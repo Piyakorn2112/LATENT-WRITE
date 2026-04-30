@@ -1,0 +1,2199 @@
+:root {
+  --bg: #eeeeee;
+  --bg-page: #fafaf9;
+  --bg-glass: rgba(255, 255, 255, 0.55);
+  --bg-glass-hover: rgba(255, 255, 255, 0.78);
+  --bg-glass-strong: rgba(255, 255, 255, 0.72);
+
+  /* Liquid glass specular gradient — top highlight, mid shadow, bottom rim */
+  --border-glass-grad: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.593) 0%,
+    rgba(255, 255, 255, 0.45) 18%,
+    rgba(255, 255, 255, 0.08) 45%,
+    rgba(255, 255, 255, 0) 80%,
+    rgba(255, 255, 255, 0.35) 100%
+  );
+
+  --shadow-glass: 0 2px 14px rgba(0, 0, 0, 0.04);
+  --shadow-glass-hover: 0 4px 20px rgba(0, 0, 0, 0.06);
+
+  --text: #1a1a1a;
+  --text-secondary: #555;
+  --text-tertiary: #999;
+  --text-body: #37352f;
+  --divider-line: rgba(0, 0, 0, 0.08);
+
+  /* Settings / floating glass panel — light mode (light glass over light bg) */
+  --panel-bg: rgba(255, 255, 255, 0.78);
+  --panel-text: rgba(0, 0, 0, 0.85);
+  --panel-text-2: rgba(0, 0, 0, 0.55);
+  --panel-text-3: rgba(0, 0, 0, 0.40);
+  --panel-text-4: rgba(0, 0, 0, 0.28);
+  --panel-btn-bg: rgba(0, 0, 0, 0.04);
+  --panel-btn-bg-hover: rgba(0, 0, 0, 0.08);
+  --panel-btn-border: rgba(0, 0, 0, 0.08);
+
+  --tc-high:   #f43f5e;
+  --tc-rising: #fbbf24;
+  --tc-calm:   #94a3b8;
+
+  --font-body: "Georgia", "Times New Roman", serif;
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+
+  --btn-size: 34px;
+  --btn-radius: 9999px;
+  --pill-radius: 9999px;
+  --card-radius: 22px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111110;
+    --bg-page: #111110;
+    --bg-glass: rgba(36, 36, 34, 0.55);
+    --bg-glass-hover: rgba(50, 50, 48, 0.72);
+    --bg-glass-strong: rgba(46, 46, 44, 0.72);
+    --border-glass-grad: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.154) 0%,
+      rgba(255, 255, 255, 0.10) 22%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(255, 255, 255, 0) 82%,
+      rgba(255, 255, 255, 0.08) 100%
+    );
+    --shadow-glass: 0 2px 18px rgba(0, 0, 0, 0.25);
+    --shadow-glass-hover: 0 4px 26px rgba(0, 0, 0, 0.35);
+    --text: #ededec;
+    --text-secondary: #a8a8a4;
+    --text-tertiary: #6b6b67;
+    --text-body: #d4d4d0;
+    --divider-line: rgba(255, 255, 255, 0.08);
+
+    /* Settings / floating glass panel — dark mode (dark glass over dark bg) */
+    --panel-bg: rgba(14, 14, 12, 0.84);
+    --panel-text: rgba(255, 255, 255, 0.88);
+    --panel-text-2: rgba(255, 255, 255, 0.55);
+    --panel-text-3: rgba(255, 255, 255, 0.40);
+    --panel-text-4: rgba(255, 255, 255, 0.28);
+    --panel-btn-bg: rgba(255, 255, 255, 0.06);
+    --panel-btn-bg-hover: rgba(255, 255, 255, 0.12);
+    --panel-btn-border: rgba(255, 255, 255, 0.10);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  margin: 0;
+  height: 100%;
+  min-height: 100dvh;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  isolation: isolate;
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(100, 140, 255, 0.18);
+}
+
+/* ─── Liquid Glass primitive ───
+   Surface is a flat translucent fill + backdrop blur — no gradient on the body.
+   The specular ring lives entirely in ::before, masked to the 1px border area only. */
+.liquid-glass {
+  position: relative;
+  background: var(--bg-glass);
+  border: none;
+  box-shadow: var(--shadow-glass);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  transition: box-shadow 0.2s ease;
+}
+
+/* Specular gradient border — mask keeps paint only in the 1px ring */
+.liquid-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--border-glass-grad);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.liquid-glass:hover {
+  box-shadow: var(--shadow-glass-hover);
+}
+
+/* ─── Toolbar ─── */
+.toolbar-shell {
+  position: sticky;
+  top: 16px;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  padding: 0 16px;
+  pointer-events: none;
+}
+
+.toolbar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: var(--pill-radius);
+  width: min(100%, 920px);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--divider-line);
+  flex-shrink: 0;
+}
+
+.toolbar-title-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--btn-size);
+  padding: 0 14px;
+  border-radius: var(--btn-radius);
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  letter-spacing: 0.01em;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .toolbar-title-input {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.toolbar-title-input::placeholder {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.toolbar-title-input:focus {
+  border-color: rgba(100, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(100, 140, 255, 0.1);
+}
+
+.chapter-counter {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+/* ─── Icon Button ─── */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--btn-size);
+  height: var(--btn-size);
+  border-radius: var(--btn-radius);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
+  flex-shrink: 0;
+  padding: 0;
+  -webkit-appearance: none;
+  touch-action: manipulation;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .icon-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.icon-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.icon-btn:active:not(:disabled) {
+  transform: scale(0.9);
+}
+
+.icon-btn-active {
+  color: #3b82f6;
+}
+
+@media (hover: none) {
+  .icon-btn:hover:not(:disabled) {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+}
+
+/* ─── Document Area ─── */
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  padding-top: 16px;
+}
+
+.document {
+  flex: 1;
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 56px 32px 160px;
+}
+
+.document-header {
+  margin-bottom: 28px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--divider-line);
+}
+
+.document-chapter-num {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-family: var(--font-ui);
+  margin-bottom: 8px;
+}
+
+.document-chapter-title {
+  font-family: var(--font-body);
+  font-size: 1.9rem;
+  font-weight: 400;
+  color: var(--text);
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+
+.document-editor {
+  width: 100%;
+  min-height: calc(100dvh - 320px);
+  border: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  font-family: var(--font-body);
+  font-size: 1.06rem;
+  line-height: 1.85;
+  color: var(--text-body);
+  letter-spacing: 0.01em;
+  padding: 0;
+}
+
+.document-editor::placeholder {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .document {
+    padding: 32px 22px 140px;
+  }
+  .document-chapter-title {
+    font-size: 1.5rem;
+  }
+  .document-editor {
+    font-size: 0.99rem;
+    line-height: 1.78;
+  }
+}
+
+/* ─── Empty State ─── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 80px 24px;
+  color: var(--text-tertiary);
+  gap: 10px;
+}
+
+.empty-state-title {
+  font-family: var(--font-body);
+  font-size: 1.4rem;
+  color: var(--text-secondary);
+}
+
+.empty-state-hint {
+  font-size: 13px;
+}
+
+/* ─── Index View (table of contents) ─── */
+.index-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 80px 16px 40px;
+  overflow-y: auto;
+  background: rgba(20, 20, 22, 0.18);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: fade-in 0.18s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.index-panel {
+  width: min(100%, 580px);
+  border-radius: var(--card-radius);
+  padding: 28px 28px 20px;
+}
+
+.index-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--divider-line);
+}
+
+.index-title {
+  font-family: var(--font-body);
+  font-size: 1.25rem;
+  margin: 0;
+  color: var(--text);
+}
+
+.index-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 60vh;
+  overflow-y: auto;
+  margin: 0 -10px;
+}
+
+.index-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-body);
+  transition: background 0.12s ease;
+}
+
+.index-row:hover {
+  background: var(--bg-glass-hover);
+}
+
+.index-row.active {
+  background: var(--bg-glass-strong);
+}
+
+.index-row-num {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  font-family: var(--font-ui);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  min-width: 36px;
+}
+
+.index-row-title {
+  color: var(--text-secondary);
+  font-size: 1rem;
+  flex: 1;
+}
+
+.index-row:hover .index-row-title,
+.index-row.active .index-row-title {
+  color: var(--text);
+}
+
+.index-empty {
+  padding: 30px 10px;
+  color: var(--text-tertiary);
+  text-align: center;
+  font-size: 13px;
+}
+
+.index-row-delete {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  margin-left: auto;
+}
+
+.index-row:hover .index-row-delete {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .index-row-delete { opacity: 1; }
+}
+
+/* ─── Saved indicator ─── */
+.saved-indicator {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+}
+
+.saved-indicator.visible { opacity: 1; }
+
+/* ═══════════════════════════════════════════
+   ANALYSIS PANEL — floating right notification stack
+   ═══════════════════════════════════════════ */
+
+/* Outer shell spans the full viewport height on the right edge */
+.analysis-panel {
+  position: fixed;
+  right: -220px;
+  top: 0px;
+  bottom: 0px;
+  z-index: 50;
+  width: 250px;
+  display: flex;
+  align-items: flex-start;
+  pointer-events: none;
+  transform: translateX(0);
+  will-change: transform;
+  transition: transform 0.90s cubic-bezier(0.28, 1.2, 0.03, 1);
+}
+
+/* Tab column — holds both the chevron and the settings button */
+.analysis-tabs {
+  pointer-events: auto;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 78px;
+  transform: translateX(-10px);
+  z-index: 20;
+  align-self: flex-start;
+}
+
+/* Individual tab button */
+.analysis-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 26px;
+  min-height: 56px;
+  padding: 9px 0;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: var(--shadow-glass);
+  position: relative;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.analysis-tab--settings {
+  min-height: 34px;
+  padding: 7px 0;
+}
+
+.analysis-tab--active {
+  color: var(--text);
+  background: var(--bg-glass-strong);
+}
+
+/* Specular border ring on each tab */
+.analysis-tab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--border-glass-grad);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.analysis-tab:hover { color: var(--text); }
+
+.analysis-tab-badge {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+}
+
+/* Drawer — slides in horizontally, scrolls vertically.
+   overflow-x: hidden clips the slide animation.
+   overflow-y: auto gives natural scroll once open. */
+.analysis-drawer {
+  pointer-events: auto;
+  height: 100%;
+  width: 220px;
+  scrollbar-width: none;
+}
+
+.analysis-drawer::-webkit-scrollbar { display: none; }
+
+.analysis-panel--open {
+  transform: translateX(-300px);
+}
+
+
+/* Inner container — zoom: 0.6 shrinks visual AND layout space,
+   so overflow-y on the drawer works naturally without transform math. */
+.analysis-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  zoom: 0.6;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 130px 14px 24px 10px;
+  transition: opacity 0.25s ease;
+  overflow-x: visible;
+  overflow-y: scroll;
+  /* min-width forces the drawer to size from the card width */
+  width: 480px;
+}
+
+/* Loading state — widgets stay fully painted; only block input. The exit
+   animation runs when the new result arrives (via cross-fade in AnalysisPanel),
+   so the existing widgets don't dim or change while analysis is mid-flight. */
+.analysis-inner--analyzing {
+  pointer-events: none;
+}
+
+.analysis-empty {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-tertiary);
+  padding: 20px 10px;
+  text-align: center;
+  min-width: 200px;
+}
+
+/* ─── Widget reveal animation — old fully exits before new staggers in ─── */
+@keyframes widgetReveal {
+  0% {
+    opacity: 0;
+    transform: translateY(22px) scale(0.94);
+    filter: blur(10px);
+  }
+  55% {
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* Reveal stagger starts AFTER the exit anim finishes (~0.32s) so the two phases
+   don't fight for the same screen space. Each card waves in 0.06s after the last. */
+.widget-list .widget-card {
+  animation: widgetReveal 0.58s cubic-bezier(0.34, 1.42, 0.64, 1) backwards;
+}
+.widget-list .widget-card:nth-child(1) { animation-delay: 0.30s; }
+.widget-list .widget-card:nth-child(2) { animation-delay: 0.36s; }
+.widget-list .widget-card:nth-child(3) { animation-delay: 0.42s; }
+.widget-list .widget-card:nth-child(4) { animation-delay: 0.48s; }
+.widget-list .widget-card:nth-child(5) { animation-delay: 0.54s; }
+.widget-list .widget-card:nth-child(6) { animation-delay: 0.60s; }
+.widget-list .widget-card:nth-child(7) { animation-delay: 0.66s; }
+.widget-list .widget-card:nth-child(n+8) { animation-delay: 0.72s; }
+
+/* Exit happens first — old list fades + drifts up, fully gone by 0.30s */
+@keyframes widgetExit {
+  0%   { opacity: 1; transform: translateY(0); filter: blur(0); }
+  100% { opacity: 0; transform: translateY(-10px); filter: blur(6px); }
+}
+
+.widget-list--exiting {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.widget-list--exiting .widget-card {
+  animation: widgetExit 0.28s ease-in forwards;
+}
+
+.widget-list-stack {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.widget-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ─── Placeholder widget — empty / processing state shown when no chapter
+   analysis is available. Built on the same .widget-card chassis as real
+   widgets so it slots into the list with the same shape and reveal anim.
+   The hero illustration changes per variant (radar pulse vs writing caret). */
+.placeholder-hero {
+  min-height: 60px;
+  position: relative;
+}
+
+/* Concentric pulsing rings — radar / sonar feel (processing variant). */
+.placeholder-ring {
+  transform-box: fill-box;
+  transform-origin: 100px 60px;
+  animation: placeholderRingPulse 2.4s ease-in-out infinite;
+}
+.placeholder-ring--1 { animation-delay: 0s; }
+.placeholder-ring--2 { animation-delay: 0.4s; }
+.placeholder-ring--3 { animation-delay: 0.8s; }
+
+@keyframes placeholderRingPulse {
+  0%   { transform: scale(0.78); opacity: 0; }
+  18%  { opacity: 0.55; }
+  100% { transform: scale(1.22); opacity: 0; }
+}
+
+/* Three pulsing dots — the actual hero glyph for processing variant. */
+.placeholder-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  z-index: 1;
+}
+.placeholder-pulse-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #7dd8ff;
+  box-shadow: 0 0 14px rgba(125, 216, 255, 0.7);
+}
+.placeholder-pulse-dot:nth-child(1) {
+  animation: placeholderDotPulse 1.4s ease-in-out infinite;
+}
+.placeholder-pulse-dot:nth-child(2) {
+  animation: placeholderDotPulse 1.4s ease-in-out 0.18s infinite;
+}
+.placeholder-pulse-dot:nth-child(3) {
+  animation: placeholderDotPulse 1.4s ease-in-out 0.36s infinite;
+}
+
+@keyframes placeholderDotPulse {
+  0%, 100% { transform: scale(0.7); opacity: 0.45; }
+  50%      { transform: scale(1);   opacity: 1; }
+}
+
+/* Empty-state hero — a thin vertical bar that blinks like a writing caret. */
+.placeholder-cursor {
+  width: 3px;
+  height: 38px;
+  border-radius: 2px;
+  background: #aab0c0;
+  box-shadow: 0 0 18px rgba(170, 176, 192, 0.5);
+  animation: placeholderCursorBlink 1.1s steps(2, jump-none) infinite;
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes placeholderCursorBlink {
+  0%, 50%      { opacity: 1; }
+  50.01%, 100% { opacity: 0.18; }
+}
+
+/* ─── Decorative SVG layer — absolutely fills the card, pointer-events none ─── */
+.widget-deco {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 0;
+  will-change: filter;
+}
+
+.widget-deco svg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ─── Base card ─── */
+.widget-card {
+  position: relative;
+  border-radius: 32px;
+  padding: 20px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 150px;
+  overflow: hidden;
+  will-change: filter;
+  box-shadow:
+    0 2px 14px rgba(0, 0, 0, 0.04)
+}
+
+/* Solid colour fill */
+.widget-card-bg {
+  position: absolute;
+  inset: 0;
+  background: var(--card-bg);
+  border-radius: inherit;
+}
+
+/* Specular gradient border ring — identical mask technique to .liquid-glass */
+.widget-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 32px;
+  padding: 1.6px;
+  background: var(--border-glass-grad);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ─── Corner labels ─── */
+.widget-corners {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  position: relative;
+  z-index: 2;
+}
+
+.widget-corner-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.75);
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.widget-corner-right {
+  text-align: right;
+}
+
+.widget-corner-dim {
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.45);
+  letter-spacing: 0.06em;
+  text-transform: none;
+  font-size: 10px;
+  max-width: 52%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ─── Hero area — centred content ─── */
+.widget-hero-area {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  position: relative;
+  z-index: 2;
+  padding: 4px 0;
+}
+
+.widget-hero-area--start {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+/* Radial glow behind the hero element (position:absolute, blurred) */
+.widget-glow {
+  position: absolute;
+  width: 120px;
+  height: 55px;
+  border-radius: 50%;
+  filter: blur(28px);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* ─── Hero text variants ─── */
+.widget-hero-num {
+  font-family: var(--font-ui);
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  position: relative;
+  z-index: 1;
+}
+
+.widget-hero-unit {
+  font-family: var(--font-ui);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  align-self: flex-end;
+  margin-left: 4px;
+  margin-bottom: 6px;
+  position: relative;
+  z-index: 1;
+}
+
+.widget-hero-label {
+  font-family: var(--font-ui);
+  font-size: 1.5rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  position: relative;
+  z-index: 1;
+  text-align: center;
+  text-shadow: 0 0 20px currentColor;
+}
+
+/* ─── Role / Register hero ─── */
+.widget-role-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  flex: 1;
+  width: 100%;
+}
+
+/* ─── Pacing hero (number + unit inline) ─── */
+.widget-pacing-hero {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+}
+
+/* ─── Diagnostics hero (same as pacing but centred number) ─── */
+.widget-diag-hero {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+}
+
+/* ─── Tension sparkline wrapper ─── */
+.widget-spark-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  width: 100%;
+  padding: 4px 0;
+}
+
+.widget-spark-wrap svg {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+}
+
+/* Wider glow used by hero illustrations that span the full card width
+   (tension sparkline) — blooms behind the line for that "lit-up" look. */
+.widget-glow--wide {
+  width: 80%;
+  height: 80%;
+  opacity: 0.45;
+  filter: blur(34px);
+}
+
+/* ─── Comparative bar rows ─── */
+.widget-comparative-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 90%;
+  position: relative;
+  padding: 6px 2px;
+}
+
+/* ─── Register signal breakdown bars ─── */
+.widget-register-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+  position: relative;
+  padding: 4px 2px;
+}
+
+.widget-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.widget-bar-key {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: rgba(255, 255, 255, 0.5);
+  width: 24px;
+  margin-right: 20px;
+  flex-shrink: 0;
+}
+
+.widget-bar-key--wide {
+  width: 68px;
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+}
+
+.widget-bar-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.widget-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+.widget-bar-val {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  width: 28px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ─── Information-dense widget layout (wg-*) ─── */
+.wg-content {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 0;
+}
+.wg-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 0;
+}
+.wg-divider {
+  height: 1px;
+  background: rgba(255,255,255,0.07);
+  margin: 7px 0;
+}
+.wg-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.wg-header-title {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: rgba(255,255,255,0.45);
+  text-transform: uppercase;
+}
+.wg-header-badge {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.07);
+  text-transform: uppercase;
+}
+.wg-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.wg-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.wg-stat-num {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  color: rgba(255,255,255,0.9);
+}
+.wg-stat-key {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.04em;
+}
+.wg-dot-sep {
+  color: rgba(255,255,255,0.18);
+  font-size: 10px;
+}
+.wg-seg {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.wg-seg-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.wg-seg-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.50);
+  width: 52px;
+  flex-shrink: 0;
+}
+.wg-seg-cells {
+  display: flex;
+  gap: 2px;
+}
+.wg-seg-cell {
+  width: 8px; height: 5px;
+  border-radius: 1.5px;
+  background: rgba(255,255,255,0.09);
+  flex-shrink: 0;
+}
+.wg-seg-tension {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  width: 56px;
+  flex-shrink: 0;
+}
+.wg-seg-momentum {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.38);
+  margin-left: auto;
+}
+.wg-seg-overall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+}
+.wg-seg-overall-text {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.04em;
+}
+.wg-channel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.wg-channel-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.wg-channel-name {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.42);
+  width: 52px;
+  flex-shrink: 0;
+}
+.wg-channel-track {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.wg-channel-fill {
+  height: 100%;
+  border-radius: 2px;
+  opacity: 0.82;
+}
+.wg-channel-val {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  color: rgba(255,255,255,0.28);
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.wg-cast {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.wg-cast-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.wg-cast-name {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.78);
+  width: 62px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wg-cast-bars {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wg-cast-bar {
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.07);
+  position: relative;
+}
+.wg-cast-bar-fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  border-radius: 2px;
+  opacity: 0.75;
+}
+.wg-cast-role {
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.28);
+  width: 58px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.wg-cast-role--dominant  { color: rgba(255,255,255,0.68); }
+.wg-cast-role--present   { color: rgba(255,255,255,0.42); }
+.wg-cast-legend {
+  display: flex;
+  gap: 10px;
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.wg-cast-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 8px;
+  color: rgba(255,255,255,0.28);
+}
+.wg-cast-legend-swatch {
+  display: inline-block;
+  width: 14px; height: 3px;
+  border-radius: 2px;
+}
+.wg-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.wg-tag {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.wg-tag-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 2px 5px;
+  background: rgba(255,255,255,0.08);
+  color: rgba(255,255,255,0.38);
+}
+.wg-tag-val {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  padding: 2px 5px;
+  background: rgba(255,255,255,0.04);
+  color: rgba(255,255,255,0.62);
+}
+.wg-diag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+.wg-diag-item {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+}
+.wg-diag-indicator {
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: 2px;
+  margin-top: 2px;
+  align-self: stretch;
+  min-height: 16px;
+}
+.wg-diag-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.wg-diag-msg {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.82);
+  line-height: 1.5;
+}
+.wg-diag-code {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  color: rgba(255,255,255,0.28);
+  text-transform: uppercase;
+}
+.wg-full-text {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.62);
+  line-height: 1.6;
+}
+.wg-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  text-transform: uppercase;
+}
+.wg-io-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wg-io-pill {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+.wg-io-pill--matched         { background: rgba(52,211,153,0.14); color: #34d399; }
+.wg-io-pill--over-structural { background: rgba(251,191,36,0.12);  color: #fbbf24; }
+.wg-io-pill--under-structural { background: rgba(244,63,94,0.12);  color: #f43f5e; }
+.wg-role-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.wg-role-pill {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.wg-role-sub {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.45);
+}
+.wg-note-line {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.55);
+  line-height: 1.6;
+  margin-bottom: 5px;
+}
+
+/* ═══════════════════════════════════════════
+   EDITOR HIGHLIGHT OVERLAY — IDE-style speech colouring
+   ═══════════════════════════════════════════ */
+
+/* Wrapper that lets the highlight layer sit behind the textarea */
+.editor-wrap {
+  position: relative;
+}
+
+/* Mirror div — same font metrics as .document-editor, sits behind it */
+.editor-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  /* height: auto — sized by content, mirrors textarea height */
+  pointer-events: none;
+  user-select: none;
+  /* Must exactly match .document-editor */
+  font-family: var(--font-body);
+  font-size: 1.06rem;
+  line-height: 1.85;
+  letter-spacing: 0.01em;
+  /* Pre-wrap preserves newlines from the raw content string */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  /* Transparent base — coloured spans provide the visible text */
+  color: transparent;
+  z-index: 1;
+  padding: 0;
+}
+
+/* When highlight is active, make the textarea text transparent so only
+   the highlight layer colouring is visible. Caret and selection remain. */
+.document-editor--highlight {
+  color: transparent !important;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-body);
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+/* Restore text colour inside textarea selection so it's readable */
+.document-editor--highlight::selection {
+  -webkit-text-fill-color: var(--text-body);
+  color: var(--text-body);
+}
+
+
+/* ─── Entity / character-name tag — inline pill on the .liquid-glass primitive ───
+   Renders on a span that ALSO carries the `liquid-glass` class so it inherits
+   the glass surface, backdrop blur, soft shadow, and specular gradient ring
+   (.liquid-glass::before) consistently with the toolbar / panels.
+
+   Layout-neutral horizontal padding: padding +7px each side adds visual width,
+   margin -7px each side cancels the layout effect, so the text inside still
+   occupies its raw character width and the textarea overlay alignment is
+   preserved exactly. */
+.entity-tag {
+  display: inline-block;
+  color: var(--entity-color, currentColor);
+  font-style: normal;
+  font-weight: 600;
+  /* Pill shape */
+  border-radius: 9999px;
+  /* Layout-neutral horizontal padding */
+  padding-left: 7px;
+  padding-right: 7px;
+  padding-top: -10px;
+  transform: translateY(0px);
+  margin: 0 -7px;
+  /* Stack above textarea + adjacent highlight text */
+  z-index: 2;
+  position: relative;
+  isolation: isolate;
+  pointer-events: auto;
+  cursor: pointer;
+  /* Glass morphism: blur the textarea text beneath */
+  backdrop-filter: blur(3px) saturate(155%);
+  -webkit-backdrop-filter: blur(3px) saturate(155%);
+  /* Background = the entity colour itself, lifted off via low alpha so the
+     pill reads as a tinted glass of the same hue rather than a generic dark
+     surface. color-mix gives a clean rgba derivation in modern browsers. */
+  background: color-mix(in srgb, var(--entity-color, #888) 18%, transparent);
+  will-change: backdrop-filter;
+}
+
+.entity-tag:hover {
+  background: color-mix(in srgb, var(--entity-color, #888) 28%, transparent);
+}
+
+@media (max-width: 640px) {
+  .editor-highlight {
+    font-size: 0.99rem;
+    line-height: 1.78;
+  }
+}
+
+/* ═══════════════════════════════════════════
+   INTELLIGENCE MODE BUTTON — ORB
+   ═══════════════════════════════════════════ */
+.intel-btn { position: relative; }
+
+.intel-btn-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Loading state — no spinner ring. Instead, the orb expands and brightens.
+   This uses pure transitions (no @keyframes): a CSS animation snaps its
+   transform/filter back to baseline when the class is removed (the cascade
+   value never changed, so transition can't fire). Static rules + transition
+   give a true smooth contraction on exit. */
+@keyframes intelSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* Orb container: blurred so overlapping dots merge into a glowing cloud */
+.intel-mesh-dot {
+  width: 20px;
+  height: 20px;
+  position: relative;
+  filter: blur(2.5px) saturate(200%) contrast(120%);
+  /* Smooth scale + filter changes in BOTH directions */
+  transition:
+    transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
+    filter 0.5s ease;
+  /* Default orb colours — overridden by inline style for non-off modes */
+  --orb-a: #FF3D68;
+  --orb-b: #3D68FF;
+  --orb-c: #68FF3D;
+}
+
+/* Analyzing: orb grows AND saturates/brightens for a clearly distinct state */
+.intel-btn--analyzing .intel-mesh-dot {
+  transform: scale(1.24);
+  filter: blur(3.8px) saturate(295%) contrast(142%) brightness(118%);
+}
+
+/* Off mode: desaturate the blur layer; colours set per colour scheme */
+.intel-mesh-dot[data-mode="off"] {
+  filter: blur(2.5px) saturate(0%) brightness(130%);
+  /* light-mode grayscale */
+  --orb-a: #bbb;
+  --orb-b: #ddd;
+  --orb-c: #999;
+}
+@media (prefers-color-scheme: dark) {
+  .intel-mesh-dot[data-mode="off"] {
+    --orb-a: #555;
+    --orb-b: #777;
+    --orb-c: #444;
+  }
+}
+
+/* Individual orbs — sharp solid circles before blur is applied */
+.intel-mesh-dot-orb {
+  position: absolute;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.intel-mesh-dot-orb:nth-child(1),
+.intel-mesh-dot-orb:nth-child(4) { background: var(--orb-a); }
+.intel-mesh-dot-orb:nth-child(2),
+.intel-mesh-dot-orb:nth-child(5) { background: var(--orb-b); }
+.intel-mesh-dot-orb:nth-child(3),
+.intel-mesh-dot-orb:nth-child(6) { background: var(--orb-c); }
+
+.intel-mesh-dot-orb:nth-child(1) { animation: intelOrbitA 3.2s ease-in-out infinite; }
+.intel-mesh-dot-orb:nth-child(2) { animation: intelOrbitB 3.8s ease-in-out infinite 0.6s; }
+.intel-mesh-dot-orb:nth-child(3) { animation: intelOrbitC 2.9s ease-in-out infinite 1.1s; }
+.intel-mesh-dot-orb:nth-child(4) { animation: intelOrbitA 3.2s ease-in-out infinite reverse 1.6s; }
+.intel-mesh-dot-orb:nth-child(5) { animation: intelOrbitB 3.8s ease-in-out infinite reverse 2.2s; }
+.intel-mesh-dot-orb:nth-child(6) { animation: intelOrbitC 2.9s ease-in-out infinite reverse 2.7s; }
+
+/* ─── AUTO mode — uses the same 6-orb geometry as the single-mode orbs to
+       avoid any layout/transform conflict (which caused frame jumps). The only
+       thing that changes in auto is the orb COLOURS, smoothly cycling through
+       all three level palettes via @property-registered CSS color variables.
+       The resolved mode's hue dwells longer in the cycle so the underlying
+       mode is identifiable, but no single colour ever dominates outright. ─── */
+@property --orb-a { syntax: "<color>"; inherits: true; initial-value: #888; }
+@property --orb-b { syntax: "<color>"; inherits: true; initial-value: #888; }
+@property --orb-c { syntax: "<color>"; inherits: true; initial-value: #888; }
+
+/* Default cycle — equal time on each palette (used when resolved level isn't set yet) */
+.intel-mesh-dot[data-mode="auto"] {
+  animation: autoCycleEqual 12s ease-in-out infinite;
+}
+
+/* Resolved-level cycles — same 12s loop, but the resolved palette occupies
+   ~50% of the cycle while the other two share the remaining 50% (~25% each).
+   Smooth keyframes (no hold-then-snap) keep transitions seamless. */
+.intel-mesh-dot[data-mode="auto"][data-resolved="low"] {
+  animation: autoCycleLow 14s ease-in-out infinite;
+}
+.intel-mesh-dot[data-mode="auto"][data-resolved="default"] {
+  animation: autoCycleDefault 14s ease-in-out infinite;
+}
+.intel-mesh-dot[data-mode="auto"][data-resolved="high"] {
+  animation: autoCycleHigh 14s ease-in-out infinite;
+}
+
+/* ≥2 mode palettes always visible simultaneously.
+   Equal: round-robin rotation — all 3 modes in view at once.
+   Resolved: A+B locked to dominant; C drifts between the other two. */
+@keyframes autoCycleEqual {
+  0%   { --orb-a: #FFB42E; --orb-b: #3D68FF; --orb-c: #8B2FF8; }  /* low + def + high */
+  33%  { --orb-a: #3D68FF; --orb-b: #8B2FF8; --orb-c: #FFB42E; }  /* def + high + low */
+  66%  { --orb-a: #8B2FF8; --orb-b: #FFB42E; --orb-c: #3D68FF; }  /* high + low + def */
+  100% { --orb-a: #FFB42E; --orb-b: #3D68FF; --orb-c: #8B2FF8; }
+}
+
+@keyframes autoCycleLow {
+  0%    { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #3D68FF; }  /* low+low+default */
+  35%   { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #3D68FF; }
+  65%   { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #8B2FF8; }  /* low+low+high */
+  100%  { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #3D68FF; }
+}
+
+@keyframes autoCycleDefault {
+  0%    { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #FFB42E; }  /* def+def+low */
+  35%   { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #FFB42E; }
+  65%   { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #8B2FF8; }  /* def+def+high */
+  100%  { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #FFB42E; }
+}
+
+@keyframes autoCycleHigh {
+  0%    { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #FFB42E; }  /* high+high+low */
+  35%   { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #FFB42E; }
+  65%   { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #3D68FF; }  /* high+high+default */
+  100%  { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #FFB42E; }
+}
+
+@keyframes intelOrbitA {
+  0%   { transform: translate(calc(-50% + 3px), calc(-50% - 2px)); }
+  50%  { transform: translate(calc(-50% - 3px), calc(-50% + 2px)); }
+  100% { transform: translate(calc(-50% + 3px), calc(-50% - 2px)); }
+}
+@keyframes intelOrbitB {
+  0%   { transform: translate(calc(-50% - 2px), calc(-50% - 3px)); }
+  50%  { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+  100% { transform: translate(calc(-50% - 2px), calc(-50% - 3px)); }
+}
+@keyframes intelOrbitC {
+  0%   { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+  33%  { transform: translate(calc(-50% - 3px), calc(-50% - 1px)); }
+  66%  { transform: translate(calc(-50% + 1px), calc(-50% - 3px)); }
+  100% { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+}
+
+/* ═══════════════════════════════════════════
+   SETTINGS PANEL
+   ═══════════════════════════════════════════ */
+
+/* Settings inner — reset zoom so the panel renders at full scale (not 0.6 like widgets) */
+.analysis-inner--settings {
+  zoom: 1;
+  width: 288px;
+  padding: 78px 10px 24px 8px;
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+/* Settings panel — inherits glass styling from .liquid-glass, defines layout only */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 20px 18px 18px;
+  border-radius: 20px;
+}
+
+.settings-section-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--panel-text-3);
+  margin: 0 0 2px;
+}
+
+.settings-intel-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-intel-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-btn-border);
+  background: var(--panel-btn-bg);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-intel-btn:hover {
+  /* Subtle border highlight + barely-tinted bg — no gray wash */
+  border-color: color-mix(in srgb, var(--panel-text) 22%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 4%, var(--panel-btn-bg));
+}
+
+.settings-intel-btn--active {
+  background: color-mix(in srgb, var(--intel-color, #8aabff) 18%, transparent);
+  border-color: color-mix(in srgb, var(--intel-color, #8aabff) 45%, transparent);
+}
+
+.settings-intel-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--panel-text);
+}
+
+.settings-intel-desc {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--panel-text-3);
+  letter-spacing: 0.01em;
+}
+
+.settings-hint {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--panel-text-4);
+  line-height: 1.55;
+  margin: 2px 0 0;
+}
+
+/* ═══════════════════════════════════════════
+   WORLD DATA PANEL — characters, places, factions
+   ═══════════════════════════════════════════ */
+
+.world-panel {
+  width: min(100%, 760px);
+  border-radius: var(--card-radius);
+  padding: 22px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: calc(100vh - 120px);
+}
+
+.world-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider-line);
+}
+
+.world-title {
+  font-family: var(--font-body);
+  font-size: 1.25rem;
+  margin: 0;
+  color: var(--text);
+}
+
+/* ─── Tabs ─── */
+.world-tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.world-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.world-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.world-tab--active {
+  color: var(--text);
+  background: var(--bg-glass-strong);
+  border-color: var(--divider-line);
+}
+
+.world-tab-count {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 6px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab-count {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.world-tab--active .world-tab-count {
+  background: rgba(0, 0, 0, 0.10);
+  color: var(--text-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab--active .world-tab-count {
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+/* ─── Body: list (left) + edit form (right) ─── */
+.world-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 1.5fr);
+  gap: 18px;
+  min-height: 360px;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .world-body {
+    grid-template-columns: 1fr;
+    min-height: 280px;
+  }
+}
+
+.world-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  padding-right: 4px;
+  margin: 0 -4px 0 0;
+}
+
+.world-list-empty {
+  padding: 18px 10px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  text-align: center;
+  font-style: italic;
+}
+
+.world-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-ui);
+  transition: background 0.12s ease;
+  position: relative;
+}
+
+.world-row:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-row:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.world-row.active {
+  background: var(--bg-glass-strong);
+}
+
+.world-row-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.world-row-blank {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.world-row-role {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.world-row-delete {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.world-row:hover .world-row-delete,
+.world-row.active .world-row-delete {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .world-row-delete { opacity: 1; }
+}
+
+.world-add-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px dashed var(--divider-line);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.world-add-btn:hover {
+  color: var(--text);
+  border-color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-add-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+/* ─── Edit form ─── */
+.world-edit {
+  overflow-y: auto;
+  padding: 0 2px 4px 0;
+}
+
+.world-edit-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+.world-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.world-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.world-field-label {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.world-input,
+.world-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-line);
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  letter-spacing: 0.01em;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  resize: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-input,
+  .world-textarea {
+    background: rgba(255, 255, 255, 0.03);
+  }
+}
+
+.world-textarea {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+  min-height: 90px;
+}
+
+.world-input::placeholder,
+.world-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.world-input:focus,
+.world-textarea:focus {
+  border-color: rgba(100, 140, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(100, 140, 255, 0.10);
+}
+
+/* ─── Auto-rename ghost buttons ─── */
+.world-rename-row,
+.entity-popover-rename {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.rename-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 10px;
+  border-radius: 9px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
+.rename-btn:hover {
+  color: var(--text);
+  border-color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.03);
+}
+
+@media (prefers-color-scheme: dark) {
+  .rename-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* ═══════════════════════════════════════════
+   ENTITY POPOVER — small floating editor
+   ═══════════════════════════════════════════ */
+
+.entity-popover {
+  position: absolute;
+  z-index: 80;
+  width: 300px;
+  border-radius: 16px;
+  padding: 14px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  /* enter anim — same curve as the widget reveal */
+  animation: widgetReveal 0.42s cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+.entity-popover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -2px 0 4px;
+}
+
+.entity-popover-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ═══════════════════════════════════════════
+   STATUS PILL — floats below toolbar, announces current task
+   ═══════════════════════════════════════════ */
+
+/* Fixed (not sticky) so it never drifts on first scroll: a sticky pill
+   has its natural flow position below the sticky offset, so the very first
+   scroll yanks it upward into the sticky slot. Fixed pins it from frame 1. */
+.status-pill-shell {
+  position: fixed;
+  top: 66px;
+  left: 0;
+  right: 0;
+  z-index: 35;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 9px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  pointer-events: auto;
+  will-change: transform, opacity, filter;
+}
+
+.status-pill--enter {
+  animation: widgetReveal 0.5s cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+.status-pill--exit {
+  animation: widgetExit 0.28s ease-in forwards;
+}
+
+.status-pill-label {
+  white-space: nowrap;
+}
+
+/* Spinner — same eased single-arc as the intelligence button */
+.status-pill-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid transparent;
+  border-top-color: var(--text);
+  opacity: 0.78;
+  animation: intelSpin 1.55s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
