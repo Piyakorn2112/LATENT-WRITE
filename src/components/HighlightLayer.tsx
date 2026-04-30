@@ -1,6 +1,8 @@
 import type { ReactNode, CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
+import { findActionSentences, attributeActor, type ActionSpan } from "../lib/action-detect";
+import type { GrammarSuggestion } from "../lib/grammar-check";
 
 const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
@@ -10,71 +12,224 @@ function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// Wrap any occurrence of a known speaker/entity name inside the given text in
-// an EntityTag (light/dark glass tint coloured to the entity's speech-text colour).
-// Returns ReactNode children — width is preserved (no padding/margin) so the
-// textarea overlay alignment isn't disturbed.
-function renderWithEntities(
+// ─── Inline-level render: entity tags + grammar ghost text ─────────────────
+//
+// Walks `text` and emits ReactNodes, splitting at:
+//   · entity-name occurrences  → <span class="entity-tag">
+//   · grammar suggestion ranges → <span class="grammar-issue" data-suggestion>
+// Grammar wins on overlap (the user should fix the typo before the entity
+// match becomes meaningful again). Plain text uses `baseStyle`.
+//
+// `grammarLocal` contains text-relative ranges (already filtered to fit `text`).
+function renderInline(
   text: string,
   speakerNames: string[],
   palette: Map<string, ColorPair>,
   baseStyle: CSSProperties,
+  grammarLocal: GrammarSuggestion[],
   keyPrefix: string,
   onEntityClick?: (name: string, anchor: DOMRect) => void,
 ): ReactNode[] {
-  if (!speakerNames.length) {
-    return [<span key={`${keyPrefix}-0`} style={baseStyle}>{text}</span>];
+  // Build a unified list of decoration ranges sorted by start.
+  type Deco =
+    | { kind: "entity"; start: number; end: number; matched: string }
+    | { kind: "grammar"; start: number; end: number; suggestion: string };
+
+  const decos: Deco[] = [];
+
+  if (speakerNames.length > 0) {
+    const sorted = [...speakerNames].sort((a, b) => b.length - a.length).map(escapeRegex);
+    const re = new RegExp(`\\b(?:${sorted.join("|")})\\b`, "gi");
+    for (const m of text.matchAll(re)) {
+      const idx = m.index ?? 0;
+      decos.push({ kind: "entity", start: idx, end: idx + m[0].length, matched: m[0] });
+    }
   }
-  // Sort longer first so "Mary Sue" matches before "Mary"
-  const sorted = [...speakerNames].sort((a, b) => b.length - a.length).map(escapeRegex);
-  const re = new RegExp(`\\b(?:${sorted.join("|")})\\b`, "gi");
+  for (const g of grammarLocal) {
+    decos.push({ kind: "grammar", start: g.start, end: g.end, suggestion: g.suggestion });
+  }
+
+  // Sort by start; grammar wins ties so it sits in the layered order first.
+  decos.sort((a, b) => a.start - b.start || (a.kind === "grammar" ? -1 : 1));
+
+  // Drop any deco that overlaps an earlier one (grammar takes priority).
+  const accepted: Deco[] = [];
+  let lastEnd = -1;
+  for (const d of decos) {
+    if (d.start < lastEnd) continue;
+    accepted.push(d);
+    lastEnd = d.end;
+  }
 
   const parts: ReactNode[] = [];
-  let last = 0;
+  let cursor = 0;
   let i = 0;
-  for (const m of text.matchAll(re)) {
-    const idx = m.index ?? 0;
-    if (idx > last) {
-      parts.push(<span key={`${keyPrefix}-t${i++}`} style={baseStyle}>{text.slice(last, idx)}</span>);
+
+  for (const d of accepted) {
+    if (d.start > cursor) {
+      parts.push(
+        <span key={`${keyPrefix}-t${i++}`} style={baseStyle}>
+          {text.slice(cursor, d.start)}
+        </span>,
+      );
     }
-    const matched = m[0];
-    const canonical = speakerNames.find(n => n.toLowerCase() === matched.toLowerCase()) ?? matched;
-    const entityColor = getSpeakerColor(palette, canonical).text;
-    parts.push(
-      <span
-        key={`${keyPrefix}-e${i++}`}
-        className="entity-tag liquid-glass"
-        style={{ "--entity-color": entityColor } as CSSProperties}
-        onClick={onEntityClick ? (e) => {
-          // Don't preventDefault — let the underlying textarea still receive
-          // the click for cursor positioning when the user is mid-edit.
-          e.stopPropagation();
-          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-          onEntityClick(canonical, rect);
-        } : undefined}
-      >
-        <span className="entity-label absolute">
+    if (d.kind === "entity") {
+      const matched = d.matched;
+      const canonical = speakerNames.find(n => n.toLowerCase() === matched.toLowerCase()) ?? matched;
+      const entityColor = getSpeakerColor(palette, canonical).text;
+      parts.push(
+        <span
+          key={`${keyPrefix}-e${i++}`}
+          className="entity-tag "
+          style={{ "--entity-color": entityColor } as CSSProperties}
+          onClick={onEntityClick ? (e) => {
+            e.stopPropagation();
+            const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            onEntityClick(canonical, rect);
+          } : undefined}
+        >
+          <div className="entity-tag-bg-sub" />
+          <div className="entity-tag-bg" />
           {matched}
-        </span>
+        </span>,
+      );
+    } else {
+      // grammar
+      parts.push(
+        <span
+          key={`${keyPrefix}-g${i++}`}
+          className="grammar-issue"
+          data-suggestion={d.suggestion}
+          style={baseStyle}
+        >
+          {text.slice(d.start, d.end)}
+        </span>,
+      );
+    }
+    cursor = d.end;
+  }
+
+  if (cursor < text.length) {
+    parts.push(
+      <span key={`${keyPrefix}-t${i++}`} style={baseStyle}>
+        {text.slice(cursor)}
       </span>,
     );
-    last = idx + matched.length;
-  }
-  if (last < text.length) {
-    parts.push(<span key={`${keyPrefix}-t${i++}`} style={baseStyle}>{text.slice(last)}</span>);
   }
   return parts;
 }
 
-// Map each trimmed paragraph back to its start offset in raw content.
-function mapPositions(content: string, paragraphs: string[]): number[] {
-  const out: number[] = [];
+// ─── Sentence-level render: wraps action sentences ─────────────────────────
+//
+// Splits `text` by action-sentence ranges, wrapping each in a tinted box.
+// Inside each chunk (action or non-action), defers to `renderInline` so
+// entity tags + grammar still work normally inside action sentences.
+//
+// Pass an empty `actionsLocal` to skip action wrapping (e.g. inside dialogue).
+// `actorColor` is computed per action span by the caller (entity-in-text
+// match → speaker; otherwise carrying speaker; otherwise null = grey default).
+function renderActionable(
+  text: string,
+  actionsLocal: ActionSpan[],
+  actionColors: (string | null)[],   // parallel to actionsLocal
+  speakerNames: string[],
+  palette: Map<string, ColorPair>,
+  baseStyle: CSSProperties,
+  grammarLocal: GrammarSuggestion[],
+  keyPrefix: string,
+  onEntityClick?: (name: string, anchor: DOMRect) => void,
+): ReactNode[] {
+  if (actionsLocal.length === 0) {
+    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick);
+  }
+
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+  let i = 0;
+
+  for (const a of actionsLocal) {
+    if (a.start > cursor) {
+      const chunk = text.slice(cursor, a.start);
+      const grammarChunk = sliceGrammar(grammarLocal, cursor, a.start);
+      parts.push(
+        <span key={`${keyPrefix}-pre${i}`}>
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick)}
+        </span>,
+      );
+    }
+    const chunk = text.slice(a.start, a.end);
+    const grammarChunk = sliceGrammar(grammarLocal, a.start, a.end);
+    const actor = actionColors[i] ?? null;
+    const apStyle: CSSProperties | undefined = actor
+      ? ({ "--ap-color": actor } as CSSProperties)
+      : undefined;
+    parts.push(
+      <span key={`${keyPrefix}-act${i}`} className="action-phrase" style={apStyle}>
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick)}
+      </span>,
+    );
+    cursor = a.end;
+    i++;
+  }
+
+  if (cursor < text.length) {
+    const chunk = text.slice(cursor);
+    const grammarChunk = sliceGrammar(grammarLocal, cursor, text.length);
+    parts.push(
+      <span key={`${keyPrefix}-post${i}`}>
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${i}`, onEntityClick)}
+      </span>,
+    );
+  }
+  return parts;
+}
+
+// Slice a grammar list to text-relative offsets, restricted to [from, to].
+function sliceGrammar(
+  list: GrammarSuggestion[],
+  from: number,
+  to: number,
+): GrammarSuggestion[] {
+  const out: GrammarSuggestion[] = [];
+  for (const g of list) {
+    if (g.end <= from || g.start >= to) continue;
+    if (g.start < from || g.end > to) continue; // skip partial overlaps for simplicity
+    out.push({ ...g, start: g.start - from, end: g.end - from });
+  }
+  return out;
+}
+
+// ─── Paragraph position resolution (color persistence strategy) ────────────
+//
+// matched=true  → render with full speech colours at the located position.
+// matched=false → that paragraph has been edited and no longer appears verbatim;
+//                 its slot is filled with whatever current content sits between
+//                 surrounding matched paragraphs, rendered as plain text.
+//
+// Edits to ONE paragraph don't strip colour from the others. Only the
+// actively-edited paragraph reverts to plain text until analysis catches up.
+interface ParaPos { start: number; end: number; matched: boolean; }
+
+function mapPositions(content: string, paragraphs: string[]): ParaPos[] {
+  const out: ParaPos[] = [];
   let from = 0;
   for (const p of paragraphs) {
     const i = content.indexOf(p, from);
-    const pos = i >= 0 ? i : from;
-    out.push(pos);
-    from = pos + p.length;
+    if (i >= 0) {
+      out.push({ start: i, end: i + p.length, matched: true });
+      from = i + p.length;
+    } else {
+      out.push({ start: from, end: from, matched: false });
+    }
+  }
+  for (let i = 0; i < out.length; i++) {
+    if (out[i].matched) continue;
+    let nextStart = content.length;
+    for (let j = i + 1; j < out.length; j++) {
+      if (out[j].matched) { nextStart = out[j].start; break; }
+    }
+    const sep = nextStart >= 2 ? 2 : 0;
+    out[i].end = Math.max(out[i].start, nextStart - sep);
   }
   return out;
 }
@@ -82,26 +237,25 @@ function mapPositions(content: string, paragraphs: string[]): number[] {
 interface Props {
   content: string;
   paragraphs: string[];
-  /** Controls opacity — kept for compatibility (highlight is now persistent). */
   visible?: boolean;
   speechResults: ChapterAnalysisResult["speechResults"];
-  /** World-data + auto-extracted entity names — highlighted wherever they appear. */
   knownNames?: string[];
-  /** Fires when the user clicks an entity chip; receives the canonical name + anchor rect. */
+  /** Grammar suggestions over the FULL `content` (absolute offsets). */
+  grammarSuggestions?: GrammarSuggestion[];
   onEntityClick?: (name: string, anchor: DOMRect) => void;
 }
 
 export function HighlightLayer({
-  content, paragraphs, speechResults, knownNames, visible = true, onEntityClick,
+  content, paragraphs, speechResults, knownNames, visible = true,
+  grammarSuggestions = [], onEntityClick,
 }: Props) {
   if (!paragraphs.length || !content) return null;
 
   const positions = mapPositions(content, paragraphs);
+
   const nodes: ReactNode[] = [];
   let cursor = 0;
 
-  // Highlightable entities = detected speakers ∪ world-data / auto-extracted names.
-  // The union means non-speaking but world-known characters still get tagged.
   const speakerSet = new Set<string>();
   for (const r of speechResults) {
     for (const s of r?.segments ?? []) {
@@ -111,40 +265,89 @@ export function HighlightLayer({
   for (const n of knownNames ?? []) speakerSet.add(n);
   const speakerNames = [...speakerSet];
 
-  // Build palette once per render — first 10 names get iOS palette colours,
-  // overflow uses golden-angle HSL distribution.
   const palette = buildSpeakerPalette(speakerNames);
 
+  // Carrying speaker: the most recent attributed speaker (confidence ≥ 0.65).
+  // Persists across paragraph boundaries — "X said. X walked." in two paragraphs
+  // still attributes the second action to X. Reset only when a new speaker
+  // appears with sufficient confidence.
+  let carryingSpeaker: string | null = null;
+
+  // Compute the box-shadow colour to use for an action span at [as, ae].
+  // 1) Entity name explicitly inside the action text wins.
+  // 2) Otherwise current carryingSpeaker.
+  // 3) Otherwise null (CSS falls back to neutral grey).
+  const actorColor = (paraText: string, as: number, ae: number): string | null => {
+    const actor = attributeActor(paraText.slice(as, ae), speakerNames, carryingSpeaker);
+    return actor ? getSpeakerColor(palette, actor).text : null;
+  };
+
   for (let pi = 0; pi < paragraphs.length; pi++) {
-    const paraStart = positions[pi];
+    const pos       = positions[pi];
+    const paraStart = pos.start;
+    const paraEnd   = pos.end;
     const para      = paragraphs[pi];
     const segs      = speechResults[pi]?.segments ?? [];
 
-    // Gap (newlines) before this paragraph
+    // Gap (newlines / freshly-typed text) before this paragraph's slot.
     if (paraStart > cursor) {
+      const gapText = content.slice(cursor, paraStart);
+      const grammarGap = sliceGrammar(grammarSuggestions, cursor, paraStart);
       nodes.push(
-        <span key={`gap${pi}`} style={{ color: BASE_COLOR }}>
-          {content.slice(cursor, paraStart)}
+        <span key={`gap${pi}`}>
+          {renderInline(gapText, speakerNames, palette, { color: BASE_COLOR },
+            grammarGap, `gap${pi}`, onEntityClick)}
         </span>,
       );
     }
 
+    if (!pos.matched) {
+      // Stale paragraph: render the corresponding slice of CURRENT content as
+      // plain text. Other paragraphs keep their colours.
+      const sliceText = content.slice(paraStart, paraEnd);
+      const grammarSlice = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
+      nodes.push(
+        <span key={`para${pi}-stale`}>
+          {renderInline(sliceText, speakerNames, palette, { color: BASE_COLOR },
+            grammarSlice, `para${pi}-stale`, onEntityClick)}
+        </span>,
+      );
+      cursor = paraEnd;
+      continue;
+    }
+
+    // Action sentences are detected paragraph-locally (offsets relative to para).
+    const paraActions = findActionSentences(para);
+    // Grammar for THIS paragraph, shifted to para-relative.
+    const paraGrammar = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
+
     const paraNodes: ReactNode[] = [];
 
-    // Colour each speech/narrative segment; leave gaps in base colour
     const sorted = [...segs].sort((a, b) => a.start - b.start);
     let pc = 0;
 
     for (const seg of sorted) {
-      // Plain gap before this segment — entity-scan it too (e.g., free-standing
-      // narrative outside any tagged segment).
+      // Non-speech gap before this segment — eligible for action wrapping.
       if (seg.start > pc) {
         const gapText = para.slice(pc, seg.start);
+        const gapActions = clipSpans(paraActions, pc, seg.start);
+        const gapGrammar = clipGrammar(paraGrammar, pc, seg.start);
+        // Compute actor colour per action span using current carryingSpeaker
+        // (entity-in-text overrides). Para-relative offsets need shifting back.
+        const gapColors = gapActions.map(a =>
+          actorColor(para, a.start + pc, a.end + pc)
+        );
         paraNodes.push(
           <span key={`bp${seg.start}`}>
-            {renderWithEntities(gapText, speakerNames, palette, { color: BASE_COLOR }, `bp${pi}-${seg.start}`, onEntityClick)}
+            {renderActionable(gapText, gapActions, gapColors, speakerNames, palette,
+              { color: BASE_COLOR }, gapGrammar, `bp${pi}-${seg.start}`, onEntityClick)}
           </span>,
         );
+      }
+      // Update carrying speaker BEFORE rendering the speech segment so any
+      // action in the next gap can attribute to this speaker.
+      if (seg.type === "speech" && seg.speaker && seg.confidence >= 0.65) {
+        carryingSpeaker = seg.speaker;
       }
       const color =
         seg.type === "narrative"
@@ -158,9 +361,12 @@ export function HighlightLayer({
         color,
         fontStyle: seg.type === "narrative" ? "italic" : undefined,
       };
+      const segGrammar = clipGrammar(paraGrammar, seg.start, seg.end);
+      // Speech segments don't get action wrapping — dialogue isn't action.
       paraNodes.push(
         <span key={`sg${seg.start}`}>
-          {renderWithEntities(segText, speakerNames, palette, segStyle, `sg${pi}-${seg.start}`, onEntityClick)}
+          {renderInline(segText, speakerNames, palette, segStyle,
+            segGrammar, `sg${pi}-${seg.start}`, onEntityClick)}
         </span>,
       );
       pc = seg.end;
@@ -168,20 +374,31 @@ export function HighlightLayer({
 
     if (pc < para.length) {
       const tailText = para.slice(pc);
+      const tailActions = clipSpans(paraActions, pc, para.length);
+      const tailGrammar = clipGrammar(paraGrammar, pc, para.length);
+      const tailColors = tailActions.map(a =>
+        actorColor(para, a.start + pc, a.end + pc)
+      );
       paraNodes.push(
         <span key="tail">
-          {renderWithEntities(tailText, speakerNames, palette, { color: BASE_COLOR }, `tail${pi}`, onEntityClick)}
+          {renderActionable(tailText, tailActions, tailColors, speakerNames, palette,
+            { color: BASE_COLOR }, tailGrammar, `tail${pi}`, onEntityClick)}
         </span>,
       );
     }
 
     nodes.push(<span key={`para${pi}`}>{paraNodes}</span>);
-    cursor = paraStart + para.length;
+    cursor = paraEnd;
   }
 
   if (cursor < content.length) {
+    const trailText = content.slice(cursor);
+    const trailGrammar = sliceGrammar(grammarSuggestions, cursor, content.length);
     nodes.push(
-      <span key="trail" style={{ color: BASE_COLOR }}>{content.slice(cursor)}</span>,
+      <span key="trail">
+        {renderInline(trailText, speakerNames, palette, { color: BASE_COLOR },
+          trailGrammar, "trail", onEntityClick)}
+      </span>,
     );
   }
 
@@ -194,4 +411,25 @@ export function HighlightLayer({
       {nodes}
     </div>
   );
+}
+
+// Clip an ActionSpan list to a [from, to] window, returning ranges
+// shifted to be relative to `from`. Spans that don't fully fit are dropped.
+function clipSpans(spans: ActionSpan[], from: number, to: number): ActionSpan[] {
+  const out: ActionSpan[] = [];
+  for (const s of spans) {
+    if (s.end <= from || s.start >= to) continue;
+    if (s.start < from || s.end > to) continue;
+    out.push({ start: s.start - from, end: s.end - from });
+  }
+  return out;
+}
+function clipGrammar(list: GrammarSuggestion[], from: number, to: number): GrammarSuggestion[] {
+  const out: GrammarSuggestion[] = [];
+  for (const g of list) {
+    if (g.end <= from || g.start >= to) continue;
+    if (g.start < from || g.end > to) continue;
+    out.push({ ...g, start: g.start - from, end: g.end - from });
+  }
+  return out;
 }

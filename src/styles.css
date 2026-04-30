@@ -4,6 +4,7 @@
   --bg-glass: rgba(255, 255, 255, 0.55);
   --bg-glass-hover: rgba(255, 255, 255, 0.78);
   --bg-glass-strong: rgba(255, 255, 255, 0.72);
+  --text-entity-tag: rgba(255, 255, 255, 0.696);
 
   /* Liquid glass specular gradient — top highlight, mid shadow, bottom rim */
   --border-glass-grad: linear-gradient(
@@ -79,6 +80,7 @@
     --panel-btn-bg: rgba(255, 255, 255, 0.06);
     --panel-btn-bg-hover: rgba(255, 255, 255, 0.12);
     --panel-btn-border: rgba(255, 255, 255, 0.10);
+    --text-entity-tag: rgba(255, 255, 255, 0.696);
   }
 }
 
@@ -383,6 +385,8 @@ body {
   width: min(100%, 580px);
   border-radius: var(--card-radius);
   padding: 28px 28px 20px;
+  border-radius: 38px;
+  background: var(--bg-glass-strong);
 }
 
 .index-header {
@@ -1412,6 +1416,116 @@ body {
   margin-bottom: 5px;
 }
 
+/* ─── Cross-arc widget (high mode) ─────────────────────────────────────────
+   Mirrors the reader's hmx-arc-graph row: prev / current / next sparklines
+   side-by-side with arrow connectors and a cross-pattern label.
+
+   The current cell is sized larger (flex: 1.4) and gets a faint accent
+   background so the reader's eye lands on it. Adjacent cells are dimmed
+   slightly to reinforce the focus hierarchy. */
+.cross-arc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0 8px;
+}
+
+.cross-arc-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  opacity: 0.78;
+  min-width: 0;
+}
+
+.cross-arc-cell--current {
+  flex: 1.45;
+  opacity: 1;
+}
+
+.cross-arc-graph {
+  width: 100%;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 4px;
+}
+
+.cross-arc-cell--current .cross-arc-graph {
+  background: rgba(125, 216, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(125, 216, 255, 0.18);
+}
+
+.cross-arc-cell-label {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+  text-align: center;
+}
+
+.cross-arc-cell--current .cross-arc-cell-label {
+  color: rgba(125, 216, 255, 0.85);
+}
+
+.cross-arc-connector {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.30);
+  flex-shrink: 0;
+  margin-bottom: 12px; /* visual offset to align with sparkline mid-line */
+}
+
+.cross-arc-cast {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.cross-arc-cast-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  line-height: 1.3;
+}
+
+.cross-arc-cast-key {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+  width: 50px;
+  flex-shrink: 0;
+}
+
+.cross-arc-cast-val {
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-arc-hint {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.32);
+  text-align: center;
+  padding: 6px 4px 0;
+  line-height: 1.4;
+}
+
 /* ═══════════════════════════════════════════
    EDITOR HIGHLIGHT OVERLAY — IDE-style speech colouring
    ═══════════════════════════════════════════ */
@@ -1441,8 +1555,10 @@ body {
   word-break: break-word;
   /* Transparent base — coloured spans provide the visible text */
   color: transparent;
-  z-index: 1;
+  z-index: 10;
   padding: 0;
+  -webkit-backdrop-filter: blur(0px); /* Trigger compositor layer */
+  isolation: isolate;
 }
 
 /* When highlight is active, make the textarea text transparent so only
@@ -1463,46 +1579,143 @@ body {
 }
 
 
-/* ─── Entity / character-name tag — inline pill on the .liquid-glass primitive ───
-   Renders on a span that ALSO carries the `liquid-glass` class so it inherits
-   the glass surface, backdrop blur, soft shadow, and specular gradient ring
-   (.liquid-glass::before) consistently with the toolbar / panels.
+/* ─── Entity / character-name tag ───
+   Must not affect line-box height, width, or text-wrap in any way — even
+   a sub-pixel difference causes the mirror-div lines to sit at different
+   Y positions from the textarea, making the cursor jump on click.
 
-   Layout-neutral horizontal padding: padding +7px each side adds visual width,
-   margin -7px each side cancels the layout effect, so the text inside still
-   occupies its raw character width and the textarea overlay alignment is
-   preserved exactly. */
+   Rules:
+   · display: inline          → no block formatting context, no baseline quirks
+   · no padding / margin      → zero inline-dimension contribution
+   · no backdrop-filter       → compositor layer promotion causes repaint jumps
+   · no liquid-glass class    → its ::before (position:absolute; inset:0) resolves
+                                 to the editor-wrap, not the tag, creating a
+                                 full-width overlay that repaints on interaction
+   · box-shadow spread        → extends the visual pill beyond the text bounds
+                                 as pure ink overflow; does not affect layout */
+/* Background: layered to fake a "frosted glass" look that's visible even
+   when there's nothing meaningful behind to blur.
+     · top layer  — translucent white gradient → top-light specular sheen
+     · base layer — entity-coloured tint mixed with a touch of white
+   The mirror-div architecture means the textarea's text behind this tag is
+   `color: transparent`, contributing nothing to the backdrop image — so a
+   raw backdrop-filter alone produces no visible blur. The static layers
+   below give the visual "glass" texture; backdrop-filter still applies on
+   top so any visible content behind (e.g., the page bg in dark mode, a
+   text selection rect) does get a real blur. */
 .entity-tag {
-  display: inline-block;
-  color: var(--entity-color, currentColor);
-  font-style: normal;
-  font-weight: 600;
-  /* Pill shape */
-  border-radius: 9999px;
-  /* Layout-neutral horizontal padding */
-  padding-left: 7px;
-  padding-right: 7px;
-  padding-top: -10px;
-  transform: translateY(0px);
-  margin: 0 -7px;
-  /* Stack above textarea + adjacent highlight text */
-  z-index: 2;
+  display: inline;
+  font-style: inherit;
+  font-weight: inherit;
+  color: var(--text-entity-tag);
   position: relative;
-  isolation: isolate;
+  z-index: 11;
   pointer-events: auto;
   cursor: pointer;
-  /* Glass morphism: blur the textarea text beneath */
-  backdrop-filter: blur(3px) saturate(155%);
-  -webkit-backdrop-filter: blur(3px) saturate(155%);
-  /* Background = the entity colour itself, lifted off via low alpha so the
-     pill reads as a tinted glass of the same hue rather than a generic dark
-     surface. color-mix gives a clean rgba derivation in modern browsers. */
-  background: color-mix(in srgb, var(--entity-color, #888) 18%, transparent);
-  will-change: backdrop-filter;
+  border-radius: 10px;
+  padding: 4px;
+  margin: -4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  transition: padding 0.12s ease, margin 0.12s ease, border-radius 0.12s ease;
 }
 
-.entity-tag:hover {
-  background: color-mix(in srgb, var(--entity-color, #888) 28%, transparent);
+.entity-tag-bg {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--entity-color, #888) 100%, transparent);
+  z-index: 10;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.entity-tag-bg-sub{
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--bg);
+  z-index: 10;
+  z-index: -1;
+  pointer-events: none;
+}
+
+
+/* ─── Action sentence highlighter ─────────────────────────────────────────
+   Subtle outline + faint fill for sentences with action verbs. Uses actor's
+   colour when attributed (--ap-color override), falls back to neutral grey.
+
+   Multi-line wrapping: box-decoration-break: clone is the key property —
+   without it, the browser renders the decoration as one unbroken box and
+   then slices it across lines, which makes the outline disappear at line
+   wraps. With clone, each line fragment gets its own complete capsule
+   (border-radius corners, full box-shadow ring, background fill).
+
+   No padding/margin — the highlight layer mirror-div must exactly match
+   the textarea's text metrics or the cursor will misalign. The decoration
+   lives entirely in box-shadow ink-overflow + background, which don't
+   participate in layout. */
+.action-phrase {
+  display: inline;
+  border-radius: 4px;
+  position: relative;
+  z-index: 2;
+  /* Default neutral grey when no actor is attributed */
+  --ap-color: rgba(140, 140, 140, 0.45);
+  background: color-mix(in srgb, var(--ap-color) 20%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+@media (prefers-color-scheme: dark) {
+  .action-phrase {
+    --ap-color: rgba(180, 180, 180, 0.40);
+  }
+}
+
+/* ─── Grammar issue (ghost text suggestion) ───────────────────────────────
+   The wrong word renders normally inline (no underline, no squiggle). The
+   suggested correction floats above as small ghost text via a ::before
+   pseudo with content from the data-suggestion attribute. position:absolute
+   inside an inline element resolves its containing block to the inline
+   element itself in WebKit/Blink, so left:0 / bottom:100% anchors above. */
+.grammar-issue {
+  position: relative;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: rgba(120, 130, 200, 0.7);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+/* Ghost suggestion floating above the wrong text. The pseudo-element is
+   absolutely positioned; for inline parents with position:relative, WebKit
+   resolves the containing block to the inline's first line-box, so
+   bottom:100% anchors right above the word. */
+.grammar-issue::before {
+  content: attr(data-suggestion);
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: 1px;
+  font-size: 0.78em;
+  font-weight: 600;
+  font-style: italic;
+  color: rgba(90, 100, 180, 0.95);
+  white-space: nowrap;
+  pointer-events: none;
+  letter-spacing: 0.01em;
+  line-height: 1.1;
+  text-decoration: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .grammar-issue {
+    text-decoration-color: rgba(180, 195, 240, 0.65);
+  }
+  .grammar-issue::before {
+    color: rgba(180, 195, 240, 0.92);
+  }
 }
 
 @media (max-width: 640px) {
@@ -1766,9 +1979,11 @@ body {
 .world-panel {
   width: min(100%, 760px);
   border-radius: var(--card-radius);
+  border-radius: 38px;
   padding: 22px 22px 18px;
   display: flex;
   flex-direction: column;
+  background: var(--bg-glass-strong);
   gap: 14px;
   max-height: calc(100vh - 120px);
 }
@@ -2117,7 +2332,7 @@ body {
   position: absolute;
   z-index: 80;
   width: 300px;
-  border-radius: 16px;
+  border-radius: 24px;
   padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;

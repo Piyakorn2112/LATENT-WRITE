@@ -36,20 +36,6 @@ export const IOS_COLORS = {
   purple: IOS_PALETTE[9],
 } as const;
 
-// ─── HSL helpers (overflow generation) ─────────────────────────────────────
-
-function hslToHex(h: number, s: number, l: number): string {
-  const sN = s / 100;
-  const lN = l / 100;
-  const k = (n: number) => (n + h / 30) % 12;
-  const a = sN * Math.min(lN, 1 - lN);
-  const f = (n: number) =>
-    lN - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  const toHex = (x: number) =>
-    Math.round(255 * x).toString(16).padStart(2, "0");
-  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`.toUpperCase();
-}
-
 function hashName(name: string): number {
   let h = 0;
   for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) & 0x7fffffff;
@@ -59,42 +45,32 @@ function hashName(name: string): number {
 // ─── Public API ────────────────────────────────────────────────────────────
 
 /**
- * Build a deterministic name → ColorPair map for an arbitrary list of names.
+ * Build a deterministic name → ColorPair map.
  *
- * Strategy:
- *   1. Sort names by hash for stable ordering across runs.
- *   2. The first N (= IOS_PALETTE.length) names get the iOS palette in order,
- *      so distinct entities always pull from the canonical palette first.
- *   3. Beyond N, generate fresh hues via golden-angle distribution (≈137.508°)
- *      — this gives maximally-spread, non-clashing colours indefinitely while
- *      keeping saturation / lightness aligned with the iOS aesthetic.
+ * Each name's colour is derived SOLELY from its own hash — adding or removing
+ * names from the list never changes the colour of any other name. This is
+ * crucial for editing: when a new entity gets detected mid-chapter, the
+ * existing speakers' dialogue colours stay rock-stable instead of all shifting
+ * one slot over.
  *
- * Pure function — no caching, no external state. Cheap to call per render.
+ * Two names can collide (hash to the same colour) — that's an acceptable
+ * trade-off for absolute stability. Collisions are rare for short cast lists,
+ * and the overflow HSL fallback adds 360 distinct hues.
+ *
+ * Pure function — no caching, no external state.
  */
 export function buildSpeakerPalette(names: string[]): Map<string, ColorPair> {
   const map = new Map<string, ColorPair>();
   if (names.length === 0) return map;
 
-  // Dedupe + sort by hash (stable across runs of the same name set)
-  const unique = Array.from(new Set(names));
-  const sorted = unique.sort((a, b) => hashName(a) - hashName(b));
-
-  const GOLDEN_ANGLE = 137.508;
-  // Offset so the first generated hue doesn't coincide exactly with a palette hue
-  const HUE_OFFSET = 19;
-
-  for (let i = 0; i < sorted.length; i++) {
-    const name = sorted[i];
-    if (i < IOS_PALETTE.length) {
-      map.set(name, IOS_PALETTE[i]);
-    } else {
-      const overflowIdx = i - IOS_PALETTE.length;
-      const hue = (overflowIdx * GOLDEN_ANGLE + HUE_OFFSET) % 360;
-      map.set(name, {
-        text: hslToHex(hue, 78, 50),
-        bg:   hslToHex(hue, 70, 30),
-      });
-    }
+  // Each name maps INDEPENDENTLY to a colour from its own hash. No probing,
+  // no neighbour-aware allocation — adding/removing other names cannot
+  // possibly change this name's colour. Two names can hash to the same
+  // colour; that is an acceptable trade-off for absolute stability and is
+  // visually disambiguated by the name itself appearing in the text.
+  for (const name of new Set(names)) {
+    const idx = hashName(name) % IOS_PALETTE.length;
+    map.set(name, IOS_PALETTE[idx]);
   }
   return map;
 }

@@ -69,11 +69,13 @@ export default function App() {
     : intelMode === "off" ? "default"
     : intelMode;
 
-  const { result: analysisResult, isAnalyzing: analysisRunning, knownNames } = useAnalysis(
-    novel,
-    currentId,
-    { level: effectiveLevel },
-  );
+  const {
+    result: analysisResult,
+    isAnalyzing: analysisRunning,
+    knownNames,
+    prevResult: prevAnalysisResult,
+    nextResult: nextAnalysisResult,
+  } = useAnalysis(novel, currentId, { level: effectiveLevel });
 
   const handleWorldChange = useCallback((next: WorldData) => {
     setNovel((n) => ({ ...n, worldData: next }));
@@ -301,6 +303,8 @@ export default function App() {
 
       <AnalysisPanel
         result={analysisResult}
+        prevResult={prevAnalysisResult}
+        nextResult={nextAnalysisResult}
         isAnalyzing={analysisRunning}
         intelMode={intelMode}
         onSetIntelMode={setIntelMode}

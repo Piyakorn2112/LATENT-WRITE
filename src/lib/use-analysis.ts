@@ -72,6 +72,12 @@ interface UseAnalysisReturn {
   isAnalyzing: boolean;
   /** Resolved entity name list — exposed so HighlightLayer can highlight uniformly. */
   knownNames: string[];
+  /** Cached analysis for the chapter immediately before the current one, if
+   *  it was previously visited and analysed. null otherwise (no eager
+   *  cross-chapter analysis — we don't trigger fresh runs just for context). */
+  prevResult: ChapterAnalysisResult | null;
+  /** Cached analysis for the chapter immediately after the current one. */
+  nextResult: ChapterAnalysisResult | null;
 }
 
 // Runs the full speech-detect → chapter-analysis pipeline for the current chapter.
@@ -175,5 +181,24 @@ export function useAnalysis(
     };
   }, [novel.chapters, currentChapterId, debounceMs, level, knownNames]);
 
-  return { result, isAnalyzing, knownNames };
+  // Adjacent chapter analyses pulled from cache — no fresh runs triggered.
+  // The cross-arc widget needs prev/next tension curves to draw arcs; those
+  // are populated organically as the user visits other chapters. Computed
+  // every render so a freshly-cached neighbour appears immediately.
+  const { prevResult, nextResult } = useMemo(() => {
+    if (!currentChapterId) return { prevResult: null, nextResult: null };
+    const idx = novel.chapters.findIndex((c) => c.id === currentChapterId);
+    if (idx < 0) return { prevResult: null, nextResult: null };
+    const prevId = idx > 0 ? novel.chapters[idx - 1].id : null;
+    const nextId = idx < novel.chapters.length - 1 ? novel.chapters[idx + 1].id : null;
+    return {
+      prevResult: prevId ? cache.current.get(prevId) ?? null : null,
+      nextResult: nextId ? cache.current.get(nextId) ?? null : null,
+    };
+    // `result` is included so the memo recomputes when the cache changes (a
+    // fresh analysis lands → cache updated → setResult fires → this rerenders).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [novel.chapters, currentChapterId, result]);
+
+  return { result, isAnalyzing, knownNames, prevResult, nextResult };
 }

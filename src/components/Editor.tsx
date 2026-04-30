@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { Chapter } from "../types";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { HighlightLayer } from "./HighlightLayer";
+import { checkGrammar } from "../lib/grammar-check";
 
 interface Props {
   chapter: Chapter;
@@ -30,14 +31,29 @@ export function Editor({
     return () => window.removeEventListener("resize", onWinResize);
   }, []);
 
-  // Keep highlight visible at all times once we have results — the analysis
-  // hook auto-refreshes on the debounce, so the colours stay roughly in sync
-  // and any drift self-corrects. The textarea text stays transparent so the
-  // highlight is what the user actually sees.
+  // Keep the textarea in --highlight mode for the entire duration that any
+  // analysis exists, regardless of whether the current content still matches.
+  // Mounting/unmounting the overlay (or toggling the textarea class) on every
+  // edit causes the browser to flip compositor layers and re-paint, which
+  // visually shifts the line being typed and collides it with the line above.
+  // Staleness is handled inside HighlightLayer instead — when content has
+  // diverged, it renders the current content as plain text in-place, keeping
+  // the DOM and the textarea state perfectly stable.
+  //
+  // The third check (speechResults.length) was redundant — speech-detect
+  // emits one result per paragraph, so it's always equal to paragraphs.length.
+  // Including it just as a safety guard left grammar/entity highlights
+  // invisible (opacity:0) any time speech detection produced an empty array.
   const hasHighlight =
-    !!analysisResult &&
-    analysisResult.paragraphs.length > 0 &&
-    analysisResult.speechResults.length > 0;
+    !!analysisResult && analysisResult.paragraphs.length > 0;
+
+  // Grammar suggestions are recomputed only when content changes — cheap
+  // regex sweep over the chapter, ~O(content × rule-count). Memoised so the
+  // HighlightLayer doesn't re-render on unrelated parent re-renders.
+  const grammarSuggestions = useMemo(
+    () => checkGrammar(chapter.content),
+    [chapter.content],
+  );
 
   return (
     <article className="document">
@@ -55,6 +71,7 @@ export function Editor({
             paragraphs={analysisResult.paragraphs}
             speechResults={analysisResult.speechResults}
             knownNames={knownNames}
+            grammarSuggestions={grammarSuggestions}
             visible={hasHighlight}
             onEntityClick={onEntityClick}
           />
