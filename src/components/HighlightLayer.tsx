@@ -8,6 +8,52 @@ const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
 const BASE_COLOR      = "var(--text-body)";
 
+// Scene label tension colours — drawn from the same iOS-system palette
+// used for entity highlights so they read with consistent saturation in
+// both light and dark mode (the previous slate/amber/rose values washed
+// out on light surfaces). The mapping is intentional, not arbitrary:
+//   calm   → indigo (low-key, recedes)
+//   rising → orange (warning warmth)
+//   high   → red    (alarm)
+const SCENE_T: Record<"calm" | "rising" | "high", string> = {
+  calm:   IOS_COLORS.indigo.text,  // #4F45D8 — readable on white, vivid on dark
+  rising: IOS_COLORS.orange.text,  // #DC7B19
+  high:   IOS_COLORS.red.text,     // #D6363B
+};
+
+// Zero-size inline-block anchor that lets a child float above the paragraph's
+// first line via `position:absolute` without contributing any width, height,
+// or baseline shift to the surrounding text flow. Safe inside the mirror-div.
+const SCENE_ANCHOR: CSSProperties = {
+  display: "inline-block",
+  width: 0,
+  height: 0,
+  overflow: "visible",
+  verticalAlign: "baseline",
+  position: "relative",
+  pointerEvents: "none",
+  userSelect: "none",
+};
+
+function sceneTagStyle(tension: "calm" | "rising" | "high"): CSSProperties {
+  return {
+    position: "absolute",
+    left: 0,
+    bottom: "2.15em", // floats into the inter-paragraph whitespace above
+    whiteSpace: "nowrap",
+    fontSize: "9px",
+    lineHeight: 1,
+    letterSpacing: "0.09em",
+    fontFamily: "var(--font-ui)",
+    fontWeight: 600,                 // slightly heavier so the iOS hue reads
+    color: SCENE_T[tension],
+    opacity: 0.85,                   // bumped from 0.65 — iOS palette is balanced for it
+    textTransform: "uppercase",
+    pointerEvents: "none",
+    userSelect: "none",
+  };
+}
+
 function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -33,7 +79,7 @@ function renderInline(
   // Build a unified list of decoration ranges sorted by start.
   type Deco =
     | { kind: "entity"; start: number; end: number; matched: string }
-    | { kind: "grammar"; start: number; end: number; suggestion: string };
+    | { kind: "grammar"; start: number; end: number; suggestion: string; gkind: GrammarSuggestion["kind"] };
 
   const decos: Deco[] = [];
 
@@ -46,7 +92,7 @@ function renderInline(
     }
   }
   for (const g of grammarLocal) {
-    decos.push({ kind: "grammar", start: g.start, end: g.end, suggestion: g.suggestion });
+    decos.push({ kind: "grammar", start: g.start, end: g.end, suggestion: g.suggestion, gkind: g.kind });
   }
 
   // Sort by start; grammar wins ties so it sits in the layered order first.
@@ -100,6 +146,7 @@ function renderInline(
           key={`${keyPrefix}-g${i++}`}
           className="grammar-issue"
           data-suggestion={d.suggestion}
+          data-kind={d.gkind}
           style={baseStyle}
         >
           {text.slice(d.start, d.end)}
@@ -288,6 +335,7 @@ export function HighlightLayer({
     const paraEnd   = pos.end;
     const para      = paragraphs[pi];
     const segs      = speechResults[pi]?.segments ?? [];
+    const meta      = speechResults[pi]?.meta;
 
     // Gap (newlines / freshly-typed text) before this paragraph's slot.
     if (paraStart > cursor) {
@@ -387,7 +435,17 @@ export function HighlightLayer({
       );
     }
 
-    nodes.push(<span key={`para${pi}`}>{paraNodes}</span>);
+    const tension = meta?.sceneTension ?? "calm";
+    nodes.push(
+      <span key={`para${pi}`}>
+        {meta?.sceneStart && meta.sceneLabel && (
+          <span aria-hidden="true" style={SCENE_ANCHOR}>
+            <span style={sceneTagStyle(tension)}>· {meta.sceneLabel}</span>
+          </span>
+        )}
+        {paraNodes}
+      </span>
+    );
     cursor = paraEnd;
   }
 

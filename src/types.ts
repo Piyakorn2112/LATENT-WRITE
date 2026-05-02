@@ -7,6 +7,7 @@ export interface Chapter {
 
 export interface NovelMeta {
   title: string;
+  subtitle?: string;
   author: string;
   description: string;
 }

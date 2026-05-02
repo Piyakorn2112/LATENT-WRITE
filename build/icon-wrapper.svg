@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Wrapper that bakes the .icon bundle's design intent into a single
+  1024×1024 PNG for electron-builder:
+    • White squircle background (Apple-style, ~22.37% corner radius)
+    • Logo PNG centred, scaled to fit, with the manifest's -5pt vertical
+      offset (icon.json position.translation-in-points = [0, -5] inside a
+      group at scale 4 → -20px in canvas space).
+  Rendered via rsvg-convert. The runtime macOS-Tahoe icon system will
+  apply its own translucency / specular on top when displayed.
+-->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="squircle">
+      <rect x="0" y="0" width="1024" height="1024" rx="229" ry="229"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#squircle)">
+    <rect x="0" y="0" width="1024" height="1024" fill="#ffffff"/>
+    <!-- Logo: 226×234 source, scaled to fit 960×960 with 5pt (≈20px) up offset.
+         Aspect ratio of logo is 226/234 ≈ 0.966, so target is 928×960. -->
+    <image href="icon-source.png"
+           x="48" y="12"
+           width="928" height="960"
+           preserveAspectRatio="xMidYMid meet"/>
+  </g>
+</svg>

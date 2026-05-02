@@ -1,5 +1,7 @@
-import { useId } from "react";
+import { useId, useMemo } from "react";
 import type { ChapterAnalysis } from "../../lib/use-analysis";
+import type { ChapterParaResult } from "../../lib/speech-detect";
+import { cliffhangerScore } from "../../lib/character-voice";
 import { WidgetCard } from "./WidgetCard";
 
 const ARC_LABEL: Record<string, string> = {
@@ -33,11 +35,34 @@ function catmullRomPath(pts: [number, number][]): string {
   return d;
 }
 
-export function TensionWidget({ analysis }: { analysis: ChapterAnalysis }) {
+interface TensionProps {
+  analysis: ChapterAnalysis;
+  /** Optional — when supplied, the widget computes a chapter-ending
+   *  "cliffhanger" lift score and shows it in the bottom action line. */
+  paragraphs?: string[];
+  speechResults?: ChapterParaResult[];
+}
+
+const CLIFF_COLOR: Record<"soft" | "lift" | "hook", string> = {
+  soft: "#94a3b8",
+  lift: "#fbbf24",
+  hook: "#f43f5e",
+};
+
+export function TensionWidget({ analysis, paragraphs, speechResults }: TensionProps) {
   const uid = useId().replace(/:/g, "_");
   const { tensionCurve, peakTension, arcShape, peakLabel, guidance } = analysis;
   const segs = analysis.highModeAnalysis?.microStructure ?? [];
   const momentum = analysis.highModeAnalysis?.narrativeMomentum;
+
+  // Cliffhanger score is a cheap derivative of paragraph-level tension —
+  // memoise so it doesn't recompute on unrelated re-renders. Only compute
+  // when paragraphs + speechResults are provided.
+  const cliff = useMemo(() => {
+    if (!paragraphs || !speechResults) return null;
+    if (paragraphs.length < 4) return null;
+    return cliffhangerScore(paragraphs, speechResults);
+  }, [paragraphs, speechResults]);
 
   const W = 440, H = 72, PAD_X = 4, PAD_Y = 6;
   const plotH = H - PAD_Y * 2;
@@ -151,6 +176,28 @@ export function TensionWidget({ analysis }: { analysis: ChapterAnalysis }) {
                   </span>
                 </div>
               )}
+            </div>
+          </>
+        )}
+
+        {/* Cliffhanger meta — appears only when paragraphs are provided. A
+            low-key footer keeps the widget legible while still surfacing
+            an end-of-chapter hook score. */}
+        {cliff && (
+          <>
+            <div className="wg-divider" />
+            <div className="wg-style-meta">
+              <span className="wg-style-meta-label">Cliffhanger</span>
+              <span className="wg-style-meta-value" style={{ color: CLIFF_COLOR[cliff.label] }}>
+                {cliff.label}
+              </span>
+              <span className="wg-style-meta-sep">·</span>
+              <span className="wg-style-meta-value" style={{ color: CLIFF_COLOR[cliff.label] }}>
+                {Math.round(cliff.score * 100)}%
+              </span>
+            </div>
+            <div className="wg-action-line" style={{ marginTop: 4 }}>
+              {cliff.note}
             </div>
           </>
         )}

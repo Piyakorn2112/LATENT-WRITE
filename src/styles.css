@@ -1,6 +1,7 @@
 :root {
   --bg: #eeeeee;
   --bg-page: #fafaf9;
+  --bg-scroll-edge: #fafaf9bc;
   --bg-glass: rgba(255, 255, 255, 0.55);
   --bg-glass-hover: rgba(255, 255, 255, 0.78);
   --bg-glass-strong: rgba(255, 255, 255, 0.72);
@@ -52,6 +53,7 @@
   :root {
     --bg: #111110;
     --bg-page: #111110;
+    --bg-scroll-edge: #111110bc;
     --bg-glass: rgba(36, 36, 34, 0.55);
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
@@ -147,6 +149,92 @@ body {
 }
 
 /* ─── Toolbar ─── */
+/* ── Scroll edge — soft gradient veil at the top of the viewport. Sits
+   between the sticky toolbar (z-index 40) and the scrollable editor text
+   (z-index 1-11) so content fades in from behind the toolbar as it scrolls
+   into view rather than hard-clipping at the toolbar's bottom edge. ── */
+.scroll-edge-top {
+  position: fixed;
+  top: -10px;
+  left: 0;
+  right: 0;
+  height: 110px;
+  z-index: 30;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Right-edge ambient blur — child of .analysis-panel so it shares the
+   panel's translate-on-open transform, sliding in and out with the
+   drawer.
+   ─────────────────────────────────────────────────────────────────────
+   Geometry — total ~600 px wide when the panel is open:
+     • right: -90 px → right edge lands at the window's right edge
+       (panel right at viewport_right - 90 + 90 = window edge)
+     • left:  -190 px → left edge extends 190 px past the panel's left
+       edge into the editor canvas, so the blur's gradual falloff has
+       room to breathe ("extend much further in").
+   Width = panel-width (320) + 90 + 190 = 600 px when open.
+   ─────────────────────────────────────────────────────────────────────
+   Closed-state hide: a translate big enough to fully tuck a 600 px
+   slab off-canvas would dominate the parallax (and feel glitchy).
+   Instead we fade opacity to 0 when the panel is closed — clean, no
+   leak onto the editor regardless of total width. The translate stays
+   at +30/0 as a subtle parallax flair. */
+.scroll-edge-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -80px;
+  right: -90px;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateX(30px);
+  transition:
+    transform 0.90s cubic-bezier(0.28, 1.2, 0.03, 1),
+    opacity   0.45s ease;
+}
+.analysis-panel--open .scroll-edge-right {
+  opacity: 1;
+  transform: translateX(0);
+}
+/* Fades content into the panel background colour on the right edge.
+   color-mix against --bg works in both light and dark without overrides. */
+.scroll-edge-right::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    color-mix(in srgb, var(--bg) 5%, transparent) 55%,
+    color-mix(in srgb, var(--bg) 14%, transparent) 100%
+  );
+  z-index: 2;
+}
+
+/* Window drag strip — top of the Electron window. Covers the area above
+   and around the toolbar so the user can drag the window from any of that
+   space. Toolbar buttons sit at z-index 40 above this strip and override
+   the drag region with `-webkit-app-region: no-drag` so they remain
+   clickable. */
+/* Thin drag strip across the top 16px of the window — matches the gap
+   above the sticky toolbar. Kept short so it never overlaps with toolbar
+   buttons. The toolbar's own background is also draggable (see below) so
+   the user can grab any non-button part of it to move the window. */
+.app-drag-region {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 16px;
+  z-index: 20;
+  -webkit-app-region: drag;
+}
+
 .toolbar-shell {
   position: sticky;
   top: 16px;
@@ -157,6 +245,15 @@ body {
   pointer-events: none;
 }
 
+/* Keep all interactive controls inside the toolbar clickable even where
+   they overlap the drag strip. */
+.toolbar button,
+.toolbar input,
+.toolbar a,
+.toolbar [role="button"] {
+  -webkit-app-region: no-drag;
+}
+
 .toolbar {
   pointer-events: auto;
   display: flex;
@@ -165,6 +262,9 @@ body {
   padding: 6px;
   border-radius: var(--pill-radius);
   width: min(100%, 920px);
+  /* The toolbar background itself is a window-drag handle — buttons and
+     inputs inside override it via `-webkit-app-region: no-drag` below. */
+  -webkit-app-region: drag;
 }
 
 .toolbar-divider {
@@ -259,6 +359,17 @@ body {
   color: #3b82f6;
 }
 
+/* Dark mode: lighter, less-saturated accent so it reads as a calm
+   highlight against the deep background instead of a punchy blue. */
+@media (prefers-color-scheme: dark) {
+  .icon-btn-active {
+    color: #9ec0f5;
+  }
+  ::selection {
+    background: rgba(158, 192, 245, 0.22);
+  }
+}
+
 @media (hover: none) {
   .icon-btn:hover:not(:disabled) {
     background: transparent;
@@ -312,13 +423,20 @@ body {
   outline: none;
   background: transparent;
   resize: none;
-  font-family: var(--font-body);
-  font-size: 1.06rem;
-  line-height: 1.85;
+  /* Typography prefs flow in via custom properties on .app; gracefully fall
+     back to the previous static values when unset. */
+  font-family: var(--editor-font, var(--font-body));
+  font-size: var(--editor-font-size, 1.06rem);
+  line-height: var(--editor-line-height, 1.85);
   color: var(--text-body);
   letter-spacing: 0.01em;
   padding: 0;
+  /* JS keeps height === scrollHeight, so the textarea never needs its own
+     scrollbar. Chromium (Electron) renders one anyway by default; hide it. */
+  overflow: hidden;
+  scrollbar-width: none;
 }
+.document-editor::-webkit-scrollbar { display: none; }
 
 .document-editor::placeholder {
   color: var(--text-tertiary);
@@ -332,10 +450,9 @@ body {
   .document-chapter-title {
     font-size: 1.5rem;
   }
-  .document-editor {
-    font-size: 0.99rem;
-    line-height: 1.78;
-  }
+  /* Editor font is user-controlled via Preferences — no small-screen
+     override (both layers must always share metrics, and the user is the
+     authority on size). */
 }
 
 /* ─── Empty State ─── */
@@ -498,14 +615,17 @@ body {
    ANALYSIS PANEL — floating right notification stack
    ═══════════════════════════════════════════ */
 
-/* Outer shell spans the full viewport height on the right edge */
+/* Outer shell spans the full viewport height on the right edge.
+   Sized to match the inner zoom level — when zoom rises, the visual
+   widget area grows, and these offsets / widths scale together so the
+   tab column lands at the same screen-position whether closed or open. */
 .analysis-panel {
   position: fixed;
-  right: -220px;
+  right: -290px;
   top: 0px;
   bottom: 0px;
   z-index: 50;
-  width: 250px;
+  width: 320px;
   display: flex;
   align-items: flex-start;
   pointer-events: none;
@@ -591,34 +711,45 @@ body {
 .analysis-drawer {
   pointer-events: auto;
   height: 100%;
-  width: 220px;
+  width: 290px;
   scrollbar-width: none;
 }
 
 .analysis-drawer::-webkit-scrollbar { display: none; }
 
 .analysis-panel--open {
-  transform: translateX(-300px);
+  transform: translateX(-380px);
 }
 
 
-/* Inner container — zoom: 0.6 shrinks visual AND layout space,
-   so overflow-y on the drawer works naturally without transform math. */
+/* Inner container — zoom: 0.77 splits the difference between widget visual
+   width (480 × 0.77 ≈ 370 px) and the settings panel inner (370 px), so
+   tabs swap between the two views without anything visibly resizing.
+   Source padding-top reduced 130 → 100 px because zoom scales it too:
+   visual top = 100 × 0.77 ≈ 77 px (matches the previous 130 × 0.6 = 78 px
+   sweet-spot the toolbar sits over). The drawer/panel widths upstairs
+   are intentionally untouched so the right-margin from the window edge
+   stays where you tuned it. */
 .analysis-inner {
   position: absolute;
   top: 0;
   bottom: 0;
-  zoom: 0.6;
+  zoom: 0.77;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 130px 14px 24px 10px;
+  padding: 100px 14px 24px 10px;
   transition: opacity 0.25s ease;
   overflow-x: visible;
   overflow-y: scroll;
+  /* Suppress the native scroll track on both engines — the drawer itself
+     hides its scrollbar, but the inner has its own overflow:scroll that
+     was painting a thin native track. Hide it here too. */
+  scrollbar-width: none;
   /* min-width forces the drawer to size from the card width */
   width: 480px;
 }
+.analysis-inner::-webkit-scrollbar { display: none; }
 
 /* Loading state — widgets stay fully painted; only block input. The exit
    animation runs when the new result arrives (via cross-fade in AnalysisPanel),
@@ -692,7 +823,49 @@ body {
 .widget-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
+}
+
+/* Always-visible cards supply their own bottom spacing. */
+.widget-list > .widget-card {
+  margin-bottom: 12px;
+}
+
+/* Animated wrapper — collapses/expands smoothly so the surrounding stack
+   shifts up or down without a jump. Uses CSS `interpolate-size` to animate
+   `height: auto` directly, which Chromium 129+ (Electron 41 ships 134)
+   handles in a single layout pass per frame. The previous
+   `grid-template-rows: 0fr → 1fr` technique forced two layout passes per
+   frame (once to resolve the fr unit, once to lay out the children) and
+   was visibly janky inside Electron's compositor. */
+@supports (interpolate-size: allow-keywords) {
+  .widget-anim {
+    interpolate-size: allow-keywords;
+  }
+}
+.widget-anim {
+  height: auto;
+  opacity: 1;
+  margin-bottom: 12px;
+  transition:
+    height        0.34s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity       0.28s ease,
+    margin-bottom 0.34s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  will-change: height, opacity;
+}
+.widget-anim--off {
+  height: 0;
+  opacity: 0;
+  margin-bottom: 0px;
+}
+.widget-anim-inner {
+  min-height: 0;
+  overflow: hidden;
+}
+/* Card inside an animated wrapper: the wrapper owns the bottom margin. */
+.widget-anim .widget-card {
+  margin-bottom: 0;
 }
 
 /* ─── Placeholder widget — empty / processing state shown when no chapter
@@ -807,13 +980,16 @@ body {
   border-radius: inherit;
 }
 
-/* Specular gradient border ring — identical mask technique to .liquid-glass */
+/* Specular gradient border ring — identical mask technique to .liquid-glass.
+   padding is the *source* thickness; visual = padding × zoom on the
+   parent .analysis-inner. With zoom now 0.8 (was 0.6), 1.4 × 0.8 = 1.12 px
+   visual (was 1.6 × 0.6 = 0.96 px). Slightly thicker but still hairline. */
 .widget-card::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: 32px;
-  padding: 1.6px;
+  padding: 1.4px;
   background: var(--border-glass-grad);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -1201,6 +1377,80 @@ body {
   border-radius: 2px;
   opacity: 0.82;
 }
+
+/* Momentum / sensory / cross-pacing row — label · bar · trailing value. */
+.wg-momentum-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wg-momentum-row:last-child { margin-bottom: 0; }
+.wg-momentum-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.5);
+  width: 64px;
+  flex-shrink: 0;
+  text-transform: capitalize;
+  letter-spacing: 0.01em;
+}
+.wg-momentum-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.wg-momentum-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  opacity: 0.85;
+  transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.wg-momentum-trend {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  width: 78px;
+  flex-shrink: 0;
+  text-align: right;
+  text-transform: capitalize;
+}
+
+/* Action note — single-sentence writer-facing tip beneath the data rows. */
+.wg-section-divider {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+.wg-action-line {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.66);
+  letter-spacing: 0.005em;
+}
+.wg-style-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.45);
+}
+.wg-style-meta-label {
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.4);
+}
+.wg-style-meta-value {
+  font-variant-numeric: tabular-nums;
+  color: rgba(255,255,255,0.85);
+}
+.wg-style-meta-sep { opacity: 0.4; }
 .wg-channel-val {
   font-family: var(--font-ui);
   font-size: 8.5px;
@@ -1533,9 +1783,19 @@ body {
 /* Wrapper that lets the highlight layer sit behind the textarea */
 .editor-wrap {
   position: relative;
+  /* Constrain editor width via the user's "measure" pref — both the
+     textarea and the highlight overlay are children, so centering at this
+     level keeps their text boxes pixel-perfectly aligned. */
+  max-width: var(--editor-measure, none);
+  margin-left: auto;
+  margin-right: auto;
 }
 
-/* Mirror div — same font metrics as .document-editor, sits behind it */
+/* Mirror div — same font metrics as .document-editor, sits behind it.
+   CRITICAL: every typographic property here MUST resolve to the same
+   computed value as on .document-editor, otherwise the cursor lands at
+   different x/y than the visible glyphs. The `var(--editor-...)` chain
+   matches the textarea's chain exactly. */
 .editor-highlight {
   position: absolute;
   top: 0;
@@ -1544,10 +1804,10 @@ body {
   /* height: auto — sized by content, mirrors textarea height */
   pointer-events: none;
   user-select: none;
-  /* Must exactly match .document-editor */
-  font-family: var(--font-body);
-  font-size: 1.06rem;
-  line-height: 1.85;
+  /* Mirror .document-editor exactly */
+  font-family: var(--editor-font, var(--font-body));
+  font-size: var(--editor-font-size, 1.06rem);
+  line-height: var(--editor-line-height, 1.85);
   letter-spacing: 0.01em;
   /* Pre-wrap preserves newlines from the raw content string */
   white-space: pre-wrap;
@@ -1557,7 +1817,7 @@ body {
   color: transparent;
   z-index: 10;
   padding: 0;
-  -webkit-backdrop-filter: blur(0px); /* Trigger compositor layer */
+  will-change: transform;
   isolation: isolate;
 }
 
@@ -1718,12 +1978,41 @@ body {
   }
 }
 
-@media (max-width: 640px) {
-  .editor-highlight {
-    font-size: 0.99rem;
-    line-height: 1.78;
-  }
+/* Style suggestions (filter words, passive voice, adverb-in-attribution,
+   wordy phrases, clichés) would flood the editor with ghost text if
+   surfaced inline. Underline them subtly in a softer hue and route the
+   actual suggestion to the Style Watch widget instead. The ghost text
+   only reappears on hover so curious writers can still see the hint. */
+.grammar-issue[data-kind="filter"],
+.grammar-issue[data-kind="passive"],
+.grammar-issue[data-kind="adverb"],
+.grammar-issue[data-kind="wordy"],
+.grammar-issue[data-kind="cliche"] {
+  text-decoration-color: rgba(160, 160, 170, 0.45);
+  text-decoration-style: dotted;
 }
+.grammar-issue[data-kind="filter"]::before,
+.grammar-issue[data-kind="passive"]::before,
+.grammar-issue[data-kind="adverb"]::before,
+.grammar-issue[data-kind="wordy"]::before,
+.grammar-issue[data-kind="cliche"]::before {
+  display: none;
+}
+.grammar-issue[data-kind="filter"]:hover::before,
+.grammar-issue[data-kind="passive"]:hover::before,
+.grammar-issue[data-kind="adverb"]:hover::before,
+.grammar-issue[data-kind="wordy"]:hover::before,
+.grammar-issue[data-kind="cliche"]:hover::before {
+  display: block;
+  color: rgba(150, 150, 160, 0.95);
+  font-style: normal;
+  font-size: 0.7em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* No small-screen override here — the highlight layer must always share
+   metrics with .document-editor, which is user-controlled via prefs. */
 
 /* ═══════════════════════════════════════════
    INTELLIGENCE MODE BUTTON — ORB
@@ -1746,26 +2035,50 @@ body {
   to { transform: rotate(360deg); }
 }
 
-/* Orb container: blurred so overlapping dots merge into a glowing cloud */
+/* Orb container: blurred so overlapping dots merge into a glowing cloud.
+   Cross-browser note: previously chained `saturate(200%) contrast(120%)`
+   on top of the blur, but `saturate()` operates in the browser's filter
+   working colour space and Chromium / WebKit pick different ones — the
+   blue-end orbs picked up a green tint in Chromium because the merged
+   blur mid-tones got pushed along sRGB's blue→cyan→green axis. We now
+   drop saturate entirely and let the source hex colours stand. The visual
+   "glow" comes from the blur alone (kept) plus a per-orb box-shadow tint.
+   `isolation: isolate` pins the stacking context so the filter pipeline
+   is deterministic across both engines. */
+/* Orb container: blurred so overlapping dots merge into a glowing cloud.
+   `saturate()` is intentionally absent — it operates in the browser's
+   filter working colour space and Chromium / WebKit pick different ones,
+   which is what introduced the green tint divergence on Chrome. Instead:
+     1. The orb colours are pre-saturated (the saturate(200%) SVG matrix
+        is baked into the hex values, see Toolbar.tsx ORB_COLORS).
+     2. A second identical mesh layer is stacked on top of this one so the
+        blurred soft edges compound additively (.intel-mesh-dot--ghost).
+   Both techniques are colour-pipeline-neutral and render the same in
+   both engines. */
 .intel-mesh-dot {
   width: 20px;
   height: 20px;
   position: relative;
-  filter: blur(2.5px) saturate(200%) contrast(120%);
-  /* Smooth scale + filter changes in BOTH directions */
+  filter: blur(2.5px) contrast(120%);
   transition:
     transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
     filter 0.5s ease;
-  /* Default orb colours — overridden by inline style for non-off modes */
-  --orb-a: #FF3D68;
-  --orb-b: #3D68FF;
-  --orb-c: #68FF3D;
+  /* Default orb colours (pre-saturated). Overridden by inline style for
+     non-off modes via Toolbar.tsx. */
+  --orb-a: #FF1167;  /* #FF3D68 × saturate(200%) */
+  --orb-b: #1066FF;  /* #3D68FF × saturate(200%) */
+  --orb-c: #00FF00;  /* #68FF3D × saturate(200%) */
 }
 
-/* Analyzing: orb grows AND saturates/brightens for a clearly distinct state */
+.intel-mesh-dot--ghost {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 .intel-btn--analyzing .intel-mesh-dot {
   transform: scale(1.24);
-  filter: blur(3.8px) saturate(295%) contrast(142%) brightness(118%);
+  filter: blur(3.8px) contrast(142%) brightness(118%);
 }
 
 /* Off mode: desaturate the blur layer; colours set per colour scheme */
@@ -1784,7 +2097,9 @@ body {
   }
 }
 
-/* Individual orbs — sharp solid circles before blur is applied */
+/* Individual orbs — sharp solid circles before blur is applied.
+   `box-shadow` adds a same-hue halo at full strength so the merged cloud
+   reads as glowing without depending on a `saturate()` filter pass. */
 .intel-mesh-dot-orb {
   position: absolute;
   width: 11px;
@@ -1839,32 +2154,35 @@ body {
 /* ≥2 mode palettes always visible simultaneously.
    Equal: round-robin rotation — all 3 modes in view at once.
    Resolved: A+B locked to dominant; C drifts between the other two. */
+/* Pre-saturated palette (saturate(200%) baked into hex). Originals shown
+   in comments for reference. Keep in sync with Toolbar.tsx ORB_COLORS. */
 @keyframes autoCycleEqual {
-  0%   { --orb-a: #FFB42E; --orb-b: #3D68FF; --orb-c: #8B2FF8; }  /* low + def + high */
-  33%  { --orb-a: #3D68FF; --orb-b: #8B2FF8; --orb-c: #FFB42E; }  /* def + high + low */
-  66%  { --orb-a: #8B2FF8; --orb-b: #FFB42E; --orb-c: #3D68FF; }  /* high + low + def */
-  100% { --orb-a: #FFB42E; --orb-b: #3D68FF; --orb-c: #8B2FF8; }
+  0%   { --orb-a: #FFAE00; --orb-b: #1066FF; --orb-c: #C50DFF; }  /* low + def + high */
+  33%  { --orb-a: #1066FF; --orb-b: #C50DFF; --orb-c: #FFAE00; }  /* def + high + low */
+  66%  { --orb-a: #C50DFF; --orb-b: #FFAE00; --orb-c: #1066FF; }  /* high + low + def */
+  100% { --orb-a: #FFAE00; --orb-b: #1066FF; --orb-c: #C50DFF; }
 }
 
 @keyframes autoCycleLow {
-  0%    { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #3D68FF; }  /* low+low+default */
-  35%   { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #3D68FF; }
-  65%   { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #8B2FF8; }  /* low+low+high */
-  100%  { --orb-a: #FFB42E; --orb-b: #F47A2D; --orb-c: #3D68FF; }
+  0%    { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #1066FF; }  /* low+low+default */
+  35%   { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #1066FF; }
+  65%   { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #C50DFF; }  /* low+low+high */
+  100%  { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #1066FF; }
 }
 
 @keyframes autoCycleDefault {
-  0%    { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #FFB42E; }  /* def+def+low */
-  35%   { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #FFB42E; }
-  65%   { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #8B2FF8; }  /* def+def+high */
-  100%  { --orb-a: #3D68FF; --orb-b: #7dd8ff; --orb-c: #FFB42E; }
+  0%    { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #FFAE00; }  /* def+def+low */
+  35%   { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #FFAE00; }
+  65%   { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #C50DFF; }  /* def+def+high */
+  100%  { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #FFAE00; }
 }
 
 @keyframes autoCycleHigh {
-  0%    { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #FFB42E; }  /* high+high+low */
-  35%   { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #FFB42E; }
-  65%   { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #3D68FF; }  /* high+high+default */
-  100%  { --orb-a: #8B2FF8; --orb-b: #C46FE8; --orb-c: #FFB42E; }
+  /* high.b is #C46FE8 → #FE54FF after saturate(200%) */
+  0%    { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #FFAE00; }  /* high+high+low */
+  35%   { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #FFAE00; }
+  65%   { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #1066FF; }  /* high+high+default */
+  100%  { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #FFAE00; }
 }
 
 @keyframes intelOrbitA {
@@ -1888,10 +2206,14 @@ body {
    SETTINGS PANEL
    ═══════════════════════════════════════════ */
 
-/* Settings inner — reset zoom so the panel renders at full scale (not 0.6 like widgets) */
+/* Settings inner — width matches the visual width of the widget grid
+   (480 × 0.77 ≈ 370 px) so toggling between tabs lands on a card of
+   identical footprint. zoom: 1 because the controls are already
+   designed at intended size. Top padding 78 px matches the widget
+   visual top padding (100 × 0.77 ≈ 77 px). */
 .analysis-inner--settings {
   zoom: 1;
-  width: 288px;
+  width: 370px;
   padding: 78px 10px 24px 8px;
   overflow-x: visible;
   overflow-y: auto;
@@ -2411,4 +2733,1371 @@ body {
   border-top-color: var(--text);
   opacity: 0.78;
   animation: intelSpin 1.55s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+/* ─── Find & Replace floating panel ───
+   Top-centre under the toolbar. Top offset of 110px clears the toolbar
+   (top: 16px, h ~38px) AND the status pill (top: 66px, h ~24px) so the
+   loading indicator doesn't overlap the panel. */
+.find-replace {
+  position: fixed;
+  top: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: var(--card-radius, 14px);
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  animation: widgetEnter 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+  -webkit-app-region: no-drag;
+}
+
+.find-replace-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.find-replace-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--btn-size);
+  padding: 0 12px;
+  border-radius: var(--btn-radius);
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  border: none;
+  outline: none;
+  transition: box-shadow 0.15s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .find-replace-input {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+.find-replace-input:focus {
+  box-shadow: 0 0 0 2px rgba(100, 140, 255, 0.35);
+}
+
+.find-replace-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: right;
+  padding: 0 4px;
+}
+
+.find-replace-nav,
+.find-replace-case {
+  flex-shrink: 0;
+}
+
+.find-replace-case {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.find-replace-action {
+  height: var(--btn-size);
+  padding: 0 12px;
+  border-radius: var(--btn-radius);
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  -webkit-app-region: no-drag;
+}
+.find-replace-action:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.09);
+}
+.find-replace-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+@media (prefers-color-scheme: dark) {
+  .find-replace-action {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .find-replace-action:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.11);
+  }
+}
+
+/* ─── Word-count footer ───
+   Fixed bottom-left. Always visible while a chapter is open. */
+.word-count {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.04);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .word-count {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.word-count-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.word-count-num {
+  color: var(--text);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.word-count-label {
+  letter-spacing: 0.01em;
+}
+
+.word-count-divider {
+  width: 1px;
+  height: 10px;
+  background: var(--divider-line);
+}
+
+/* ── Word count: daily goal ──────────────────────────────────────────── */
+.word-count-goal {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+}
+.word-count-goal-bar {
+  display: inline-block;
+  position: relative;
+  width: 60px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--divider-line);
+  overflow: hidden;
+}
+.word-count-goal-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: linear-gradient(90deg, #6ea8ff, #b58dff);
+  border-radius: 2px;
+  transition: width 0.35s ease;
+}
+.word-count-goal--met .word-count-goal-fill {
+  background: linear-gradient(90deg, #34d399, #10b981);
+}
+.word-count-goal--met .word-count-num {
+  color: #10b981;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   SETTINGS — typography + goals
+   Layout pattern: each control gets its own .settings-stack so the slider
+   spans the full width without competing with its value display. The label
+   and value share a header row above. This keeps everything inside the
+   panel even at the panel's narrowest width.
+   ───────────────────────────────────────────────────────────────────── */
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.settings-stack-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.settings-label {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--panel-text-3);
+}
+.settings-value {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--panel-text);
+  letter-spacing: 0.02em;
+}
+
+/* ─── Font pill chooser (replaces the native <select>) ─── */
+.settings-pillgroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.settings-pill {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--panel-text-3);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.settings-pill:hover {
+  color: var(--panel-text);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.settings-pill--active {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(255, 255, 255, 0.95);
+  color: #0e0e10;
+  font-weight: 600;
+}
+@media (prefers-color-scheme: light) {
+  .settings-pill--active {
+    background: #1a1d22;
+    border-color: #1a1d22;
+    color: #f6f6f4;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   RANGE SLIDER — macOS 26 white pill knob, bouncy expand on press
+   ───────────────────────────────────────────────────────────────────── */
+
+.settings-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 22px;            /* generous hit area; track centred via gradient */
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* WebKit track */
+.settings-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+@media (prefers-color-scheme: light) {
+  .settings-range::-webkit-slider-runnable-track {
+    background: rgba(0, 0, 0, 0.14);
+  }
+}
+
+/* WebKit knob — pill shape, white, with a natural bouncy spring on press */
+.settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 13px;
+  height: 22px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 0;
+  margin-top: -9px;        /* (track 4 - knob 22) / 2 */
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.14);
+  /* Natural spring on press: cubic-bezier mimics a slight overshoot. */
+  transition:
+    transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.18s ease,
+    backdrop-filter 0.22s ease,
+    box-shadow 0.22s ease;
+}
+.settings-range:hover::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+.settings-range:active::-webkit-slider-thumb {
+  /* Knob expands ~1.6× and reads as a translucent "puck" being grabbed.
+     Note: backdrop-filter on `::-webkit-slider-thumb` is silently ignored
+     in Chromium — the synthesised form-control pseudo-element does not
+     create a backdrop-filter compositing context. We instead fake the
+     translucent-glass feel with a vertical gradient + an inset rim, plus
+     a stronger ambient shadow. The result reads as a real glass puck on
+     top of the track without the (broken) blur. */
+  transform: scale(1.62);
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 255, 255, 0.52) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 2px 6px rgba(0, 0, 0, 0.22),
+    0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* Firefox — mirror as closely as possible */
+.settings-range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+.settings-range::-moz-range-thumb {
+  width: 13px;
+  height: 22px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 4px 10px rgba(0, 0, 0, 0.14);
+  transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 0.18s ease;
+}
+.settings-range:hover::-moz-range-thumb { transform: scale(1.08); }
+.settings-range:active::-moz-range-thumb {
+  transform: scale(1.62);
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0.78) 0%,
+    rgba(255, 255, 255, 0.52) 100%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 2px 6px rgba(0, 0, 0, 0.22),
+    0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   NUMBER STEPPER — themed −/+ buttons + digit field (replaces native spin)
+   ───────────────────────────────────────────────────────────────────── */
+
+.stepper {
+  display: inline-flex;
+  align-items: stretch;
+  width: 100%;
+  height: 32px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-line);
+  background: rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+@media (prefers-color-scheme: light) {
+  .stepper { background: rgba(0, 0, 0, 0.03); }
+}
+.stepper-btn {
+  flex: 0 0 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--panel-text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.stepper-btn svg {
+  display: block;        /* drops the inline baseline gap; truly centred */
+}
+.stepper-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+}
+@media (prefers-color-scheme: light) {
+  .stepper-btn:hover:not(:disabled) {
+    background: rgba(0, 0, 0, 0.06);
+  }
+}
+.stepper-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14);
+}
+.stepper-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.stepper-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--panel-text);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.stepper-input::placeholder {
+  color: var(--panel-text-4);
+}
+/* Hide the native number-input spinner if any browser still injects one. */
+.stepper-input::-webkit-outer-spin-button,
+.stepper-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   INDEX VIEW v2 — world-card style, Book Info + Chapters
+   ───────────────────────────────────────────────────────────────────── */
+
+.index-panel-v2 {
+  width: min(640px, 92vw);
+  max-height: calc(100vh - 120px);
+  overflow: hidden;
+}
+.index-panel-v2 .world-header {
+  gap: 12px;
+}
+
+/* Book-info form */
+.bookinfo-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  padding: 4px 4px 8px 0;
+}
+.bookinfo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bookinfo-label {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--panel-text-3);
+}
+.bookinfo-input,
+.bookinfo-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+@media (prefers-color-scheme: light) {
+  .bookinfo-input,
+  .bookinfo-textarea { background: rgba(0, 0, 0, 0.03); }
+}
+.bookinfo-input:focus,
+.bookinfo-textarea:focus {
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.07);
+}
+.bookinfo-input--title {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.bookinfo-textarea {
+  resize: vertical;
+  min-height: 80px;
+  max-height: 200px;
+}
+
+.bookinfo-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--divider-line);
+}
+.bookinfo-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 4px;
+}
+.bookinfo-stat-num {
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.bookinfo-stat-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--panel-text-3);
+}
+
+/* Chapter list (cards) */
+.chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  padding: 2px;
+  margin: 0 -2px;
+}
+.chapter-card-wrap { position: relative; }
+.chapter-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: left;
+  cursor: grab;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+@media (prefers-color-scheme: light) {
+  .chapter-card { background: rgba(0, 0, 0, 0.025); }
+}
+.chapter-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--divider-line);
+}
+.chapter-card--active {
+  background: rgba(255, 255, 255, 0.10);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.chapter-card--dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+.chapter-card:active { cursor: grabbing; }
+
+.chapter-card-num {
+  flex: 0 0 auto;
+  min-width: 28px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--panel-text-3);
+  font-variant-numeric: tabular-nums;
+}
+.chapter-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chapter-card-title {
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chapter-card-meta {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--panel-text-3);
+  letter-spacing: 0.02em;
+}
+.chapter-card-delete {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.chapter-card:hover .chapter-card-delete {
+  opacity: 1;
+}
+.chapter-drop-line {
+  height: 2px;
+  margin: 2px 4px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.85) 20%, rgba(255, 255, 255, 0.85) 80%, transparent);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.4);
+}
+
+/* ── IndexView: drag-reorder ─────────────────────────────────────────── */
+.index-row-wrap {
+  position: relative;
+}
+.index-row.dragging {
+  opacity: 0.4;
+}
+.index-drop-line {
+  height: 2px;
+  margin: 4px 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, #6ea8ff 20%, #6ea8ff 80%, transparent);
+  box-shadow: 0 0 6px rgba(110, 168, 255, 0.6);
+}
+.index-hint {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider-line);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+/* ── Project search overlay ──────────────────────────────────────────── */
+.project-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(8, 10, 14, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  animation: fadeIn 0.18s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.project-search {
+  width: min(720px, 92vw);
+  max-height: 70vh;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.project-search-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--divider-line);
+}
+.project-search-input {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 14px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  padding: 6px 4px;
+}
+.project-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+.project-search-count {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  padding: 0 6px;
+}
+.project-search-case {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+}
+.project-search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  outline: none;
+}
+.project-search-empty {
+  padding: 28px 16px;
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text-tertiary);
+}
+.project-search-group {
+  margin-bottom: 10px;
+}
+.project-search-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.project-search-group-num {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+.project-search-group-name {
+  flex: 1;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-search-group-count {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.project-search-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border-radius: 9px;
+  border: none;
+  background: transparent;
+  color: var(--text-body);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.project-search-row:hover,
+.project-search-row.active {
+  background: rgba(110, 168, 255, 0.13);
+}
+.project-search-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.project-search-mark {
+  background: rgba(110, 168, 255, 0.32);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+.project-search-hint {
+  padding: 8px 14px;
+  border-top: 1px solid var(--divider-line);
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
+/* ── Focus mode ──────────────────────────────────────────────────────── */
+.app--focus .toolbar-shell,
+.app--focus .analysis-panel,
+.app--focus .scroll-edge-top {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+.app--focus .word-count {
+  opacity: 0.35;
+  transition: opacity 0.25s ease;
+}
+.app--focus .word-count:hover {
+  opacity: 1;
+}
+.app--focus .document {
+  padding-top: 80px;
+}
+.focus-exit {
+  position: fixed;
+  top: 22px;
+  right: 22px;
+  z-index: 30;
+  padding: 8px 16px;
+  border-radius: 999px;
+  /* The liquid-glass class supplies the background, blur, and border;
+     this rule only handles position, type, and animation. */
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  opacity: 0;
+  animation: focusExitIn 0.4s 0.3s ease forwards;
+  -webkit-app-region: no-drag;
+}
+.focus-exit:hover {
+  color: var(--text);
+}
+@keyframes focusExitIn {
+  to { opacity: 1; }
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   ONBOARDING — first-launch welcome flow (also re-openable via Help menu)
+   Macro Creator-Studio inspired: dimmed full-screen backdrop, single
+   liquid-glass card centred, 4 pages on a horizontal track, footer with
+   skip/dots/next. Internals are theme-coherent and re-use the production
+   orb, palette, and typographic scale so the welcome doesn't feel grafted on.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+.onb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 14, 0.62);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  animation: onbFadeIn 0.32s ease;
+  padding: 32px;
+}
+@media (prefers-color-scheme: light) {
+  .onb-overlay {
+    background: rgba(245, 246, 248, 0.6);
+  }
+}
+@keyframes onbFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.onb-card {
+  width: min(820px, 96vw);
+  height: min(560px, 90vh);
+  border-radius: 28px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  /* Use the system's static glass shadow — same look as every other panel
+     (toolbar, world panel, find/replace, etc.). The previous custom shadow
+     was heavier than `--shadow-glass-hover`, which made the resting state
+     look louder than the hover state on every other liquid-glass surface. */
+  animation: onbCardIn 0.5s cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+/* The card is non-interactive (it's a modal shell, not a button); suppress
+   the hover shadow boost from .liquid-glass so resting and hovering match. */
+.onb-card:hover {
+  box-shadow: var(--shadow-glass);
+}
+@keyframes onbCardIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.onb-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  -webkit-app-region: no-drag;
+}
+
+/* ─── Sliding stage ─────────────────────────────────────────────────────── */
+.onb-stage {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+.onb-track {
+  display: flex;
+  width: 400%;            /* 4 pages × 100% each */
+  height: 100%;
+  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0.18, 1);
+}
+.onb-page {
+  flex: 0 0 25%;          /* 1 / 4 of track == 100% of stage */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 56px 56px 28px;
+  text-align: center;
+  /* All pages stay opaque — the track's translate (clipped by the stage's
+     overflow:hidden) is what shows/hides them. A separate opacity gate
+     would simply hide off-screen pages twice and, more importantly,
+     would also fade out the page being slid in until React commits
+     `--active`, producing an empty mid-animation frame. */
+  overflow-y: auto;
+}
+
+/* ─── Hero areas ────────────────────────────────────────────────────────── */
+.onb-hero {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin-bottom: 28px;
+}
+.onb-hero--orb {
+  height: 240px;
+  position: relative;
+}
+.onb-hero--modes {
+  gap: 28px;
+  flex-wrap: nowrap;
+  justify-content: space-around;
+  height: 168px;
+}
+.onb-hero--widgets {
+  gap: 14px;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  max-width: 640px;
+  margin-left: auto;
+  margin-right: auto;
+}
+/* The welcome page now renders real production widgets (TensionWidget,
+   ProseProfileWidget). Their .widget-card chassis comes with its own
+   solid background and specular ring — we just constrain the size so
+   they don't dominate the page. transform: scale keeps every internal
+   metric (sparkline geometry, bar dimensions, specular ring thickness)
+   exactly proportional to what the user will see in the analysis panel. */
+.onb-hero--widgets .widget-card {
+  margin: 0;                          /* override the .widget-list margin */
+  width: 100%;
+  transform: scale(0.92);             /* ~480 → 442 px; tasteful for the welcome card */
+  transform-origin: top center;
+}
+.onb-hero--tips {
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  max-width: 540px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ─── Hero orb (large-scale wrapper) ────────────────────────────────────── */
+.onb-orb {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Subtle glow halo behind the orb — playful but not loud. */
+  filter: drop-shadow(0 8px 40px rgba(168, 145, 255, 0.22));
+}
+/* The stage must mirror the toolbar's .intel-btn-inner exactly so the two
+   mesh-dot spans render with correct geometry:
+     • display: flex blockifies the main <span class="intel-mesh-dot"> so
+       its width: 20px / height: 20px from the base class actually apply
+       (inline-default spans ignore those properties — that's why removing
+       flex earlier rendered an empty container).
+     • Explicit 20×20 size keeps the ghost layer's `position: absolute;
+       inset: 0;` resolving against a 20×20 box, perfectly overlapping
+       the main cluster instead of anchoring at the wrapper's top-left.
+   The transform: scale() on the stage then visually inflates the
+   correctly-laid-out 20×20 unit to the requested hero size. */
+.onb-orb-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+/* Smooth colour crossfade on mode swap. The toolbar orb deliberately snaps
+   colours when the user clicks (felt more responsive at 20 px), but at
+   the welcome's 220 px the snap is jarring — the eye is locked on the
+   orb. The @property-registered <color> variables make this transition
+   interpolatable; we just need to declare it. Targeted to .onb-orb so
+   the toolbar behaviour is preserved. */
+.onb-orb .intel-mesh-dot {
+  transition:
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease,
+    transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
+    filter 0.5s ease;
+}
+
+/* Slow the internal orbits ~2.6× on the hero orb. The orbits use absolute-
+   pixel transforms inside the 20 px container, which transform-scale then
+   blows up to 220 px — the same per-second pixel velocity now traverses
+   much more area, so the small-orb timings read as frantic at hero scale.
+   Stretching them brings the motion back to a calm float. */
+.onb-orb .intel-mesh-dot-orb:nth-child(1) { animation-duration: 8.5s; }
+.onb-orb .intel-mesh-dot-orb:nth-child(2) { animation-duration: 10s; }
+.onb-orb .intel-mesh-dot-orb:nth-child(3) { animation-duration: 7.5s; }
+.onb-orb .intel-mesh-dot-orb:nth-child(4) { animation-duration: 8.5s; }
+.onb-orb .intel-mesh-dot-orb:nth-child(5) { animation-duration: 10s; }
+.onb-orb .intel-mesh-dot-orb:nth-child(6) { animation-duration: 7.5s; }
+
+/* ─── Modes row (page 2) ────────────────────────────────────────────────── */
+.onb-mode {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.onb-mode .onb-orb {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 4px 14px rgba(168, 145, 255, 0.18));
+}
+.onb-mode-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-top: 6px;
+}
+.onb-mode-sub {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  text-align: center;
+  max-width: 14ch;
+  line-height: 1.45;
+}
+
+/* ─── Mock widget cards (page 3) ──────────────────────────────────────────
+   Mirror the real .widget-card chassis exactly so the welcome preview
+   reads as "this is what the live panel actually looks like":
+     • border-radius: 32px           (was 18 — too rounded-soft for a widget)
+     • padding: 20px                 (matches .widget-card)
+     • +liquid-glass class           (translucent glass + 1px specular ring)
+   The local rules below carry only layout — the surface treatment lives
+   on .liquid-glass. */
+.onb-mock-card {
+  position: relative;
+  border-radius: 32px;
+  padding: 20px;
+  text-align: left;
+  color: var(--text);
+  overflow: hidden;
+}
+.onb-mock-corners {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+.onb-mock-corner {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+.onb-mock-corner-right { color: var(--text-secondary); }
+.onb-mock-row {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  margin-top: 6px;
+  position: relative;
+  z-index: 1;
+}
+.onb-mock-key { color: var(--text-tertiary); }
+.onb-mock-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 8px;
+  position: relative;
+  z-index: 1;
+}
+.onb-mock-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+}
+.onb-mock-bar-label {
+  flex: 0 0 88px;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+.onb-mock-bar-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--divider-line);
+  overflow: hidden;
+  position: relative;
+}
+.onb-mock-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  /* Bars animate in from 0 on first reveal — playful, not loud. */
+  animation: onbBarFill 0.9s 0.15s cubic-bezier(0.18, 1.02, 0.42, 1) backwards;
+}
+@keyframes onbBarFill {
+  from { width: 0 !important; opacity: 0.4; }
+}
+.onb-mock-bar-val {
+  flex: 0 0 92px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+.onb-mock-foot {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  border-top: 1px solid var(--divider-line);
+  padding-top: 8px;
+  line-height: 1.5;
+  margin-top: 8px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ─── Tips grid (page 4) ────────────────────────────────────────────────── */
+.onb-tip-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.onb-tip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+@media (prefers-color-scheme: light) {
+  .onb-tip {
+    background: rgba(0, 0, 0, 0.025);
+    border-color: rgba(0, 0, 0, 0.06);
+  }
+}
+.onb-tip-keys {
+  display: inline-flex;
+  gap: 3px;
+  flex: 0 0 auto;
+}
+.onb-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+@media (prefers-color-scheme: light) {
+  .onb-key {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+}
+.onb-tip-label {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+.onb-inline-kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-family: var(--font-ui);
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text);
+}
+@media (prefers-color-scheme: light) {
+  .onb-inline-kbd {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* ─── Title + subtitle ──────────────────────────────────────────────────── */
+.onb-title {
+  font-family: var(--font-body);
+  font-size: 30px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.18;
+  color: var(--text);
+  margin: 0 0 12px;
+  max-width: 22ch;
+}
+.onb-title--small {
+  font-size: 24px;
+  margin-bottom: 10px;
+}
+.onb-subtitle {
+  font-family: var(--font-ui);
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  max-width: 56ch;
+  margin: 0;
+}
+.onb-subtitle strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ─── Footer ────────────────────────────────────────────────────────────── */
+.onb-footer {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 14px 22px 18px;
+  gap: 16px;
+  border-top: 1px solid var(--divider-line);
+}
+.onb-skip {
+  justify-self: start;
+  padding: 8px 14px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.onb-skip:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+@media (prefers-color-scheme: light) {
+  .onb-skip:hover { background: rgba(0, 0, 0, 0.05); }
+}
+.onb-dots {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.onb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.42, 0.64, 1), width 0.3s ease;
+}
+@media (prefers-color-scheme: light) {
+  .onb-dot { background: rgba(0, 0, 0, 0.18); }
+}
+.onb-dot:hover { background: rgba(255, 255, 255, 0.4); }
+.onb-dot--active {
+  background: var(--text);
+  width: 22px;
+  border-radius: 999px;
+}
+.onb-nav {
+  justify-self: end;
+  display: inline-flex;
+  gap: 6px;
+}
+.onb-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.onb-nav-btn:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.04);
+}
+@media (prefers-color-scheme: light) {
+  .onb-nav-btn:hover {
+    border-color: rgba(0, 0, 0, 0.18);
+    background: rgba(0, 0, 0, 0.04);
+  }
+}
+.onb-nav-btn:active { transform: translateY(1px); }
+.onb-nav-btn--primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+  font-weight: 600;
+}
+.onb-nav-btn--primary:hover {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+  filter: brightness(1.06);
+}
+
+/* Narrow-window safety — collapse the modes row gracefully. */
+@media (max-width: 720px) {
+  .onb-card {
+    height: min(640px, 92vh);
+  }
+  .onb-page { padding: 40px 28px 22px; }
+  .onb-hero--modes { gap: 12px; }
+  .onb-mode-sub { display: none; }
+  .onb-tip-grid { grid-template-columns: 1fr; }
 }

@@ -2,16 +2,29 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, BookOpenIcon,
-  PlusIcon, DownloadIcon, UploadIcon, UsersIcon,
+  PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon,
 } from "./Icon";
 
 export type IntelMode = "off" | "low" | "default" | "high" | "auto";
 
-// 60 : 30 : 10 feel — a=dominant, b=complement, c=highlight accent
+// 60 : 30 : 10 feel — a=dominant, b=complement, c=highlight accent.
+//
+// These hex values are the originals after applying the SVG `saturate(200%)`
+// colour matrix per spec (computed manually, then clamped to [0, 1] per
+// channel). Pre-baking the saturation lets us drop the `saturate()` filter
+// from `.intel-mesh-dot`, which is where the cross-engine green-tint
+// divergence was creeping in (Chromium and WebKit pick different working
+// colour spaces for filter operations). Reference matrix used:
+//   R' = 1.787R − 0.715G − 0.072B
+//   G' = −0.213R + 1.285G − 0.072B
+//   B' = −0.213R − 0.715G + 1.928B
 const ORB_COLORS: Record<Exclude<IntelMode, "off" | "auto">, { a: string; b: string; c: string }> = {
-  low:     { a: "#FFB42E", b: "#F47A2D", c: "#FFE0A0" },  // orange-yellow / deep orange / pale gold
-  default: { a: "#3D68FF", b: "#7dd8ff", c: "#C0D8FF" },  // vivid blue / sky / pale blue
-  high:    { a: "#8B2FF8", b: "#d880ff", c: "#FFB8F8" },  // deep purple / lavender / pink
+  // low — originals: #FFB42E / #F47A2D / #FFE0A0
+  low:     { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
+  // default — originals: #3D68FF / #7dd8ff / #C0D8FF
+  default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
+  // high — originals: #8B2FF8 / #d880ff / #FFB8F8
+  high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
 };
 
 interface IntelBtnProps {
@@ -52,11 +65,28 @@ function IntelBtn({ mode, resolvedLevel, onClick, analyzing }: IntelBtnProps) {
       title={titleText}
     >
       <span className="intel-btn-inner">
+        {/* Two stacked mesh layers — the second one overlays the first
+            exactly, compounding the chroma additively. This is what
+            actually carries the saturated look across both Chromium and
+            WebKit; the `saturate()` filter still runs but no longer has
+            to do all the lifting on its own (which is where the cross-
+            engine green tint was creeping in). */}
         <span
           className="intel-mesh-dot"
           data-mode={mode}
           data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
           style={styleVars}
+        >
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <span key={i} className="intel-mesh-dot-orb" />
+          ))}
+        </span>
+        <span
+          className="intel-mesh-dot intel-mesh-dot--ghost"
+          data-mode={mode}
+          data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
+          style={styleVars}
+          aria-hidden="true"
         >
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <span key={i} className="intel-mesh-dot-orb" />
@@ -79,6 +109,7 @@ interface Props {
   onAddChapter: () => void;
   onImport: () => void;
   onExport: () => void;
+  onExportPdf: () => void;
   hasChapter: boolean;
   intelMode: IntelMode;
   /** When intelMode === "auto", the level the prescan currently resolves to. */
@@ -91,7 +122,7 @@ export function Toolbar({
   chapterTitle, onChapterTitleChange,
   currentIndex, totalChapters,
   onPrev, onNext, onOpenIndex, onOpenWorld, onAddChapter,
-  onImport, onExport, hasChapter,
+  onImport, onExport, onExportPdf, hasChapter,
   intelMode, intelResolvedLevel, onCycleIntel, isAnalyzing,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -179,6 +210,9 @@ export function Toolbar({
         </button>
         <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
           <DownloadIcon />
+        </button>
+        <button className="icon-btn" onClick={onExportPdf} aria-label="Export PDF" title="Export PDF">
+          <FileTextIcon size={16} />
         </button>
       </div>
     </div>

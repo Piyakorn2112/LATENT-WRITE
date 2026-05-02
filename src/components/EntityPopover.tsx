@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { WorldData, WorldCharacter } from "../types";
 import { findEntityIndex } from "../lib/world-data";
@@ -21,25 +21,25 @@ const GAP = 8;
 export function EntityPopover({
   initialName, anchor, worldData, onUpdate, onRename, onClose,
 }: Props) {
-  // Resolve which world-data record this click maps to (or null if unknown).
-  const found = useMemo(
-    () => findEntityIndex(worldData, initialName),
-    [worldData, initialName],
-  );
+  // Stable ref: resolved once at mount, never re-derived from worldData changes.
+  // This prevents the stale-found bug where a rename updates the entity's name
+  // in worldData and the next useMemo call returns null (old name no longer found),
+  // causing subsequent commits to create a new entity instead of updating the slot.
+  const foundRef = useRef(findEntityIndex(worldData, initialName));
 
   // Local working copy. Initialized from world data, or as a stub for new entities.
   const [draft, setDraft] = useState<WorldCharacter>(() => {
-    if (found && worldData) {
-      const list = worldData[found.kind] as WorldCharacter[];
-      return { ...list[found.index] };
+    if (foundRef.current && worldData) {
+      const list = worldData[foundRef.current.kind] as WorldCharacter[];
+      return { ...list[foundRef.current.index] };
     }
     return { name: initialName, aliases: [], role: "", description: "" };
   });
 
   // The "saved" name the document currently uses. Rename buttons only show
   // when the user has actually changed the name in the form.
-  const originalNameRef = useRef(found && worldData
-    ? (worldData[found.kind] as WorldCharacter[])[found.index].name
+  const originalNameRef = useRef(foundRef.current && worldData
+    ? (worldData[foundRef.current.kind] as WorldCharacter[])[foundRef.current.index].name
     : initialName,
   );
   const originalName = originalNameRef.current;
@@ -96,36 +96,45 @@ export function EntityPopover({
   }, [onClose]);
 
   // ── Persist draft → world data ──
-  // Each edit commits straight through so the textarea highlight refreshes
-  // with the new info on the next analysis cycle.
+  // Pushes `{ ...draft, ...patch }` to world data immediately. Called for
+  // all fields EXCEPT name — the name field only updates local draft state
+  // on each keystroke, then calls flushToWorld() on blur/Enter/rename to
+  // avoid partial names lighting up in the text mid-typing.
   const commit = (patch: Partial<WorldCharacter>) => {
     const next = { ...draft, ...patch };
     setDraft(next);
 
-    // Resolve current world data shape (default empty)
     const wd: WorldData = {
       characters: worldData?.characters ?? [],
       places: worldData?.places ?? [],
       factions: worldData?.factions ?? [],
     };
 
-    if (found) {
-      const list = [...(wd[found.kind] as WorldCharacter[])];
-      list[found.index] = next;
-      onUpdate({ ...wd, [found.kind]: list });
+    if (foundRef.current) {
+      const list = [...(wd[foundRef.current.kind] as WorldCharacter[])];
+      list[foundRef.current.index] = next;
+      onUpdate({ ...wd, [foundRef.current.kind]: list });
     } else {
-      // New entity — add as a character by default (most common case).
+      // Track the slot so subsequent edits (role, aliases, etc.) update the
+      // same record instead of creating another new entity each time.
+      foundRef.current = { kind: "characters", index: wd.characters.length };
       onUpdate({ ...wd, characters: [...wd.characters, next] });
     }
   };
 
+  // Flush the current draft (including any pending name edit) to world data.
+  // Called on name-field blur, Enter, and before rename so the entity record
+  // is always up-to-date when the rename runs.
+  const flushToWorld = () => commit({});
+
   const aliasesText = (draft.aliases ?? []).join(", ");
 
   const doRename = (scope: "chapter" | "book") => {
+    // Ensure the new name is committed before the rename runs — both
+    // handleWorldChange and handleRename queue React state updates and
+    // React applies them in order, so the final state is consistent.
+    flushToWorld();
     onRename(originalName, draft.name.trim(), scope);
-    // After rename completes, the entity record's name is already the new
-    // value (committed in `commit`). Roll the original ref forward so the
-    // buttons hide.
     originalNameRef.current = draft.name.trim();
   };
 
@@ -133,7 +142,7 @@ export function EntityPopover({
     <div ref={cardRef} className="entity-popover liquid-glass" style={pos}>
       <div className="entity-popover-header">
         <span className="entity-popover-eyebrow">
-          {found ? "Edit entity" : "New entity"}
+          {foundRef.current ? "Edit entity" : "New entity"}
         </span>
         <button className="icon-btn" onClick={onClose} aria-label="Close" style={{ width: 26, height: 26 }}>
           <CloseIcon size={14} />
@@ -145,10 +154,11 @@ export function EntityPopover({
         <input
           className="world-input"
           value={draft.name}
-          onChange={(e) => commit({ name: e.target.value })}
+          onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+          onBlur={flushToWorld}
+          onKeyDown={(e) => { if (e.key === "Enter") { flushToWorld(); e.currentTarget.blur(); } }}
           /* No autoFocus — keep the textarea focused so the user can keep
-             typing / deleting without the popover stealing keyboard input.
-             They tap into the popover only when they want to edit it. */
+             typing / deleting without the popover stealing keyboard input. */
         />
       </label>
 

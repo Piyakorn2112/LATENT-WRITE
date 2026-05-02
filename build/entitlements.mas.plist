@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac App Store entitlements for Latent Write.
+
+  • app-sandbox: required for MAS distribution.
+  • files.user-selected.read-write: needed so the user can Import .txt
+    and the PDF "Save As…" dialog can write to a chosen location.
+  • print: required by webContents.printToPDF in a sandboxed app.
+
+  Networking, microphone, camera, location, and contacts are all denied
+  by omission — Latent Write does not use them.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.print</key>
+    <true/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(TeamIdentifierPrefix)com.latentwrite.app</string>
+    </array>
+</dict>
+</plist>

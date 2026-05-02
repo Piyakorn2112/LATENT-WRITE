@@ -6,10 +6,12 @@ import type {
   WorldFaction,
 } from "../types";
 import { ensureWorldData } from "../lib/world-data";
+import { parseNovel } from "../lib/parser";
 import {
   CloseIcon,
   PlusIcon,
   TrashIcon,
+  UploadIcon,
   UsersIcon,
   MapPinIcon,
   FlagIcon,
@@ -39,12 +41,36 @@ export function WorldDataView({ worldData, onChange, onRename, onClose }: Props)
   const wd = useMemo(() => ensureWorldData({ meta: { title: "", author: "", description: "" }, chapters: [], worldData }), [worldData]);
   const [tab, setTab] = useState<Tab>("characters");
   const [selected, setSelected] = useState<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      if (!text) return;
+      const imported = parseNovel(text).worldData;
+      if (!imported) return;
+      const mergeList = <T extends { name: string }>(existing: T[], incoming: T[]): T[] => {
+        const seen = new Set(existing.map((e) => e.name.toLowerCase()));
+        return [...existing, ...incoming.filter((e) => !seen.has(e.name.toLowerCase()))];
+      };
+      onChange({
+        characters: mergeList(wd.characters, imported.characters ?? []),
+        places:     mergeList(wd.places,     imported.places     ?? []),
+        factions:   mergeList(wd.factions,   imported.factions   ?? []),
+      });
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
 
   const list: Entity[] = wd[tab] as Entity[];
   const current = selected !== null ? list[selected] : null;
@@ -82,9 +108,26 @@ export function WorldDataView({ worldData, onChange, onRename, onClose }: Props)
       <div className="world-panel liquid-glass">
         <div className="world-header">
           <h2 className="world-title">World</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close world data">
-            <CloseIcon />
-          </button>
+          <div style={{ display: "flex", gap: 4 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt"
+              style={{ display: "none" }}
+              onChange={handleImport}
+            />
+            <button
+              className="icon-btn"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="Import world data from file"
+              title="Import from .txt — appends to existing entries"
+            >
+              <UploadIcon size={16} />
+            </button>
+            <button className="icon-btn" onClick={onClose} aria-label="Close world data">
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
         <div className="world-tabs">

@@ -18,6 +18,8 @@ import {
   MapPin as _Mp,
   Flag as _Fl,
   User as _Un,
+  FileText as _Ft,
+  Minus as _Mn,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -40,3 +42,5 @@ export const UsersIcon     = wrap(_Us);
 export const MapPinIcon    = wrap(_Mp);
 export const FlagIcon      = wrap(_Fl);
 export const UserIcon      = wrap(_Un);
+export const FileTextIcon  = wrap(_Ft);
+export const MinusIcon     = wrap(_Mn);

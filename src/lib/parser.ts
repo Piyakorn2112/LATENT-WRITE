@@ -5,12 +5,12 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function parseNovel(raw: string): Novel {
   const lines = raw.split("\n");
-  const meta: NovelMeta = { title: "", author: "", description: "" };
+  const meta: NovelMeta = { title: "", subtitle: "", author: "", description: "" };
   const chapters: Chapter[] = [];
   const worldData: WorldData = emptyWorldData();
 
   let section:
-    | "title" | "author" | "description"
+    | "title" | "subtitle" | "author" | "description"
     | "chapter" | "index"
     | "world-json"
     | null = null;
@@ -46,6 +46,7 @@ export function parseNovel(raw: string): Novel {
     const trimmed = line.trim();
 
     if (trimmed === "===TITLE===")       { flush(); section = "title"; continue; }
+    if (trimmed === "===SUBTITLE===")    { flush(); section = "subtitle"; continue; }
     if (trimmed === "===AUTHOR===")      { flush(); section = "author"; continue; }
     if (trimmed === "===DESCRIPTION===") { flush(); section = "description"; continue; }
     if (trimmed === "===INDEX===")       { flush(); section = "index"; continue; }
@@ -65,6 +66,7 @@ export function parseNovel(raw: string): Novel {
     }
 
     if (section === "title" && trimmed) { meta.title = trimmed; section = null; continue; }
+    if (section === "subtitle" && trimmed) { meta.subtitle = trimmed; section = null; continue; }
     if (section === "author" && trimmed) { meta.author = trimmed; section = null; continue; }
     if (section === "description") {
       if (trimmed) meta.description += (meta.description ? " " : "") + trimmed;
@@ -88,6 +90,7 @@ export function parseNovel(raw: string): Novel {
 export function serializeNovel(novel: Novel): string {
   const out: string[] = [];
   out.push("===TITLE===", novel.meta.title || "Untitled", "");
+  if (novel.meta.subtitle) out.push("===SUBTITLE===", novel.meta.subtitle, "");
   if (novel.meta.author) out.push("===AUTHOR===", novel.meta.author, "");
   if (novel.meta.description) out.push("===DESCRIPTION===", novel.meta.description, "");
 
@@ -127,7 +130,7 @@ export function newChapter(number: number, title = ""): Chapter {
 
 export function emptyNovel(): Novel {
   return {
-    meta: { title: "Untitled", author: "", description: "" },
+    meta: { title: "Untitled", subtitle: "", author: "", description: "" },
     chapters: [],
   };
 }

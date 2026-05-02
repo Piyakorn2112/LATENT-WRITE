@@ -93,6 +93,9 @@ export function useAnalysis(
   const { debounceMs = 1000, level = "default" } = options;
   const [result, setResult] = useState<ChapterAnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  // Bumped when background adjacent-chapter scans complete so the
+  // prevResult/nextResult memo re-derives from the updated cache.
+  const [adjacentReady, setAdjacentReady] = useState(0);
 
   // Cache previous results keyed by chapter id so switching chapters restores
   // stale data instantly. Includes endContext so we don't re-run detection
@@ -181,10 +184,64 @@ export function useAnalysis(
     };
   }, [novel.chapters, currentChapterId, debounceMs, level, knownNames]);
 
-  // Adjacent chapter analyses pulled from cache — no fresh runs triggered.
-  // The cross-arc widget needs prev/next tension curves to draw arcs; those
-  // are populated organically as the user visits other chapters. Computed
-  // every render so a freshly-cached neighbour appears immediately.
+  // High-mode background pre-scan: when intelligence is set to "high" and an
+  // adjacent chapter hasn't been visited yet, run its analysis in the background
+  // so the CrossArcWidget has data without requiring the user to navigate there.
+  // Runs after the current chapter's result lands (result dep), deferred by a
+  // short timeout so it doesn't compete with the in-flight main analysis render.
+  useEffect(() => {
+    if (level !== "high") return;
+    if (!currentChapterId) return;
+
+    const t = window.setTimeout(() => {
+      const chapters = novel.chapters;
+      const idx = chapters.findIndex((c) => c.id === currentChapterId);
+      if (idx < 0) return;
+
+      const currentCached = cache.current.get(currentChapterId);
+      if (!currentCached) return; // current not analysed yet — wait for next fire
+
+      const prevId = idx > 0 ? chapters[idx - 1].id : null;
+      const nextId = idx < chapters.length - 1 ? chapters[idx + 1].id : null;
+      const needPrev = !!prevId && !cache.current.has(prevId);
+      const needNext = !!nextId && !cache.current.has(nextId);
+      if (!needPrev && !needNext) return;
+
+      const buildSiblings = (skipId: string): ChapterStats[] => {
+        const stats: ChapterStats[] = [];
+        for (const ch of chapters) {
+          if (ch.id === skipId) continue;
+          const c = cache.current.get(ch.id);
+          if (c) stats.push(computeChapterStats(c.paragraphs, c.speechResults));
+        }
+        return stats;
+      };
+
+      if (needPrev) {
+        const prevChapter = chapters[idx - 1];
+        let prevCtx: ChapterEndContext | null = null;
+        for (let i = idx - 2; i >= 0; i--) {
+          const c = cache.current.get(chapters[i].id);
+          if (c?.endContext) { prevCtx = c.endContext; break; }
+        }
+        cache.current.set(prevChapter.id, analyzeOne(prevChapter, prevCtx, buildSiblings(prevChapter.id), knownNames, level));
+      }
+
+      if (needNext) {
+        const nextChapter = chapters[idx + 1];
+        cache.current.set(nextChapter.id, analyzeOne(nextChapter, currentCached.endContext, buildSiblings(nextChapter.id), knownNames, level));
+      }
+
+      setAdjacentReady((v) => v + 1);
+    }, 200); // yield to the main analysis render before starting background work
+
+    return () => window.clearTimeout(t);
+  }, [result, level, currentChapterId, novel.chapters, knownNames]);
+
+  // Adjacent chapter analyses pulled from cache — no fresh runs triggered for
+  // non-high modes. In high mode the background effect above pre-populates the
+  // cache, so neighbours are available without the user visiting them.
+  // `adjacentReady` bumps the memo when the background scan completes.
   const { prevResult, nextResult } = useMemo(() => {
     if (!currentChapterId) return { prevResult: null, nextResult: null };
     const idx = novel.chapters.findIndex((c) => c.id === currentChapterId);
@@ -195,10 +252,8 @@ export function useAnalysis(
       prevResult: prevId ? cache.current.get(prevId) ?? null : null,
       nextResult: nextId ? cache.current.get(nextId) ?? null : null,
     };
-    // `result` is included so the memo recomputes when the cache changes (a
-    // fresh analysis lands → cache updated → setResult fires → this rerenders).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [novel.chapters, currentChapterId, result]);
+  }, [novel.chapters, currentChapterId, result, adjacentReady]);
 
   return { result, isAnalyzing, knownNames, prevResult, nextResult };
 }

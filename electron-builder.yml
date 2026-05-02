@@ -1,0 +1,68 @@
+appId: com.latentwrite.app
+productName: Latent Write
+copyright: Copyright © 2026
+
+# Files bundled into the app
+files:
+  - dist/**/*
+  - electron/**/*
+
+directories:
+  output: release
+  buildResources: build
+
+# ─── Default DMG distribution (sideload) ──────────────────────────────────
+mac:
+  category: public.app-category.productivity
+  # Source PNG generated from "Latent Write Logo.icon" (the macOS 26
+  # layered-icon bundle): squircle-masked, white background, logo centred
+  # per the bundle's icon.json manifest. electron-builder reads this PNG
+  # and generates the multi-resolution .icns for the app bundle.
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  # Local / sideload build — unsigned. Set identity to your Developer ID
+  # certificate name to enable codesign + notarization.
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+dmg:
+  title: Latent Write
+  # background: build/dmg-background.png   # optional, 540×380 px
+  window:
+    width: 540
+    height: 380
+
+# ─── App Store distribution (Mac App Store) ───────────────────────────────
+# Use `electron-builder --mac mas --config electron-builder.yml` to produce a
+# .pkg suitable for App Store Connect upload via Transporter / altool.
+#
+# Required for an MAS submission:
+#   • Apple Developer Program membership
+#   • A "Mac App Distribution" certificate installed in Keychain
+#   • A "Mac Installer Distribution" certificate installed in Keychain
+#   • A provisioning profile from App Store Connect (.provisionprofile)
+#   • App sandbox enabled, with the entitlements below
+#   • Hardened Runtime ON, identity set, notarization NOT required (App Store
+#     does its own equivalent)
+#
+# Then set:
+#   mac.identity: "3rd Party Mac Developer Application: <Your Name> (<TeamID>)"
+#   mas.identity: "3rd Party Mac Developer Installer:   <Your Name> (<TeamID>)"
+#   mas.provisioningProfile: build/embedded.provisionprofile
+#
+# Keep the entitlements files at build/entitlements.mas.plist and
+# build/entitlements.mas.inherit.plist — see those files for the minimum
+# sandbox setup this app needs (file read/write for import/export, no
+# network, no microphone).
+mas:
+  category: public.app-category.productivity
+  icon: build/icon.png
+  hardenedRuntime: false
+  entitlements: build/entitlements.mas.plist
+  entitlementsInherit: build/entitlements.mas.inherit.plist
+  # provisioningProfile: build/embedded.provisionprofile
+  # identity: "3rd Party Mac Developer Application: Your Name (TEAMID)"
