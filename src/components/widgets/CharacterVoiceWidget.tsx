@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { WidgetCard } from "./WidgetCard";
 import {
   profileCharacterVoices, computeTagVariety,
@@ -23,7 +23,7 @@ const VERDICT_COLOR: Record<string, string> = {
   "no-data":    IOS_COLORS.blue.text,
 };
 
-export function CharacterVoiceWidget({ paragraphs, speechResults, worldData, content }: Props) {
+function CharacterVoiceWidgetImpl({ paragraphs, speechResults, worldData, content }: Props) {
   const stats: CharacterVoiceStat[] = useMemo(
     () => profileCharacterVoices(paragraphs, speechResults, worldData),
     [paragraphs, speechResults, worldData],
@@ -125,3 +125,5 @@ export function CharacterVoiceWidget({ paragraphs, speechResults, worldData, con
     </WidgetCard>
   );
 }
+
+export const CharacterVoiceWidget = memo(CharacterVoiceWidgetImpl);

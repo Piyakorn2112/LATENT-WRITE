@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { WidgetCard } from "./WidgetCard";
 import { checkGrammar, type GrammarSuggestion } from "../../lib/grammar-check";
 
@@ -95,7 +95,7 @@ function findEchoes(text: string, windowWords = 60): Echo[] {
     .slice(0, 5);
 }
 
-export function StyleWatchWidget({ content }: Props) {
+function StyleWatchWidgetImpl({ content }: Props) {
   const data = useMemo(() => {
     const all = checkGrammar(content);
     const counts: Record<string, number> = {};
@@ -234,3 +234,5 @@ export function StyleWatchWidget({ content }: Props) {
     </WidgetCard>
   );
 }
+
+export const StyleWatchWidget = memo(StyleWatchWidgetImpl);

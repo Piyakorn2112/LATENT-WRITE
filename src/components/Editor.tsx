@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import type { Chapter } from "../types";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { HighlightLayer } from "./HighlightLayer";
@@ -47,12 +47,17 @@ export function Editor({
   const hasHighlight =
     !!analysisResult && analysisResult.paragraphs.length > 0;
 
-  // Grammar suggestions are recomputed only when content changes — cheap
-  // regex sweep over the chapter, ~O(content × rule-count). Memoised so the
-  // HighlightLayer doesn't re-render on unrelated parent re-renders.
+  // useDeferredValue lets React render the HighlightLayer at *low* priority.
+  // While the user is typing, the textarea (controlled by `chapter.content`)
+  // updates instantly; the highlight overlay re-renders during idle time
+  // with the deferred content. If the user keeps typing, React abandons
+  // the in-flight low-priority render and restarts with the latest value.
+  // Both `content` and `grammarSuggestions` need to come from the same
+  // source so positions and ranges stay aligned.
+  const deferredContent = useDeferredValue(chapter.content);
   const grammarSuggestions = useMemo(
-    () => checkGrammar(chapter.content),
-    [chapter.content],
+    () => checkGrammar(deferredContent),
+    [deferredContent],
   );
 
   return (
@@ -67,7 +72,7 @@ export function Editor({
       <div className="editor-wrap">
         {analysisResult && analysisResult.paragraphs.length > 0 && (
           <HighlightLayer
-            content={chapter.content}
+            content={deferredContent}
             paragraphs={analysisResult.paragraphs}
             speechResults={analysisResult.speechResults}
             knownNames={knownNames}

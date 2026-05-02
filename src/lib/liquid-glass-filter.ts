@@ -1,0 +1,394 @@
+/**
+ * Per-element physics-based liquid-glass refraction filter.
+ *
+ *  • Per-element map sized to actual W×H so the bezel stays uniform on
+ *    rectangular pills (not anisotropic as it would be with a stretched
+ *    shared map).
+ *  • All length values use userSpaceOnUse, so blur and displacement are
+ *    fixed in absolute pixels — universal across panels.
+ *  • Bezel shape is the SDF of a rounded rectangle matching the element's
+ *    CSS border-radius. Refraction direction is the unit gradient of the
+ *    SDF (correct curved-corner refraction).
+ *  • Bezel height profile is the convex squircle h(t) = (1−(1−t)⁴)^¼.
+ *
+ *  Progressive blur: edges stay sharp so the rim refraction reads as a
+ *  lens; interior crossfades into a stronger blur. The blur mix factor is
+ *  baked into the displacement map's blue channel (the displacement map
+ *  reads only R and G), then extracted via feColorMatrix and used to mask
+ *  a blurred copy of the displaced backdrop. Single extra blur pass +
+ *  three composite primitives — efficient on the GPU.
+ *
+ *  Performance: filter generation is deferred to requestIdleCallback so
+ *  panel-open / chapter-switch animations are not blocked. Until the JS
+ *  filter is ready, the CSS fallback (a uniform blur) shows.
+ */
+
+const SVG_ID = "lg-filter-svg";
+const NS = "http://www.w3.org/2000/svg";
+const SELECTOR = ".liquid-glass, .analysis-tab";
+
+// ── Tunables ─────────────────────────────────────────────────────────────
+//
+// Map-generation tunables (BEZEL_PX, MAP_DIVISOR, refractive indices, the
+// squircle profile, the SDF helper, and the progressive-blur mask params)
+// live in `liquid-glass-worker.ts` — that's where the per-pixel math runs.
+// Keep them in sync with the worker file when adjusting the look.
+
+// Used by the SVG filter primitives below — feDisplacementMap.scale and
+// feGaussianBlur.stdDeviation read these directly.
+const DISP_PX = 30;        // max refraction shift, pixels
+const BLUR_PX = 5;         // backdrop blur stdDeviation, pixels
+const SATURATE = "1.8";
+
+// Round (W, H, R) to this for cache key — sub-pixel differences do not
+// produce a visually different filter and otherwise we'd build a new map
+// on every resize-observer tick during animations.
+const CACHE_GRID = 4;
+
+// LRU cap so long-running sessions with varied panel sizes don't accrete
+// hundreds of <filter> nodes in the DOM.
+const FILTER_CACHE_LIMIT = 24;
+
+// ── Worker dispatch ──────────────────────────────────────────────────────
+
+let worker: Worker | null = null;
+let workerDead = false;
+const pendingBlob = new Map<string, (blob: Blob) => void>();
+
+function ensureWorker(): Worker | null {
+  if (workerDead) return null;
+  if (worker) return worker;
+  try {
+    worker = new Worker(
+      new URL("./liquid-glass-worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    worker.onmessage = (e: MessageEvent<{ id: string; blob: Blob }>) => {
+      const { id, blob } = e.data;
+      const resolver = pendingBlob.get(id);
+      if (resolver) {
+        pendingBlob.delete(id);
+        resolver(blob);
+      }
+    };
+    worker.onerror = (err) => {
+      console.error("[liquid-glass] worker error:", err);
+      workerDead = true;
+      worker = null;
+    };
+    return worker;
+  } catch (err) {
+    console.warn("[liquid-glass] worker init failed, glass will use CSS fallback only:", err);
+    workerDead = true;
+    return null;
+  }
+}
+
+let reqCounter = 0;
+function buildMapInWorker(
+  elemW: number,
+  elemH: number,
+  radius: number,
+  overflow: number,
+): Promise<string | null> {
+  const w = ensureWorker();
+  if (!w) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const id = `req-${++reqCounter}`;
+    pendingBlob.set(id, (blob) => resolve(URL.createObjectURL(blob)));
+    w.postMessage({ id, elemW, elemH, radius, overflow });
+  });
+}
+
+// ── Filter generation / caching ──────────────────────────────────────────
+
+interface CacheEntry {
+  filter: SVGFilterElement;
+  blobUrl: string | null;
+}
+
+let svgRoot: SVGSVGElement | null = null;
+let defs: SVGDefsElement | null = null;
+const filterCache = new Map<string, CacheEntry>();
+const inFlightFilter = new Map<string, Promise<string | null>>();
+
+function ensureSvgRoot() {
+  if (svgRoot) return;
+  svgRoot = document.createElementNS(NS, "svg") as SVGSVGElement;
+  svgRoot.id = SVG_ID;
+  svgRoot.setAttribute("aria-hidden", "true");
+  Object.assign(svgRoot.style, {
+    position: "absolute",
+    width: "0",
+    height: "0",
+    overflow: "hidden",
+    pointerEvents: "none",
+  });
+  defs = document.createElementNS(NS, "defs") as SVGDefsElement;
+  svgRoot.append(defs);
+  document.body.prepend(svgRoot);
+}
+
+function snap(v: number): number {
+  return Math.max(CACHE_GRID, Math.round(v / CACHE_GRID) * CACHE_GRID);
+}
+
+function createElNS(tag: string, attrs: Record<string, string>) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  return e;
+}
+
+function buildFilterEl(
+  id: string,
+  w: number,
+  h: number,
+  overflow: number,
+  mapUrl: string,
+): SVGFilterElement {
+  const filter = createElNS("filter", {
+    id,
+    filterUnits: "userSpaceOnUse",
+    primitiveUnits: "userSpaceOnUse",
+    x: String(-overflow),
+    y: String(-overflow),
+    width: String(w + 2 * overflow),
+    height: String(h + 2 * overflow),
+    "color-interpolation-filters": "sRGB",
+  }) as SVGFilterElement;
+
+  filter.append(
+    // Displacement map is sized to the full filter region. The overflow
+    // margin is pre-baked as neutral grey (128,128,128,A=255 with mask=0)
+    // so the previous feFlood + feComposite(over) pair is no longer
+    // needed — saves two primitives per frame.
+    createElNS("feImage", {
+      href: mapUrl,
+      x: String(-overflow),
+      y: String(-overflow),
+      width: String(w + 2 * overflow),
+      height: String(h + 2 * overflow),
+      preserveAspectRatio: "none",
+      result: "dispMap",
+    }),
+    createElNS("feDisplacementMap", {
+      in: "SourceGraphic",
+      in2: "dispMap",
+      // scale × 0.5 = max pixel shift, so scale = DISP_PX × 2.
+      scale: String(DISP_PX * 2),
+      xChannelSelector: "R",
+      yChannelSelector: "G",
+      result: "displaced",
+    }),
+    createElNS("feGaussianBlur", {
+      in: "displaced",
+      stdDeviation: String(BLUR_PX),
+      result: "blurred",
+    }),
+    // Extract the B channel of the displacement-map image as alpha. Matrix
+    // sets RGB to white and copies B → A. Result is a white-on-mask image
+    // whose alpha is the blur mix factor at every pixel.
+    createElNS("feColorMatrix", {
+      in: "dispMap",
+      type: "matrix",
+      values: "0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 0",
+      result: "blurMask",
+    }),
+    // Centre region: blurred * mask  (mask=1 in centre, 0 at rim).
+    createElNS("feComposite", {
+      in: "blurred",
+      in2: "blurMask",
+      operator: "in",
+      result: "centerBlur",
+    }),
+    // Rim region: displaced * (1 − mask)  (sharp where mask=0).
+    createElNS("feComposite", {
+      in: "displaced",
+      in2: "blurMask",
+      operator: "out",
+      result: "edgeSharp",
+    }),
+    // Combine: arithmetic add. Both inputs are pre-multiplied by mask /
+    // 1−mask so summing reconstructs lerp(displaced, blurred, mask).
+    createElNS("feComposite", {
+      in: "centerBlur",
+      in2: "edgeSharp",
+      operator: "arithmetic",
+      k1: "0",
+      k2: "1",
+      k3: "1",
+      k4: "0",
+      result: "progressive",
+    }),
+    createElNS("feColorMatrix", {
+      in: "progressive",
+      type: "saturate",
+      values: SATURATE,
+    }),
+  );
+
+  return filter;
+}
+
+function evictLRU() {
+  while (filterCache.size > FILTER_CACHE_LIMIT) {
+    const oldestId = filterCache.keys().next().value as string | undefined;
+    if (!oldestId) break;
+    const entry = filterCache.get(oldestId);
+    filterCache.delete(oldestId);
+    if (entry) {
+      entry.filter.remove();
+      if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+    }
+  }
+}
+
+// Async because the displacement map is generated in a Web Worker — heavy
+// SDF + Snell math + PNG encode all run off the main thread, so panel-open
+// and chapter-switch animations don't block on filter generation. The CSS
+// fallback blur shows until this resolves.
+async function ensureFilter(
+  elemW: number,
+  elemH: number,
+  radius: number,
+): Promise<string | null> {
+  ensureSvgRoot();
+  const w = snap(elemW);
+  const h = snap(elemH);
+  const r = snap(radius);
+  const id = `lg-${w}-${h}-${r}`;
+
+  const cached = filterCache.get(id);
+  if (cached) {
+    filterCache.delete(id);
+    filterCache.set(id, cached);
+    return id;
+  }
+
+  // Dedupe concurrent requests for the same id.
+  const existing = inFlightFilter.get(id);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    const overflow = DISP_PX + BLUR_PX * 2 + 4;
+    const mapUrl = await buildMapInWorker(w, h, r, overflow);
+    if (!mapUrl) return null;
+
+    const filter = buildFilterEl(id, w, h, overflow, mapUrl);
+    defs!.append(filter);
+    filterCache.set(id, { filter, blobUrl: mapUrl });
+    evictLRU();
+    inFlightFilter.delete(id);
+    return id;
+  })();
+
+  inFlightFilter.set(id, promise);
+  return promise;
+}
+
+// ── Per-element attachment ───────────────────────────────────────────────
+
+const observed = new WeakMap<Element, ResizeObserver>();
+const lastSize = new WeakMap<Element, string>();
+
+function readRadius(el: Element): number {
+  const cs = getComputedStyle(el);
+  // Use top-left as representative; mixed-corner radii are rare here.
+  const tl = parseFloat(cs.borderTopLeftRadius || "0");
+  return isFinite(tl) ? tl : 0;
+}
+
+// Idle scheduling — kicks off the worker request during browser idle time
+// so filter generation is doubly non-blocking (idle dispatch + worker compute).
+type IdleHandle = number;
+const idleSchedule: (cb: () => void) => IdleHandle =
+  typeof (globalThis as any).requestIdleCallback === "function"
+    ? ((cb) =>
+        (globalThis as any).requestIdleCallback(cb, { timeout: 200 }) as IdleHandle)
+    : ((cb) => requestAnimationFrame(cb) as IdleHandle);
+
+function applyTo(element: HTMLElement) {
+  if (observed.has(element)) return;
+
+  let scheduled = false;
+  const update = async () => {
+    scheduled = false;
+    // offsetWidth/Height return layout size, ignoring CSS transforms — so
+    // scale animations don't trigger filter rebuilds.
+    const w = element.offsetWidth;
+    const h = element.offsetHeight;
+    if (w < 4 || h < 4) return;
+    const r = readRadius(element);
+    const key = `${snap(w)}-${snap(h)}-${snap(r)}`;
+    if (lastSize.get(element) === key) return;
+    lastSize.set(element, key);
+    const id = await ensureFilter(w, h, r);
+    if (!id) return; // worker dead → CSS fallback stays
+    // Verify the element still wants this filter (size may have changed
+    // while the worker was busy). If so, the next update tick will set the
+    // correct filter.
+    if (lastSize.get(element) !== key) return;
+    const ref = `url(#${id})`;
+    element.style.setProperty("backdrop-filter", ref);
+    element.style.setProperty("-webkit-backdrop-filter", ref);
+  };
+
+  const schedule = () => {
+    if (scheduled) return;
+    scheduled = true;
+    idleSchedule(update);
+  };
+
+  schedule();
+  const ro = new ResizeObserver(schedule);
+  ro.observe(element);
+  observed.set(element, ro);
+}
+
+function unobserve(el: Element) {
+  const ro = observed.get(el);
+  if (ro) {
+    ro.disconnect();
+    observed.delete(el);
+    lastSize.delete(el);
+  }
+}
+
+function isGlassEl(el: Element): boolean {
+  return typeof el.matches === "function" && el.matches(SELECTOR);
+}
+
+function scan(root: ParentNode) {
+  if (root instanceof Element && isGlassEl(root)) applyTo(root as HTMLElement);
+  root.querySelectorAll?.(SELECTOR).forEach((el) => applyTo(el as HTMLElement));
+}
+
+export function initLiquidGlassFilter(): void {
+  if (document.getElementById(SVG_ID)) return;
+
+  const startup = () => {
+    ensureSvgRoot();
+    scan(document.body);
+
+    const mo = new MutationObserver((muts) => {
+      for (const mut of muts) {
+        mut.addedNodes.forEach((n) => {
+          if (n.nodeType === 1) scan(n as Element);
+        });
+        mut.removedNodes.forEach((n) => {
+          if (n.nodeType !== 1) return;
+          const el = n as Element;
+          if (isGlassEl(el)) unobserve(el);
+          el.querySelectorAll?.(SELECTOR).forEach(unobserve);
+        });
+      }
+    });
+    mo.observe(document.body, { childList: true, subtree: true });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", startup, { once: true });
+  } else {
+    startup();
+  }
+}

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { WidgetCard } from "./WidgetCard";
 import { summarizeContinuity } from "../../lib/continuity";
 import { IOS_COLORS } from "../../lib/palette";
@@ -12,7 +12,7 @@ interface Props {
 
 const SECTION_BORDER = "rgba(255,255,255,0.06)";
 
-export function ContinuityWidget({ chapters, worldData, chapterIndex }: Props) {
+function ContinuityWidgetImpl({ chapters, worldData, chapterIndex }: Props) {
   const summary = useMemo(
     () => summarizeContinuity(chapters, worldData, chapterIndex),
     [chapters, worldData, chapterIndex],
@@ -121,3 +121,5 @@ export function ContinuityWidget({ chapters, worldData, chapterIndex }: Props) {
     </WidgetCard>
   );
 }
+
+export const ContinuityWidget = memo(ContinuityWidgetImpl);

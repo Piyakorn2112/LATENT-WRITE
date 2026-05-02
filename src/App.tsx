@@ -163,6 +163,12 @@ export default function App() {
     setNovel((n) => ({ ...n, worldData: next }));
   }, []);
 
+  // Stable callback identity — feeds into HighlightLayer's useMemo dep list,
+  // so a fresh lambda per render would invalidate the memo every keystroke.
+  const handleEntityClick = useCallback((name: string, anchor: DOMRect) => {
+    setEntityPopover({ name, anchor });
+  }, []);
+
   const handleRename = useCallback(
     (oldName: string, newName: string, scope: "chapter" | "book") => {
       const old = oldName.trim();
@@ -454,7 +460,7 @@ export default function App() {
           onContentChange={(content) => updateCurrent((c) => ({ ...c, content }))}
           analysisResult={intelMode !== "off" ? analysisResult : null}
           knownNames={intelMode !== "off" ? knownNames : []}
-          onEntityClick={(name, anchor) => setEntityPopover({ name, anchor })}
+          onEntityClick={handleEntityClick}
         />
       ) : (
         <div className="empty-state">
@@ -481,7 +487,10 @@ export default function App() {
 
       {worldOpen && (
         <WorldDataView
+          novel={novel}
+          currentChapterId={currentId ?? null}
           worldData={novel.worldData}
+          intelMode={intelMode}
           onChange={handleWorldChange}
           onRename={handleRename}
           onClose={() => setWorldOpen(false)}

@@ -140,6 +140,108 @@ export function autoExtractEntities(novel: Novel, minFreq = 3, max = 30): string
     .map(([name]) => name);
 }
 
+// ── Contextual entity classifier ──────────────────────────────────────────
+
+const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|valley|plains|plain|desert|island|islands|lake|river|sea|ocean|bay|gulf|cove|creek|brook|stream|falls|harbor|harbour|port|city|town|village|hamlet|castle|keep|tower|gate|bridge|road|street|avenue|square|market|hall|inn|tavern|temple|shrine|palace|manor|estate|fortress|citadel|dungeon|ruins|cave|cavern|mine|district|quarter|ward|sector|region|territory|province|country|land|field|fields|garden|gardens|cliff|pass|hills|hill|marsh|swamp|bog|inlet|basin)\b/i;
+
+const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant)\b/i;
+
+const CHAR_TITLE_RE = /\b(lord|lady|sir|captain|master|doctor|dr|father|mother|queen|king|prince|princess|elder|chief|general|colonel|major|sergeant|inspector|professor|saint)\s*$/i;
+
+const PLACE_PREP_RE = /\b(in|at|from|to|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
+
+const CHAR_VERB_RE = /^\s*(said|asked|replied|whispered|shouted|called|told|warned|answered|explained|nodded|shook|smiled|frowned|looked|stared|watched|turned|walked|ran|moved|stood|sat|fell|rose|felt|thought|knew|heard|saw|met|glanced|waved|reached|grabbed|held|spoke|cried|laughed|sighed|gasped|blinked|noticed|realized|remembered|decided|wondered|wanted|needed|found|returned|entered|left|opened|closed|pulled|pushed|drew|raised|pressed|touched|released|jumped|stepped|leaned|knelt|bowed|pointed|added|continued|interrupted)\b/i;
+
+const CHAR_PRONOUN_RE = /\b(he|she|they|him|her)\s*$/i;
+
+const FACTION_COLLECTIVE_RE = /^\s*(attacked|gathered|declared|sent|marched|controlled|ruled|ordered|commanded|demanded|allied|fought|held|occupied|protected|served|arrived|retreated|advanced|surrounded|captured|released|accepted|rejected|agreed|disbanded|recruited|deployed|imposed)\b/i;
+
+export interface ScanResult {
+  characters: string[];
+  places:     string[];
+  factions:   string[];
+}
+
+/**
+ * Scans `text` for Title-Case proper-noun candidates not already in `existing`,
+ * then classifies each into character / place / faction using name-internal
+ * keywords and contextual signals from the surrounding prose.
+ */
+export function scanAndClassify(
+  text: string,
+  existing: WorldData | undefined,
+  minFreq = 2,
+): ScanResult {
+  // Build exclusion set from already-registered names + aliases
+  const excluded = new Set<string>();
+  for (const e of [
+    ...(existing?.characters ?? []),
+    ...(existing?.places     ?? []),
+    ...(existing?.factions   ?? []),
+  ]) {
+    excluded.add(e.name.toLowerCase());
+    for (const a of e.aliases ?? []) excluded.add(a.toLowerCase());
+  }
+
+  // Extract 1–3 word Title-Case sequences with frequency count
+  const freq = new Map<string, number>();
+  const pat = /\b([A-Z][a-z]{1,}(?:\s[A-Z][a-z]{1,}){0,2})\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = pat.exec(text)) !== null) {
+    const name = m[1];
+    const first = name.split(" ")[0];
+    if (STOPLIST.has(first) || name.length < 3) continue;
+    if (excluded.has(name.toLowerCase())) continue;
+    freq.set(name, (freq.get(name) ?? 0) + 1);
+  }
+
+  // Filter, sort longest-first (so longer names win de-overlap), then by freq
+  const candidates = [...freq.entries()]
+    .filter(([, n]) => n >= minFreq)
+    .sort((a, b) => b[0].length - a[0].length || b[1] - a[1])
+    .map(([name]) => name);
+
+  // De-overlap: drop shorter names that are strict substrings of a kept name
+  const kept: string[] = [];
+  for (const name of candidates) {
+    const lc = name.toLowerCase();
+    if (!kept.some((k) => k.toLowerCase() !== lc && k.toLowerCase().includes(lc))) {
+      kept.push(name);
+    }
+  }
+
+  const result: ScanResult = { characters: [], places: [], factions: [] };
+
+  for (const name of kept) {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const ctxRe = new RegExp(`([^\\n]{0,90})\\b${esc}\\b([^\\n]{0,90})`, "gi");
+
+    let charScore = 0, placeScore = 0, factScore = 0;
+
+    // Name-internal structural signals (highest weight — reliable in fiction)
+    if (PLACE_SUFFIX_RE.test(name)) placeScore += 4;
+    if (FACTION_SUFFIX_RE.test(name)) factScore += 4;
+
+    let cx: RegExpExecArray | null;
+    while ((cx = ctxRe.exec(text)) !== null) {
+      const before = cx[1];
+      const after  = cx[2];
+      if (CHAR_TITLE_RE.test(before))   charScore  += 3;
+      if (CHAR_PRONOUN_RE.test(before)) charScore  += 2;
+      if (CHAR_VERB_RE.test(after))     charScore  += 1;
+      if (PLACE_PREP_RE.test(before))   placeScore += 1;
+      if (/\bthe\s*$/i.test(before) && FACTION_COLLECTIVE_RE.test(after)) factScore += 2;
+    }
+
+    const max = Math.max(charScore, placeScore, factScore);
+    if (factScore  === max && factScore  > charScore) { result.factions.push(name); continue; }
+    if (placeScore === max && placeScore > charScore) { result.places.push(name);   continue; }
+    result.characters.push(name);
+  }
+
+  return result;
+}
+
 // ── Combined known-names resolver ─────────────────────────────────────────
 
 /**

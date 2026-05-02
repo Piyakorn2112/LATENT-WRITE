@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
+import { useDebouncedValue } from "../lib/use-debounced";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
 import { ProseProfileWidget } from "./widgets/ProseProfileWidget";
@@ -24,6 +25,7 @@ import { IOS_COLORS } from "../lib/palette";
 import type { Preferences, Typography, WritingGoals } from "../lib/preferences";
 import { FONT_LABELS } from "../lib/preferences";
 import { NumberStepper } from "./NumberStepper";
+import { GlassRange } from "./GlassRange";
 
 type IntelMode = "off" | "low" | "default" | "high" | "auto";
 
@@ -121,11 +123,10 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
           <label className="settings-label">Size</label>
           <span className="settings-value">{typography.fontSize}px</span>
         </div>
-        <input
-          type="range" min={14} max={26} step={1}
+        <GlassRange
+          min={14} max={26} step={1}
           value={typography.fontSize}
-          onChange={(e) => setTypography({ fontSize: Number(e.target.value) })}
-          className="settings-range"
+          onChange={(v) => setTypography({ fontSize: v })}
         />
       </div>
 
@@ -134,11 +135,10 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
           <label className="settings-label">Line height</label>
           <span className="settings-value">{typography.lineHeight.toFixed(2)}</span>
         </div>
-        <input
-          type="range" min={1.3} max={2.2} step={0.05}
+        <GlassRange
+          min={1.3} max={2.2} step={0.05}
           value={typography.lineHeight}
-          onChange={(e) => setTypography({ lineHeight: Number(e.target.value) })}
-          className="settings-range"
+          onChange={(v) => setTypography({ lineHeight: v })}
         />
       </div>
 
@@ -147,11 +147,10 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
           <label className="settings-label">Measure</label>
           <span className="settings-value">{typography.measure}ch</span>
         </div>
-        <input
-          type="range" min={50} max={100} step={2}
+        <GlassRange
+          min={50} max={100} step={2}
           value={typography.measure}
-          onChange={(e) => setTypography({ measure: Number(e.target.value) })}
-          className="settings-range"
+          onChange={(v) => setTypography({ measure: v })}
         />
       </div>
 
@@ -178,17 +177,56 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
   );
 }
 
+// Sequenced mount: when the widget tree (re)mounts on a chapter switch, each
+// AnimatedWidget waits `order` animation frames before rendering its child.
+// Spreads the per-widget render + useMemo cost across multiple frames so the
+// initial reveal doesn't blow a single frame budget on ~15 widgets at once.
+function useFrameDelay(framesToWait: number): boolean {
+  const [ready, setReady] = useState(framesToWait <= 0);
+  useEffect(() => {
+    if (framesToWait <= 0) {
+      setReady(true);
+      return;
+    }
+    let cancelled = false;
+    let count = 0;
+    const tick = () => {
+      if (cancelled) return;
+      count++;
+      if (count >= framesToWait) {
+        setReady(true);
+      } else {
+        requestAnimationFrame(tick);
+      }
+    };
+    requestAnimationFrame(tick);
+    return () => { cancelled = true; };
+  }, [framesToWait]);
+  return ready;
+}
+
 // Animated collapse/expand wrapper for conditionally-present widgets.
 // Mounts immediately but starts in the collapsed (--off) state so the entry
 // CSS transition plays from height:0 → natural height. On hide, the CSS
 // transition plays first, then the element is removed from the DOM after the
 // transition ends so the surrounding stack smoothly closes the gap.
-function AnimatedWidget({ show, children }: { show: boolean; children: React.ReactNode }) {
-  const [mounted, setMounted] = useState(show);
-  const [on, setOn] = useState(show);
+function AnimatedWidget({
+  show,
+  order = 0,
+  children,
+}: {
+  show: boolean;
+  /** Stagger slot — child renders after this many animation frames. */
+  order?: number;
+  children: React.ReactNode;
+}) {
+  const ready = useFrameDelay(order);
+  const [mounted, setMounted] = useState(false);
+  const [on, setOn] = useState(false);
   const frameRef = useRef(0);
 
   useEffect(() => {
+    if (!ready) return;
     if (show) {
       setMounted(true);
       // Two rAFs: first lets React flush the mount with --off applied to the
@@ -203,7 +241,7 @@ function AnimatedWidget({ show, children }: { show: boolean; children: React.Rea
       return () => window.clearTimeout(t);
     }
     return () => cancelAnimationFrame(frameRef.current);
-  }, [show]);
+  }, [show, ready]);
 
   if (!mounted) return null;
   return (
@@ -215,7 +253,7 @@ function AnimatedWidget({ show, children }: { show: boolean; children: React.Rea
 
 function WidgetSet({
   result, prevResult, nextResult, showCrossArc,
-  chapterContent, allChapters, chapterIndex, worldData,
+  chapterContent, allChapters, chapterIndex, worldData, wordCount,
 }: {
   result: ChapterAnalysisResult;
   prevResult: ChapterAnalysisResult | null;
@@ -225,6 +263,8 @@ function WidgetSet({
   allChapters?: Chapter[];
   chapterIndex?: number;
   worldData?: WorldData;
+  /** Pre-computed word count from the parent — avoids a second .split here. */
+  wordCount?: number;
 }) {
   const a = result.analysis;
   const hi = a.highModeAnalysis;
@@ -237,44 +277,49 @@ function WidgetSet({
   // Prose Profile needs ~80 words of prose to be informative; the widget
   // also internally guards on that, but we use the same threshold here so
   // the AnimatedWidget's enter transition doesn't fire for a no-op render.
-  const hasProseProfile = !!chapterContent && chapterContent.trim().split(/\s+/).length > 80;
+  const hasProseProfile = (wordCount ?? 0) > 80;
   const hasContinuityCtx = !!allChapters && allChapters.length > 1 && chapterIndex != null && chapterIndex >= 0;
   const hasCharacterVoice = result.paragraphs.length > 0 && a.speakerCounts.length >= 2;
 
+  // `order` slots stagger the actual MOUNT (not just the CSS reveal) one
+  // animation frame at a time. With ~15 widgets that's ~240 ms for the last
+  // one to land, but each individual frame only does the work of one widget.
   return (
     <>
-      <AnimatedWidget show={hasDiagnostics}><DiagnosticsWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget show={!!hi}><ShapingWidget analysis={a} /></AnimatedWidget>
-      <TensionWidget
-        analysis={a}
-        paragraphs={result.paragraphs}
-        speechResults={result.speechResults}
-      />
-      <AnimatedWidget show={!!hi}><StructureWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget show={hasMomentum}><MomentumWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget show={showCrossArc}>
+      <AnimatedWidget order={0} show={hasDiagnostics}><DiagnosticsWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={1} show={!!hi}><ShapingWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={2} show={true}>
+        <TensionWidget
+          analysis={a}
+          paragraphs={result.paragraphs}
+          speechResults={result.speechResults}
+        />
+      </AnimatedWidget>
+      <AnimatedWidget order={3} show={!!hi}><StructureWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={4} show={hasMomentum}><MomentumWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={5} show={showCrossArc}>
         <CrossArcWidget current={result} prev={prevResult} next={nextResult} />
       </AnimatedWidget>
-      <AnimatedWidget show={showCrossArc && (!!prevResult || !!nextResult)}>
+      <AnimatedWidget order={6} show={showCrossArc && (!!prevResult || !!nextResult)}>
         <CrossPacingWidget current={result} prev={prevResult} next={nextResult} />
       </AnimatedWidget>
       {/* Continuity slots between cross-pacing and prose profile so cross-
           chapter and chapter-level structural notes sit together visually. */}
-      <AnimatedWidget show={hasContinuityCtx}>
+      <AnimatedWidget order={7} show={hasContinuityCtx}>
         <ContinuityWidget
           chapters={allChapters ?? []}
           worldData={worldData}
           chapterIndex={chapterIndex ?? -1}
         />
       </AnimatedWidget>
-      <AnimatedWidget show={hasProseProfile}>
+      <AnimatedWidget order={8} show={hasProseProfile}>
         <ProseProfileWidget content={chapterContent ?? ""} />
       </AnimatedWidget>
-      <AnimatedWidget show={hasSensory}><SensoryBalanceWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget show={hasStyleContent}>
+      <AnimatedWidget order={9} show={hasSensory}><SensoryBalanceWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={10} show={hasStyleContent}>
         <StyleWatchWidget content={chapterContent ?? ""} />
       </AnimatedWidget>
-      <AnimatedWidget show={hasCharacterVoice}>
+      <AnimatedWidget order={11} show={hasCharacterVoice}>
         <CharacterVoiceWidget
           paragraphs={result.paragraphs}
           speechResults={result.speechResults}
@@ -282,9 +327,9 @@ function WidgetSet({
           content={chapterContent ?? ""}
         />
       </AnimatedWidget>
-      <AnimatedWidget show={!!hi || hasCast}><VoiceWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget show={hasCast}><CastWidget analysis={a} /></AnimatedWidget>
-      <RoleWidget analysis={a} />
+      <AnimatedWidget order={12} show={!!hi || hasCast}><VoiceWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={13} show={hasCast}><CastWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={14} show={true}><RoleWidget analysis={a} /></AnimatedWidget>
     </>
   );
 }
@@ -301,6 +346,14 @@ export function AnalysisPanel({
     intelMode === "high" ||
     (intelMode === "auto" && !!result?.analysis.highModeAnalysis);
   const [view, setView] = useState<"widgets" | "settings" | null>(null);
+
+  // Debounce live content props so widgets don't recompute on every keystroke
+  // — the widget tree contains heavy passes (grammar, echo detection, prose
+  // profile) that previously ran on every input event when the panel was open.
+  // 350 ms is short enough to feel near-live; analysis itself is debounced
+  // separately at 1 s in useAnalysis.
+  const debouncedContent = useDebouncedValue(chapterContent ?? "", 350);
+  const debouncedChapters = useDebouncedValue(allChapters, 350);
 
   // Cross-fade state: old widgets exit, new ones stagger in on chapter change.
   // For same-chapter re-analyses (data updates), just swap displayed silently
@@ -320,7 +373,7 @@ export function AnalysisPanel({
     if (chapterChanged && displayed && displayed.paragraphs.length > 0) {
       setExiting(displayed);
       if (exitTimer.current) window.clearTimeout(exitTimer.current);
-      exitTimer.current = window.setTimeout(() => setExiting(null), 300);
+      exitTimer.current = window.setTimeout(() => setExiting(null), 200);
       setRevealKey((k) => k + 1);
     }
     setDisplayed(result);
@@ -330,26 +383,38 @@ export function AnalysisPanel({
     if (exitTimer.current) window.clearTimeout(exitTimer.current);
   }, []);
 
-  const toggle = (target: "widgets" | "settings") =>
-    setView((v) => (v === target ? null : target));
+  const toggle = useCallback(
+    (target: "widgets" | "settings") =>
+      setView((v) => (v === target ? null : target)),
+    [],
+  );
 
   const isOpen = view !== null;
   const hasContent = displayed && displayed.paragraphs.length > 0;
 
-  const widgetCount = !hasContent ? 0 : (() => {
+  // Word-count threshold check used twice (widgetCount badge + WidgetSet
+  // gating). Computing once at this level avoids a second .split on every
+  // render and keeps the count badge stable across keystrokes.
+  const debouncedWordCount = useMemo(
+    () => (debouncedContent ? debouncedContent.trim().split(/\s+/).length : 0),
+    [debouncedContent],
+  );
+
+  const widgetCount = useMemo(() => {
+    if (!hasContent) return 0;
     const a = displayed!.analysis;
     let n = 2; // tension + role always
     if (a.writerDiagnostics.length > 0) n++;
-    if (a.highModeAnalysis) n += 2; // shaping + structure
-    if (showCrossArc) n++; // cross-arc widget
+    if (a.highModeAnalysis) n += 2;
+    if (showCrossArc) n++;
     if (a.highModeAnalysis || a.speakerCounts.length > 0) n++;
     if (a.speakerCounts.length > 0) n++;
-    if (chapterContent && chapterContent.trim().length > 50) n++;       // style watch
-    if (chapterContent && chapterContent.trim().split(/\s+/).length > 80) n++; // prose profile
-    if (allChapters && allChapters.length > 1 && chapterIndex != null) n++;    // continuity (may suppress at render)
-    if (a.speakerCounts.length >= 2) n++;                                // character voice
+    if (debouncedContent && debouncedContent.trim().length > 50) n++;
+    if (debouncedWordCount > 80) n++;
+    if (debouncedChapters && debouncedChapters.length > 1 && chapterIndex != null) n++;
+    if (a.speakerCounts.length >= 2) n++;
     return n;
-  })();
+  }, [hasContent, displayed, showCrossArc, debouncedContent, debouncedWordCount, debouncedChapters, chapterIndex]);
 
   const placeholderVariant: "empty" | "processing" = isAnalyzing ? "processing" : "empty";
 
@@ -416,10 +481,11 @@ export function AnalysisPanel({
                     prevResult={prevResult}
                     nextResult={nextResult}
                     showCrossArc={showCrossArc}
-                    chapterContent={chapterContent}
-                    allChapters={allChapters}
+                    chapterContent={debouncedContent}
+                    allChapters={debouncedChapters}
                     chapterIndex={chapterIndex}
                     worldData={worldData}
+                    wordCount={debouncedWordCount}
                   />
                 </div>
               </div>

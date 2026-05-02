@@ -6,6 +6,7 @@
   --bg-glass-hover: rgba(255, 255, 255, 0.78);
   --bg-glass-strong: rgba(255, 255, 255, 0.72);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
+  --bg-edge-right: #000000;
 
   /* Liquid glass specular gradient — top highlight, mid shadow, bottom rim */
   --border-glass-grad: linear-gradient(
@@ -16,6 +17,15 @@
     rgba(255, 255, 255, 0) 80%,
     rgba(255, 255, 255, 0.35) 100%
   );
+
+   --border-glass-grad-widget: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.458) 0%,
+      rgba(255, 255, 255, 0.10) 22%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(255, 255, 255, 0) 82%,
+      rgba(255, 255, 255, 0.436) 100%
+    );
 
   --shadow-glass: 0 2px 14px rgba(0, 0, 0, 0.04);
   --shadow-glass-hover: 0 4px 20px rgba(0, 0, 0, 0.06);
@@ -65,6 +75,14 @@
       rgba(255, 255, 255, 0) 82%,
       rgba(255, 255, 255, 0.08) 100%
     );
+    --border-glass-grad-widget: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.154) 0%,
+      rgba(255, 255, 255, 0.10) 22%,
+      rgba(255, 255, 255, 0.02) 50%,
+      rgba(255, 255, 255, 0) 82%,
+      rgba(255, 255, 255, 0.08) 100%
+    );
     --shadow-glass: 0 2px 18px rgba(0, 0, 0, 0.25);
     --shadow-glass-hover: 0 4px 26px rgba(0, 0, 0, 0.35);
     --text: #ededec;
@@ -72,6 +90,7 @@
     --text-tertiary: #6b6b67;
     --text-body: #d4d4d0;
     --divider-line: rgba(255, 255, 255, 0.08);
+    --bg-edge-right: #111110;
 
     /* Settings / floating glass panel — dark mode (dark glass over dark bg) */
     --panel-bg: rgba(14, 14, 12, 0.84);
@@ -119,10 +138,13 @@ body {
   background: var(--bg-glass);
   border: none;
   box-shadow: var(--shadow-glass);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  /* Fallback before JS upgrades to per-element refraction filter — same
+     blur strength JS uses, so the upgrade is seamless. */
+  backdrop-filter: blur(6px) saturate(1.45);
+  -webkit-backdrop-filter: blur(6px) saturate(1.45);
   transition: box-shadow 0.2s ease;
 }
+
 
 /* Specular gradient border — mask keeps paint only in the 1px ring */
 .liquid-glass::before {
@@ -210,8 +232,8 @@ body {
   background: linear-gradient(
     to right,
     transparent 0%,
-    color-mix(in srgb, var(--bg) 5%, transparent) 55%,
-    color-mix(in srgb, var(--bg) 14%, transparent) 100%
+    color-mix(in srgb, var(--bg-edge-right) 16%, transparent) 55%,
+    color-mix(in srgb, var(--bg-edge-right) 20%, transparent) 100%
   );
   z-index: 2;
 }
@@ -663,8 +685,8 @@ body {
   cursor: pointer;
   color: var(--text-secondary);
   background: var(--bg-glass);
-  backdrop-filter: blur(16px) saturate(160%);
-  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  backdrop-filter: blur(6px) saturate(1.45);
+  -webkit-backdrop-filter: blur(6px) saturate(1.45);
   box-shadow: var(--shadow-glass);
   position: relative;
   transition: color 0.15s ease, background 0.15s ease;
@@ -738,7 +760,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 100px 14px 24px 10px;
+  padding: 20px 14px 24px 10px;
   transition: opacity 0.25s ease;
   overflow-x: visible;
   overflow-y: scroll;
@@ -767,41 +789,28 @@ body {
   min-width: 200px;
 }
 
-/* ─── Widget reveal animation — old fully exits before new staggers in ─── */
+/* ─── Widget reveal — minimal notification-badge feel.
+   Scale-only pop with a natural spring overshoot. The cubic-bezier's y2 of
+   1.62 sends scale slightly past 1.0 mid-curve before settling — reads as a
+   subtle bounce, not a wobble. ─── */
 @keyframes widgetReveal {
-  0% {
-    opacity: 0;
-    transform: translateY(22px) scale(0.94);
-    filter: blur(10px);
-  }
-  55% {
-    filter: blur(0);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
-  }
+  0%   { opacity: 0; transform: scale(0.88); }
+  100% { opacity: 1; transform: scale(1); }
 }
 
-/* Reveal stagger starts AFTER the exit anim finishes (~0.32s) so the two phases
-   don't fight for the same screen space. Each card waves in 0.06s after the last. */
 .widget-list .widget-card {
-  animation: widgetReveal 0.58s cubic-bezier(0.34, 1.42, 0.64, 1) backwards;
+  animation: widgetReveal 0.34s cubic-bezier(0.34, 1.62, 0.55, 1) backwards;
+  transform-origin: center;
 }
-.widget-list .widget-card:nth-child(1) { animation-delay: 0.30s; }
-.widget-list .widget-card:nth-child(2) { animation-delay: 0.36s; }
-.widget-list .widget-card:nth-child(3) { animation-delay: 0.42s; }
-.widget-list .widget-card:nth-child(4) { animation-delay: 0.48s; }
-.widget-list .widget-card:nth-child(5) { animation-delay: 0.54s; }
-.widget-list .widget-card:nth-child(6) { animation-delay: 0.60s; }
-.widget-list .widget-card:nth-child(7) { animation-delay: 0.66s; }
-.widget-list .widget-card:nth-child(n+8) { animation-delay: 0.72s; }
+/* No nth-child delays — JS-side `useFrameDelay` in AnalysisPanel staggers
+   the actual mount one animation frame per widget, so each widget reveals
+   as soon as it lands in the DOM. The visual cascade is identical, but the
+   CPU spike of "render 15 widgets in one frame" is spread across ~15 frames. */
 
-/* Exit happens first — old list fades + drifts up, fully gone by 0.30s */
+/* Exit — quick fade with a tiny scale-down, paired symmetry with reveal. */
 @keyframes widgetExit {
-  0%   { opacity: 1; transform: translateY(0); filter: blur(0); }
-  100% { opacity: 0; transform: translateY(-10px); filter: blur(6px); }
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(0.96); }
 }
 
 .widget-list--exiting {
@@ -810,7 +819,7 @@ body {
   pointer-events: none;
 }
 .widget-list--exiting .widget-card {
-  animation: widgetExit 0.28s ease-in forwards;
+  animation: widgetExit 0.14s ease-in forwards;
 }
 
 .widget-list-stack {
@@ -848,7 +857,6 @@ body {
   opacity: 1;
   margin-bottom: 12px;
   transition:
-    height        0.34s cubic-bezier(0.4, 0, 0.2, 1),
     opacity       0.28s ease,
     margin-bottom 0.34s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
@@ -989,8 +997,8 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 32px;
-  padding: 1.4px;
-  background: var(--border-glass-grad);
+  padding: 1.2px;
+  background: var(--border-glass-grad-widget);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -1990,6 +1998,10 @@ body {
 .grammar-issue[data-kind="cliche"] {
   text-decoration-color: rgba(160, 160, 170, 0.45);
   text-decoration-style: dotted;
+  /* pointer-events: auto so CSS :hover fires for the ghost-text tooltip.
+     mousedown is cancelled in HighlightLayer to keep textarea focus. */
+  pointer-events: auto;
+  cursor: text;
 }
 .grammar-issue[data-kind="filter"]::before,
 .grammar-issue[data-kind="passive"]::before,
@@ -2214,7 +2226,7 @@ body {
 .analysis-inner--settings {
   zoom: 1;
   width: 370px;
-  padding: 78px 10px 24px 8px;
+  padding: 16px 10px 24px 8px;
   overflow-x: visible;
   overflow-y: auto;
 }
@@ -2299,6 +2311,8 @@ body {
    ═══════════════════════════════════════════ */
 
 .world-panel {
+  position: relative;
+  overflow: hidden;
   width: min(100%, 760px);
   border-radius: var(--card-radius);
   border-radius: 38px;
@@ -2646,6 +2660,274 @@ body {
   }
 }
 
+/* ── Auto-scan UI ─────────────────────────────────────────────────────── */
+
+/* Ambient orb — absolutely positioned inside .world-panel, transitions in
+   when scanning starts and breathes while the computation runs */
+.world-scan-orb {
+  position: absolute;
+  inset: 0;
+  width: 140%;
+  height: 140%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at center,
+    var(--orb-color, #1071D8) 0%,
+    transparent 65%
+  );
+  filter: blur(48px);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 0;
+  transition: opacity 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: opacity, transform;
+}
+
+.world-scan-orb--visible {
+  opacity: 0.4;
+  animation:
+    orb-enter 0.65s cubic-bezier(0.34, 1.2, 0.64, 1) forwards,
+    orb-breathe 2.8s ease-in-out 0.65s infinite;
+}
+
+@keyframes orb-enter {
+  from { transform: translate(-50%, -50%) scale(0.45); }
+  to   { transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes orb-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    }
+  50%       { transform: translate(-50%, -50%) scale(1.10); }
+}
+
+/* Loading spinner */
+@keyframes scan-spin {
+  to { transform: rotate(360deg); }
+}
+
+.world-scan-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex: 1;
+  min-height: 260px;
+  position: relative;
+  z-index: 1;
+}
+
+.world-scan-spinner {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 2.5px solid color-mix(in srgb, var(--spinner-color, var(--text)) 18%, transparent);
+  border-top-color: var(--spinner-color, var(--text));
+  animation: scan-spin 0.85s linear infinite;
+}
+
+.world-scan-loading-label {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.world-scan-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  flex: 1;
+  min-height: 260px;
+  padding: 8px 0 16px;
+}
+
+.world-scan-pick-title {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  text-align: center;
+  margin: 0;
+}
+
+.world-scan-pick-title--sm {
+  font-size: 11px;
+  text-align: left;
+  padding: 0 2px 4px;
+}
+
+.world-scan-mode-row {
+  display: flex;
+  gap: 10px;
+}
+
+.world-scan-mode-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.world-scan-mode-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--panel-text) 22%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 5%, transparent);
+}
+
+.world-scan-mode-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Review results */
+.world-scan-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+  padding-bottom: 4px;
+}
+
+.world-scan-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 8px;
+  scrollbar-width: thin;
+}
+
+.world-scan-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.world-scan-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 5px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.world-scan-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.12s ease;
+}
+
+.world-scan-row:hover {
+  background: color-mix(in srgb, var(--panel-text) 5%, transparent);
+}
+
+.world-scan-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--text);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.world-scan-row-name {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.world-scan-empty-full {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  text-align: center;
+  padding: 20px;
+}
+
+.world-scan-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--divider-line);
+  flex-shrink: 0;
+}
+
+.world-scan-register-btn {
+  flex: 1;
+  padding: 9px 16px;
+  border-radius: 11px;
+  border: none;
+  background: var(--text);
+  color: var(--bg);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.world-scan-register-btn:not(:disabled):hover {
+  opacity: 0.82;
+}
+
+.world-scan-register-btn:disabled {
+  opacity: 0.30;
+  cursor: default;
+}
+
+.world-scan-back-btn {
+  padding: 9px 16px;
+  border-radius: 11px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.world-scan-back-btn:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--panel-text) 22%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 4%, transparent);
+}
+
 /* ═══════════════════════════════════════════
    ENTITY POPOVER — small floating editor
    ═══════════════════════════════════════════ */
@@ -2660,7 +2942,7 @@ body {
   flex-direction: column;
   gap: 9px;
   /* enter anim — same curve as the widget reveal */
-  animation: widgetReveal 0.42s cubic-bezier(0.34, 1.42, 0.64, 1);
+  animation: widgetReveal 0.28s cubic-bezier(0.22, 0.9, 0.32, 1);
 }
 
 .entity-popover-header {
@@ -2713,11 +2995,11 @@ body {
 }
 
 .status-pill--enter {
-  animation: widgetReveal 0.5s cubic-bezier(0.34, 1.42, 0.64, 1);
+  animation: widgetReveal 0.32s cubic-bezier(0.22, 0.9, 0.32, 1);
 }
 
 .status-pill--exit {
-  animation: widgetExit 0.28s ease-in forwards;
+  animation: widgetExit 0.18s ease-in forwards;
 }
 
 .status-pill-label {
@@ -2974,7 +3256,8 @@ body {
 }
 .settings-pill:hover {
   color: var(--panel-text);
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: color-mix(in srgb, var(--panel-text) 22%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 5%, transparent);
 }
 .settings-pill--active {
   background: rgba(255, 255, 255, 0.92);
@@ -3087,6 +3370,113 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.85),
     0 2px 6px rgba(0, 0, 0, 0.22),
     0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   GLASS RANGE — liquid-glass knob slider (replaces .settings-range)
+   backdrop-filter on ::-webkit-slider-thumb is silently ignored in
+   Chromium, so we hide the native thumb and position a .liquid-glass div
+   that tracks the value via a CSS custom property.
+   ───────────────────────────────────────────────────────────────────── */
+
+.glass-range-wrap {
+  position: relative;
+  width: 100%;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.glass-range-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.18);
+}
+@media (prefers-color-scheme: light) {
+  .glass-range-track { background: rgba(0, 0, 0, 0.14); }
+}
+
+.glass-range-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+@media (prefers-color-scheme: light) {
+  .glass-range-fill { background: rgba(0, 0, 0, 0.32); }
+}
+
+/* Knob: pill div absolutely placed along the track via CSS custom property.
+   left = frac × (trackWidth − knobWidth), computed via calc(). */
+.glass-range-knob {
+  position: absolute;
+  top: 50%;
+  left: calc(var(--glass-range-frac, 0) * (100% - 20px));
+  transform: translateY(-50%);
+  width: 20px;
+  height: 14px;
+  border-radius: 999px;
+  pointer-events: none;
+  /* Fallback appearance until the liquid-glass filter is ready */
+  background: rgb(255, 255, 255);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.109),
+    0 4px 10px rgba(0, 0, 0, 0.08);
+  transition:
+    transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+  will-change: transform;
+}
+
+.glass-range-knob::before{
+   content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 0.5px;
+  background: var(--border-glass-grad);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Hover + press states: driven by :has() watching the transparent native input */
+.glass-range-wrap:has(.glass-range-input:hover) .glass-range-knob {
+  transform: translateY(-50%) scale(1.08);
+}
+.glass-range-wrap:has(.glass-range-input:active) .glass-range-knob {
+  transform: translateY(-50%) scale(1.62);
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.22),
+    0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* The native input is invisible but fully interactive — sits above the
+   visual track/knob so all pointer and keyboard events are captured. */
+.glass-range-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

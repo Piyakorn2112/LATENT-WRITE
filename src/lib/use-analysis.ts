@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDebouncedValue } from "./use-debounced";
 import type { Chapter, Novel } from "../types";
 import {
   detectSpeechInChapter,
@@ -112,8 +113,16 @@ export function useAnalysis(
   const resultChapterId = useRef<string | null>(null);
 
   // Resolved entity names — pulls from world data, falls back to auto-extraction.
-  // Memoized on novel reference so we don't rebuild every render.
-  const knownNames = useMemo(() => resolveKnownNames(novel), [novel]);
+  // worldData changes rarely (explicit edits only). When there's no world data,
+  // autoExtractEntities scans all chapter text — expensive on large novels. We
+  // debounce the chapters reference so that scan only runs after a typing pause,
+  // not on every single keystroke.
+  const debouncedChapters = useDebouncedValue(novel.chapters, 2000);
+  const knownNames = useMemo(
+    () => resolveKnownNames({ ...novel, chapters: debouncedChapters }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [novel.worldData, debouncedChapters],
+  );
 
   useEffect(() => {
     if (!currentChapterId) {

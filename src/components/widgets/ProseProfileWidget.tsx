@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { WidgetCard } from "./WidgetCard";
 import { profileChapter, type ProseProfile } from "../../lib/prose-profile";
 import { IOS_COLORS } from "../../lib/palette";
@@ -40,7 +40,7 @@ const BAND_COLOR: Record<ProseProfile["fleschBand"], string> = {
   hard:   IOS_COLORS.purple.text,
 };
 
-export function ProseProfileWidget({ content }: Props) {
+function ProseProfileWidgetImpl({ content }: Props) {
   const p = useMemo(() => profileChapter(content), [content]);
 
   // Don't render below a meaningful sample size — too noisy.
@@ -158,3 +158,5 @@ export function ProseProfileWidget({ content }: Props) {
     </WidgetCard>
   );
 }
+
+export const ProseProfileWidget = memo(ProseProfileWidgetImpl);

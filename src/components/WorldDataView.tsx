@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type {
+  Novel,
   WorldData,
   WorldCharacter,
   WorldPlace,
   WorldFaction,
 } from "../types";
-import { ensureWorldData } from "../lib/world-data";
+import { ensureWorldData, scanAndClassify, type ScanResult } from "../lib/world-data";
 import { parseNovel } from "../lib/parser";
 import {
   CloseIcon,
@@ -15,13 +16,23 @@ import {
   UsersIcon,
   MapPinIcon,
   FlagIcon,
+  SparklesIcon,
+  BookOpenIcon,
+  ListIcon,
 } from "./Icon";
 
 type Tab = "characters" | "places" | "factions";
 type Entity = WorldCharacter | WorldPlace | WorldFaction;
+type ScanCategory = "characters" | "places" | "factions";
+type ScanPhase = "pick" | "scanning" | "review";
+
+type IntelMode = "off" | "low" | "default" | "high" | "auto";
 
 interface Props {
+  novel: Novel;
+  currentChapterId: string | null;
   worldData: WorldData | undefined;
+  intelMode: IntelMode;
   onChange: (next: WorldData) => void;
   onRename: (oldName: string, newName: string, scope: "chapter" | "book") => void;
   onClose: () => void;
@@ -33,21 +44,87 @@ const TAB_META: Record<Tab, { label: string; Icon: typeof UsersIcon; roleLabel: 
   factions:   { label: "Factions",   Icon: FlagIcon,   roleLabel: "Type" },
 };
 
+const SCAN_CATEGORY_META: Record<ScanCategory, { label: string; Icon: typeof UsersIcon }> = {
+  characters: { label: "Characters", Icon: UsersIcon  },
+  places:     { label: "Places",     Icon: MapPinIcon },
+  factions:   { label: "Factions",   Icon: FlagIcon   },
+};
+
+// Orb color per intel mode — vivid but not over-saturated
+const ORB_COLOR: Record<IntelMode, string> = {
+  off:     "#888888",
+  auto:    "#2EA84A",
+  low:     "#DC7B19",
+  default: "#1071D8",
+  high:    "#A828B8",
+};
+
 function newEntity(): Entity {
   return { name: "", aliases: [], role: "", description: "" } as Entity;
 }
 
-export function WorldDataView({ worldData, onChange, onRename, onClose }: Props) {
-  const wd = useMemo(() => ensureWorldData({ meta: { title: "", author: "", description: "" }, chapters: [], worldData }), [worldData]);
-  const [tab, setTab] = useState<Tab>("characters");
+const emptySelected = (): Record<ScanCategory, Set<string>> => ({
+  characters: new Set(),
+  places:     new Set(),
+  factions:   new Set(),
+});
+
+export function WorldDataView({
+  novel, currentChapterId, worldData, intelMode, onChange, onRename, onClose,
+}: Props) {
+  const wd = useMemo(
+    () => ensureWorldData({ meta: { title: "", author: "", description: "" }, chapters: [], worldData }),
+    [worldData],
+  );
+  const [tab, setTab]         = useState<Tab>("characters");
   const [selected, setSelected] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Scan state ──────────────────────────────────────────────────────────
+  const [scanPhase,    setScanPhase]    = useState<ScanPhase | null>(null);
+  const [scanMode,     setScanMode]     = useState<"chapter" | "novel">("chapter");
+  const [scanResults,  setScanResults]  = useState<ScanResult>({ characters: [], places: [], factions: [] });
+  const [scanSelected, setScanSelected] = useState<Record<ScanCategory, Set<string>>>(emptySelected);
+
+  // Run heavy computation after the "scanning" loading state has painted
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    if (scanPhase !== "scanning") return;
+    let raf1: number, raf2: number, timer: ReturnType<typeof setTimeout>;
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        timer = setTimeout(() => {
+          const text =
+            scanMode === "chapter"
+              ? (novel.chapters.find((c) => c.id === currentChapterId)?.content ?? "")
+              : novel.chapters.map((c) => c.content).join("\n\n");
+          const results = scanAndClassify(text, wd, scanMode === "chapter" ? 2 : 3);
+          setScanResults(results);
+          setScanSelected({
+            characters: new Set(results.characters),
+            places:     new Set(results.places),
+            factions:   new Set(results.factions),
+          });
+          setScanPhase("review");
+        }, 0);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+      clearTimeout(timer);
+    };
+  }, [scanPhase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (scanPhase) setScanPhase(null);
+        else onClose();
+      }
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, scanPhase]);
 
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -75,9 +152,7 @@ export function WorldDataView({ worldData, onChange, onRename, onClose }: Props)
   const list: Entity[] = wd[tab] as Entity[];
   const current = selected !== null ? list[selected] : null;
 
-  const updateList = (next: Entity[]) => {
-    onChange({ ...wd, [tab]: next });
-  };
+  const updateList = (next: Entity[]) => onChange({ ...wd, [tab]: next });
 
   const handleAdd = () => {
     const next = [...list, newEntity()];
@@ -100,15 +175,92 @@ export function WorldDataView({ worldData, onChange, onRename, onClose }: Props)
     updateList(next);
   };
 
+  const startScan = (mode: "chapter" | "novel") => {
+    setScanMode(mode);
+    setScanPhase("scanning");
+  };
+
+  const toggleScanItem = (cat: ScanCategory, name: string) => {
+    setScanSelected((prev) => {
+      const next = { ...prev, [cat]: new Set(prev[cat]) };
+      if (next[cat].has(name)) next[cat].delete(name);
+      else next[cat].add(name);
+      return next;
+    });
+  };
+
+  const totalScanSelected =
+    scanSelected.characters.size + scanSelected.places.size + scanSelected.factions.size;
+
+  const doRegister = () => {
+    const mergeNew = <T extends { name: string }>(
+      existing: T[],
+      names: string[],
+      make: (n: string) => T,
+    ): T[] => {
+      const seen = new Set(existing.map((e) => e.name.toLowerCase()));
+      return [...existing, ...names.filter((n) => !seen.has(n.toLowerCase())).map(make)];
+    };
+    onChange({
+      characters: mergeNew(
+        wd.characters,
+        [...scanSelected.characters],
+        (name) => ({ name, aliases: [], role: "", description: "" } as WorldCharacter),
+      ),
+      places: mergeNew(
+        wd.places,
+        [...scanSelected.places],
+        (name) => ({ name, aliases: [], type: "", description: "" } as WorldPlace),
+      ),
+      factions: mergeNew(
+        wd.factions,
+        [...scanSelected.factions],
+        (name) => ({ name, aliases: [], type: "", description: "" } as WorldFaction),
+      ),
+    });
+    setScanPhase(null);
+  };
+
+  const hasScanResults =
+    scanResults.characters.length + scanResults.places.length + scanResults.factions.length > 0;
+
+  const currentChapter = novel.chapters.find((c) => c.id === currentChapterId);
+  const orbColor = ORB_COLOR[intelMode] ?? ORB_COLOR.default;
+  const orbActive = scanPhase === "scanning";
+
   return (
     <div
       className="index-overlay"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="world-panel liquid-glass">
-        <div className="world-header">
-          <h2 className="world-title">World</h2>
+
+        {/* ── Ambient orb — always mounted, CSS-transitioned in/out ── */}
+        <div
+          className={`world-scan-orb${orbActive ? " world-scan-orb--visible" : ""}`}
+          style={{ "--orb-color": orbColor } as CSSProperties}
+          aria-hidden="true"
+        />
+
+        {/* ── Header ── */}
+        <div className="world-header" style={{ position: "relative", zIndex: 1 }}>
+          <h2 className="world-title">
+            {scanPhase === "pick"     ? "Auto-Scan"   :
+             scanPhase === "scanning" ? "Scanning…"   :
+             scanPhase === "review"   ? `Scan — ${scanMode === "chapter" ? "Chapter" : "Novel"}` :
+             "World"}
+          </h2>
           <div style={{ display: "flex", gap: 4 }}>
+            {scanPhase === null && (
+              <button
+                className="icon-btn"
+                onClick={() => setScanPhase("pick")}
+                aria-label="Auto-scan text for entities"
+                title="Auto-scan for characters, places & factions"
+              >
+                <SparklesIcon size={16} />
+              </button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -116,97 +268,205 @@ export function WorldDataView({ worldData, onChange, onRename, onClose }: Props)
               style={{ display: "none" }}
               onChange={handleImport}
             />
+            {scanPhase === null && (
+              <button
+                className="icon-btn"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Import world data from file"
+                title="Import from .txt — appends to existing entries"
+              >
+                <UploadIcon size={16} />
+              </button>
+            )}
             <button
               className="icon-btn"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label="Import world data from file"
-              title="Import from .txt — appends to existing entries"
+              onClick={() => { if (scanPhase) setScanPhase(null); else onClose(); }}
+              aria-label={scanPhase ? "Cancel scan" : "Close world data"}
             >
-              <UploadIcon size={16} />
-            </button>
-            <button className="icon-btn" onClick={onClose} aria-label="Close world data">
               <CloseIcon />
             </button>
           </div>
         </div>
 
-        <div className="world-tabs">
-          {(Object.keys(TAB_META) as Tab[]).map((t) => {
-            const { label, Icon } = TAB_META[t];
-            const count = (wd[t] as Entity[]).length;
-            return (
+        {/* ── Scan: Pick mode ── */}
+        {scanPhase === "pick" && (
+          <div className="world-scan-pick" style={{ position: "relative", zIndex: 1 }}>
+            <p className="world-scan-pick-title">
+              Scan the text and auto-register characters,<br />places, and factions.
+            </p>
+            <div className="world-scan-mode-row">
               <button
-                key={t}
-                className={`world-tab ${tab === t ? "world-tab--active" : ""}`}
-                onClick={() => { setTab(t); setSelected(null); }}
+                className="world-scan-mode-btn"
+                onClick={() => startScan("chapter")}
+                disabled={!currentChapter}
+                title={!currentChapter ? "No chapter open" : `Scan "${currentChapter.title || "current chapter"}"`}
               >
-                <Icon size={14} />
-                <span>{label}</span>
-                {count > 0 && <span className="world-tab-count">{count}</span>}
+                <BookOpenIcon size={14} />
+                Current Chapter
               </button>
-            );
-          })}
-        </div>
+              <button
+                className="world-scan-mode-btn"
+                onClick={() => startScan("novel")}
+                disabled={novel.chapters.length === 0}
+              >
+                <ListIcon size={14} />
+                Whole Novel
+              </button>
+            </div>
+          </div>
+        )}
 
-        <div className="world-body">
-          <div className="world-list">
-            {list.length === 0 ? (
-              <div className="world-list-empty">
-                No {TAB_META[tab].label.toLowerCase()} yet
-              </div>
+        {/* ── Scan: Loading ── */}
+        {scanPhase === "scanning" && (
+          <div className="world-scan-loading" style={{ position: "relative", zIndex: 1 }}>
+            <div
+              className="world-scan-spinner"
+              style={{ "--spinner-color": orbColor } as CSSProperties}
+            />
+            <span className="world-scan-loading-label">
+              Scanning {scanMode === "chapter" ? "chapter" : "novel"}…
+            </span>
+          </div>
+        )}
+
+        {/* ── Scan: Review results ── */}
+        {scanPhase === "review" && (
+          <div className="world-scan-results" style={{ position: "relative", zIndex: 1 }}>
+            {hasScanResults ? (
+              <>
+                <p className="world-scan-pick-title world-scan-pick-title--sm">
+                  {scanResults.characters.length + scanResults.places.length + scanResults.factions.length} new
+                  {" "}{scanMode === "chapter" ? "in this chapter" : "across the novel"} — uncheck any to skip.
+                </p>
+                <div className="world-scan-list">
+                  {(["characters", "places", "factions"] as ScanCategory[]).map((cat) => {
+                    const items = scanResults[cat];
+                    if (items.length === 0) return null;
+                    const { label, Icon } = SCAN_CATEGORY_META[cat];
+                    return (
+                      <div key={cat} className="world-scan-section">
+                        <div className="world-scan-section-title">
+                          <Icon size={12} />
+                          <span>{label}</span>
+                          <span className="world-tab-count">{scanSelected[cat].size}/{items.length}</span>
+                        </div>
+                        {items.map((name) => (
+                          <label key={name} className="world-scan-row">
+                            <input
+                              type="checkbox"
+                              checked={scanSelected[cat].has(name)}
+                              onChange={() => toggleScanItem(cat, name)}
+                            />
+                            <span className="world-scan-row-name">{name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
             ) : (
-              list.map((e, i) => {
-                const roleish =
-                  (e as WorldCharacter).role ?? (e as WorldPlace).type ?? "";
+              <div className="world-scan-empty-full">
+                No new entities found in {scanMode === "chapter" ? "this chapter" : "the novel"}.
+              </div>
+            )}
+            <div className="world-scan-actions">
+              <button
+                className="world-scan-register-btn"
+                onClick={doRegister}
+                disabled={totalScanSelected === 0}
+              >
+                Register {totalScanSelected > 0 ? `${totalScanSelected} selected` : ""}
+              </button>
+              <button className="world-scan-back-btn" onClick={() => setScanPhase("pick")}>
+                Back
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Normal view ── */}
+        {scanPhase === null && (
+          <>
+            <div className="world-tabs" style={{ position: "relative", zIndex: 1 }}>
+              {(Object.keys(TAB_META) as Tab[]).map((t) => {
+                const { label, Icon } = TAB_META[t];
+                const count = (wd[t] as Entity[]).length;
                 return (
-                <button
-                  key={i}
-                  className={`world-row ${selected === i ? "active" : ""}`}
-                  onClick={() => setSelected(i)}
-                >
-                  <span className="world-row-name">
-                    {e.name || <em className="world-row-blank">Untitled</em>}
-                  </span>
-                  {roleish && <span className="world-row-role">{roleish}</span>}
-                  <span
-                    className="world-row-delete"
-                    onClick={(ev) => { ev.stopPropagation(); handleDelete(i); }}
-                    role="button"
-                    aria-label="Delete"
+                  <button
+                    key={t}
+                    className={`world-tab ${tab === t ? "world-tab--active" : ""}`}
+                    onClick={() => { setTab(t); setSelected(null); }}
                   >
-                    <span className="icon-btn" style={{ width: 26, height: 26 }}>
-                      <TrashIcon size={14} />
-                    </span>
-                  </span>
-                </button>
+                    <Icon size={14} />
+                    <span>{label}</span>
+                    {count > 0 && <span className="world-tab-count">{count}</span>}
+                  </button>
                 );
-              })
-            )}
-            <button className="world-add-btn" onClick={handleAdd}>
-              <PlusIcon size={14} />
-              <span>Add {TAB_META[tab].label.slice(0, -1).toLowerCase()}</span>
-            </button>
-          </div>
+              })}
+            </div>
 
-          <div className="world-edit">
-            {current ? (
-              <EntityForm
-                entity={current}
-                roleLabel={TAB_META[tab].roleLabel}
-                onPatch={patchCurrent}
-                onRename={onRename}
-                tabKey={`${tab}:${selected}`}
-                isCharacter={tab === "characters"}
-              />
-            ) : (
-              <div className="world-edit-empty">
-                {list.length === 0
-                  ? `Add a ${TAB_META[tab].label.slice(0, -1).toLowerCase()} to begin.`
-                  : "Select an entry to edit."}
+            <div className="world-body" style={{ position: "relative", zIndex: 1 }}>
+              <div className="world-list">
+                {list.length === 0 ? (
+                  <div className="world-list-empty">
+                    No {TAB_META[tab].label.toLowerCase()} yet
+                  </div>
+                ) : (
+                  list.map((e, i) => {
+                    const roleish =
+                      (e as WorldCharacter).role ?? (e as WorldPlace).type ?? "";
+                    return (
+                      <button
+                        key={i}
+                        className={`world-row ${selected === i ? "active" : ""}`}
+                        onClick={() => setSelected(i)}
+                      >
+                        <span className="world-row-name">
+                          {e.name || <em className="world-row-blank">Untitled</em>}
+                        </span>
+                        {roleish && <span className="world-row-role">{roleish}</span>}
+                        <span
+                          className="world-row-delete"
+                          onClick={(ev) => { ev.stopPropagation(); handleDelete(i); }}
+                          role="button"
+                          aria-label="Delete"
+                        >
+                          <span className="icon-btn" style={{ width: 26, height: 26 }}>
+                            <TrashIcon size={14} />
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+                <button className="world-add-btn" onClick={handleAdd}>
+                  <PlusIcon size={14} />
+                  <span>Add {TAB_META[tab].label.slice(0, -1).toLowerCase()}</span>
+                </button>
               </div>
-            )}
-          </div>
-        </div>
+
+              <div className="world-edit">
+                {current ? (
+                  <EntityForm
+                    entity={current}
+                    roleLabel={TAB_META[tab].roleLabel}
+                    onPatch={patchCurrent}
+                    onRename={onRename}
+                    tabKey={`${tab}:${selected}`}
+                    isCharacter={tab === "characters"}
+                  />
+                ) : (
+                  <div className="world-edit-empty">
+                    {list.length === 0
+                      ? `Add a ${TAB_META[tab].label.slice(0, -1).toLowerCase()} to begin.`
+                      : "Select an entry to edit."}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -219,9 +479,7 @@ function EntityForm({
   roleLabel: string;
   onPatch: (patch: Partial<Entity>) => void;
   onRename: (oldName: string, newName: string, scope: "chapter" | "book") => void;
-  /** Stable key for the (tab, selectedIndex) pair — re-captures originalName on switch. */
   tabKey: string;
-  /** Only characters get the rename buttons; places/factions are address-only. */
   isCharacter: boolean;
 }) {
   const aliasesText = (entity.aliases ?? []).join(", ");
@@ -232,8 +490,6 @@ function EntityForm({
     else onPatch({ type: v } as Partial<Entity>);
   };
 
-  // Capture the entity's name when this entry was first opened. The rename
-  // buttons appear when the form value drifts away from this baseline.
   const originalNameRef = useRef(entity.name);
   const lastKeyRef = useRef(tabKey);
   if (lastKeyRef.current !== tabKey) {

@@ -1,4 +1,4 @@
-import type { ReactNode, CSSProperties } from "react";
+import { memo, useMemo, type ReactNode, type CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
 import { findActionSentences, attributeActor, type ActionSpan } from "../lib/action-detect";
@@ -141,6 +141,12 @@ function renderInline(
       );
     } else {
       // grammar
+      // Style-kind spans (filter/passive/adverb/wordy/cliche) need pointer-events
+      // so CSS :hover fires to reveal their ghost text. mousedown is cancelled to
+      // keep textarea focus; click refocuses in case the browser moved it anyway.
+      const isStyleKind =
+        d.gkind === "filter" || d.gkind === "passive" || d.gkind === "adverb" ||
+        d.gkind === "wordy" || d.gkind === "cliche";
       parts.push(
         <span
           key={`${keyPrefix}-g${i++}`}
@@ -148,6 +154,13 @@ function renderInline(
           data-suggestion={d.suggestion}
           data-kind={d.gkind}
           style={baseStyle}
+          onMouseDown={isStyleKind ? (e) => e.preventDefault() : undefined}
+          onClick={isStyleKind ? (e) => {
+            (e.currentTarget as HTMLElement)
+              .closest(".editor-wrap")
+              ?.querySelector<HTMLTextAreaElement>("textarea")
+              ?.focus();
+          } : undefined}
         >
           {text.slice(d.start, d.end)}
         </span>,
@@ -292,173 +305,173 @@ interface Props {
   onEntityClick?: (name: string, anchor: DOMRect) => void;
 }
 
-export function HighlightLayer({
+function HighlightLayerImpl({
   content, paragraphs, speechResults, knownNames, visible = true,
   grammarSuggestions = [], onEntityClick,
 }: Props) {
-  if (!paragraphs.length || !content) return null;
+  // Building the highlight nodes is the heavy bit (string indexOf per
+  // paragraph + per-segment span construction + grammar slicing). Memoising
+  // here means the work runs only when content/paragraphs/grammar actually
+  // change, not on every parent re-render — and combined with React.memo
+  // and the editor's `useDeferredValue` on content it runs at low priority.
+  const nodes = useMemo<ReactNode[]>(() => {
+    if (!paragraphs.length || !content) return [];
 
-  const positions = mapPositions(content, paragraphs);
+    const positions = mapPositions(content, paragraphs);
+    const out: ReactNode[] = [];
+    let cursor = 0;
 
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-
-  const speakerSet = new Set<string>();
-  for (const r of speechResults) {
-    for (const s of r?.segments ?? []) {
-      if (s.speaker) speakerSet.add(s.speaker);
+    const speakerSet = new Set<string>();
+    for (const r of speechResults) {
+      for (const s of r?.segments ?? []) {
+        if (s.speaker) speakerSet.add(s.speaker);
+      }
     }
-  }
-  for (const n of knownNames ?? []) speakerSet.add(n);
-  const speakerNames = [...speakerSet];
+    for (const n of knownNames ?? []) speakerSet.add(n);
+    const speakerNames = [...speakerSet];
 
-  const palette = buildSpeakerPalette(speakerNames);
+    const palette = buildSpeakerPalette(speakerNames);
 
-  // Carrying speaker: the most recent attributed speaker (confidence ≥ 0.65).
-  // Persists across paragraph boundaries — "X said. X walked." in two paragraphs
-  // still attributes the second action to X. Reset only when a new speaker
-  // appears with sufficient confidence.
-  let carryingSpeaker: string | null = null;
+    // Carrying speaker: the most recent attributed speaker (confidence ≥ 0.65).
+    let carryingSpeaker: string | null = null;
 
-  // Compute the box-shadow colour to use for an action span at [as, ae].
-  // 1) Entity name explicitly inside the action text wins.
-  // 2) Otherwise current carryingSpeaker.
-  // 3) Otherwise null (CSS falls back to neutral grey).
-  const actorColor = (paraText: string, as: number, ae: number): string | null => {
-    const actor = attributeActor(paraText.slice(as, ae), speakerNames, carryingSpeaker);
-    return actor ? getSpeakerColor(palette, actor).text : null;
-  };
+    const actorColor = (paraText: string, as: number, ae: number): string | null => {
+      const actor = attributeActor(paraText.slice(as, ae), speakerNames, carryingSpeaker);
+      return actor ? getSpeakerColor(palette, actor).text : null;
+    };
 
-  for (let pi = 0; pi < paragraphs.length; pi++) {
-    const pos       = positions[pi];
-    const paraStart = pos.start;
-    const paraEnd   = pos.end;
-    const para      = paragraphs[pi];
-    const segs      = speechResults[pi]?.segments ?? [];
-    const meta      = speechResults[pi]?.meta;
+    for (let pi = 0; pi < paragraphs.length; pi++) {
+      const pos       = positions[pi];
+      const paraStart = pos.start;
+      const paraEnd   = pos.end;
+      const para      = paragraphs[pi];
+      const segs      = speechResults[pi]?.segments ?? [];
+      const meta      = speechResults[pi]?.meta;
 
-    // Gap (newlines / freshly-typed text) before this paragraph's slot.
-    if (paraStart > cursor) {
-      const gapText = content.slice(cursor, paraStart);
-      const grammarGap = sliceGrammar(grammarSuggestions, cursor, paraStart);
-      nodes.push(
-        <span key={`gap${pi}`}>
-          {renderInline(gapText, speakerNames, palette, { color: BASE_COLOR },
-            grammarGap, `gap${pi}`, onEntityClick)}
-        </span>,
-      );
-    }
-
-    if (!pos.matched) {
-      // Stale paragraph: render the corresponding slice of CURRENT content as
-      // plain text. Other paragraphs keep their colours.
-      const sliceText = content.slice(paraStart, paraEnd);
-      const grammarSlice = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
-      nodes.push(
-        <span key={`para${pi}-stale`}>
-          {renderInline(sliceText, speakerNames, palette, { color: BASE_COLOR },
-            grammarSlice, `para${pi}-stale`, onEntityClick)}
-        </span>,
-      );
-      cursor = paraEnd;
-      continue;
-    }
-
-    // Action sentences are detected paragraph-locally (offsets relative to para).
-    const paraActions = findActionSentences(para);
-    // Grammar for THIS paragraph, shifted to para-relative.
-    const paraGrammar = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
-
-    const paraNodes: ReactNode[] = [];
-
-    const sorted = [...segs].sort((a, b) => a.start - b.start);
-    let pc = 0;
-
-    for (const seg of sorted) {
-      // Non-speech gap before this segment — eligible for action wrapping.
-      if (seg.start > pc) {
-        const gapText = para.slice(pc, seg.start);
-        const gapActions = clipSpans(paraActions, pc, seg.start);
-        const gapGrammar = clipGrammar(paraGrammar, pc, seg.start);
-        // Compute actor colour per action span using current carryingSpeaker
-        // (entity-in-text overrides). Para-relative offsets need shifting back.
-        const gapColors = gapActions.map(a =>
-          actorColor(para, a.start + pc, a.end + pc)
-        );
-        paraNodes.push(
-          <span key={`bp${seg.start}`}>
-            {renderActionable(gapText, gapActions, gapColors, speakerNames, palette,
-              { color: BASE_COLOR }, gapGrammar, `bp${pi}-${seg.start}`, onEntityClick)}
+      // Gap (newlines / freshly-typed text) before this paragraph's slot.
+      if (paraStart > cursor) {
+        const gapText = content.slice(cursor, paraStart);
+        const grammarGap = sliceGrammar(grammarSuggestions, cursor, paraStart);
+        out.push(
+          <span key={`gap${pi}`}>
+            {renderInline(gapText, speakerNames, palette, { color: BASE_COLOR },
+              grammarGap, `gap${pi}`, onEntityClick)}
           </span>,
         );
       }
-      // Update carrying speaker BEFORE rendering the speech segment so any
-      // action in the next gap can attribute to this speaker.
-      if (seg.type === "speech" && seg.speaker && seg.confidence >= 0.65) {
-        carryingSpeaker = seg.speaker;
+
+      if (!pos.matched) {
+        // Stale paragraph: render the corresponding slice of CURRENT content as
+        // plain text. Other paragraphs keep their colours.
+        const sliceText = content.slice(paraStart, paraEnd);
+        const grammarSlice = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
+        out.push(
+          <span key={`para${pi}-stale`}>
+            {renderInline(sliceText, speakerNames, palette, { color: BASE_COLOR },
+              grammarSlice, `para${pi}-stale`, onEntityClick)}
+          </span>,
+        );
+        cursor = paraEnd;
+        continue;
       }
-      const color =
-        seg.type === "narrative"
-          ? NARRATIVE_COLOR
-          : seg.speaker
-          ? getSpeakerColor(palette, seg.speaker).text
-          : ACTION_TEXT;
 
-      const segText = para.slice(seg.start, seg.end);
-      const segStyle: CSSProperties = {
-        color,
-        fontStyle: seg.type === "narrative" ? "italic" : undefined,
-      };
-      const segGrammar = clipGrammar(paraGrammar, seg.start, seg.end);
-      // Speech segments don't get action wrapping — dialogue isn't action.
-      paraNodes.push(
-        <span key={`sg${seg.start}`}>
-          {renderInline(segText, speakerNames, palette, segStyle,
-            segGrammar, `sg${pi}-${seg.start}`, onEntityClick)}
-        </span>,
+      // Action sentences are detected paragraph-locally (offsets relative to para).
+      const paraActions = findActionSentences(para);
+      // Grammar for THIS paragraph, shifted to para-relative.
+      const paraGrammar = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
+
+      const paraNodes: ReactNode[] = [];
+
+      const sorted = [...segs].sort((a, b) => a.start - b.start);
+      let pc = 0;
+
+      for (const seg of sorted) {
+        // Non-speech gap before this segment — eligible for action wrapping.
+        if (seg.start > pc) {
+          const gapText = para.slice(pc, seg.start);
+          const gapActions = clipSpans(paraActions, pc, seg.start);
+          const gapGrammar = clipGrammar(paraGrammar, pc, seg.start);
+          const gapColors = gapActions.map((a: ActionSpan) =>
+            actorColor(para, a.start + pc, a.end + pc)
+          );
+          paraNodes.push(
+            <span key={`bp${seg.start}`}>
+              {renderActionable(gapText, gapActions, gapColors, speakerNames, palette,
+                { color: BASE_COLOR }, gapGrammar, `bp${pi}-${seg.start}`, onEntityClick)}
+            </span>,
+          );
+        }
+        // Update carrying speaker BEFORE rendering the speech segment so any
+        // action in the next gap can attribute to this speaker.
+        if (seg.type === "speech" && seg.speaker && seg.confidence >= 0.65) {
+          carryingSpeaker = seg.speaker;
+        }
+        const color =
+          seg.type === "narrative"
+            ? NARRATIVE_COLOR
+            : seg.speaker
+            ? getSpeakerColor(palette, seg.speaker).text
+            : ACTION_TEXT;
+
+        const segText = para.slice(seg.start, seg.end);
+        const segStyle: CSSProperties = {
+          color,
+          fontStyle: seg.type === "narrative" ? "italic" : undefined,
+        };
+        const segGrammar = clipGrammar(paraGrammar, seg.start, seg.end);
+        paraNodes.push(
+          <span key={`sg${seg.start}`}>
+            {renderInline(segText, speakerNames, palette, segStyle,
+              segGrammar, `sg${pi}-${seg.start}`, onEntityClick)}
+          </span>,
+        );
+        pc = seg.end;
+      }
+
+      if (pc < para.length) {
+        const tailText = para.slice(pc);
+        const tailActions = clipSpans(paraActions, pc, para.length);
+        const tailGrammar = clipGrammar(paraGrammar, pc, para.length);
+        const tailColors = tailActions.map((a: ActionSpan) =>
+          actorColor(para, a.start + pc, a.end + pc)
+        );
+        paraNodes.push(
+          <span key="tail">
+            {renderActionable(tailText, tailActions, tailColors, speakerNames, palette,
+              { color: BASE_COLOR }, tailGrammar, `tail${pi}`, onEntityClick)}
+          </span>,
+        );
+      }
+
+      const tension = meta?.sceneTension ?? "calm";
+      out.push(
+        <span key={`para${pi}`}>
+          {meta?.sceneStart && meta.sceneLabel && (
+            <span aria-hidden="true" style={SCENE_ANCHOR}>
+              <span style={sceneTagStyle(tension)}>· {meta.sceneLabel}</span>
+            </span>
+          )}
+          {paraNodes}
+        </span>
       );
-      pc = seg.end;
+      cursor = paraEnd;
     }
 
-    if (pc < para.length) {
-      const tailText = para.slice(pc);
-      const tailActions = clipSpans(paraActions, pc, para.length);
-      const tailGrammar = clipGrammar(paraGrammar, pc, para.length);
-      const tailColors = tailActions.map(a =>
-        actorColor(para, a.start + pc, a.end + pc)
-      );
-      paraNodes.push(
-        <span key="tail">
-          {renderActionable(tailText, tailActions, tailColors, speakerNames, palette,
-            { color: BASE_COLOR }, tailGrammar, `tail${pi}`, onEntityClick)}
+    if (cursor < content.length) {
+      const trailText = content.slice(cursor);
+      const trailGrammar = sliceGrammar(grammarSuggestions, cursor, content.length);
+      out.push(
+        <span key="trail">
+          {renderInline(trailText, speakerNames, palette, { color: BASE_COLOR },
+            trailGrammar, "trail", onEntityClick)}
         </span>,
       );
     }
 
-    const tension = meta?.sceneTension ?? "calm";
-    nodes.push(
-      <span key={`para${pi}`}>
-        {meta?.sceneStart && meta.sceneLabel && (
-          <span aria-hidden="true" style={SCENE_ANCHOR}>
-            <span style={sceneTagStyle(tension)}>· {meta.sceneLabel}</span>
-          </span>
-        )}
-        {paraNodes}
-      </span>
-    );
-    cursor = paraEnd;
-  }
+    return out;
+  }, [content, paragraphs, speechResults, knownNames, grammarSuggestions, onEntityClick]);
 
-  if (cursor < content.length) {
-    const trailText = content.slice(cursor);
-    const trailGrammar = sliceGrammar(grammarSuggestions, cursor, content.length);
-    nodes.push(
-      <span key="trail">
-        {renderInline(trailText, speakerNames, palette, { color: BASE_COLOR },
-          trailGrammar, "trail", onEntityClick)}
-      </span>,
-    );
-  }
+  if (nodes.length === 0) return null;
 
   return (
     <div
@@ -470,6 +483,8 @@ export function HighlightLayer({
     </div>
   );
 }
+
+export const HighlightLayer = memo(HighlightLayerImpl);
 
 // Clip an ActionSpan list to a [from, to] window, returning ranges
 // shifted to be relative to `from`. Spans that don't fully fit are dropped.
