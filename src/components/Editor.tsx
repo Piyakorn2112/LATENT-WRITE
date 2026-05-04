@@ -55,9 +55,35 @@ export function Editor({
   // Both `content` and `grammarSuggestions` need to come from the same
   // source so positions and ranges stay aligned.
   const deferredContent = useDeferredValue(chapter.content);
+
+  // Build context.speechSpans from the speech detector so the grammar checker
+  // can suppress style hints (filter, passive, adverb, wordy, cliché) inside
+  // dialogue — authors stylise speech intentionally and we don't want false
+  // positives there. Hard errors (spelling, agreement, capital) still fire
+  // inside dialogue. Coordinates are absolute over `deferredContent`, derived
+  // by locating each paragraph's offset and adding each speech segment's
+  // paragraph-relative range.
+  const speechSpans = useMemo(() => {
+    if (!analysisResult) return undefined;
+    const spans: Array<{ start: number; end: number }> = [];
+    let from = 0;
+    for (let i = 0; i < analysisResult.paragraphs.length; i++) {
+      const para = analysisResult.paragraphs[i];
+      const idx = deferredContent.indexOf(para, from);
+      if (idx < 0) continue;
+      const segs = analysisResult.speechResults[i]?.segments ?? [];
+      for (const s of segs) {
+        if (s.type !== "speech") continue;
+        spans.push({ start: idx + s.start, end: idx + s.end });
+      }
+      from = idx + para.length;
+    }
+    return spans.length ? spans : undefined;
+  }, [analysisResult, deferredContent]);
+
   const grammarSuggestions = useMemo(
-    () => checkGrammar(deferredContent),
-    [deferredContent],
+    () => checkGrammar(deferredContent, { context: { speechSpans } }),
+    [deferredContent, speechSpans],
   );
 
   return (

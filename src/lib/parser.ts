@@ -1,7 +1,7 @@
 import type { Novel, Chapter, NovelMeta, WorldData } from "../types";
 import { emptyWorldData } from "./world-data";
 
-const uid = () => Math.random().toString(36).slice(2, 10);
+export const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function parseNovel(raw: string): Novel {
   const lines = raw.split("\n");

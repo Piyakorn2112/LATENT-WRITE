@@ -20,6 +20,9 @@ import {
   User as _Un,
   FileText as _Ft,
   Minus as _Mn,
+  Image as _Im,
+  Type as _Ty,
+  Frame as _Fr,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -44,3 +47,6 @@ export const FlagIcon      = wrap(_Fl);
 export const UserIcon      = wrap(_Un);
 export const FileTextIcon  = wrap(_Ft);
 export const MinusIcon     = wrap(_Mn);
+export const ImageIcon     = wrap(_Im);
+export const TypeIcon      = wrap(_Ty);
+export const FrameIcon     = wrap(_Fr);

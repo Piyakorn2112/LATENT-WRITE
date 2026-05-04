@@ -16,10 +16,10 @@ import type { CSSProperties } from "react";
 //     collapsing to ~0 by strip 4. This is what "extend the effect
 //     further in" reads as visually: a longer travel distance for the
 //     blur to fade out across.
-const STRIP_COUNT = 6;
-const MAX_BLUR    = 8;
+const STRIP_COUNT = 3;
+const MAX_BLUR    = 3;
 const EXP_BASE    = 1.4;
-const OVERLAP     = -100;
+const OVERLAP     = -220;
 
 // Mask each (non-rightmost) strip so it fades in on its right edge
 // (where it overlaps the strip with stronger blur) and fades out on

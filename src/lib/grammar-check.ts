@@ -1,653 +1,954 @@
-// Rule-based grammar + style checker.
-//
-// Detects common writing errors and emits ghost-text suggestions. NOT a full
-// NLP system — just a pragmatic, large list of frequent confusables, typos,
-// agreement/article patterns, plus prose-style flags (filter words,
-// adverb-in-attribution, body-language clichés, wordy phrases, etc.). The
-// HighlightLayer renders each suggestion as small ghost text floating
-// above the original, no red squiggles.
-//
-// Design principles:
-// • Conservative on context-sensitive rules — we'd rather miss a real error
-//   than constantly nag a writer with false positives. Every confusable is
-//   gated on adjacent tokens that disambiguate the substitution.
-// • Style suggestions ("filter", "wordy", "cliche") use a different `kind`
-//   so the UI can distinguish them from outright errors and let the writer
-//   keep them when intentional.
-// • The whole pipeline is one regex-sweep per rule; cheap enough to run on
-//   every keystroke even on long chapters.
+/**
+ * grammar-checker.ts
+ *
+ * Conservative grammar, spelling, and minimal style checker for prose tools.
+ * The goal is to flag clear mistakes while avoiding false positives in normal
+ * English prose.
+ */
 
 export interface GrammarSuggestion {
-  /** Absolute start offset in input text. */
   start: number;
-  /** Absolute end offset (exclusive). */
   end: number;
-  /** The original wrong text exactly as it appears. */
   original: string;
-  /** The suggested replacement (will be displayed as ghost text). */
   suggestion: string;
-  /** Short label classifying the type of issue. */
   kind:
-    | "confusable"
     | "spelling"
-    | "spacing"
-    | "double"
-    | "punctuation"
     | "agreement"
     | "article"
+    | "spacing"
+    | "punctuation"
     | "capital"
-    | "wordy"
     | "filter"
     | "passive"
     | "adverb"
-    | "cliche";
+    | "wordy"
+    | "cliche"
+    | "double"
+    | "confusable";
+  severity: "error" | "warning" | "suggestion";
+}
+
+/** Paragraph-level context for context-aware checking — when present, the
+ *  checker can soften/skip rules inside dialogue speech segments where
+ *  authors intentionally use colloquial or dialect speech. Coordinates are
+ *  relative to the FULL text passed to checkGrammar. */
+export interface GrammarContext {
+  /** Half-open spans of dialogue (intra-quote) ranges. Hard agreement errors
+   *  still fire here (so "they was" still flags), but stylistic rules
+   *  (filter, passive, adverb, wordy, cliche) are suppressed inside speech. */
+  speechSpans?: Array<{ start: number; end: number }>;
+}
+
+export interface CheckOptions {
+  /** When false, omits low-importance style suggestions (filter words,
+   *  passive voice, attribution adverbs, wordy phrases, clichés). Default
+   *  is true so the paragraph renderer can show both tiers (high-importance
+   *  ghost text always, low-importance only on hover) — see HighlightLayer
+   *  for the visual distinction. */
+  style?: boolean;
+  /** Optional context from the speech / action detect pipelines, used to
+   *  reduce false positives inside dialogue. */
+  context?: GrammarContext;
+}
+
+interface RuleResult {
+  suggestion: string;
+  kind: GrammarSuggestion["kind"];
+  severity: GrammarSuggestion["severity"];
 }
 
 interface Rule {
-  pattern: RegExp;        // Must use the global flag.
-  build: (m: RegExpExecArray) => { suggestion: string; kind: GrammarSuggestion["kind"] } | null;
+  pattern: RegExp;
+  build: (m: RegExpExecArray) => RuleResult | null;
 }
 
-// Helper — preserves the leading capital of `original` on the replacement.
 function matchCase(original: string, replacement: string): string {
-  if (!original) return replacement;
-  if (original[0] === original[0].toUpperCase() && original[0] !== original[0].toLowerCase()) {
+  if (!original || !replacement) return replacement;
+  const first = original[0];
+  if (first >= "A" && first <= "Z") {
     return replacement[0].toUpperCase() + replacement.slice(1);
   }
   return replacement;
 }
 
-// ─── Vowel-sound test for a/an article rule ─────────────────────────────
-//
-// English articles attach to the *sound* of the next word, not its spelling.
-// We approximate with an opening-letter heuristic + a list of exceptions
-// where the spelling lies (silent h, vowel-letter words that begin with a
-// consonant sound, etc.). This is the same technique used by Hemingway and
-// LanguageTool for an "a → an" warning that's right ~95% of the time on
-// natural prose.
-
 const VOWEL_SOUND_EXCEPTIONS = new Set([
-  // Words that BEGIN with a consonant sound but are spelled with a vowel.
-  "one", "once", "ouija", "useful", "user", "using", "uniform", "unit",
-  "united", "universal", "university", "ubiquitous", "utopia", "european",
-  "ewe", "ewer", "u", "uno",
+  "one",
+  "once",
+  "ouija",
+  "useful",
+  "user",
+  "users",
+  "using",
+  "usual",
+  "uniform",
+  "unit",
+  "united",
+  "universal",
+  "university",
+  "unique",
+  "unity",
+  "ubiquitous",
+  "utopia",
+  "ukulele",
+  "european",
+  "euphemism",
+  "eucalyptus",
+  "ewe",
+  "ewer",
+  "u",
+  "url",
 ]);
-const SILENT_H_PREFIXES = [
-  "honor", "honour", "honest", "hour", "heir", "herb", "homage",
+
+const SILENT_H_WORDS = [
+  "honor",
+  "honour",
+  "honest",
+  "hour",
+  "heir",
+  "homage",
 ];
 
-function startsWithVowelSound(word: string): boolean {
+function beginsWithVowelSound(word: string): boolean {
   if (!word) return false;
+
+  if (/^[A-Z]-/.test(word)) {
+    return "AEFHILMNORSX".includes(word[0]);
+  }
+
   const lower = word.toLowerCase();
-  if (SILENT_H_PREFIXES.some((p) => lower.startsWith(p))) return true;
+  if (/^[A-Z]{2,}$/.test(word)) {
+    return "AEFHILMNORSX".includes(word[0]);
+  }
+
+  if (SILENT_H_WORDS.some((p) => lower.startsWith(p))) return true;
   if (VOWEL_SOUND_EXCEPTIONS.has(lower)) return false;
-  // Strip leading punctuation
-  const c = lower.replace(/^[^a-z]+/, "")[0];
-  return "aeiou".includes(c);
+
+  const first = lower.replace(/^[^a-z]+/, "")[0];
+  return !!first && "aeiou".includes(first);
 }
 
-// ─── Misspellings: a curated list of single-correction typos ─────────────
+type SpellEntry = [RegExp, string, boolean];
+
+const SPELL_ENTRIES: SpellEntry[] = [
+  [/\bteh\b/g, "the", false],
+  [/\btehn\b/gi, "then", false],
+  [/\bwierd\b/gi, "weird", false],
+  [/\bthier\b/gi, "their", false],
+  [/\bnoone\b/gi, "no one", false],
+  [/\balot\b/gi, "a lot", false],
+  [/\btruely\b/gi, "truly", false],
+  [/\buntill\b/gi, "until", false],
+  [/\bbegining\b/gi, "beginning", false],
+  [/\bcomming\b/gi, "coming", false],
+  [/\boccured\b/gi, "occurred", false],
+  [/\boccurence(s)?\b/gi, "occurrence", true],
+  [/\boccurrance(s)?\b/gi, "occurrence", true],
+  [/\boccuring\b/gi, "occurring", false],
+  [/\bacheiv(e|ed|ing|ment|ments|able|ably|s)?\b/gi, "achiev", true],
+  [/\breciev(e|ed|s|ing|er|ers)?\b/gi, "receiv", true],
+  [/\bbeleiv(e|ed|s|ing|er|ers)?\b/gi, "believ", true],
+  [/\bdefinat(e|ely|eness)?\b/gi, "definit", true],
+  [/\bseperat(e|ed|es|ing|ely|ions?)?\b/gi, "separat", true],
+  [/\brecomend(ed|s|ing|ation|ations)?\b/gi, "recommend", true],
+  [/\bdisapear(ed|s|ing|ance|ances)?\b/gi, "disappear", true],
+  [/\bdisapoint(ed|s|ing|ment|ments)?\b/gi, "disappoint", true],
+  [/\bdissapoint(ed|s|ing|ment|ments)?\b/gi, "disappoint", true],
+  [/\bembarass(ed|es|ing|ment|ments)?\b/gi, "embarrass", true],
+  [/\bharrass(ed|es|ing|ment|ments)?\b/gi, "harass", true],
+  [/\baccomodat(e|ed|ing|ion|ions)?\b/gi, "accommodat", true],
+  [/\bacommodat(e|ed|ing|ion|ions)?\b/gi, "accommodat", true],
+  [/\baccidentaly\b/gi, "accidentally", false],
+  [/\bagressive\b/gi, "aggressive", false],
+  [/\bapparant\b/gi, "apparent", false],
+  [/\bbecuase\b/gi, "because", false],
+  [/\bbrocolli\b/gi, "broccoli", false],
+  [/\bcamoflage\b/gi, "camouflage", false],
+  [/\bcalender\b/gi, "calendar", false],
+  [/\bcemetary\b/gi, "cemetery", false],
+  [/\bcommitee\b/gi, "committee", false],
+  [/\bcompletly\b/gi, "completely", false],
+  [/\bconcious\b/gi, "conscious", false],
+  [/\bdaugher\b/gi, "daughter", false],
+  [/\bdefinately\b/gi, "definitely", false],
+  [/\bdiscribe\b/gi, "describe", false],
+  [/\bdrunkeness\b/gi, "drunkenness", false],
+  [/\bequiptment\b/gi, "equipment", false],
+  [/\benviroment(al|ally)?\b/gi, "environment", true],
+  [/\bexistance\b/gi, "existence", false],
+  [/\bexagerat(e|ed|ing|ion|ions)?\b/gi, "exaggerat", true],
+  [/\bexagerrat(e|ed|ing|ion|ions)?\b/gi, "exaggerat", true],
+  [/\bfourty\b/gi, "forty", false],
+  [/\bfreind(s|ly|ship|ships)?\b/gi, "friend", true],
+  [/\bforiegn\b/gi, "foreign", false],
+  [/\bgaurd(ed|s|ing)?\b/gi, "guard", true],
+  [/\bgoverment\b/gi, "government", false],
+  [/\bgrammer\b/gi, "grammar", false],
+  [/\bhieght\b/gi, "height", false],
+  [/\bhygeine\b/gi, "hygiene", false],
+  [/\bimediat(e|ely|ly)?\b/gi, "immediat", true],
+  [/\bimmediat(e|ely|ly)?\b/gi, "immediat", true],
+  [/\binconvient\b/gi, "inconvenient", false],
+  [/\bindependant\b/gi, "independent", false],
+  [/\bintresting\b/gi, "interesting", false],
+  [/\bjewlry\b/gi, "jewelry", false],
+  [/\bknowlege\b/gi, "knowledge", false],
+  [/\blibary\b/gi, "library", false],
+  [/\blightening\b/gi, "lightning", false],
+  [/\bmaintence\b/gi, "maintenance", false],
+  [/\bmaintainance\b/gi, "maintenance", false],
+  [/\bmispell(ed|s|ing)?\b/gi, "misspell", true],
+  [/\bneccessary\b/gi, "necessary", false],
+  [/\bnecesary\b/gi, "necessary", false],
+  [/\bnoticable\b/gi, "noticeable", false],
+  [/\bocasion(ally|al|s)?\b/gi, "occasion", true],
+  [/\bperminent\b/gi, "permanent", false],
+  [/\bpersistant\b/gi, "persistent", false],
+  [/\bposession\b/gi, "possession", false],
+  [/\bpriviledge(d|s)?\b/gi, "privilege", true],
+  [/\bproffessional\b/gi, "professional", false],
+  [/\bpronounciation\b/gi, "pronunciation", false],
+  [/\bquestionaire\b/gi, "questionnaire", false],
+  [/\brefered\b/gi, "referred", false],
+  [/\brefering\b/gi, "referring", false],
+  [/\brelevent\b/gi, "relevant", false],
+  [/\brember(ed|ing|s)?\b/gi, "remember", true],
+  [/\brememberance\b/gi, "remembrance", false],
+  [/\brestaraunt\b/gi, "restaurant", false],
+  [/\brhythym\b/gi, "rhythm", false],
+  [/\bsacrafice(d|s|ing)?\b/gi, "sacrific", true],
+  [/\bsargent\b/gi, "sergeant", false],
+  [/\bseige\b/gi, "siege", false],
+  [/\bsincerly\b/gi, "sincerely", false],
+  [/\bsmoe\b/gi, "some", false],
+  [/\bsouvenier\b/gi, "souvenir", false],
+  [/\bsubtley\b/gi, "subtly", false],
+  [/\bsucceful\b/gi, "successful", false],
+  [/\bsucessful\b/gi, "successful", false],
+  [/\bsuccessfull\b/gi, "successful", false],
+  [/\bsucess\b/gi, "success", false],
+  [/\bsuprise(d|s|ingly)?\b/gi, "surprise", true],
+  [/\btomarrow\b/gi, "tomorrow", false],
+  [/\btomorow\b/gi, "tomorrow", false],
+  [/\btommorow\b/gi, "tomorrow", false],
+  [/\btruley\b/gi, "truly", false],
+  [/\btwelth\b/gi, "twelfth", false],
+  [/\bunfortunatly\b/gi, "unfortunately", false],
+  [/\busefull\b/gi, "useful", false],
+  [/\bvacum\b/gi, "vacuum", false],
+  [/\bwhereever\b/gi, "wherever", false],
+  [/\bwich\b/gi, "which", false],
+  [/\bwithdrawl\b/gi, "withdrawal", false],
+  [/\bwriteable\b/gi, "writable", false],
+  [/\byeild(ed|s|ing)?\b/gi, "yield", true],
+  [/\bpublically\b/gi, "publicly", false],
+  [/\bparrallel\b/gi, "parallel", false],
+  [/\bpeice(s)?\b/gi, "piece", true],
+  [/\bstrenght\b/gi, "strength", false],
+  [/\bthier\b/gi, "their", false],
+
+  // Common doubled-consonant misses on -ed / -ing past forms. Pattern is:
+  // short stressed syllable ending in single consonant should double before
+  // -ed / -ing. Listed explicitly so false positives stay at zero (e.g.
+  // "sloped" is legit and intentionally not in this list).
+  [/\bstoped\b/gi, "stopped", false],
+  [/\bstoping\b/gi, "stopping", false],
+  [/\bdroped\b/gi, "dropped", false],
+  [/\bdroping\b/gi, "dropping", false],
+  [/\bplaned\b/gi, "planned", false],
+  [/\bplaning\b/gi, "planning", false],
+  [/\brunned\b/gi, "ran", false],
+  [/\bgriped\b/gi, "gripped", false],
+  [/\bgriping\b/gi, "gripping", false],
+  [/\bswiming\b/gi, "swimming", false],
+  [/\bbeging\b/gi, "begging", false],
+  [/\bcuted\b/gi, "cut", false],
+  [/\bputed\b/gi, "put", false],
+];
+
+function makeSpellRules(): Rule[] {
+  return SPELL_ENTRIES.map(([pattern, fix, hasSuffix]) => ({
+    pattern,
+    build(m): RuleResult | null {
+      const suffix = hasSuffix ? (m[1] ?? "") : "";
+      const suggestion = matchCase(m[0], fix + suffix);
+      if (suggestion === m[0]) return null;
+      return {
+        suggestion,
+        kind: "spelling",
+        severity: "error",
+      };
+    },
+  }));
+}
+
+function makeAuxRules(
+  auxPattern: string,
+  fixes: Array<[string, string]>,
+  severity: GrammarSuggestion["severity"] = "error",
+): Rule[] {
+  return fixes.map(([wrong, right]) => ({
+    pattern: new RegExp(`\\b(${auxPattern})\\s+${wrong}\\b`, "gi"),
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} ${right}`),
+      kind: "agreement",
+      severity,
+    }),
+  }));
+}
+
+function makeDidRules(fixes: Array<[string, string]>): Rule[] {
+  return fixes.map(([wrong, right]) => ({
+    pattern: new RegExp(`\\bdid\\s+${wrong}\\b`, "gi"),
+    build: (m) => ({
+      suggestion: matchCase(m[0], `did ${right}`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  }));
+}
+
+const TENSE_RULES: Rule[] = [
+  ...makeAuxRules("has|have|had", [
+    ["went", "gone"],
+    ["ran", "run"],
+    ["drank", "drunk"],
+    ["saw", "seen"],
+    ["took", "taken"],
+    ["came", "come"],
+    ["ate", "eaten"],
+    ["wrote", "written"],
+    ["drove", "driven"],
+    ["fell", "fallen"],
+    ["began", "begun"],
+    ["forgot", "forgotten"],
+    ["broke", "broken"],
+    ["chose", "chosen"],
+    ["gave", "given"],
+    ["swam", "swum"],
+    ["layed", "laid"],
+    ["done", "done"],
+  ]),
+  ...makeDidRules([
+    ["went", "go"],
+    ["ran", "run"],
+    ["drank", "drink"],
+    ["saw", "see"],
+    ["took", "take"],
+    ["came", "come"],
+    ["ate", "eat"],
+    ["wrote", "write"],
+    ["drove", "drive"],
+    ["fell", "fall"],
+    ["began", "begin"],
+    ["forgot", "forget"],
+    ["broke", "break"],
+    ["chose", "choose"],
+    ["gave", "give"],
+    ["swam", "swim"],
+    ["done", "do"],
+    ["had", "have"],
+    ["was", "be"],
+    ["were", "be"],
+    ["seen", "see"],
+    ["taken", "take"],
+    ["written", "write"],
+    ["driven", "drive"],
+    ["broken", "break"],
+    ["chosen", "choose"],
+    ["begun", "begin"],
+    ["forgotten", "forget"],
+    ["fallen", "fall"],
+  ]),
+  {
+    pattern: /\b(could|should|would|must|might|may)\s+of\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1].toLowerCase()} have`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: /\b(he|she|it)\s+don't\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} doesn't`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: /\b(he|she|it)\s+have\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} has`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: /\b(he|she|it)\s+are\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} is`),
+      kind: "agreement",
+      severity: "warning",
+    }),
+  },
+  {
+    pattern: /\b(you|we|they)\s+was\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} were`),
+      kind: "agreement",
+      severity: "warning",
+    }),
+  },
+  {
+    pattern: /\b(you|we|they)\s+has\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} have`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: /\bthere's\s+(lots|many|several|a\s+few|hundreds|thousands|millions|dozens)\s+/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `there are ${m[1]} `),
+      kind: "agreement",
+      severity: "warning",
+    }),
+  },
+];
+
+// ── Subject–verb agreement (third-person singular and plural) ─────────────
 //
-// Keys are *patterns* (case-insensitive); values are the correct spelling.
-// We exclude any informal/dialectal forms commonly used in fiction
-// (gonna/wanna/tho/cuz/y'all/finna). Suffix-bearing rules (e.g. recieve →
-// receive + suffix) live as standalone rules below.
-const MISSPELLINGS: Array<[RegExp, string]> = [
-  [/\bteh\b/g,                            "the"],          // (case-sensitive on purpose)
-  [/\btehn\b/gi,                          "then"],
-  [/\bwierd\b/gi,                         "weird"],
-  [/\bthier\b/gi,                         "their"],
-  [/\bsupposably\b/gi,                    "supposedly"],
-  [/\birregardless\b/gi,                  "regardless"],
-  [/\bnoone\b/gi,                         "no one"],
-  [/\balot\b/gi,                          "a lot"],
-  [/\btruely\b/gi,                        "truly"],
-  [/\buntill\b/gi,                        "until"],
-  [/\bbegining\b/gi,                      "beginning"],
-  [/\boccured\b/gi,                       "occurred"],
-  [/\boccurence\b/gi,                     "occurrence"],
-  [/\boccurances\b/gi,                    "occurrences"],
-  [/\bacheive(d|s|ment|ments|able)?\b/gi, "achieve"],     // suffix preserved by build() below
-  [/\bcalender\b/gi,                      "calendar"],
-  [/\bcemetary\b/gi,                      "cemetery"],
-  [/\bchangable\b/gi,                     "changeable"],
-  [/\bcollectible\b/gi,                   "collectable"], // both valid; prefer more common
-  [/\bcommitee\b/gi,                      "committee"],
-  [/\bcompletly\b/gi,                     "completely"],
-  [/\bconcious\b/gi,                      "conscious"],
-  [/\bdaugher\b/gi,                       "daughter"],
-  [/\bdiscribe\b/gi,                      "describe"],
-  [/\bdrunkeness\b/gi,                    "drunkenness"],
-  [/\bembarass(ed|ment|es|ing)?\b/gi,     "embarrass"],
-  [/\bequiptment\b/gi,                    "equipment"],
-  [/\bexistance\b/gi,                     "existence"],
-  [/\bfourty\b/gi,                        "forty"],
-  [/\bfreind(s|ly|ship)?\b/gi,            "friend"],
-  [/\bgaurd(ed|s|ing)?\b/gi,              "guard"],
-  [/\bgoverment\b/gi,                     "government"],
-  [/\bgrammer\b/gi,                       "grammar"],
-  [/\bharrass(ed|ment|es|ing)?\b/gi,      "harass"],
-  [/\bhieght\b/gi,                        "height"],
-  [/\bhumourous\b/gi,                     "humorous"],
-  [/\bhygeine\b/gi,                       "hygiene"],
-  [/\bibelieve\b/gi,                      "I believe"],
-  [/\bimediatly\b/gi,                     "immediately"],
-  [/\bimediately\b/gi,                    "immediately"],
-  [/\bimmediatly\b/gi,                    "immediately"],
-  [/\binconvient\b/gi,                    "inconvenient"],
-  [/\bindependant\b/gi,                   "independent"],
-  [/\binfact\b/gi,                        "in fact"],
-  [/\bintresting\b/gi,                    "interesting"],
-  [/\bjewlry\b/gi,                        "jewelry"],
-  [/\bjudgement\b/gi,                     "judgment"],   // US preferred
-  [/\bknowlege\b/gi,                      "knowledge"],
-  [/\blibary\b/gi,                        "library"],
-  [/\blightening\b/gi,                    "lightning"],  // weather, not the verb
-  [/\bmaintence\b/gi,                     "maintenance"],
-  [/\bmaintainance\b/gi,                  "maintenance"],
-  [/\bmispell(ed|s|ing)?\b/gi,            "misspell"],
-  [/\bmispelling\b/gi,                    "misspelling"],
-  [/\bneccessary\b/gi,                    "necessary"],
-  [/\bnecesary\b/gi,                      "necessary"],
-  [/\bnoticable\b/gi,                     "noticeable"],
-  [/\bocasion(s|ally|al)?\b/gi,           "occasion"],
-  [/\boccasion(s|ally|al)?\b/gi,          "occasion"],   // already correct, no-op via early skip
-  [/\bperminent\b/gi,                     "permanent"],
-  [/\bpersistant\b/gi,                    "persistent"],
-  [/\bposession\b/gi,                     "possession"],
-  [/\bpriviledge\b/gi,                    "privilege"],
-  [/\bproffessional\b/gi,                 "professional"],
-  [/\bpronounciation\b/gi,                "pronunciation"],
-  [/\bquestionaire\b/gi,                  "questionnaire"],
-  [/\brecomend(ed|s|ation|ing)?\b/gi,     "recommend"],
-  [/\brefered\b/gi,                       "referred"],
-  [/\brefering\b/gi,                      "referring"],
-  [/\brelevent\b/gi,                      "relevant"],
-  [/\brember(ed|ing|s)?\b/gi,             "remember"],
-  [/\brememberance\b/gi,                  "remembrance"],
-  [/\brestaraunt\b/gi,                    "restaurant"],
-  [/\brhythym\b/gi,                       "rhythm"],
-  [/\bsacrafice\b/gi,                     "sacrifice"],
-  [/\bsargent\b/gi,                       "sergeant"],
-  [/\bsence\b/gi,                         "since"],
-  [/\bseige\b/gi,                         "siege"],
-  [/\bsincerly\b/gi,                      "sincerely"],
-  [/\bsixtin\b/gi,                        "sixteen"],
-  [/\bsmoe\b/gi,                          "some"],
-  [/\bsouvenier\b/gi,                     "souvenir"],
-  [/\bsubtley\b/gi,                       "subtly"],
-  [/\bsucceful\b/gi,                      "successful"],
-  [/\bsucessful\b/gi,                     "successful"],
-  [/\bsucess\b/gi,                        "success"],
-  [/\bsuprise(d|s|ingly)?\b/gi,           "surprise"],
-  [/\btomarrow\b/gi,                      "tomorrow"],
-  [/\btomorow\b/gi,                       "tomorrow"],
-  [/\btommorow\b/gi,                      "tomorrow"],
-  [/\bthrough(out)?\b/gi,                 "through"],   // already correct, skipped
-  [/\btruley\b/gi,                        "truly"],
-  [/\btwelth\b/gi,                        "twelfth"],
-  [/\bunfortunatly\b/gi,                  "unfortunately"],
-  [/\busefull\b/gi,                       "useful"],
-  [/\bvacum\b/gi,                         "vacuum"],
-  [/\bwhereever\b/gi,                     "wherever"],
-  [/\bwich\b/gi,                          "which"],
-  [/\bwierd\b/gi,                         "weird"],
-  [/\bwithdrawl\b/gi,                     "withdrawal"],
-  [/\bwriteable\b/gi,                     "writable"],
-  [/\byeild\b/gi,                         "yield"],
+// Two complementary rules:
+//   • Singular subject + bare verb   → suggest +s    ("she arrive" → "she arrives")
+//   • Plural subject   + 3sg verb    → suggest bare  ("they walks" → "they walk")
+//
+// We enumerate verbs explicitly to keep false positives at zero — there's no
+// general way to tell a bare verb from a noun without a parser. The list
+// covers the common high-frequency offenders that show up in fiction prose.
+//
+// Pairs are stored as [bare, third-person-singular].
+
+type VerbPair = [string, string];
+
+const SVA_VERBS: VerbPair[] = [
+  ["arrive", "arrives"],   ["feel", "feels"],     ["pause", "pauses"],
+  ["sound", "sounds"],     ["seem", "seems"],     ["appear", "appears"],
+  ["come", "comes"],       ["go", "goes"],        ["do", "does"],
+  ["have", "has"],         ["run", "runs"],       ["walk", "walks"],
+  ["talk", "talks"],       ["look", "looks"],     ["know", "knows"],
+  ["think", "thinks"],     ["say", "says"],       ["tell", "tells"],
+  ["need", "needs"],       ["want", "wants"],     ["like", "likes"],
+  ["love", "loves"],       ["hate", "hates"],     ["hope", "hopes"],
+  ["live", "lives"],       ["work", "works"],     ["play", "plays"],
+  ["stop", "stops"],       ["start", "starts"],   ["make", "makes"],
+  ["take", "takes"],       ["see", "sees"],       ["hear", "hears"],
+  ["find", "finds"],       ["give", "gives"],     ["hold", "holds"],
+  ["read", "reads"],       ["write", "writes"],   ["help", "helps"],
+  ["wait", "waits"],       ["sit", "sits"],       ["stand", "stands"],
+  ["fall", "falls"],       ["rise", "rises"],     ["move", "moves"],
+  ["smile", "smiles"],     ["laugh", "laughs"],   ["sleep", "sleeps"],
+  ["wake", "wakes"],       ["breathe", "breathes"], ["listen", "listens"],
+  ["reach", "reaches"],    ["grab", "grabs"],     ["push", "pushes"],
+  ["pull", "pulls"],       ["throw", "throws"],   ["catch", "catches"],
+  ["open", "opens"],       ["close", "closes"],   ["turn", "turns"],
+  ["leave", "leaves"],     ["enter", "enters"],   ["rush", "rushes"],
+  ["watch", "watches"],    ["pass", "passes"],    ["miss", "misses"],
+  ["wonder", "wonders"],   ["matter", "matters"], ["happen", "happens"],
+  ["change", "changes"],   ["return", "returns"], ["continue", "continues"],
+  ["remain", "remains"],   ["become", "becomes"], ["mean", "means"],
+  ["believe", "believes"], ["remember", "remembers"], ["forget", "forgets"],
+  ["call", "calls"],       ["answer", "answers"], ["ask", "asks"],
+  ["whisper", "whispers"], ["shout", "shouts"],   ["bring", "brings"],
+  ["carry", "carries"],    ["follow", "follows"], ["lead", "leads"],
+  ["fit", "fits"],         ["differ", "differs"], ["exist", "exists"],
 ];
 
-// ─── Filter words (style) ───────────────────────────────────────────────
-// "Filter" words distance the reader from the POV character's experience.
-// "She heard the door creak" → "The door creaked." etc. Flagged at the
-// word level — the writer can keep them when intentional.
-const FILTER_WORDS = [
-  "saw", "noticed", "watched", "heard", "felt", "thought", "wondered",
-  "realized", "decided", "knew", "remembered", "seemed", "looked", "appeared",
-  "experienced", "observed", "considered",
+const SVA_BARE_TO_3SG = new Map<string, string>(SVA_VERBS);
+const SVA_3SG_TO_BARE = new Map<string, string>(
+  SVA_VERBS.map(([bare, third]) => [third, bare]),
+);
+
+function bareToThirdPattern(): string {
+  return SVA_VERBS.map(([bare]) => bare).join("|");
+}
+function thirdToBarePattern(): string {
+  return SVA_VERBS.map(([, third]) => third).join("|");
+}
+
+// Auxiliary / modal / infinitive markers that legitimately take a bare verb
+// after a pronoun. Without this guard, "did he run" / "could she go" would
+// incorrectly trip the (he|she|it) + bare-verb rule.
+const BARE_VERB_LICENSORS = /\b(do|did|does|don't|didn't|doesn't|will|won't|would|wouldn't|could|couldn't|should|shouldn't|must|mustn't|might|may|can|can't|shall|let|to|help|helped|make|made|makes|watch|watched|see|saw|feel|felt|hear|heard|let's)\s+$/i;
+
+// Causative/perception licensors that take "obj + bare verb": "make X seem"
+// is grammatical, so "the rhythm seem" inside such a construct shouldn't trip
+// the determiner-singular rule.
+const CAUSATIVE_LICENSORS = /\b(make|makes|made|let|lets|let's|help|helps|helped|watch|watched|watches|see|sees|saw|seen|feel|feels|felt|hear|hears|heard|have|has|had)\s+$/i;
+
+const SVA_RULES: Rule[] = [
+  // Singular subject (he/she/it) + bare verb → 3sg form.
+  // "she arrive" → "she arrives"; "it feel" → "it feels"; "She pause" → "She pauses".
+  {
+    pattern: new RegExp(
+      `\\b(he|she|it)\\s+(${bareToThirdPattern()})\\b`,
+      "gi",
+    ),
+    build: (m) => {
+      const verb = m[2].toLowerCase();
+      const fixed = SVA_BARE_TO_3SG.get(verb);
+      if (!fixed) return null;
+      // Skip cases where an auxiliary or modal preceded the pronoun and
+      // legitimately licenses a bare verb: "did he run", "could she go",
+      // "let it be", etc.
+      const before = m.input.slice(Math.max(0, m.index - 12), m.index);
+      if (BARE_VERB_LICENSORS.test(before)) return null;
+      return {
+        suggestion: matchCase(m[0], `${m[1]} ${fixed}`),
+        kind: "agreement",
+        severity: "error",
+      };
+    },
+  },
+  // Plural subject + 3sg verb → bare verb.
+  // "they walks" → "they walk"; "we runs" → "we run"; "People rushes" → "People rush".
+  {
+    pattern: new RegExp(
+      `\\b(they|we|you|people|men|women|children|police|cattle)\\s+(${thirdToBarePattern()})\\b`,
+      "gi",
+    ),
+    build: (m) => {
+      const verb = m[2].toLowerCase();
+      const fixed = SVA_3SG_TO_BARE.get(verb);
+      if (!fixed) return null;
+      return {
+        suggestion: matchCase(m[0], `${m[1]} ${fixed}`),
+        kind: "agreement",
+        severity: "error",
+      };
+    },
+  },
+  // Possessive + plural noun + 3sg verb → bare.
+  // "his words comes out" → "his words come out"; "her hands shakes" → "her hands shake".
+  // The plural-noun list is short and explicit so we avoid mistaking a singular
+  // noun ending in -s ("his kiss feels…" — kiss is singular) for plural.
+  {
+    pattern: new RegExp(
+      `\\b(his|her|their|my|your|our)\\s+` +
+        `(words|things|hands|eyes|feet|legs|arms|fingers|teeth|lips|shoulders|knees|cheeks|ears|nails|toes|brothers|sisters|parents|friends|enemies|dreams|hopes|fears|plans|ideas|thoughts|memories|stories|secrets|reasons|questions|answers|kids|children|days|years|hours|minutes|moments|footsteps)\\s+` +
+        `(${thirdToBarePattern()})\\b`,
+      "gi",
+    ),
+    build: (m) => {
+      const verb = m[3].toLowerCase();
+      const fixed = SVA_3SG_TO_BARE.get(verb);
+      if (!fixed) return null;
+      return {
+        suggestion: matchCase(m[0], `${m[1]} ${m[2]} ${fixed}`),
+        kind: "agreement",
+        severity: "error",
+      };
+    },
+  },
+  // Determiner + singular noun + bare verb → 3sg.
+  // "the rhythm seem" → "the rhythm seems".
+  // Restricted to a curated set of high-confidence sense verbs so we don't
+  // misfire on imperative readings ("the rhythm, stop!").
+  {
+    pattern: new RegExp(
+      `\\b(the|a|an|this|that|every|each)\\s+([A-Za-z][A-Za-z'\\-]+?)(?<!s)\\s+` +
+        `(seem|sound|feel|appear|matter|exist|fit|differ|change|happen|continue|remain|return|become)\\b`,
+      "gi",
+    ),
+    build: (m) => {
+      const verb = m[3].toLowerCase();
+      const fixed = SVA_BARE_TO_3SG.get(verb);
+      if (!fixed) return null;
+      // Skip when the head noun is itself a plural we know about.
+      const noun = m[2].toLowerCase();
+      if (
+        noun === "people" || noun === "men" || noun === "women" ||
+        noun === "children" || noun === "police" || noun === "cattle"
+      ) return null;
+      // Skip causative / perception constructs where bare verb is licensed:
+      // "make the rhythm seem off", "let the music sound louder".
+      const before = m.input.slice(Math.max(0, m.index - 16), m.index);
+      if (CAUSATIVE_LICENSORS.test(before)) return null;
+      return {
+        suggestion: matchCase(m[0], `${m[1]} ${m[2]} ${fixed}`),
+        kind: "agreement",
+        severity: "error",
+      };
+    },
+  },
 ];
 
-// ─── Body-language clichés ──────────────────────────────────────────────
-const BODY_CLICHES: Array<[RegExp, string]> = [
-  [/\b(rolled|rolling)\s+(?:his|her|their|my|your)\s+eyes?\b/gi,            "[overused: rolling eyes]"],
-  [/\b(raised|raising|cocked|cocking|arched|arching)\s+(?:an|his|her|their|my|your)\s+(?:eye)?brow\b/gi,
-                                                                             "[overused: raised brow]"],
-  [/\b(shrugged|shrugging)\s+(?:his|her|their|my|your)\s+shoulders?\b/gi,    "shrugged"],
-  [/\b(let\s+out|heaved)\s+a\s+(?:long\s+)?(?:deep\s+)?(?:weary\s+)?breath\b/gi,
-                                                                             "[overused: heavy breath]"],
-  [/\b(let\s+out|heaved|gave)\s+a\s+(?:long\s+)?sigh\b/gi,                  "[overused: long sigh]"],
-  [/\bnodd(?:ed|ing)\s+(?:his|her|their|my|your)\s+head\b/gi,                "nodded"],
-  [/\bshook\s+(?:his|her|their|my|your)\s+head\b/gi,                         "[check: head shake — common cliché]"],
-  [/\bbit\s+(?:his|her|their|my|your)\s+(?:lower\s+)?lip\b/gi,               "[overused: lip bite]"],
-  [/\bclench(?:ed|ing)\s+(?:his|her|their|my|your)\s+(?:fists?|jaw|teeth)\b/gi,
-                                                                             "[overused: clenched fist/jaw]"],
-  [/\bran\s+(?:his|her|their|my|your)\s+(?:fingers|hand)\s+through\s+(?:his|her|their|my|your)\s+hair\b/gi,
-                                                                             "[overused: fingers through hair]"],
-  [/\b(?:his|her|their|my|your)\s+heart\s+(?:skipped|raced|pounded|hammered|thudded)\b/gi,
-                                                                             "[overused: heart racing]"],
-];
-
-// ─── Wordy phrases (style) ──────────────────────────────────────────────
-const WORDY: Array<[RegExp, string]> = [
-  [/\bin\s+order\s+to\b/gi,                                  "to"],
-  [/\bdue\s+to\s+the\s+fact\s+that\b/gi,                     "because"],
-  [/\bowing\s+to\s+the\s+fact\s+that\b/gi,                   "because"],
-  [/\bin\s+spite\s+of\s+the\s+fact\s+that\b/gi,              "although"],
-  [/\bdespite\s+the\s+fact\s+that\b/gi,                      "although"],
-  [/\bin\s+the\s+event\s+that\b/gi,                          "if"],
-  [/\bat\s+this\s+(?:point|moment)\s+in\s+time\b/gi,         "now"],
-  [/\bat\s+the\s+present\s+time\b/gi,                        "now"],
-  [/\bin\s+the\s+near\s+future\b/gi,                         "soon"],
-  [/\ba\s+(?:large|great)\s+number\s+of\b/gi,                "many"],
-  [/\bthe\s+majority\s+of\b/gi,                              "most"],
-  [/\bbasically\b/gi,                                        ""],
-  [/\bactually\b/gi,                                         ""],
-  [/\bliterally\b/gi,                                        ""],
-  [/\bvery\s+unique\b/gi,                                    "unique"],
-  [/\bcompletely\s+unique\b/gi,                              "unique"],
-  [/\bend\s+result\b/gi,                                     "result"],
-  [/\bfinal\s+outcome\b/gi,                                  "outcome"],
-  [/\bfree\s+gift\b/gi,                                      "gift"],
-  [/\bpast\s+history\b/gi,                                   "history"],
-  [/\babsolutely\s+essential\b/gi,                           "essential"],
-  [/\bjoin\s+together\b/gi,                                  "join"],
-  [/\bcollaborate\s+together\b/gi,                           "collaborate"],
-  [/\beach\s+and\s+every\b/gi,                               "every"],
-  [/\bnod(?:ded|ding)?\s+(?:his|her|their|my|your)\s+head\s+yes\b/gi, "nodded"],
-  [/\bsudden(?:ly)?\b/gi,                                    "[avoid: \"suddenly\"]"],
-];
-
-// ─── Confusable pairs (context-gated) ───────────────────────────────────
-const CONFUSABLES: Rule[] = [
-  // your → you're (before contractions or adjectives following "be")
-  { pattern: /\byour\s+(welcome|right|wrong|the\s+best|amazing|so|too|not|gonna|going\s+to|going\s+|getting\s+|being\s+|never\s+gonna|always\s+|already\s+)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `you're ${m[1]}`), kind: "confusable" }) },
-
-  // you're → your (before nouns)
-  { pattern: /\byou're\s+(book|car|house|name|friend|family|hand|face|eyes|hair|mom|dad|brother|sister|son|daughter|own|fault|turn|time|chance|problem|business|idea|fault|mind|head|body|life|home|room|place|side|self|kind|kids?|wife|husband|child(?:ren)?|partner|boss|teacher|parents?|enemies|enemy)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `your ${m[1]}`), kind: "confusable" }) },
-
-  // their / there
-  { pattern: /\btheir\s+(is|are|was|were|will\s+be|has\s+been|isn't|aren't|wasn't|weren't|won't\s+be)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `there ${m[1]}`), kind: "confusable" }) },
-  { pattern: /\bthere\s+(own|house|car|family|book|name|friend|hand|face|mom|dad|brother|sister|kids?|home|life|own|side|fault|business|turn|time|chance|child(?:ren)?)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `their ${m[1]}`), kind: "confusable" }) },
-  { pattern: /\bthey're\s+(house|car|book|own|family|name|friend|hand|face|mom|dad|brother|sister|kids?|home|side|child(?:ren)?)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `their ${m[1]}`), kind: "confusable" }) },
-
-  // its / it's
-  { pattern: /\bits\s+(a|an|the|going|been|just|only|too|not|gonna|so|because|like|hard|easy|time|true|fine|okay|over|done|here|there)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `it's ${m[1]}`), kind: "confusable" }) },
-  { pattern: /\bit's\s+(own|way|effect|tail|head|color|colour|name|side|edge|surface|shape|size|core|home|nature|origin|purpose|fault)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `its ${m[1]}`), kind: "confusable" }) },
-
-  // affect / effect
-  { pattern: /\b(the|an|a|that|this|side|major|minor|adverse|positive|negative|net|primary|secondary|domino|ripple|knock-on|cumulative)\s+affect\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} effect`), kind: "confusable" }) },
-  { pattern: /\b(it|this|that|to|will|would|may|might|could|can|does|doesn't|didn't)\s+effects\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} affects`), kind: "confusable" }) },
-
-  // then / than
-  { pattern: /\b(more|less|better|worse|other|rather|stronger|weaker|bigger|smaller|taller|shorter|faster|slower|older|younger|sooner|later|further|farther|harder|easier|cheaper|costlier|brighter|darker|warmer|colder|kinder|crueler)\s+then\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} than`), kind: "confusable" }) },
-
-  // loose / lose
-  { pattern: /\bloose\s+(the|a|my|his|her|their|your|our|it|him|her|them|control|hope|track|sight|weight|time|money|count|focus|grip|interest|patience|temper|track|touch)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `lose ${m[1]}`), kind: "confusable" }) },
-
-  // could of / should of / would of / must of / might of
-  { pattern: /\b(could|should|would|must|might|may)\s+of\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1].toLowerCase()} have`), kind: "confusable" }) },
-
-  // accept / except
-  { pattern: /\b(everyone|everybody|all|nobody|no\s+one)\s+accept\s+(?!the\s+fact)/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} except `), kind: "confusable" }) },
-
-  // who's / whose
-  { pattern: /\bwho's\s+(book|car|house|name|fault|turn|side|child|kids?|wife|husband)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `whose ${m[1]}`), kind: "confusable" }) },
-  { pattern: /\bwhose\s+(coming|going|here|there|gonna|been|got|the|a|an)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `who's ${m[1]}`), kind: "confusable" }) },
-
-  // lay / lie (common cases)
-  { pattern: /\b(?:i|he|she|they|we|you)\s+(?:was|were|am|is|are)\s+laying\s+(?:on|in|down|there|here|across)\b/gi,
-    build: (m) => ({ suggestion: m[0].replace(/laying/i, (s) => s[0] === s[0].toUpperCase() ? "Lying" : "lying"), kind: "confusable" }) },
-  { pattern: /\bI\s+layed\b/gi,
-    build: () => ({ suggestion: "I lay", kind: "confusable" }) },
-
-  // fewer / less
-  { pattern: /\bless\s+(people|cars|books|things|chairs|tables|days|hours|minutes|seconds|times|reasons|ideas|kids|children|students|words|sentences)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `fewer ${m[1]}`), kind: "confusable" }) },
-
-  // amount / number  (use "number" with countable nouns)
-  { pattern: /\bamount\s+of\s+(people|cars|books|things|chairs|kids|children|students|days|hours)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `number of ${m[1]}`), kind: "confusable" }) },
-
-  // farther / further (physical vs metaphorical)
-  { pattern: /\bfurther\s+(down\s+the\s+road|away|north|south|east|west|along\s+the)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `farther ${m[1]}`), kind: "confusable" }) },
-
-  // emigrate / immigrate
-  { pattern: /\bemigrate\s+to\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], "immigrate to"), kind: "confusable" }) },
-  { pattern: /\bimmigrate\s+from\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], "emigrate from"), kind: "confusable" }) },
-
-  // principal / principle
-  { pattern: /\bschool\s+principle\b/gi,
-    build: () => ({ suggestion: "school principal", kind: "confusable" }) },
-  { pattern: /\bprincipal\s+of\s+the\s+matter\b/gi,
-    build: () => ({ suggestion: "principle of the matter", kind: "confusable" }) },
-
-  // stationary / stationery
-  { pattern: /\bstationary\s+(store|paper|envelope)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `stationery ${m[1]}`), kind: "confusable" }) },
-
-  // peek / peak / pique
-  { pattern: /\bpeak\s+(?:my|your|his|her|their|our)\s+(?:interest|curiosity)\b/gi,
-    build: (m) => ({ suggestion: m[0].replace(/peak/i, (s) => s[0] === "P" ? "Pique" : "pique"), kind: "confusable" }) },
-
-  // bare / bear (with the burden, repeat, etc.)
-  { pattern: /\bbare\s+(with\s+me|the\s+burden|fruit|in\s+mind|witness|responsibility)\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `bear ${m[1]}`), kind: "confusable" }) },
-
-  // sale / sail
-  { pattern: /\bsale\s+(?:the|across|through|over)\s+the\s+(sea|ocean|harbor|harbour)\b/gi,
-    build: (m) => ({ suggestion: m[0].replace(/sale/i, (s) => s[0] === "S" ? "Sail" : "sail"), kind: "confusable" }) },
-
-  // breath / breathe
-  { pattern: /\bI\s+can(?:'t|not)\s+breath\b/gi,
-    build: () => ({ suggestion: "I can't breathe", kind: "confusable" }) },
-  { pattern: /\btake\s+a\s+deep\s+breathe\b/gi,
-    build: () => ({ suggestion: "take a deep breath", kind: "confusable" }) },
-
-  // compliment / complement
-  { pattern: /\bcompliment\s+each\s+other\b/gi,
-    build: () => ({ suggestion: "complement each other", kind: "confusable" }) },
-
-  // led / lead (verb past tense)
-  { pattern: /\b(?:he|she|they|i|we|you)\s+lead\s+(?:the\s+way|me|us|them|him|her)\b/gi,
-    build: (m) => ({ suggestion: m[0].replace(/lead/i, "led"), kind: "confusable" }) },
-];
-
-// ─── Subject-verb agreement (light) ─────────────────────────────────────
-const AGREEMENT: Rule[] = [
-  { pattern: /\b(he|she|it)\s+don't\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} doesn't`), kind: "agreement" }) },
-  { pattern: /\b(he|she|it)\s+have\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} has`), kind: "agreement" }) },
-  { pattern: /\b(he|she|it)\s+were\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} was`), kind: "agreement" }) },
-  { pattern: /\b(I|you|we|they)\s+was\b/g,
-    build: (m) => ({ suggestion: `${m[1]} were`, kind: "agreement" }) },
-  // "There's lots of …" → "There are lots of …" (informal but commonly flagged)
-  { pattern: /\bthere's\s+(lots|many|several|a\s+few|hundreds|thousands|millions|some)\s+/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `there are ${m[1]} `), kind: "agreement" }) },
-  // "have went / has went" → "have gone / has gone"
-  { pattern: /\b(has|have|had)\s+went\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} gone`), kind: "agreement" }) },
-  // "have ran" → "have run"
-  { pattern: /\b(has|have|had)\s+ran\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} run`), kind: "agreement" }) },
-  // "have drank" → "have drunk"
-  { pattern: /\b(has|have|had)\s+drank\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} drunk`), kind: "agreement" }) },
-  // "have saw" → "have seen"
-  { pattern: /\b(has|have|had)\s+saw\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} seen`), kind: "agreement" }) },
-  // "have took" → "have taken"
-  { pattern: /\b(has|have|had)\s+took\b/gi,
-    build: (m) => ({ suggestion: matchCase(m[0], `${m[1]} taken`), kind: "agreement" }) },
-  // "ain't" → flag (informal; suggest "isn't"/"am not"/"aren't" depending on subject; we just flag)
-  { pattern: /\bain't\b/gi,
-    build: () => ({ suggestion: "[informal: ain't]", kind: "agreement" }) },
-];
-
-// ─── Article rule: a/an before vowel-sound words ────────────────────────
 const ARTICLE_RULE: Rule = {
   pattern: /\b([Aa]n?)\s+([A-Za-z][A-Za-z'\-]*)\b/g,
   build: (m) => {
     const article = m[1];
     const word = m[2];
     const isAn = article.toLowerCase() === "an";
-    const wantsAn = startsWithVowelSound(word);
-    if (wantsAn === isAn) return null;
-    const fixed = wantsAn ? "an" : "a";
+    const wantsAn = beginsWithVowelSound(word);
+    if (isAn === wantsAn) return null;
     return {
-      suggestion: matchCase(article, fixed) + " " + word,
+      suggestion: matchCase(article, wantsAn ? "an" : "a") + " " + word,
       kind: "article",
+      severity: "error",
     };
   },
 };
 
-// ─── Capitalization ─────────────────────────────────────────────────────
-//
-// Two sub-rules:
-//   (a) standalone lowercase pronoun "i" → "I" (not "i'm" — that's caught
-//       by the contraction rule below)
-//   (b) sentence-start lowercase letter after .!?
-const CAP_RULES: Rule[] = [
-  // Standalone "i" with whitespace boundaries.
-  { pattern: /(^|[^A-Za-z'])(i)(?![A-Za-z'])/g,
-    build: (m) => {
-      // Don't replace if it's the very first character — there's no leading
-      // group to keep — match[2] is index 0 then.
-      const lead = m[1];
-      return { suggestion: lead + "I", kind: "capital" };
-    } },
-  // "i'm / i've / i'll / i'd" → "I'm" etc.
-  { pattern: /\bi('m|'ve|'ll|'d)\b/g,
-    build: (m) => ({ suggestion: "I" + m[1], kind: "capital" }) },
-  // Sentence-start lowercase letter after .!?
-  { pattern: /([.!?])\s+([a-z])/g,
-    build: (m) => ({ suggestion: `${m[1]} ${m[2].toUpperCase()}`, kind: "capital" }) },
+const CAPITAL_RULES: Rule[] = [
+  {
+    pattern: /(^|[^A-Za-z'])(i)(?![A-Za-z'])/g,
+    build: (m) => ({
+      suggestion: m[1] + "I",
+      kind: "capital",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: /\bi('m|'ve|'ll|'d)\b/g,
+    build: (m) => ({
+      suggestion: "I" + m[1],
+      kind: "capital",
+      severity: "error",
+    }),
+  },
 ];
 
-// ─── Punctuation / spacing ──────────────────────────────────────────────
 const PUNCT_RULES: Rule[] = [
-  // Doubled space inside a sentence
-  { pattern: / {2,}(?=\S)/g,
-    build: () => ({ suggestion: " ", kind: "spacing" }) },
-  // Space before sentence punctuation
-  { pattern: / +([.,;:!?])/g,
-    build: (m) => ({ suggestion: m[1], kind: "punctuation" }) },
-  // Missing space after sentence punctuation (lower → upper / letter)
-  { pattern: /([.!?])([A-Z][a-z])/g,
-    build: (m) => ({ suggestion: `${m[1]} ${m[2]}`, kind: "spacing" }) },
-  // Three+ exclamation / question marks → one
-  { pattern: /!{3,}/g, build: () => ({ suggestion: "!", kind: "punctuation" }) },
-  { pattern: /\?{3,}/g, build: () => ({ suggestion: "?", kind: "punctuation" }) },
-  // Trailing space before paragraph break
-  { pattern: / +(?=\n)/g, build: () => ({ suggestion: "", kind: "spacing" }) },
-  // Two periods (likely typo, not ellipsis)
-  { pattern: /(?<![.!?])\.\.(?!\.)/g,
-    build: () => ({ suggestion: ".", kind: "punctuation" }) },
-  // Spaced ellipsis ". . ." → "…"
-  { pattern: /\. \. \./g, build: () => ({ suggestion: "…", kind: "punctuation" }) },
-  // Three dots → ellipsis (style — many editors prefer the proper char)
-  { pattern: /(?<![.])\.{3}(?!\.)/g,
-    build: () => ({ suggestion: "…", kind: "punctuation" }) },
-  // Two-hyphen pseudo-em-dash
-  { pattern: /(?<!-)--(?!-)/g, build: () => ({ suggestion: "—", kind: "punctuation" }) },
-  // Space-flanked hyphen between words → en-dash for ranges, em for breaks.
-  // Conservative: only when both sides are letters (likely a sentence break).
-  { pattern: /(\w) - (\w)/g,
-    build: (m) => ({ suggestion: `${m[1]}—${m[2]}`, kind: "punctuation" }) },
+  {
+    pattern: /(?<=\S) {2,}(?=\S)/g,
+    build: () => ({
+      suggestion: " ",
+      kind: "spacing",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: / +([.,;:!?])/g,
+    build: (m) => ({
+      suggestion: m[1],
+      kind: "punctuation",
+      severity: "error",
+    }),
+  },
+  {
+    pattern: / +(?=\n)/g,
+    build: () => ({
+      suggestion: "",
+      kind: "spacing",
+      severity: "error",
+    }),
+  },
 ];
 
-// ─── Doubled words ──────────────────────────────────────────────────────
-const DOUBLE_RULES: Rule[] = [
-  { pattern: /\b(the|a|an|and|of|to|in|on|for|but|with|as|i|he|she|they|we|you|her|his|him|its|their|our|my|your|me|us|them|so|too|very|just|when|where|what|who|why|how|all|any|some|now|here|there|then|than|will|would|could|should|can|may|might|must|been|being|was|were|is|are|am|been|have|having|had|each|every|both|either|neither)\s+\1\b/gi,
-    build: (m) => ({ suggestion: m[1], kind: "double" }) },
-];
-
-// ─── Filter words (style) ───────────────────────────────────────────────
-const FILTER_RE = new RegExp(
-  `\\b(${FILTER_WORDS.join("|")})\\b`,
-  "gi",
-);
 const FILTER_RULE: Rule = {
-  pattern: FILTER_RE,
+  pattern: /\b(saw|noticed|watched|heard|felt|thought|wondered|realized|realised|decided|knew|remembered|seemed|observed|considered)\s+(?:that\s|what\s|how\s|a\s|an\s|the\s)/gi,
   build: (m) => ({
     suggestion: `[filter: ${m[1].toLowerCase()}]`,
     kind: "filter",
+    severity: "suggestion",
   }),
 };
 
-// ─── Adverb-in-attribution ──────────────────────────────────────────────
-//
-// "she said angrily", "he whispered loudly", etc. Telling instead of
-// showing. Flag the adverb only.
-const ATTRIBUTION_VERBS = [
-  "said", "asked", "replied", "whispered", "shouted", "yelled", "muttered",
-  "cried", "sighed", "laughed", "snapped", "growled", "purred", "hissed",
-  "barked", "rasped", "answered",
+const PASSIVE_PARTICIPLES = [
+  "been",
+  "seen",
+  "done",
+  "found",
+  "made",
+  "told",
+  "given",
+  "taken",
+  "known",
+  "thought",
+  "brought",
+  "caught",
+  "taught",
+  "bought",
+  "sought",
+  "fought",
+  "held",
+  "kept",
+  "left",
+  "sent",
+  "spent",
+  "built",
+  "felt",
+  "met",
+  "said",
+  "heard",
+  "read",
+  "led",
+  "lit",
+  "fit",
+  "cut",
+  "hit",
+  "let",
+  "put",
+  "set",
+  "shut",
+  "spread",
+  "shot",
+  "forgotten",
+  "written",
+  "driven",
+  "ridden",
+  "spoken",
+  "broken",
+  "frozen",
+  "stolen",
+  "chosen",
+  "hidden",
+  "fallen",
+  "forgiven",
+  "shaken",
+  "woken",
+  "worn",
+  "torn",
+  "born",
+  "sworn",
+  "drawn",
+  "grown",
+  "blown",
+  "thrown",
+  "shown",
 ];
-const ATTRIB_RE = new RegExp(
-  `\\b(${ATTRIBUTION_VERBS.join("|")})\\s+([a-z]+ly)\\b`,
-  "gi",
-);
-const ATTRIBUTION_ADVERB_RULE: Rule = {
-  pattern: ATTRIB_RE,
-  build: (m) => ({
-    suggestion: `${m[1]} [show, don't tell]`,
-    kind: "adverb",
-  }),
-};
 
-// ─── Passive voice (light) ──────────────────────────────────────────────
-//
-// Pattern: form of "to be" + past participle. We match a small but high-
-// signal subset (regular -ed verbs + an irregular list). The replacement
-// just flags it; the writer decides whether to revise.
-const IRREGULAR_PARTICIPLES = [
-  "been","seen","done","gone","found","made","told","given","taken","known",
-  "thought","brought","caught","taught","bought","sought","fought","held",
-  "kept","left","sent","spent","built","bent","felt","met","said","heard",
-  "read","led","lit","fit","cut","hit","let","put","set","shut","spread",
-  "shot","forgot","gotten","written","driven","ridden","spoken","broken",
-  "frozen","stolen","chosen","hidden","fallen","forbidden","forgiven",
-  "shaken","woken","worn","torn","born","sworn","drawn","grown","blown",
-  "thrown","known","flown","shown",
-];
-const PASSIVE_RE = new RegExp(
-  `\\b(was|were|been|being|is|are|am|be)\\s+(?:[a-z]+ed|${IRREGULAR_PARTICIPLES.join("|")})\\b`,
-  "gi",
-);
 const PASSIVE_RULE: Rule = {
-  pattern: PASSIVE_RE,
+  pattern: new RegExp(
+    `\\b(was|were|been|being|is|are|am)\\s+(?:[a-z]+ed|${PASSIVE_PARTICIPLES.join("|")})\\b`,
+    "gi",
+  ),
   build: (m) => ({
     suggestion: `[passive: ${m[0].toLowerCase()}]`,
     kind: "passive",
+    severity: "suggestion",
   }),
 };
 
-// ─── Cliché phrases ─────────────────────────────────────────────────────
-const CLICHE_PHRASES: Array<[RegExp, string]> = [
-  [/\bat\s+the\s+end\s+of\s+the\s+day\b/gi,                 "[cliché]"],
-  [/\bin\s+the\s+nick\s+of\s+time\b/gi,                     "[cliché]"],
-  [/\bavoid\s+(?:like|as)\s+the\s+plague\b/gi,              "[cliché]"],
-  [/\bas\s+(?:luck|fate)\s+would\s+have\s+it\b/gi,          "[cliché]"],
-  [/\bonly\s+time\s+will\s+tell\b/gi,                       "[cliché]"],
-  [/\bbetter\s+late\s+than\s+never\b/gi,                    "[cliché]"],
-  [/\bthe\s+calm\s+before\s+the\s+storm\b/gi,               "[cliché]"],
-  [/\ba\s+blessing\s+in\s+disguise\b/gi,                    "[cliché]"],
-  [/\bevery\s+cloud\s+has\s+a\s+silver\s+lining\b/gi,       "[cliché]"],
-  [/\bfit\s+as\s+a\s+fiddle\b/gi,                           "[cliché]"],
-  [/\b(?:wide-?eyed|deer)\s+in\s+(?:the\s+)?headlights\b/gi, "[cliché]"],
-  [/\bcold\s+sweat\b/gi,                                     "[cliché]"],
-  [/\b(?:eyes|gaze)\s+(?:bored|drilling)\s+into\b/gi,        "[cliché]"],
-  [/\bblood\s+ran\s+cold\b/gi,                               "[cliché]"],
+// Adverb-on-attribution: "said softly" / "whispered loudly" — Show, don't tell.
+// Limited to attribution verbs so we don't fire on every -ly adverb in prose.
+const ADVERB_RULE: Rule = {
+  pattern: /\b(said|asked|replied|answered|whispered|murmured|shouted|cried|called|muttered|exclaimed|stated|declared|added|remarked|continued|interrupted)\s+([a-z]+ly)\b/gi,
+  build: (m) => ({
+    suggestion: `[adverb: ${m[2].toLowerCase()} on "${m[1].toLowerCase()}"]`,
+    kind: "adverb",
+    severity: "suggestion",
+  }),
+};
+
+// Wordy phrases — common bloat that can usually be tightened. Each pair is
+// [pattern source, suggested replacement]. Listed as a small high-confidence
+// set rather than an exhaustive style guide; false positives stay rare.
+const WORDY_ENTRIES: Array<[RegExp, string]> = [
+  [/\bin order to\b/gi, "to"],
+  [/\bdue to the fact that\b/gi, "because"],
+  [/\bdespite the fact that\b/gi, "although"],
+  [/\bin spite of the fact that\b/gi, "although"],
+  [/\bat this point in time\b/gi, "now"],
+  [/\bat that point in time\b/gi, "then"],
+  [/\bin the event that\b/gi, "if"],
+  [/\bfor the purpose of\b/gi, "to"],
+  [/\bin the process of\b/gi, "while"],
+  [/\bat the present time\b/gi, "now"],
+  [/\ba large number of\b/gi, "many"],
+  [/\ba great deal of\b/gi, "much"],
+  [/\bthe majority of\b/gi, "most"],
+  [/\bcame to a stop\b/gi, "stopped"],
+  [/\bgave a smile\b/gi, "smiled"],
+  [/\bgave a nod\b/gi, "nodded"],
+  [/\blet out a sigh\b/gi, "sighed"],
 ];
 
-// ─── Combined rules list ────────────────────────────────────────────────
-
-const MISSPELLING_RULES: Rule[] = MISSPELLINGS.map(([re, fix]) => ({
-  pattern: re,
-  build: (m) => {
-    // For patterns with a captured suffix group, append it.
-    const suffix = m[1] ?? "";
-    return { suggestion: matchCase(m[0], fix + suffix), kind: "spelling" };
-  },
-}));
-
-const BODY_CLICHE_RULES: Rule[] = BODY_CLICHES.map(([re, msg]) => ({
-  pattern: re,
-  build: () => ({ suggestion: msg, kind: "cliche" }),
-}));
-
-const WORDY_RULES: Rule[] = WORDY.map(([re, fix]) => ({
-  pattern: re,
+const WORDY_RULES: Rule[] = WORDY_ENTRIES.map(([pattern, fix]) => ({
+  pattern,
   build: (m) => ({
-    suggestion: fix === "" ? "[remove]" : matchCase(m[0], fix),
+    suggestion: matchCase(m[0], fix),
     kind: "wordy",
+    severity: "suggestion",
   }),
 }));
 
-const CLICHE_RULES: Rule[] = CLICHE_PHRASES.map(([re, msg]) => ({
-  pattern: re,
-  build: () => ({ suggestion: msg, kind: "cliche" }),
-}));
-
-const RULES: Rule[] = [
-  // Order matters only for tie-breaking on identical start positions.
-  // High-confidence spelling first so it beats overlapping style flags.
-  ...MISSPELLING_RULES,
-  ...CONFUSABLES,
-  ...AGREEMENT,
-  ARTICLE_RULE,
-  ...CAP_RULES,
-  ...PUNCT_RULES,
-  ...DOUBLE_RULES,
-  // Style suggestions last so spelling/grammar wins on overlap.
-  ...WORDY_RULES,
-  ATTRIBUTION_ADVERB_RULE,
-  FILTER_RULE,
-  PASSIVE_RULE,
-  ...BODY_CLICHE_RULES,
-  ...CLICHE_RULES,
+// Clichés — small starter set; intentionally narrow. Style suggestion tier.
+const CLICHE_ENTRIES: Array<[RegExp, string]> = [
+  [/\bat the end of the day\b/gi, "[cliché]"],
+  [/\bin the blink of an eye\b/gi, "[cliché]"],
+  [/\bonly time will tell\b/gi, "[cliché]"],
+  [/\bcold as ice\b/gi, "[cliché]"],
+  [/\bquiet as a mouse\b/gi, "[cliché]"],
+  [/\bstrong as an ox\b/gi, "[cliché]"],
+  [/\bnaked eye\b/gi, "[cliché]"],
+  [/\bbottom line\b/gi, "[cliché]"],
 ];
 
-/** Run all rules over `text`, returning a sorted, non-overlapping list of
- *  suggestions. Earlier (lower-start) matches win on overlap; on ties, a
- *  longer match wins (so phrase-level rules beat single-word rules at the
- *  same start). */
-export function checkGrammar(text: string): GrammarSuggestion[] {
+const CLICHE_RULES: Rule[] = CLICHE_ENTRIES.map(([pattern, fix]) => ({
+  pattern,
+  build: (m) => ({
+    suggestion: matchCase(m[0], fix),
+    kind: "cliche",
+    severity: "suggestion",
+  }),
+}));
+
+// Doubled-word typo: "the the", "a a" — easy hit when editing.
+const DOUBLE_RULE: Rule = {
+  pattern: /\b([A-Za-z]+)\s+\1\b/g,
+  build: (m) => {
+    // Whitelist legitimate repetitions (had had, that that in some grammars).
+    const w = m[1].toLowerCase();
+    if (w === "had" || w === "that") return null;
+    return {
+      suggestion: m[1],
+      kind: "double",
+      severity: "error",
+    };
+  },
+};
+
+// Confusables — small explicit list. Each rule fires on one confidently-wrong
+// usage. We avoid the truly context-sensitive cases (their/there/they're)
+// because they need parsing to disambiguate without false positives.
+const CONFUSABLE_RULES: Rule[] = [
+  {
+    pattern: /\byour\s+(welcome|right|wrong|here|there|gonna)\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `you're ${m[1]}`),
+      kind: "confusable",
+      severity: "warning",
+    }),
+  },
+  {
+    pattern: /\bits\s+(a|an|the|been|being|going|gonna|been|just|only)\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `it's ${m[1]}`),
+      kind: "confusable",
+      severity: "warning",
+    }),
+  },
+];
+
+function buildRules(options: CheckOptions): Rule[] {
+  // High-importance (always shown): spelling, agreement, article, capital,
+  // spacing, punctuation, doubled word, confusables. These render with the
+  // ghost-text suggestion floating above the underlined word.
+  const rules: Rule[] = [
+    ...makeSpellRules(),
+    ...TENSE_RULES,
+    ...SVA_RULES,
+    ARTICLE_RULE,
+    ...CAPITAL_RULES,
+    ...PUNCT_RULES,
+    DOUBLE_RULE,
+    ...CONFUSABLE_RULES,
+  ];
+
+  // Low-importance (style hints, only shown on hover via the paragraph
+  // renderer): filter words, passive voice, attribution adverbs, wordy
+  // phrases, clichés. Default ON — the paragraph renderer relies on these
+  // being present to render the dim secondary tier described in styles.css.
+  if (options.style !== false) {
+    rules.push(
+      FILTER_RULE,
+      PASSIVE_RULE,
+      ADVERB_RULE,
+      ...WORDY_RULES,
+      ...CLICHE_RULES,
+    );
+  }
+
+  return rules;
+}
+
+const STYLE_KINDS_SET: ReadonlySet<GrammarSuggestion["kind"]> = new Set([
+  "filter", "passive", "adverb", "wordy", "cliche",
+]);
+
+function inSpan(
+  start: number,
+  end: number,
+  spans: ReadonlyArray<{ start: number; end: number }>,
+): boolean {
+  for (const s of spans) {
+    if (start >= s.start && end <= s.end) return true;
+  }
+  return false;
+}
+
+/**
+ * Run all enabled rules over `text`.
+ *
+ * Returns a sorted, non-overlapping list of suggestions. Earlier matches win
+ * on overlap; on ties, longer matches win.
+ *
+ * Optional `options.context.speechSpans` suppresses *style* rules (filter,
+ * passive, adverb, wordy, cliché) inside dialogue. Authors deliberately use
+ * passive voice and stylized adverbs in dialogue and we don't want to
+ * second-guess those. Hard errors (spelling, agreement, capitalization)
+ * still fire inside speech — "stoped" and "they was" are wrong everywhere.
+ */
+export function checkGrammar(
+  text: string,
+  options: CheckOptions = {},
+): GrammarSuggestion[] {
   if (!text) return [];
 
+  const speechSpans = options.context?.speechSpans;
+
+  const rules = buildRules(options);
   const all: GrammarSuggestion[] = [];
-  for (const rule of RULES) {
+
+  for (const rule of rules) {
     rule.pattern.lastIndex = 0;
     let m: RegExpExecArray | null;
     let safety = 0;
+
     while ((m = rule.pattern.exec(text)) !== null) {
-      // Pathological zero-width match safety
       if (m.index === rule.pattern.lastIndex) rule.pattern.lastIndex++;
       if (++safety > 5000) break;
 
       const built = rule.build(m);
       if (!built) continue;
+
       const original = m[0];
-      // Skip no-op suggestions (rule already correct).
       if (built.suggestion === original) continue;
+
+      const start = m.index;
+      const end = m.index + original.length;
+
+      // Drop style hints inside dialogue — see doc-comment above.
+      if (
+        speechSpans &&
+        STYLE_KINDS_SET.has(built.kind) &&
+        inSpan(start, end, speechSpans)
+      ) {
+        continue;
+      }
+
       all.push({
-        start: m.index,
-        end: m.index + original.length,
+        start,
+        end,
         original,
         suggestion: built.suggestion,
         kind: built.kind,
+        severity: built.severity,
       });
     }
   }
 
-  // Sort by start (asc), then by length (desc — longer wins on tie).
   all.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+
   const out: GrammarSuggestion[] = [];
   let lastEnd = -1;
+
   for (const s of all) {
     if (s.start < lastEnd) continue;
     out.push(s);
     lastEnd = s.end;
   }
+
   return out;
 }

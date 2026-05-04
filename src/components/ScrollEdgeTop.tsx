@@ -3,10 +3,10 @@ import type { CSSProperties } from "react";
 // Each strip is its own backdrop-filter compositor layer. In Electron's
 // Chromium the GPU cost stacks linearly, so we use far fewer strips than the
 // novel reader (which runs in Safari with a more forgiving compositor).
-const STRIP_COUNT = 8;
+const STRIP_COUNT = 9;
 const MAX_BLUR    = 2;
 const EXP_BASE    = 2;
-const OVERLAP     = -10;
+const OVERLAP     = -16;
 
 const STRIP_MASK =
   "linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%)";

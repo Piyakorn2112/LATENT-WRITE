@@ -39,13 +39,13 @@ function sceneTagStyle(tension: "calm" | "rising" | "high"): CSSProperties {
   return {
     position: "absolute",
     left: 0,
-    bottom: "2.15em", // floats into the inter-paragraph whitespace above
+    bottom: "3.15em", // floats into the inter-paragraph whitespace above
     whiteSpace: "nowrap",
     fontSize: "9px",
     lineHeight: 1,
     letterSpacing: "0.09em",
     fontFamily: "var(--font-ui)",
-    fontWeight: 600,                 // slightly heavier so the iOS hue reads
+    fontWeight: 700,                 // slightly heavier so the iOS hue reads
     color: SCENE_T[tension],
     opacity: 0.85,                   // bumped from 0.65 — iOS palette is balanced for it
     textTransform: "uppercase",
@@ -448,7 +448,7 @@ function HighlightLayerImpl({
         <span key={`para${pi}`}>
           {meta?.sceneStart && meta.sceneLabel && (
             <span aria-hidden="true" style={SCENE_ANCHOR}>
-              <span style={sceneTagStyle(tension)}>· {meta.sceneLabel}</span>
+              <span style={sceneTagStyle(tension)}>| {meta.sceneLabel}</span>
             </span>
           )}
           {paraNodes}

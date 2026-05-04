@@ -18,6 +18,10 @@ export interface Preferences {
   /** Set to true once the user dismisses the welcome flow. Missing on first
    *  launch — we use that to decide whether to auto-show onboarding. */
   hasSeenOnboarding?: boolean;
+  /** Easter-egg "fun mode" — toggles whimsical animations on the toolbar
+   *  intel orb (bouncy gooey eyes that move and blink). Off by default;
+   *  surfaced as a toggle in the settings panel. */
+  funMode?: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -30,6 +34,7 @@ const DEFAULTS: Preferences = {
   goals: {
     dailyWords: 0,
   },
+  funMode: false,
 };
 
 const KEY = "latentwrite:prefs-v1";
@@ -43,6 +48,7 @@ export function loadPrefs(): Preferences {
       typography: { ...DEFAULTS.typography, ...(p.typography ?? {}) },
       goals: { ...DEFAULTS.goals, ...(p.goals ?? {}) },
       hasSeenOnboarding: p.hasSeenOnboarding,
+      funMode: p.funMode ?? DEFAULTS.funMode,
     };
   } catch {
     return { ...DEFAULTS };

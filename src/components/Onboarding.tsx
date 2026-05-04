@@ -60,16 +60,24 @@ function HeroOrb({ mode, size = 220 }: { mode: IntelMode; size?: number }) {
   );
 }
 
-function CyclingOrb() {
+function CyclingOrb({ active }: { active: boolean }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
+    // Only run the colour cycle while page 1 is the visible page. With the
+    // interval running while the user is on page 2/3/4, the orb's colour
+    // would tick every 4 s in an off-screen page, triggering a full
+    // CyclingOrb → HeroOrb subtree re-render. Pausing here keeps the
+    // onboarding render budget free for whatever the user is actually
+    // looking at and avoids a stale colour on return (it just resumes
+    // from wherever it was, which is fine — same orb, same palette).
+    if (!active) return;
     // 4 s dwell on each colour; the CSS transition on --orb-a/b/c is 1.4 s,
     // so the eye sees ~2.6 s of solid colour and ~1.4 s of crossfade.
     const id = window.setInterval(() => {
       setIdx((i) => (i + 1) % MODE_ORDER.length);
     }, 4000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [active]);
   return <HeroOrb mode={MODE_ORDER[idx]} size={220} />;
 }
 
@@ -198,7 +206,7 @@ export function Onboarding({ onClose }: Props) {
             {/* PAGE 1 — Welcome */}
             <OnbPage active={page === 0}>
               <div className="onb-hero onb-hero--orb">
-                <CyclingOrb />
+                <CyclingOrb active={page === 0} />
               </div>
               <h1 className="onb-title">Welcome to Latent Write</h1>
               <p className="onb-subtitle">

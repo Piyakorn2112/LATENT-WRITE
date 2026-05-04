@@ -26,6 +26,7 @@ import type { Preferences, Typography, WritingGoals } from "../lib/preferences";
 import { FONT_LABELS } from "../lib/preferences";
 import { NumberStepper } from "./NumberStepper";
 import { GlassRange } from "./GlassRange";
+import { GlassToggle } from "./GlassToggle";
 
 type IntelMode = "off" | "low" | "default" | "high" | "auto";
 
@@ -80,6 +81,11 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
 
   return (
     <div className="settings-panel liquid-glass">
+      {/* Inner wrapper carries the scroll. Keeping the scroll INSIDE
+          the panel (not on .settings-panel itself) lets the panel's
+          .liquid-glass::before specular ring stay anchored to the
+          card edges instead of scrolling away with the content. */}
+      <div className="settings-panel-scroll">
       <p className="settings-section-label">Intelligence</p>
       <div className="settings-intel-grid">
         {INTEL_LEVELS.map(({ value, label, desc, color }) => (
@@ -170,9 +176,25 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
         />
       </div>
 
+      <p className="settings-section-label">Easter eggs</p>
+      <div className="settings-toggle-row">
+        <div className="settings-toggle-row-text">
+          <span className="settings-toggle-row-title">Fun mode</span>
+          <span className="settings-toggle-row-desc">
+            Adds bouncy gooey eyes to the toolbar intelligence orb.
+          </span>
+        </div>
+        <GlassToggle
+          checked={!!prefs.funMode}
+          onChange={(v) => onSetPrefs({ ...prefs, funMode: v })}
+          ariaLabel="Toggle fun mode"
+        />
+      </div>
+
       <p className="settings-hint">
         Settings persist locally. Goals reset at midnight.
       </p>
+      </div>
     </div>
   );
 }

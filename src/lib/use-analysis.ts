@@ -159,6 +159,16 @@ export function useAnalysis(
       resultChapterId.current = currentChapterId;
     }
 
+    // Empty chapters have nothing to analyse — don't flip the pill on, and
+    // don't schedule a debounced run. Otherwise creating a new (empty)
+    // chapter would leave the StatusPill stuck on "Analysing chapter…" for
+    // the full debounce window even though there is no content.
+    const isEmpty = chapter.content.trim().length === 0;
+    if (isEmpty) {
+      setIsAnalyzing(false);
+      return;
+    }
+
     setIsAnalyzing(true);
 
     const timer = window.setTimeout(() => {

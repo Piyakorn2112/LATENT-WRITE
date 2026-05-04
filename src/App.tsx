@@ -11,9 +11,19 @@ import { FindReplace } from "./components/FindReplace";
 import { WordCount } from "./components/WordCount";
 import { ProjectSearch } from "./components/ProjectSearch";
 import { Onboarding } from "./components/Onboarding";
-import { newChapter, parseNovel, serializeNovel } from "./lib/parser";
-import { buildNovelHtml, printNovelBrowser } from "./lib/pdf-export";
-import { loadNovel, saveNovel } from "./lib/storage";
+import { PdfExportOverlay } from "./components/PdfExportOverlay";
+import { newChapter, parseNovel, serializeNovel, uid } from "./lib/parser";
+import {
+  buildNovelHtml,
+  printNovelBrowser,
+  type PdfExportOptions,
+} from "./lib/pdf-export";
+import {
+  loadNovel,
+  saveNovel,
+  loadCurrentChapterId,
+  saveCurrentChapterId,
+} from "./lib/storage";
 import { useAnalysis } from "./lib/use-analysis";
 import { lightweightPrescan } from "./lib/auto-intel";
 import { renameInBook, renameInText } from "./lib/world-data";
@@ -44,11 +54,24 @@ function totalWordsInNovel(novel: Novel): number {
 
 export default function App() {
   const [novel, setNovel] = useState<Novel>(() => loadNovel());
-  const [currentId, setCurrentId] = useState<string | null>(
-    () => loadNovel().chapters[0]?.id ?? null
-  );
+  // Initial chapter pick: prefer the last-opened chapter from localStorage,
+  // but only if it's still present in the loaded novel (chapters can be
+  // deleted between sessions). Falls back to chapter[0]. The id is persisted
+  // on every change via the effect below so refresh keeps the writer's
+  // place across sessions.
+  const [currentId, setCurrentId] = useState<string | null>(() => {
+    const initial = loadNovel();
+    const saved = loadCurrentChapterId();
+    if (saved && initial.chapters.some((c) => c.id === saved)) return saved;
+    return initial.chapters[0]?.id ?? null;
+  });
+
+  useEffect(() => {
+    saveCurrentChapterId(currentId);
+  }, [currentId]);
   const [indexOpen, setIndexOpen] = useState(false);
   const [worldOpen, setWorldOpen] = useState(false);
+  const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
   const [intelMode, setIntelMode] = useState<"off" | "low" | "default" | "high" | "auto">("default");
   const [findOpen, setFindOpen] = useState(false);
@@ -220,15 +243,27 @@ export default function App() {
   );
 
   const handleAddChapter = useCallback(() => {
+    // Generate the new id ONCE outside the updater. setNovel's updater can be
+    // invoked twice in StrictMode (and React legitimately re-runs it under
+    // concurrent rendering), so any randomness inside the updater would
+    // produce two different chapters with two different ids. Previously a
+    // queueMicrotask scheduled inside the updater would set currentId to the
+    // discarded run's id — causing the editor to land on "no chapter open"
+    // because that id never made it into the committed chapters array.
+    const newId = uid();
     setNovel((n) => {
+      // Idempotent on re-invocation: if a previous run already appended this
+      // id, return the same state.
+      if (n.chapters.some((c) => c.id === newId)) return n;
       const nextNumber = n.chapters.length
         ? Math.max(...n.chapters.map((c) => c.number)) + 1
         : 1;
-      const c = newChapter(nextNumber);
-      const updated = { ...n, chapters: [...n.chapters, c] };
-      queueMicrotask(() => setCurrentId(c.id));
-      return updated;
+      const fresh = { ...newChapter(nextNumber), id: newId };
+      return { ...n, chapters: [...n.chapters, fresh] };
     });
+    // React 18 auto-batches this with the setNovel above (both inside the
+    // same event/microtask), so currentId and chapters commit together.
+    setCurrentId(newId);
   }, []);
 
   const handleDeleteChapter = useCallback(
@@ -293,16 +328,28 @@ export default function App() {
     URL.revokeObjectURL(url);
   }, [novel]);
 
-  const handleExportPdf = useCallback(async () => {
-    const safeTitle = (novel.meta.title || "novel").replace(/[^\w\d-]+/g, "-").toLowerCase();
-    const filename = `${safeTitle}.pdf`;
-    if (window.electronAPI) {
-      const html = buildNovelHtml(novel);
-      await window.electronAPI.exportPdf(html, filename);
-    } else {
-      printNovelBrowser(novel);
-    }
-  }, [novel]);
+  // PDF export now opens the format/paper-size overlay first. The actual
+  // export runs in `doExportPdf` after the user picks options. The Electron
+  // menu's `export-pdf` and the toolbar's PDF button both route through the
+  // overlay so the choice surface is consistent across triggers.
+  const handleExportPdf = useCallback(() => {
+    setPdfExportOpen(true);
+  }, []);
+
+  const doExportPdf = useCallback(
+    async (options: PdfExportOptions) => {
+      setPdfExportOpen(false);
+      const safeTitle = (novel.meta.title || "novel").replace(/[^\w\d-]+/g, "-").toLowerCase();
+      const filename = `${safeTitle}.pdf`;
+      if (window.electronAPI) {
+        const html = buildNovelHtml(novel, options);
+        await window.electronAPI.exportPdf(html, filename);
+      } else {
+        printNovelBrowser(novel, options);
+      }
+    },
+    [novel],
+  );
 
   // Onboarding dismissal — flip the persistent flag once so we never
   // auto-show it again. Re-opening via the Help menu doesn't update the
@@ -441,6 +488,7 @@ export default function App() {
         intelResolvedLevel={intelMode === "auto" ? autoResolvedLevel : undefined}
         onCycleIntel={cycleIntel}
         isAnalyzing={analysisRunning}
+        funMode={prefs.funMode}
       />
 
       <input
@@ -561,6 +609,14 @@ export default function App() {
 
       {onboardingOpen && (
         <Onboarding onClose={handleOnboardingClose} />
+      )}
+
+      {pdfExportOpen && (
+        <PdfExportOverlay
+          meta={novel.meta}
+          onConfirm={doExportPdf}
+          onClose={() => setPdfExportOpen(false)}
+        />
       )}
 
       <div className={`saved-indicator ${savedVisible ? "visible" : ""}`}>

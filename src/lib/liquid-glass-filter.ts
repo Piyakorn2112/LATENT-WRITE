@@ -37,17 +37,22 @@ const SELECTOR = ".liquid-glass, .analysis-tab";
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
 const DISP_PX = 30;        // max refraction shift, pixels
-const BLUR_PX = 5;         // backdrop blur stdDeviation, pixels
+const BLUR_PX = 4;         // backdrop blur stdDeviation, pixels
 const SATURATE = "1.8";
 
 // Round (W, H, R) to this for cache key — sub-pixel differences do not
 // produce a visually different filter and otherwise we'd build a new map
 // on every resize-observer tick during animations.
-const CACHE_GRID = 4;
+const CACHE_GRID = 16;
 
 // LRU cap so long-running sessions with varied panel sizes don't accrete
-// hundreds of <filter> nodes in the DOM.
-const FILTER_CACHE_LIMIT = 24;
+// hundreds of <filter> nodes in the DOM. Eviction also skips any filter
+// currently bound to a live element (refcount > 0), so this cap only
+// trims *unreferenced* sized variants. Toolbar, scroll edges, analysis tab,
+// popovers, and focus button between them already use ~8 unique sizes;
+// add resize jitter and the cap needs to be generous or the toolbar's
+// in-use filter is evicted while the user resizes a popover textbox.
+const FILTER_CACHE_LIMIT = 32;
 
 // ── Worker dispatch ──────────────────────────────────────────────────────
 
@@ -105,6 +110,8 @@ function buildMapInWorker(
 interface CacheEntry {
   filter: SVGFilterElement;
   blobUrl: string | null;
+  /** How many live elements currently set their backdrop-filter to this id. */
+  refCount: number;
 }
 
 let svgRoot: SVGSVGElement | null = null;
@@ -231,15 +238,26 @@ function buildFilterEl(
 }
 
 function evictLRU() {
-  while (filterCache.size > FILTER_CACHE_LIMIT) {
-    const oldestId = filterCache.keys().next().value as string | undefined;
-    if (!oldestId) break;
-    const entry = filterCache.get(oldestId);
-    filterCache.delete(oldestId);
-    if (entry) {
-      entry.filter.remove();
-      if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
-    }
+  if (filterCache.size <= FILTER_CACHE_LIMIT) return;
+
+  // Walk from oldest to newest. Skip:
+  //   · entries currently referenced by a live element (refcount > 0) —
+  //     removing their <filter> node would break the existing backdrop-filter
+  //     url(#id) on that element. Toolbars/panels that don't resize would
+  //     otherwise lose their glass when a popover resize storm filled the cache.
+  //   · the newest entry — it was just created and is about to be bound by
+  //     the caller, so its refcount is still 0 only because the bind is one
+  //     statement away.
+  const ids = [...filterCache.keys()];
+  const newestId = ids[ids.length - 1];
+  for (const id of ids) {
+    if (filterCache.size <= FILTER_CACHE_LIMIT) break;
+    if (id === newestId) continue;
+    const entry = filterCache.get(id);
+    if (!entry || entry.refCount > 0) continue;
+    filterCache.delete(id);
+    entry.filter.remove();
+    if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
   }
 }
 
@@ -276,7 +294,7 @@ async function ensureFilter(
 
     const filter = buildFilterEl(id, w, h, overflow, mapUrl);
     defs!.append(filter);
-    filterCache.set(id, { filter, blobUrl: mapUrl });
+    filterCache.set(id, { filter, blobUrl: mapUrl, refCount: 0 });
     evictLRU();
     inFlightFilter.delete(id);
     return id;
@@ -290,6 +308,30 @@ async function ensureFilter(
 
 const observed = new WeakMap<Element, ResizeObserver>();
 const lastSize = new WeakMap<Element, string>();
+// Tracks which filter id each live element is currently pointing at, so we
+// can decrement the previous filter's refcount when an element re-binds to
+// a new size's filter (and on detach).
+const elementFilterId = new WeakMap<Element, string>();
+
+function bindFilter(element: Element, newId: string) {
+  const prevId = elementFilterId.get(element);
+  if (prevId === newId) return;
+  if (prevId) {
+    const prev = filterCache.get(prevId);
+    if (prev && prev.refCount > 0) prev.refCount--;
+  }
+  const next = filterCache.get(newId);
+  if (next) next.refCount++;
+  elementFilterId.set(element, newId);
+}
+
+function unbindFilter(element: Element) {
+  const prevId = elementFilterId.get(element);
+  if (!prevId) return;
+  const prev = filterCache.get(prevId);
+  if (prev && prev.refCount > 0) prev.refCount--;
+  elementFilterId.delete(element);
+}
 
 function readRadius(el: Element): number {
   const cs = getComputedStyle(el);
@@ -328,6 +370,7 @@ function applyTo(element: HTMLElement) {
     // while the worker was busy). If so, the next update tick will set the
     // correct filter.
     if (lastSize.get(element) !== key) return;
+    bindFilter(element, id);
     const ref = `url(#${id})`;
     element.style.setProperty("backdrop-filter", ref);
     element.style.setProperty("-webkit-backdrop-filter", ref);
@@ -352,6 +395,7 @@ function unobserve(el: Element) {
     observed.delete(el);
     lastSize.delete(el);
   }
+  unbindFilter(el);
 }
 
 function isGlassEl(el: Element): boolean {
