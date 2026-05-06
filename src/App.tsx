@@ -13,6 +13,8 @@ import { ProjectSearch } from "./components/ProjectSearch";
 import { Onboarding } from "./components/Onboarding";
 import { PdfExportOverlay } from "./components/PdfExportOverlay";
 import { newChapter, parseNovel, serializeNovel, uid } from "./lib/parser";
+import { autoParagraph } from "./lib/auto-paragraph";
+import { autoSceneBreaks } from "./lib/auto-scene-break";
 import {
   buildNovelHtml,
   printNovelBrowser,
@@ -72,6 +74,16 @@ export default function App() {
   const [indexOpen, setIndexOpen] = useState(false);
   const [worldOpen, setWorldOpen] = useState(false);
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
+  // Auto-paragraph processing state — drives both the AnalysisPanel
+  // button's "working" pulse and the editor's ambient scan-orb gradient.
+  // The actual paragraphing pass is fast (synchronous, sub-frame on
+  // typical chapters); the lifetime of this flag is mostly UX feedback.
+  const [autoParagraphing, setAutoParagraphing] = useState(false);
+  // Same shape, separate flag — for the auto-scene-break pass. Kept
+  // distinct so the two buttons can be in different states (e.g. user
+  // hits paragraph then immediately scene-break) and the StatusPill
+  // can read different labels.
+  const [sceneBreaking, setSceneBreaking] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
   const [intelMode, setIntelMode] = useState<"off" | "low" | "default" | "high" | "auto">("default");
   const [findOpen, setFindOpen] = useState(false);
@@ -223,7 +235,9 @@ export default function App() {
   );
 
   const statusTask: StatusTask | null = renameTask
-    ?? (analysisRunning ? { kind: "analyzing", label: "Analysing chapter…" } : null);
+    ?? (autoParagraphing ? { kind: "auto-paragraph", label: "Re-paragraphing chapter…" } : null)
+    ?? (sceneBreaking    ? { kind: "auto-paragraph", label: "Inserting scene breaks…"  } : null)
+    ?? (analysisRunning  ? { kind: "analyzing",      label: "Analysing chapter…"      } : null);
 
   const chapters = novel.chapters;
   const currentIndex = useMemo(
@@ -351,6 +365,54 @@ export default function App() {
     [novel],
   );
 
+  // Smart auto-paragraph — re-segment the current chapter using
+  // speech / action / time-shift signals from auto-paragraph.ts. The
+  // actual pass is synchronous; we wrap it in a brief processing window
+  // so the UI feedback (button pulse + editor scan-orb gradient) reads
+  // as a real beat rather than an instant flicker. The orb's
+  // breathe-in animation alone is 0.65 s, so the minimum visible window
+  // needs to cover at least that for the cue to register.
+  const handleAutoParagraph = useCallback(() => {
+    if (!current || autoParagraphing) return;
+    setAutoParagraphing(true);
+    // rAF + small idle window: lets the orb's enter animation start before
+    // we mutate content (which would otherwise re-render the editor mid
+    // animation and visually cancel the breath-in).
+    window.setTimeout(() => {
+      const next = autoParagraph(current.content, knownNames);
+      // Only commit if something actually changed — avoids noisy undo
+      // history entries when the chapter was already cleanly paragraphed.
+      if (next !== current.content) {
+        updateCurrent((c) => ({ ...c, content: next }));
+      }
+      // Hold the orb visible for a short tail so the user perceives the
+      // pass landing rather than blinking out as soon as state commits.
+      window.setTimeout(() => setAutoParagraphing(false), 700);
+    }, 280);
+  }, [current, knownNames, autoParagraphing, updateCurrent]);
+
+  // Auto-scene-break — companion pass to auto-paragraph. Reads the
+  // existing speech-detect output (already produced for the active
+  // chapter by useAnalysis) and inserts `* * *` markers at detected
+  // scene boundaries. Same UX-window pattern as auto-paragraph so the
+  // two buttons feel like a family.
+  const handleAutoSceneBreak = useCallback(() => {
+    if (!current || sceneBreaking) return;
+    if (!analysisResult || analysisResult.paragraphs.length < 3) return;
+    setSceneBreaking(true);
+    window.setTimeout(() => {
+      const r = autoSceneBreaks(
+        current.content,
+        analysisResult.paragraphs,
+        analysisResult.speechResults,
+      );
+      if (r.inserted > 0 && r.content !== current.content) {
+        updateCurrent((c) => ({ ...c, content: r.content }));
+      }
+      window.setTimeout(() => setSceneBreaking(false), 700);
+    }, 280);
+  }, [current, sceneBreaking, analysisResult, updateCurrent]);
+
   // Onboarding dismissal — flip the persistent flag once so we never
   // auto-show it again. Re-opening via the Help menu doesn't update the
   // flag (it's already true after first close).
@@ -456,19 +518,48 @@ export default function App() {
     return off;
   }, [handleAddChapter, handleImport, handleExport, handleExportPdf, flushSave, cycleIntel, handlePrev, handleNext]);
 
+  // Intel-mode tint colour exposed as a single CSS variable on the app
+  // root so consumers (editor scan-orb, auto-paragraph status pill,
+  // future intelligence-tinted UI) can inherit it without prop drilling.
+  // Mirrors the WorldDataView ORB_COLOR map exactly so the auto-scan
+  // orb in the world panel and the auto-paragraph orb in the editor
+  // share the same per-mode tint identity.
+  const orbColor = (() => {
+    const m = intelMode === "auto" ? autoResolvedLevel : intelMode;
+    switch (m) {
+      case "off":     return "#888888";
+      case "low":     return "#DC7B19";
+      case "high":    return "#A828B8";
+      case "default": default: return "#1071D8";
+    }
+  })();
+
   // Apply typography prefs to CSS custom properties on the editor tree.
   const editorStyle = useMemo<CSSProperties>(() => ({
     "--editor-font":        FONT_STACKS[prefs.typography.fontFamily],
     "--editor-font-size":   `${prefs.typography.fontSize}px`,
     "--editor-line-height": String(prefs.typography.lineHeight),
     "--editor-measure":     `${prefs.typography.measure}ch`,
-  } as CSSProperties), [prefs.typography]);
+    "--orb-color":          orbColor,
+  } as CSSProperties), [prefs.typography, orbColor]);
 
   const appClass = `app${focusMode ? " app--focus" : ""}`;
 
   return (
     <div className={appClass} style={editorStyle}>
       <div className="app-drag-region" aria-hidden="true" />
+      {/* Window-sized scan orb — fades in across the entire viewport
+          whenever a smart-process pass is running (auto-paragraph or
+          auto-scene-break). Lives at the app root so its
+          `position: fixed` is positioned against the viewport (parents
+          like .document have transform/contain set, which would
+          otherwise reanchor fixed positioning). */}
+      <div
+        className={`editor-scan-orb${
+          autoParagraphing || sceneBreaking ? " editor-scan-orb--visible" : ""
+        }`}
+        aria-hidden="true"
+      />
       <ScrollEdgeTop />
       <Toolbar
         chapterTitle={current?.title ?? ""}
@@ -570,6 +661,14 @@ export default function App() {
         allChapters={chapters}
         chapterIndex={currentIndex}
         worldData={novel.worldData}
+        onAutoParagraph={current ? handleAutoParagraph : undefined}
+        autoParagraphing={autoParagraphing}
+        onAutoSceneBreak={
+          current && analysisResult && analysisResult.paragraphs.length >= 3
+            ? handleAutoSceneBreak
+            : undefined
+        }
+        sceneBreaking={sceneBreaking}
       />
 
       {current && (

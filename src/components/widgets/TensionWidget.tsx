@@ -1,4 +1,6 @@
 import { useId, useMemo } from "react";
+import { TrendingUp, TrendingDown, Mountain, Activity, MapPin, Anchor } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ChapterAnalysis } from "../../lib/use-analysis";
 import type { ChapterParaResult } from "../../lib/speech-detect";
 import { cliffhangerScore } from "../../lib/character-voice";
@@ -7,6 +9,18 @@ import { WidgetCard } from "./WidgetCard";
 const ARC_LABEL: Record<string, string> = {
   "slope-up": "Rising", "slope-down": "Falling", "plateau-high": "Sustained",
   "spike": "Spike", "double-peak": "Two Peaks", "valley": "Valley", "flat": "Flat",
+};
+
+// Per-arc-shape glyph — encodes the shape silhouette in an icon so the
+// arc-shape badge reads at a glance even before the label.
+const ARC_ICON: Record<string, LucideIcon> = {
+  "slope-up":     TrendingUp,
+  "slope-down":   TrendingDown,
+  "plateau-high": Activity,
+  "spike":        Mountain,
+  "double-peak":  Mountain,
+  "valley":       MapPin,
+  "flat":         Anchor,
 };
 
 const TENSION_FILL: Record<string, number> = { calm: 1, rising: 3, high: 4, sustained: 5 };
@@ -64,7 +78,7 @@ export function TensionWidget({ analysis, paragraphs, speechResults }: TensionPr
     return cliffhangerScore(paragraphs, speechResults);
   }, [paragraphs, speechResults]);
 
-  const W = 440, H = 72, PAD_X = 4, PAD_Y = 6;
+  const W = 440, H = 84, PAD_X = 6, PAD_Y = 14;
   const plotH = H - PAD_Y * 2;
 
   const pts: [number, number][] = tensionCurve.length >= 2
@@ -84,6 +98,21 @@ export function TensionWidget({ analysis, paragraphs, speechResults }: TensionPr
   const lineGradId = `tl-${uid}`;
   const fillGradId = `tf-${uid}`;
 
+  // Locate the peak point so we can pin a marker above it. When multiple
+  // points tie at peak we use the FIRST occurrence — matches the writer's
+  // reading-order intuition ("where does it first hit max").
+  const peakIdx = tensionCurve.length > 0
+    ? tensionCurve.findIndex((v) => v === peakVal)
+    : -1;
+  const peakPt = peakIdx >= 0 && pts[peakIdx] ? pts[peakIdx] : null;
+
+  // Calm/rising/high zone bands — drawn as faint horizontal guides at
+  // the 0.35 and 0.85 thresholds (the same thresholds tColor() uses).
+  // The eye uses these to immediately classify any point on the curve
+  // without having to compare it to a remembered legend.
+  const yRising = (H - PAD_Y) - 0.35 * plotH;
+  const yHigh = (H - PAD_Y) - 0.85 * plotH;
+
   const momentumColors: Record<string, string> = {
     stuck: "#94a3b8", progressing: "#38bdf8", accelerating: "#34d399",
   };
@@ -93,11 +122,21 @@ export function TensionWidget({ analysis, paragraphs, speechResults }: TensionPr
       topLeft="TENSION ARC" topRight={peakTension.toUpperCase()}
     >
       <div className="wg-content">
-        {/* Sparkline */}
+        {/* Sparkline — the hero. The chart is the chapter at a glance,
+            so it gets the most pixels. Layered structure (back→front):
+              · Two faint guide lines at the rising/high thresholds
+                (0.35 / 0.85), so any point reads its zone instantly
+              · Soft fill gradient under the curve (peak-coloured)
+              · The curve itself, gradient-stroked by per-point tension
+              · A peak pin: vertical hairline + a small filled circle
+                at the chapter's first peak — that's the data the writer
+                most cares about ("where does this hit hardest")
+            All of it data-bound — no decorative elements. */}
         {linePath ? (
           <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
             preserveAspectRatio="none"
-            style={{ overflow: "visible", display: "block", marginBottom: 4 }}>
+            className="wg-tension-chart"
+            style={{ overflow: "visible", display: "block", marginBottom: 6 }}>
             <defs>
               <linearGradient id={lineGradId} x1="0%" y1="0%" x2="100%" y2="0%">
                 {tensionCurve.map((v, i) => (
@@ -107,14 +146,47 @@ export function TensionWidget({ analysis, paragraphs, speechResults }: TensionPr
                 ))}
               </linearGradient>
               <linearGradient id={fillGradId} x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stopColor={peakColor} stopOpacity="0.22" />
+                <stop offset="0%" stopColor={peakColor} stopOpacity="0.26" />
                 <stop offset="100%" stopColor={peakColor} stopOpacity="0" />
               </linearGradient>
             </defs>
+
+            {/* Threshold guides — faint dotted reference lines, exactly
+                where the colour transitions happen on the gradient. */}
+            <line x1={PAD_X} y1={yRising} x2={W - PAD_X} y2={yRising}
+              stroke="rgba(255, 255, 255, 0.07)" strokeWidth="0.8"
+              strokeDasharray="2 4" vectorEffect="non-scaling-stroke" />
+            <line x1={PAD_X} y1={yHigh} x2={W - PAD_X} y2={yHigh}
+              stroke="rgba(244, 63, 94, 0.16)" strokeWidth="0.8"
+              strokeDasharray="2 4" vectorEffect="non-scaling-stroke" />
+
             {fillPath && <path d={fillPath} fill={`url(#${fillGradId})`} />}
             <path d={linePath} fill="none" stroke={`url(#${lineGradId})`}
-              strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+              strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
               vectorEffect="non-scaling-stroke" />
+
+            {/* Peak pin — vertical hairline drops from the curve to the
+                baseline, so the reader can scan straight down to the
+                "where" axis without losing the y-position. */}
+            {peakPt && (
+              <>
+                <line
+                  x1={peakPt[0]} y1={peakPt[1] + 1}
+                  x2={peakPt[0]} y2={H - PAD_Y}
+                  stroke={peakColor} strokeWidth="0.8"
+                  strokeDasharray="1.5 2"
+                  opacity="0.45"
+                  vectorEffect="non-scaling-stroke"
+                />
+                {/* Outer ring (glow halo via larger semi-transparent
+                    circle) + crisp dot. Stays inside the chart bounds
+                    via the increased PAD_Y above. */}
+                <circle cx={peakPt[0]} cy={peakPt[1]} r="3.4"
+                  fill={peakColor} opacity="0.28" />
+                <circle cx={peakPt[0]} cy={peakPt[1]} r="2.1"
+                  fill={peakColor} stroke="#0c1220" strokeWidth="0.8" />
+              </>
+            )}
           </svg>
         ) : (
           <div style={{ height: H, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -122,81 +194,131 @@ export function TensionWidget({ analysis, paragraphs, speechResults }: TensionPr
           </div>
         )}
 
-        {/* Arc info row */}
-        <div className="wg-row" style={{ marginBottom: segs.length ? 8 : 0 }}>
-          <span className="wg-stat-key">{ARC_LABEL[arcShape] ?? arcShape}</span>
+        {/* Arc-shape badge + peak position track. The shape glyph turns
+            the abstract "arcShape" classification into an at-a-glance
+            silhouette; the tiny inline track encodes peak position
+            without forcing the eye to read "peak ~78%". */}
+        <div className="wg-tension-meta">
+          <span className="wg-arc-badge"
+            style={{
+              color: peakColor,
+              borderColor: `${peakColor}55`,
+              background: `${peakColor}10`,
+            }}>
+            {(() => {
+              const ArcGlyph = ARC_ICON[arcShape] ?? Activity;
+              return <ArcGlyph size={11} strokeWidth={2.4} />;
+            })()}
+            <span>{ARC_LABEL[arcShape] ?? arcShape}</span>
+          </span>
+
           {guidance.peakPosition != null && (
-            <>
-              <span className="wg-dot-sep">·</span>
-              <span className="wg-stat-key">peak ~{guidance.peakPosition}%</span>
-            </>
+            <span className="wg-tension-peakloc">
+              <span className="wg-tension-peakloc-key">PEAK</span>
+              <span className="wg-tension-peakloc-track" aria-hidden="true">
+                <span
+                  className="wg-tension-peakloc-fill"
+                  style={{ width: `${guidance.peakPosition}%`, background: peakColor }}
+                />
+                <span
+                  className="wg-tension-peakloc-pip"
+                  style={{ left: `${guidance.peakPosition}%`, background: peakColor }}
+                />
+              </span>
+              <span className="wg-tension-peakloc-num"
+                style={{ color: peakColor }}>
+                {guidance.peakPosition}%
+              </span>
+            </span>
           )}
+
           {peakLabel && (
-            <>
-              <span className="wg-dot-sep">·</span>
-              <span className="wg-stat-key">{peakLabel}</span>
-            </>
+            <span className="wg-tension-peaklabel">{peakLabel}</span>
           )}
         </div>
 
-        {/* Structure segments (high mode) */}
+        {/* Structure segments (high mode) — redesigned as a horizontal
+            stack of compact tiles. Each tile shows: the segment label,
+            a 5-cell tension dot row, and the momentum score (when
+            present). The horizontal layout reads as a chapter shape,
+            not a generic list. */}
         {segs.length > 0 && (
           <>
             <div className="wg-divider" />
-            <div className="wg-section">
+            <div className="wg-tension-segs">
               {segs.map(seg => {
                 const tc = TENSION_COLOR[seg.tensionProfile] ?? "#94a3b8";
                 const fill = TENSION_FILL[seg.tensionProfile] ?? 1;
                 const mom = momentum?.segments.find(m => m.label === seg.label);
                 const momColor = mom ? (momentumColors[mom.trend] ?? "#94a3b8") : "#94a3b8";
                 return (
-                  <div key={seg.label} className="wg-seg">
-                    <span className="wg-seg-dot" style={{ background: tc }} />
-                    <span className="wg-seg-label">{seg.label.replace("-section", "")}</span>
-                    <div className="wg-seg-cells">
+                  <div key={seg.label} className="wg-tension-seg-tile">
+                    <span className="wg-tension-seg-label">
+                      {seg.label.replace("-section", "")}
+                    </span>
+                    <div className="wg-tension-seg-cells">
                       {[0,1,2,3,4].map(i => (
-                        <span key={i} className="wg-seg-cell"
-                          style={i < fill ? { background: tc } : undefined} />
+                        <span key={i} className="wg-tension-seg-cell"
+                          style={i < fill ? {
+                            background: tc,
+                            boxShadow: `0 0 4px ${tc}88`,
+                          } : undefined} />
                       ))}
                     </div>
-                    <span className="wg-seg-tension" style={{ color: tc }}>{seg.tensionProfile}</span>
+                    <span className="wg-tension-seg-tension" style={{ color: tc }}>
+                      {seg.tensionProfile}
+                    </span>
                     {mom && (
-                      <span className="wg-seg-momentum" style={{ color: momColor }}>
+                      <span className="wg-tension-seg-mom" style={{ color: momColor }}>
                         {Math.round(mom.score * 100)}%
                       </span>
                     )}
                   </div>
                 );
               })}
-              {momentum?.overall && (
-                <div className="wg-seg-overall">
-                  <span className="wg-seg-overall-text">
-                    overall · {momentum.overall}
-                    {momentum.hasFakePeak ? " · ⚠ fake-peak" : ""}
-                  </span>
-                </div>
-              )}
             </div>
+            {momentum?.overall && (
+              <div className="wg-tension-overall">
+                <span>overall</span>
+                <span className="wg-tension-overall-val">{momentum.overall}</span>
+                {momentum.hasFakePeak && (
+                  <span className="wg-tension-overall-warn">fake-peak</span>
+                )}
+              </div>
+            )}
           </>
         )}
 
-        {/* Cliffhanger meta — appears only when paragraphs are provided. A
-            low-key footer keeps the widget legible while still surfacing
-            an end-of-chapter hook score. */}
+        {/* Cliffhanger — redesigned from a text + percentage line into a
+            visual mini-meter. The bar reads "how strong is the hook?" in
+            one glance; the label disambiguates the band (soft / lift /
+            hook). Lives at the bottom because it's a *chapter-end*
+            metric — semantically the closing note. */}
         {cliff && (
           <>
             <div className="wg-divider" />
-            <div className="wg-style-meta">
-              <span className="wg-style-meta-label">Cliffhanger</span>
-              <span className="wg-style-meta-value" style={{ color: CLIFF_COLOR[cliff.label] }}>
+            <div className="wg-tension-cliff">
+              <span className="wg-tension-cliff-key">CLIFFHANGER</span>
+              <span className="wg-tension-cliff-track" aria-hidden="true">
+                <span className="wg-tension-cliff-fill"
+                  style={{
+                    width: `${Math.round(cliff.score * 100)}%`,
+                    background: CLIFF_COLOR[cliff.label],
+                  }} />
+              </span>
+              <span className="wg-tension-cliff-pill"
+                style={{
+                  color: CLIFF_COLOR[cliff.label],
+                  borderColor: `${CLIFF_COLOR[cliff.label]}55`,
+                }}>
                 {cliff.label}
               </span>
-              <span className="wg-style-meta-sep">·</span>
-              <span className="wg-style-meta-value" style={{ color: CLIFF_COLOR[cliff.label] }}>
-                {Math.round(cliff.score * 100)}%
+              <span className="wg-tension-cliff-num"
+                style={{ color: CLIFF_COLOR[cliff.label] }}>
+                {Math.round(cliff.score * 100)}
               </span>
             </div>
-            <div className="wg-action-line" style={{ marginTop: 4 }}>
+            <div className="wg-action-line" style={{ marginTop: 6 }}>
               {cliff.note}
             </div>
           </>

@@ -715,6 +715,33 @@ body {
   padding: 7px 0;
 }
 
+/* Auto-paragraph button — same chassis as --settings (compact one-line
+   icon) but visually distinct as a one-shot action rather than a tab
+   toggle: no --active state, just a working/processing state that
+   pulses while the host runs the paragraphing pass. */
+.analysis-tab--action {
+  min-height: 34px;
+  padding: 7px 0;
+}
+
+.analysis-tab--action:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+/* Working state — gentle pulse on the icon while autoParagraphing.
+   Uses opacity so it composites cheaply on the GPU layer. */
+.analysis-tab--working {
+  color: var(--text);
+}
+.analysis-tab--working svg {
+  animation: analysis-tab-pulse 1.4s ease-in-out infinite;
+}
+@keyframes analysis-tab-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1);    }
+  50%       { opacity: 1;    transform: scale(1.10); }
+}
+
 .analysis-tab--active {
   color: var(--text);
   background: var(--bg-glass-strong);
@@ -1035,6 +1062,7 @@ body {
   justify-content: space-between;
   align-items: flex-start;
   position: relative;
+  margin-bottom: 12px;
   z-index: 2;
 }
 
@@ -1143,6 +1171,52 @@ body {
   justify-content: center;
   position: relative;
   width: 100%;
+}
+
+/* ─── Shared dial primitives (DialRing) ──────────────────────────────────
+   Used by Pacing, Cast, Sensory, Style, Momentum and any future widget
+   that wants the Apple-Watch dot-ring gauge language. The SVG renders the
+   actual dots; this class just centres the optional centre slot (hero
+   numeric + small contextual icon) over the ring. */
+.wg-dial-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.wg-dial-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+  gap: 2px;
+}
+.wg-dial-num {
+  font-family: var(--font-ui);
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: var(--card-accent, #fff);
+}
+.wg-dial-num--sm { font-size: 1.4rem; }
+.wg-dial-unit {
+  font-family: var(--font-ui);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--card-accent, #fff);
+  opacity: 0.78;
+}
+.wg-dial-icon {
+  display: inline-flex;
+  margin-top: 2px;
+  color: var(--card-accent, #fff);
+  opacity: 0.85;
 }
 
 /* ─── Diagnostics hero (same as pacing but centred number) ─── */
@@ -1559,6 +1633,1066 @@ body {
   width: 14px; height: 3px;
   border-radius: 2px;
 }
+
+/* ─── Cast widget — dial-led variant (Apple-Watch dot-ring style) ──────── */
+.wg-cast-dial-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0 10px;
+}
+.wg-cast-row-compact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+.wg-cast-row-compact .wg-cast-dot {
+  width: 7px; height: 7px;
+}
+.wg-cast-row-compact .wg-cast-name {
+  flex: 1;
+  font-size: 11px;
+  width: auto;
+}
+.wg-cast-share {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.62);
+  flex-shrink: 0;
+}
+.wg-cast-turns {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(255, 255, 255, 0.42);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Mini ring badges (StyleWatch row of dials) ──────────────────────── */
+.wg-mini-dials {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  align-items: start;
+  padding: 4px 0 6px;
+}
+.wg-mini-dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.wg-mini-dial-num {
+  font-family: var(--font-ui);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wg-mini-dial-label {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.46);
+  text-align: center;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+/* Tiny per-kind icon under the count — encodes the kind in the
+   silhouette so the dial reads at a glance without needing the label. */
+.wg-mini-dial-icon {
+  display: inline-flex;
+  margin-top: 1px;
+  opacity: 0.78;
+}
+
+/* Voice widget register row — small icon prefix per register. */
+.wg-register-row {
+  align-items: center;
+  gap: 6px;
+}
+.wg-register-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+
+/* ─── Rhythm widget — sentence-length histogram + variance score ──────── */
+.wg-rhythm-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+.wg-rhythm-stats {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 2px 2px;
+}
+.wg-rhythm-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.wg-rhythm-stat-num {
+  font-family: var(--font-ui);
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wg-rhythm-stat-key {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.wg-rhythm-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 4px;
+  opacity: 0.78;
+}
+.wg-rhythm-chart {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  /* Reserve a hairline of vertical room for the bars to land cleanly
+     without touching the bottom edge — the calmness move from the iOS
+     brief: data has space to breathe. */
+}
+
+/* Each bar rises from the baseline on mount with a brief stagger.
+   transform-origin: bottom keeps the scaleY anchored to the slot floor
+   so the rise reads as growth, not opacity-fade. The cubic-bezier
+   matches the rest of the system's spring family (.34, 1.42, .64, 1).
+   No looping animation — the widget is "alive" on entry, then still. */
+.wg-rhythm-bar {
+  transform-origin: 50% 100%;
+  animation: rhythm-bar-rise 0.42s cubic-bezier(0.34, 1.42, 0.64, 1) backwards;
+  transition: transform 0.18s ease, filter 0.18s ease;
+}
+@keyframes rhythm-bar-rise {
+  from { transform: scaleY(0.06); opacity: 0; }
+  to   { transform: scaleY(1);    opacity: 1; }
+}
+
+/* Hover micro-interaction — the bar lifts a hairline and brightens 10%.
+   Pure CSS, no JS. The native <title> child gives the inline tooltip
+   on hover (sentence index range + word count), so the bar becomes
+   inspectable without any tooltip framework. */
+.wg-rhythm-bar:hover {
+  transform: scaleY(1.04);
+  filter: brightness(1.12);
+}
+
+/* ─── Repetition / Echo widget ──────────────────────────────────────── */
+.wg-rep-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0 8px;
+}
+.wg-rep-hero-num {
+  font-family: var(--font-ui);
+  font-size: 1.85rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wg-rep-hero-key {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.wg-rep-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  align-self: center;
+  opacity: 0.84;
+}
+.wg-rep-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+}
+.wg-rep-kbadge {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.wg-rep-phrase {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.wg-rep-bar {
+  width: 38px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.wg-rep-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  opacity: 0.85;
+}
+.wg-rep-count {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.wg-rep-loc {
+  font-size: 9px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.42);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+/* ─── Title suggester widget ────────────────────────────────────────── */
+.wg-titles-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0 6px;
+}
+.wg-title-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+.wg-title-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(167, 139, 250, 0.45);
+}
+.wg-title-row:active {
+  transform: scale(0.98);
+}
+.wg-title-rank {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.32);
+  width: 14px;
+  flex-shrink: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.wg-title-text {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  color: rgba(255, 255, 255, 0.92);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.wg-title-source {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(167, 139, 250, 0.62);
+  flex-shrink: 0;
+}
+
+/* ─── Tension widget polish ─────────────────────────────────────────── */
+.wg-tension-chart {
+  /* Subtle reveal on mount — curve scales up from baseline so it reads
+     as growth, not opacity-fade. */
+  transform-origin: 50% 100%;
+  animation: wg-tension-rise 0.55s cubic-bezier(0.34, 1.4, 0.56, 1) backwards;
+}
+@keyframes wg-tension-rise {
+  from { transform: scaleY(0.55); opacity: 0.4; }
+  to   { transform: scaleY(1);    opacity: 1; }
+}
+.wg-tension-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.wg-arc-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.wg-tension-peakloc {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 120px;
+}
+.wg-tension-peakloc-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.32);
+}
+.wg-tension-peakloc-track {
+  flex: 1;
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  min-width: 60px;
+}
+.wg-tension-peakloc-fill {
+  position: absolute;
+  top: 0; left: 0;
+  height: 100%;
+  border-radius: 2px;
+  opacity: 0.55;
+}
+.wg-tension-peakloc-pip {
+  position: absolute;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.42);
+}
+.wg-tension-peakloc-num {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: right;
+}
+.wg-tension-peaklabel {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.5);
+  flex-basis: 100%;
+}
+.wg-tension-segs {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0;
+}
+.wg-tension-seg-tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+.wg-tension-seg-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+  width: 56px;
+  flex-shrink: 0;
+}
+.wg-tension-seg-cells {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.wg-tension-seg-cell {
+  width: 7px;
+  height: 8px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.07);
+}
+.wg-tension-seg-tension {
+  flex: 1;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.wg-tension-seg-mom {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  width: 38px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.wg-tension-overall {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0 4px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.32);
+}
+.wg-tension-overall-val {
+  color: rgba(255, 255, 255, 0.78);
+  letter-spacing: 0.06em;
+}
+.wg-tension-overall-warn {
+  color: #fb923c;
+  margin-left: auto;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+.wg-tension-cliff {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 0;
+}
+.wg-tension-cliff-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  color: rgba(255, 255, 255, 0.42);
+  flex-shrink: 0;
+}
+.wg-tension-cliff-track {
+  flex: 1;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  min-width: 60px;
+}
+.wg-tension-cliff-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  opacity: 0.85;
+}
+.wg-tension-cliff-pill {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
+.wg-tension-cliff-num {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  flex-shrink: 0;
+  min-width: 24px;
+  text-align: right;
+}
+
+/* ─── Prose profile widget ──────────────────────────────────────────── */
+.wg-prose-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px 0 10px;
+}
+.wg-prose-pill {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid;
+  min-width: 0;
+}
+.wg-prose-pill-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+.wg-prose-pill-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.wg-prose-pill-value {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.05;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wg-prose-pill-key {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wg-prose-pill-pct {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  color: inherit;
+  opacity: 0.78;
+}
+.wg-prose-dials {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 2px 0 8px;
+}
+.wg-prose-dial {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.wg-prose-dial-num {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wg-prose-dial-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: -2px;
+}
+.wg-prose-dial-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  text-align: center;
+}
+.wg-prose-dial-sub {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* ─── Voice widget — hero mode card + channel pills + register dials ── */
+.wg-voice-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-radius: 14px;
+  border: 1px solid;
+  margin-bottom: 9px;
+}
+.wg-voice-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+.wg-voice-hero-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.wg-voice-hero-mode {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  line-height: 1.05;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wg-voice-hero-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.wg-voice-hero-stats {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.wg-voice-hero-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.wg-voice-hero-stat-num {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.92);
+  font-variant-numeric: tabular-nums;
+}
+.wg-voice-hero-stat-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.wg-voice-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+.wg-voice-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.wg-voice-chip-name {
+  font-weight: 700;
+}
+.wg-voice-chip-num {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.78;
+}
+.wg-voice-markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-bottom: 7px;
+  padding: 0 2px;
+}
+.wg-voice-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+.wg-voice-marker-key {
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+}
+.wg-voice-marker-val {
+  letter-spacing: 0.04em;
+}
+.wg-voice-registers {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 4px 0;
+}
+.wg-voice-register {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.wg-voice-register--zero { opacity: 0.55; }
+.wg-voice-register-num {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wg-voice-register-icon {
+  display: inline-flex;
+  margin-top: 1px;
+  opacity: 0.78;
+}
+.wg-voice-register-label {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.46);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  text-align: center;
+}
+
+/* ─── Continuity widget ─────────────────────────────────────────────── */
+.wg-cont-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0 8px;
+}
+.wg-cont-strip-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.wg-cont-strip-count {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.wg-cont-strip-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  opacity: 0.78;
+}
+.wg-cont-block {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 0;
+}
+.wg-cont-block + .wg-cont-block {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.wg-cont-block-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* Timeline-slip chips */
+.wg-cont-slips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wg-cont-slip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 63, 94, 0.32);
+  background: rgba(244, 63, 94, 0.06);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+}
+.wg-cont-slip-name {
+  font-weight: 700;
+  letter-spacing: 0.005em;
+}
+.wg-cont-slip-pin {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(244, 63, 94, 0.18);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hand-off prev → curr cards */
+.wg-cont-handoff {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  gap: 8px;
+}
+.wg-cont-handoff-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 9px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+  min-width: 0;
+}
+.wg-cont-handoff-card--this {
+  background: rgba(251, 146, 60, 0.05);
+}
+.wg-cont-handoff-card-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.42);
+}
+.wg-cont-handoff-card-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.wg-cont-handoff-card-val {
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.wg-cont-handoff-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  opacity: 0.78;
+}
+
+/* Chekhov anchor chips */
+.wg-cont-chekhov {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.wg-cont-chekhov-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 7px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.wg-cont-chekhov-name {
+  font-weight: 600;
+  font-style: italic;
+  letter-spacing: 0.005em;
+}
+.wg-cont-chekhov-num {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.42);
+}
+
+.wg-mini-dial--zero .wg-mini-dial-num,
+.wg-mini-dial--zero .wg-mini-dial-label {
+  opacity: 0.42;
+}
+
+/* ─── Clock-face dial (PacingWidget) ─────────────────────────────────── */
+.wg-clock-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.wg-clock-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+  /* Pull centre stack down a touch so the minute-hand from 12-o'clock
+     position doesn't overlap the numeric. */
+  padding-top: 3px;
+}
+.wg-clock-center .wg-dial-icon {
+  margin-top: 4px;
+}
+
+/* ─── Cast widget — floating proportional name labels around dial ──────
+   Each speaker's name floats outside the ring at the angular midpoint
+   of their dial segment. Font size scales with their dialogue share so
+   the "loudest" speaker reads largest — same iCloud-profile bouquet
+   feel the user pointed to. Transition only fires on enter (no live
+   loop). pointer-events: none keeps the labels decorative — actual
+   speaker rows below remain the interactive surface. */
+.wg-cast-dial-bouquet {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  /* Reserves vertical room for the floating labels to extend above and
+     below the dial without clipping. */
+  padding: 22px 4px 20px;
+  margin: 4px 0;
+}
+.wg-cast-float-label {
+  position: absolute;
+  font-family: var(--font-ui);
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  background-color: rgb(242, 242, 242);
+  padding: 6px 10px;
+  
+  border-radius: 9999px;
+  transform: translate(-50%, -50%);
+  animation: wg-cast-float-in 0.5s cubic-bezier(0.34, 1.42, 0.64, 1) backwards;
+}
+@keyframes wg-cast-float-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1);   }
+}
 .wg-tags {
   display: flex;
   flex-wrap: wrap;
@@ -1802,6 +2936,176 @@ body {
   line-height: 1.4;
 }
 
+/* ─── Cross-arc widget — HI redesign ────────────────────────────────── */
+
+/* Pattern badge sits centred above the cell row, anchored as the
+   widget's eye-stop. Tinted by the pattern's energy class. */
+.wg-cross-pattern-row {
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 8px;
+}
+.wg-cross-pattern-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px 4px 9px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+/* Cell row */
+.wg-cross-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0 8px;
+}
+.wg-cross-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px 8px 6px;
+  border-radius: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.02);
+  /* Reveal scale-up matches TensionWidget's chart rise. backwards
+     fill keeps the start frame visible during animation-delay. */
+  animation: wg-cross-cell-rise 0.5s cubic-bezier(0.34, 1.42, 0.56, 1) backwards;
+}
+.wg-cross-cell--current {
+  flex: 1.5;
+  animation-delay: 0.06s;
+}
+.wg-cross-cell:nth-child(1) { animation-delay: 0s;    }
+.wg-cross-cell:nth-child(5) { animation-delay: 0.12s; }
+.wg-cross-cell--empty {
+  opacity: 0.5;
+}
+
+@keyframes wg-cross-cell-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+.wg-cross-cell-key {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.38);
+  text-align: center;
+}
+.wg-cross-cell-key--current {
+  color: rgba(255, 255, 255, 0.7);
+}
+.wg-cross-graph {
+  width: 100%;
+  display: block;
+}
+.wg-cross-cell-tension {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.42);
+  font-variant-numeric: tabular-nums;
+}
+.wg-cross-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.32);
+  flex-shrink: 0;
+  margin-bottom: 18px; /* offset to align with sparkline mid-line */
+}
+
+/* Cast continuity rows */
+.wg-cross-cast {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-top: 4px;
+}
+.wg-cross-cast-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wg-cross-cast-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(248, 113, 113, 0.78);
+  width: 64px;
+  flex-shrink: 0;
+}
+.wg-cross-cast-key--in {
+  color: rgba(96, 165, 250, 0.85);
+}
+.wg-cross-cast-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+.wg-cross-cast-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+.wg-cross-cast-chip--gone {
+  color: rgba(248, 113, 113, 0.86);
+  border-color: rgba(248, 113, 113, 0.32);
+  background: rgba(248, 113, 113, 0.08);
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 113, 113, 0.42);
+  text-decoration-thickness: 1px;
+}
+.wg-cross-cast-chip--in {
+  color: rgba(96, 165, 250, 0.92);
+  border-color: rgba(96, 165, 250, 0.32);
+  background: rgba(96, 165, 250, 0.08);
+}
+
+/* Empty state */
+.wg-cross-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.42);
+  text-align: center;
+  padding: 8px 4px 4px;
+  line-height: 1.4;
+}
+
 /* ═══════════════════════════════════════════
    EDITOR HIGHLIGHT OVERLAY — IDE-style speech colouring
    ═══════════════════════════════════════════ */
@@ -1815,6 +3119,82 @@ body {
   max-width: var(--editor-measure, none);
   margin-left: auto;
   margin-right: auto;
+}
+
+/* ─── Ambient scan orb (auto-paragraph + future smart passes) ───────────
+   Soft blob gradient that fades in over the text field while a smart-
+   process pass is running on the chapter. Mirrors the World Data
+   .world-scan-orb idiom: heavily-blurred radial gradient sized larger
+   than its container, breathing while visible. pointer-events:none keeps
+   it out of the user's way; z-index sits below the highlight layer (10)
+   and below the textarea (1) base order — actually we use z-index:0 +
+   the textarea's own opacity to blend, but the orb is positioned
+   absolute behind the text without intercepting clicks.
+
+   Colour is pulled from --orb-color (intel-mode tinted) when set;
+   otherwise falls back to the Default-mode blue. The breathing keyframe
+   is shared with .world-scan-orb so both orbs feel like the same
+   intelligence layer at work. */
+.editor-scan-orb {
+  /* Window-sized backdrop glow. Mounted at the App root so position:
+     fixed anchors to the viewport (any ancestor with transform or
+     `contain: paint` — like `.document` — would otherwise reanchor
+     it). The glow size scales with the WINDOW, not with the editor's
+     `--editor-measure` text column, so a wide screen gets a wide
+     glow that visually frames the entire workspace.
+
+     Heavy bits (filter, will-change, animation) live only on
+     `--visible` so the idle base is just an opacity:0 fixed div with
+     no GPU compositor layer — costs nothing while not in use. */
+  position: fixed;
+  inset: 0;
+  border-radius: 0;
+  background: radial-gradient(
+    ellipse 90vmax 70vmax at center 55%,
+    var(--orb-color, #1071D8) 0%,
+    transparent 58%
+  );
+  opacity: 0;
+  pointer-events: none;
+  /* z-index: 0 keeps the orb behind the editor surface (which sits in
+     normal flow at the default stacking level inside .document). The
+     toolbar (z-40), panels (z-50), and overlays (z-60+) all paint
+     above the orb, so the glow stays a backdrop rather than a wash. */
+  z-index: 0;
+  transition: opacity 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.editor-scan-orb--visible {
+  /* blur + will-change only when actually visible — see comment above. */
+  filter: blur(72px);
+  will-change: opacity, transform;
+  /* Subtle — the editor is the focus, not the orb. Window-scale glow
+     reads stronger than a column-scale one even at the same opacity
+     (more pixels covered), so we dial down a touch to 0.16. */
+  opacity: 0.16;
+  /* Dedicated keyframes — the original world-data orb-enter / editor-orb-
+     breathe both use `translate(-50%, -50%) scale(...)` for centering,
+     which is wrong for our fixed-inset window orb (it has no translate
+     centering). These scale around the orb's own centre instead. */
+  animation:
+    editor-scan-orb-enter   0.65s cubic-bezier(0.34, 1.2, 0.64, 1) forwards,
+    editor-scan-orb-breathe 3.6s ease-in-out 0.65s infinite;
+  transform-origin: center;
+}
+
+@keyframes editor-scan-orb-enter {
+  from { transform: scale(0.78); }
+  to   { transform: scale(1);    }
+}
+
+@keyframes editor-scan-orb-breathe {
+  0%, 100% { transform: scale(1);     }
+  50%       { transform: scale(1.06); }
+}
+
+@keyframes editor-orb-breathe {
+  0%, 100% { transform: translate(-50%, -50%) scale(1);    }
+  50%       { transform: translate(-50%, -50%) scale(1.08); }
 }
 
 /* Mirror div — same font metrics as .document-editor, sits behind it.
@@ -3058,12 +4438,41 @@ body {
   will-change: transform, opacity, filter;
 }
 
+/* Reveal / exit — applied to ALL kinds (analyzing, renaming, auto-paragraph
+   …) for a consistent entrance. Spring curve matches .widget-card's
+   reveal exactly (y2 = 1.62), so the pill bounces in shoulder-to-shoulder
+   with the analysis widgets instead of fading flat while they pop. */
 .status-pill--enter {
-  animation: widgetReveal 0.32s cubic-bezier(0.22, 0.9, 0.32, 1);
+  animation: widgetReveal 0.42s cubic-bezier(0.34, 1.62, 0.55, 1) backwards;
 }
 
 .status-pill--exit {
-  animation: widgetExit 0.18s ease-in forwards;
+  animation: widgetExit 0.22s ease-in forwards;
+}
+
+/* ── Auto-paragraph kind — static intel-mode-tinted glow ─────────────────
+   Only applied to the "Re-paragraphing chapter…" pill, NOT the regular
+   "Analysing chapter…" or rename pills. The smart-paragraph pass is a
+   one-shot user-triggered action, so the extra glow signals "yes, the
+   thing you just clicked is doing work" — distinct from the ambient,
+   passive analyzing state which uses the plain pill.
+
+   Glow is STATIC (no breathing pulse) — the spinner inside the pill
+   already conveys ongoing motion, so an additional glow oscillation
+   would be visual noise. Colour inherits from --orb-color (set on
+   the app root, derived from the active intel mode), so the halo
+   tints purple in High, orange in Low, blue in Default — same
+   identity logic as the world-data scan orb. */
+.status-pill--auto-paragraph {
+  /* Toned-down halo — the previous 32px / 9px / 55% read as overstated
+     once the window-scale backdrop orb came online. The orb is now
+     doing most of the "active" signalling at viewport scale; the pill
+     just needs a tinted edge to confirm the pill itself is the active
+     indicator, not a louder halo competing with the backdrop. */
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 2px 12px rgba(0, 0, 0, 0.18),
+    0 0 18px 4px color-mix(in srgb, var(--orb-color, #1066FF) 32%, transparent);
 }
 
 .status-pill-label {
@@ -5681,10 +7090,11 @@ body {
   height: 100%;
   pointer-events: none;
   z-index: 6;
+  scale: 1;
   animation: intel-eyes-fade 0.45s ease-out;
   /* Soft halo behind the merged eye contour — wide blur, dark, slight
      downward offset. Renders after the gooey filter on the inner <g>. */
-  filter: drop-shadow(0 0.6px 3px rgb(0, 0, 0, 0.6));
+  filter: drop-shadow(0 0.6px 4px rgba(255, 255, 255, 0.238));
 }
 
 @keyframes intel-eyes-fade {
@@ -5693,7 +7103,7 @@ body {
 }
 
 .intel-eye {
-  fill: #ffffff;
+  fill: #000000;
   /* transform-box: fill-box + transform-origin: center — scale & translate
      operate around each shape's own bounding-box centre. */
   transform-box: fill-box;
@@ -5730,7 +7140,7 @@ body {
 .intel-eye-arc {
   opacity: 0;
   fill: none;
-  stroke: #ffffff;
+  stroke: #000000;
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;

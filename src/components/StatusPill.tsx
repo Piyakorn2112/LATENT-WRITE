@@ -44,7 +44,7 @@ export function StatusPill({ task }: Props) {
   return (
     <div className="status-pill-shell">
       <div
-        className={`status-pill liquid-glass status-pill--${phase}`}
+        className={`status-pill liquid-glass status-pill--${phase} status-pill--${displayed.kind}`}
         key={displayed.kind}
         role="status"
         aria-live="polite"

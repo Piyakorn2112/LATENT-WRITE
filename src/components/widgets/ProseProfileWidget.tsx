@@ -1,52 +1,95 @@
 import { memo, useMemo } from "react";
+import {
+  User, Users, Hourglass,
+  AudioWaveform, Lightbulb, BookOpen,
+} from "lucide-react";
 import { WidgetCard } from "./WidgetCard";
+import { ArcRing } from "./ArcRing";
 import { profileChapter, type ProseProfile } from "../../lib/prose-profile";
-import { IOS_COLORS } from "../../lib/palette";
 
 interface Props { content: string; }
 
+// Dark-mode-tuned palette. The IOS_COLORS palette is calibrated for the
+// light editor surface (purple/indigo/blue at `text` saturation read
+// fine on white, but go DIM and low-contrast on #0d1117). These values
+// are the dark-mode 400-tier equivalents — vivid against the card bg
+// without bleaching out, and consistent with the StyleWatch / Sensory
+// dark-widget family already in use elsewhere.
+
 const POV_LABEL: Record<ProseProfile["pov"], string> = {
-  first: "1st person", second: "2nd person", third: "3rd person", mixed: "Mixed",
+  first: "1st",
+  second: "2nd",
+  third: "3rd",
+  mixed: "Mixed",
+};
+const POV_LONG: Record<ProseProfile["pov"], string> = {
+  first: "First person",
+  second: "Second person",
+  third: "Third person",
+  mixed: "Mixed POV",
 };
 const POV_COLOR: Record<ProseProfile["pov"], string> = {
-  first:  IOS_COLORS.purple.text,
-  second: IOS_COLORS.cyan.text,
-  third:  IOS_COLORS.blue.text,
-  mixed:  IOS_COLORS.orange.text,
+  first:  "#c084fc", // violet-400  (was IOS purple #A828B8 — too dim)
+  second: "#22d3ee", // cyan-400
+  third:  "#60a5fa", // blue-400    (was IOS blue #1071D8 — too dim)
+  mixed:  "#fb923c", // orange-400
 };
 
+const TENSE_LABEL: Record<ProseProfile["tense"], string> = {
+  past: "Past", present: "Present", mixed: "Mixed",
+};
 const TENSE_COLOR: Record<ProseProfile["tense"], string> = {
-  past:    IOS_COLORS.indigo.text,
-  present: IOS_COLORS.teal.text,
-  mixed:   IOS_COLORS.orange.text,
+  past:    "#818cf8", // indigo-400 (was IOS indigo #4F45D8 — too dim)
+  present: "#5eead4", // teal-300
+  mixed:   "#fb923c",
 };
 
 const RHYTHM_COLOR: Record<ProseProfile["rhythm"], string> = {
-  monotonous: IOS_COLORS.orange.text,
-  even:       IOS_COLORS.blue.text,
-  varied:     IOS_COLORS.green.text,
-  erratic:    IOS_COLORS.red.text,
+  monotonous: "#fbbf24", // amber-400  (was IOS orange — clarify "needs attention")
+  even:       "#60a5fa", // blue-400
+  varied:     "#34d399", // emerald-400
+  erratic:    "#fb7185", // rose-400
 };
 
 const SHOWTELL_COLOR: Record<ProseProfile["showTell"], string> = {
-  showing:  IOS_COLORS.green.text,
-  balanced: IOS_COLORS.blue.text,
-  telling:  IOS_COLORS.orange.text,
+  showing:  "#34d399", // emerald-400
+  balanced: "#60a5fa", // blue-400
+  telling:  "#fbbf24", // amber-400 (warning, not failure)
 };
 
 const BAND_COLOR: Record<ProseProfile["fleschBand"], string> = {
-  easy:   IOS_COLORS.green.text,
-  medium: IOS_COLORS.blue.text,
-  hard:   IOS_COLORS.purple.text,
+  easy:   "#34d399",
+  medium: "#60a5fa",
+  hard:   "#c084fc", // violet-400 — bright purple instead of IOS purple
 };
 
+/**
+ * Prose profile — re-laid out as two visual tiers:
+ *
+ *   1. Hero row: two prominent pill-cards encoding the chapter's
+ *      categorical signals (POV + Tense). Both come with a lucide
+ *      glyph that maps to the category, so the row reads instantly.
+ *      Drift cases ("mixed") tint the pill orange and the headline
+ *      flips to "POV DRIFT" / "TENSE DRIFT".
+ *
+ *   2. Three micro-dials: continuous-arc rings for Reading grade,
+ *      Rhythm variance, and Show/Tell balance. Each centre carries a
+ *      compact numeric + tiny label, matching the StyleWatch mini-dial
+ *      family already in use elsewhere.
+ *
+ *   3. Action line + secondary stats footer (sentence count, filter
+ *      density) — same as before.
+ *
+ * Replaces the prior generic 5-row bar list. Categorical data gets
+ * categorical UI (pills with text); continuous data gets continuous
+ * UI (arcs with numerics). That's the move from the HI brief: native
+ * to the data shape, not one bar-chart for everything.
+ */
 function ProseProfileWidgetImpl({ content }: Props) {
   const p = useMemo(() => profileChapter(content), [content]);
 
-  // Don't render below a meaningful sample size — too noisy.
   if (p.words < 80) return null;
 
-  // Compose a one-line verdict that picks the most actionable signal.
   const headline = p.pov === "mixed"
     ? "POV DRIFT"
     : p.tense === "mixed"
@@ -57,13 +100,9 @@ function ProseProfileWidgetImpl({ content }: Props) {
     ? "TELLING"
     : "PROFILE";
 
-  const accent = p.pov === "mixed" || p.tense === "mixed"
-    ? IOS_COLORS.orange.text
-    : p.rhythm === "monotonous"
-    ? IOS_COLORS.orange.text
-    : p.showTell === "telling"
-    ? IOS_COLORS.orange.text
-    : IOS_COLORS.blue.text;
+  const accent = p.pov === "mixed" || p.tense === "mixed" || p.rhythm === "monotonous" || p.showTell === "telling"
+    ? "#fb923c"  // orange-400 — warning state
+    : "#60a5fa"; // blue-400 — neutral default
 
   const verdict = (() => {
     if (p.pov === "mixed") return "Pronoun mix suggests a POV switch — verify it's intentional.";
@@ -75,49 +114,35 @@ function ProseProfileWidgetImpl({ content }: Props) {
     return `Reads cleanly at grade ${p.fleschGrade}.`;
   })();
 
-  // Five-row bar layout — each row is one metric. Column widths match
-  // wg-momentum-row so this widget visually aligns with Momentum,
-  // Sensory, Style Watch and Cross-Pacing.
-  type Row = { label: string; valueText: string; color: string; pct: number };
-  const rows: Row[] = [
-    {
-      label: "POV",
-      valueText: POV_LABEL[p.pov],
-      color: POV_COLOR[p.pov],
-      pct: Math.round(Math.max(p.povRatio.first, p.povRatio.second, p.povRatio.third) * 100),
-    },
-    {
-      label: "Tense",
-      valueText: p.tense === "past" ? "Past" : p.tense === "present" ? "Present" : "Mixed",
-      color: TENSE_COLOR[p.tense],
-      pct: p.tense === "past"
-        ? Math.round(p.tenseRatio.past * 100)
-        : p.tense === "present"
-        ? Math.round(p.tenseRatio.present * 100)
-        : 50,
-    },
-    {
-      label: "Reading",
-      valueText: `Grade ${p.fleschGrade.toFixed(1)}`,
-      color: BAND_COLOR[p.fleschBand],
-      // Map grade 4..14 → 30..100% bar width
-      pct: Math.max(20, Math.min(100, Math.round(((p.fleschGrade - 4) / 10) * 100))),
-    },
-    {
-      label: "Rhythm",
-      valueText: p.rhythm[0].toUpperCase() + p.rhythm.slice(1),
-      color: RHYTHM_COLOR[p.rhythm],
-      // Map cv 0..1 → 0..100% (clamp)
-      pct: Math.min(100, Math.round(p.rhythmCv * 100)),
-    },
-    {
-      label: "Show / tell",
-      valueText: p.showTell[0].toUpperCase() + p.showTell.slice(1),
-      color: SHOWTELL_COLOR[p.showTell],
-      // Filter density % inverted so 0% filter = 100% bar (all showing)
-      pct: Math.max(8, Math.min(100, Math.round((1 - Math.min(1, p.filterDensity / 3)) * 100))),
-    },
-  ];
+  // POV pill picks an icon by person (User for 1st-person singular,
+  // Users for 2nd/3rd which often involves multiple referents).
+  const PovIcon = p.pov === "first" ? User : Users;
+
+  // Reading grade dial — map grades 4..14 onto 0..1 fill, accent by band.
+  const gradeFill = Math.max(0.18, Math.min(1, (p.fleschGrade - 4) / 10));
+
+  // Rhythm dial — coefficient of variation 0..1+, clamp.
+  const rhythmFill = Math.min(1, Math.max(0.08, p.rhythmCv));
+
+  // Show/Tell dial — invert filter density so 100% = pure showing.
+  const showTellFill = Math.max(0.08, Math.min(1, 1 - Math.min(1, p.filterDensity / 3)));
+
+  // Topline POV-confidence percentage (most-dominant POV ratio).
+  const povPct = Math.round(
+    Math.max(p.povRatio.first, p.povRatio.second, p.povRatio.third) * 100,
+  );
+  // Tense confidence — if mixed, neither side dominates, show 50%.
+  const tensePct = p.tense === "past"
+    ? Math.round(p.tenseRatio.past * 100)
+    : p.tense === "present"
+    ? Math.round(p.tenseRatio.present * 100)
+    : 50;
+
+  const povColor   = POV_COLOR[p.pov];
+  const tenseColor = TENSE_COLOR[p.tense];
+  const gradeColor = BAND_COLOR[p.fleschBand];
+  const rhythmColor = RHYTHM_COLOR[p.rhythm];
+  const showTellColor = SHOWTELL_COLOR[p.showTell];
 
   return (
     <WidgetCard
@@ -128,20 +153,117 @@ function ProseProfileWidgetImpl({ content }: Props) {
       topRight={headline}
     >
       <div className="wg-content">
-        <div className="wg-section">
-          {rows.map((r) => (
-            <div className="wg-momentum-row" key={r.label}>
-              <div className="wg-momentum-label">{r.label}</div>
-              <div className="wg-momentum-bar">
-                <div className="wg-momentum-bar-fill"
-                  style={{ width: `${r.pct}%`, background: r.color }} />
-              </div>
-              <div className="wg-momentum-trend"
-                style={{ color: r.color, fontVariantNumeric: "tabular-nums" }}>
-                {r.valueText}
-              </div>
+        {/* Hero — POV + Tense as twin category cards */}
+        <div className="wg-prose-hero">
+          <div
+            className="wg-prose-pill"
+            style={{
+              color: povColor,
+              borderColor: `${povColor}55`,
+              background: `${povColor}10`,
+            }}
+          >
+            <span className="wg-prose-pill-icon">
+              <PovIcon size={13} strokeWidth={2.4} />
+            </span>
+            <div className="wg-prose-pill-text">
+              <span className="wg-prose-pill-value">{POV_LABEL[p.pov]}</span>
+              <span className="wg-prose-pill-key">{POV_LONG[p.pov]}</span>
             </div>
-          ))}
+            <span className="wg-prose-pill-pct">{povPct}%</span>
+          </div>
+          <div
+            className="wg-prose-pill"
+            style={{
+              color: tenseColor,
+              borderColor: `${tenseColor}55`,
+              background: `${tenseColor}10`,
+            }}
+          >
+            <span className="wg-prose-pill-icon">
+              <Hourglass size={13} strokeWidth={2.4} />
+            </span>
+            <div className="wg-prose-pill-text">
+              <span className="wg-prose-pill-value">{TENSE_LABEL[p.tense]}</span>
+              <span className="wg-prose-pill-key">tense</span>
+            </div>
+            <span className="wg-prose-pill-pct">{tensePct}%</span>
+          </div>
+        </div>
+
+        {/* Three micro-dials — continuous metrics get continuous UI */}
+        <div className="wg-prose-dials">
+          <div className="wg-prose-dial">
+            <ArcRing
+              size={62}
+              thickness={5}
+              startAngle={-90}
+              sweep={360}
+              color={gradeColor}
+              fill={gradeFill}
+              trackColor="rgba(255, 255, 255, 0.06)"
+              indicatorDot
+            >
+              <span className="wg-prose-dial-num" style={{ color: gradeColor }}>
+                {p.fleschGrade.toFixed(1)}
+              </span>
+              <span className="wg-prose-dial-icon" style={{ color: gradeColor }}>
+                <BookOpen size={10} strokeWidth={2.4} />
+              </span>
+            </ArcRing>
+            <span className="wg-prose-dial-label">Reading</span>
+            <span className="wg-prose-dial-sub" style={{ color: gradeColor }}>
+              {p.fleschBand}
+            </span>
+          </div>
+
+          <div className="wg-prose-dial">
+            <ArcRing
+              size={62}
+              thickness={5}
+              startAngle={-90}
+              sweep={360}
+              color={rhythmColor}
+              fill={rhythmFill}
+              trackColor="rgba(255, 255, 255, 0.06)"
+              indicatorDot
+            >
+              <span className="wg-prose-dial-num" style={{ color: rhythmColor }}>
+                {Math.round(rhythmFill * 100)}
+              </span>
+              <span className="wg-prose-dial-icon" style={{ color: rhythmColor }}>
+                <AudioWaveform size={10} strokeWidth={2.4} />
+              </span>
+            </ArcRing>
+            <span className="wg-prose-dial-label">Rhythm</span>
+            <span className="wg-prose-dial-sub" style={{ color: rhythmColor }}>
+              {p.rhythm}
+            </span>
+          </div>
+
+          <div className="wg-prose-dial">
+            <ArcRing
+              size={62}
+              thickness={5}
+              startAngle={-90}
+              sweep={360}
+              color={showTellColor}
+              fill={showTellFill}
+              trackColor="rgba(255, 255, 255, 0.06)"
+              indicatorDot
+            >
+              <span className="wg-prose-dial-icon" style={{ color: showTellColor }}>
+                <Lightbulb size={11} strokeWidth={2.4} />
+              </span>
+              <span className="wg-prose-dial-num" style={{ color: showTellColor }}>
+                {Math.round(showTellFill * 100)}
+              </span>
+            </ArcRing>
+            <span className="wg-prose-dial-label">Show / Tell</span>
+            <span className="wg-prose-dial-sub" style={{ color: showTellColor }}>
+              {p.showTell}
+            </span>
+          </div>
         </div>
 
         <div className="wg-section wg-section-divider">

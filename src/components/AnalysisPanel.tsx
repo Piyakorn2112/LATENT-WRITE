@@ -4,6 +4,9 @@ import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
+import { RhythmWidget } from "./widgets/RhythmWidget";
+import { RepetitionWidget } from "./widgets/RepetitionWidget";
+import { TitleSuggesterWidget } from "./widgets/TitleSuggesterWidget";
 import { ProseProfileWidget } from "./widgets/ProseProfileWidget";
 import { ContinuityWidget } from "./widgets/ContinuityWidget";
 import { CharacterVoiceWidget } from "./widgets/CharacterVoiceWidget";
@@ -20,7 +23,8 @@ import { MomentumWidget } from "./widgets/MomentumWidget";
 import { SensoryBalanceWidget } from "./widgets/SensoryBalanceWidget";
 import { CrossPacingWidget } from "./widgets/CrossPacingWidget";
 import { PlaceholderWidget } from "./widgets/PlaceholderWidget";
-import { ChevronRight as ChevronIcon, SettingsIcon } from "./Icon";
+import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon } from "./Icon";
+import { SeparatorHorizontal } from "lucide-react";
 import { IOS_COLORS } from "../lib/palette";
 import type { Preferences, Typography, WritingGoals } from "../lib/preferences";
 import { FONT_LABELS } from "../lib/preferences";
@@ -52,6 +56,22 @@ interface Props {
   /** worldData — used by Continuity (place hand-off) and Character Voice
    *  (gender / pronoun reconciliation). */
   worldData?: WorldData;
+  /** Smart auto-paragraphing — when invoked, the host (App) re-segments
+   *  the current chapter using speech / action / time-shift signals.
+   *  The button next to the chevron/settings tabs fires this; the host
+   *  drives the loading state + orb animation. */
+  onAutoParagraph?: () => void;
+  /** While true, the auto-paragraph button shows the same processing
+   *  treatment as the analyzing pill — used to disable double-clicks
+   *  and signal the user that the chapter is being re-segmented. */
+  autoParagraphing?: boolean;
+  /** Auto-scene-break inserter — companion to auto-paragraph. Walks the
+   *  chapter's existing paragraph stream and inserts `* * *` markers at
+   *  detected scene boundaries (tension flips, time-shift markers, POV
+   *  changes). The host drives the actual mutation. */
+  onAutoSceneBreak?: () => void;
+  /** Mirror of autoParagraphing for the scene-break button. */
+  sceneBreaking?: boolean;
 }
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
@@ -341,7 +361,23 @@ function WidgetSet({
       <AnimatedWidget order={10} show={hasStyleContent}>
         <StyleWatchWidget content={chapterContent ?? ""} />
       </AnimatedWidget>
-      <AnimatedWidget order={11} show={hasCharacterVoice}>
+      {/* Sentence-rhythm — only meaningful with ≥4 sentences (~20+ words),
+          guard inside the widget itself; the show flag keeps the slot
+          stable when the chapter has any prose. */}
+      <AnimatedWidget order={11} show={hasStyleContent}>
+        <RhythmWidget content={chapterContent ?? ""} />
+      </AnimatedWidget>
+      {/* Repetition / echo finder — needs substantial text to find
+          phrasal tics; the widget itself returns null below threshold. */}
+      <AnimatedWidget order={12} show={(chapterContent?.length ?? 0) > 200}>
+        <RepetitionWidget content={chapterContent ?? ""} />
+      </AnimatedWidget>
+      {/* Chapter title suggester — sits near the end of the widget
+          stack as a quiet utility; updates as the chapter changes. */}
+      <AnimatedWidget order={13} show={result.paragraphs.length > 0}>
+        <TitleSuggesterWidget result={result} knownNames={a.speakerCounts.map(s => s.name)} />
+      </AnimatedWidget>
+      <AnimatedWidget order={14} show={hasCharacterVoice}>
         <CharacterVoiceWidget
           paragraphs={result.paragraphs}
           speechResults={result.speechResults}
@@ -349,9 +385,9 @@ function WidgetSet({
           content={chapterContent ?? ""}
         />
       </AnimatedWidget>
-      <AnimatedWidget order={12} show={!!hi || hasCast}><VoiceWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget order={13} show={hasCast}><CastWidget analysis={a} /></AnimatedWidget>
-      <AnimatedWidget order={14} show={true}><RoleWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={15} show={!!hi || hasCast}><VoiceWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={16} show={hasCast}><CastWidget analysis={a} /></AnimatedWidget>
+      <AnimatedWidget order={17} show={true}><RoleWidget analysis={a} /></AnimatedWidget>
     </>
   );
 }
@@ -360,6 +396,8 @@ export function AnalysisPanel({
   result, prevResult, nextResult, isAnalyzing, intelMode, onSetIntelMode,
   prefs, onSetPrefs, chapterId, chapterContent,
   allChapters, chapterIndex, worldData,
+  onAutoParagraph, autoParagraphing,
+  onAutoSceneBreak, sceneBreaking,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
   // under high intelligence. Auto resolves dynamically per chapter, so we
@@ -466,6 +504,39 @@ export function AnalysisPanel({
             <span className="analysis-tab-badge">{widgetCount}</span>
           )}
         </button>
+
+        {/* Auto-paragraph — single-shot action button, NOT a tab toggle.
+            Click runs the smart paragrapher on the current chapter
+            content and applies the result. The host (App) drives the
+            actual processing loop, including the analyzing pill
+            ("Analysing chapter…") and the editor-scan orb gradient. */}
+        {onAutoParagraph && (
+          <button
+            className={`analysis-tab analysis-tab--action ${autoParagraphing ? "analysis-tab--working" : ""}`}
+            onClick={onAutoParagraph}
+            disabled={autoParagraphing}
+            aria-label="Smart auto-paragraph chapter"
+            title="Smart auto-paragraph chapter"
+          >
+            <PilcrowIcon size={13} />
+          </button>
+        )}
+
+        {/* Auto-scene-break — companion to auto-paragraph. Inserts `* * *`
+            markers at detected scene boundaries (tension flips,
+            time-shift markers, speaker-discontinuity gaps). Same single-
+            shot button language; pulses while the host runs the pass. */}
+        {onAutoSceneBreak && (
+          <button
+            className={`analysis-tab analysis-tab--action ${sceneBreaking ? "analysis-tab--working" : ""}`}
+            onClick={onAutoSceneBreak}
+            disabled={sceneBreaking}
+            aria-label="Auto-insert scene breaks"
+            title="Auto-insert scene breaks"
+          >
+            <SeparatorHorizontal size={13} strokeWidth={2.4} />
+          </button>
+        )}
 
         <button
           className={`analysis-tab analysis-tab--settings ${view === "settings" ? "analysis-tab--active" : ""}`}

@@ -1,9 +1,10 @@
 import { useId } from "react";
+import { ChevronRight, ArrowLeft, ArrowRight, Sparkles } from "lucide-react";
 import type { ChapterAnalysisResult } from "../../lib/use-analysis";
 import { WidgetCard } from "./WidgetCard";
 
-// Catmull-Rom path generator — same algorithm the reader uses for its
-// hmx-arc-graph mini sparklines, so the visual feel matches.
+// ── Sparkline helpers (shared with TensionWidget; kept inline so the
+// cross-arc cells stay self-contained at small sizes) ──────────────────
 function catmullRomPath(pts: [number, number][]): string {
   if (pts.length < 2) return "";
   let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
@@ -21,69 +22,39 @@ function catmullRomPath(pts: [number, number][]): string {
   return d;
 }
 
+// Dark-mode-tuned tension colours — same palette family as the rest of
+// the dark-widget refresh (rose / amber / slate at the 400 tier).
 function tColor(v: number): string {
-  return v >= 0.85 ? "#f43f5e" : v >= 0.35 ? "#fbbf24" : "#94a3b8";
+  return v >= 0.85 ? "#fb7185" : v >= 0.35 ? "#fbbf24" : "#94a3b8";
 }
 
-// Mini sparkline — fixed-width 100×{22|26}, used three times across the
-// prev / current / next cells. The current chapter's sparkline is slightly
-// taller and bolder so the eye lands on it.
-function MiniArc({ curve, idBase, isCurrent = false }: {
-  curve: number[]; idBase: string; isCurrent?: boolean;
-}) {
-  const W = 100;
-  const H = isCurrent ? 30 : 24;
-  const PAD_Y = 2;
-  const plotH = H - 2 * PAD_Y;
+// Per-tension cell tint. Reads as "what energy zone is this chapter in"
+// at a glance — calm cells tinted slate-blue, rising amber, high rose.
+// Subtle (≤ 8% alpha) so the sparkline is the eye's first-stop, not the
+// background colour.
+const PEAK_TINT: Record<string, { bg: string; border: string; label: string }> = {
+  calm:     { bg: "rgba(148, 163, 184, 0.05)", border: "rgba(148, 163, 184, 0.18)", label: "rgba(148, 163, 184, 0.92)" },
+  rising:   { bg: "rgba(251, 191, 36, 0.08)",  border: "rgba(251, 191, 36, 0.22)",  label: "rgba(251, 191, 36, 0.95)"  },
+  high:     { bg: "rgba(251, 113, 133, 0.10)", border: "rgba(251, 113, 133, 0.28)", label: "rgba(251, 113, 133, 0.95)" },
+};
 
-  if (curve.length < 2) {
-    return (
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
-           preserveAspectRatio="none" aria-hidden="true">
-        <line x1="0" y1={H / 2} x2={W} y2={H / 2}
-              stroke="rgba(255,255,255,0.12)" strokeWidth="1" strokeDasharray="2 3" />
-      </svg>
-    );
-  }
+// 3-chapter peak-pattern → colour. Energy-grouped: high-tension shapes
+// run rose, mixed/transitional run amber, low-tension run blue. Same
+// thinking as PEAK_TINT — the colour is doing semantic work (energy
+// class), not decoration.
+const PATTERN_META: Record<string, { color: string; label: string }> = {
+  "sustained":         { color: "#fb7185", label: "Sustained"        },
+  "tension & release": { color: "#fb923c", label: "Tension & Release"},
+  "peak and fall":     { color: "#fb923c", label: "Peak & Fall"      },
+  "building peak":     { color: "#fb923c", label: "Building Peak"    },
+  "breather window":   { color: "#60a5fa", label: "Breather"         },
+  "escalating":        { color: "#fb7185", label: "Escalating"       },
+  "descending":        { color: "#60a5fa", label: "Descending"       },
+  "plateau":           { color: "#94a3b8", label: "Plateau"          },
+  "accelerating":      { color: "#fb7185", label: "Accelerating"     },
+  "decompressing":     { color: "#60a5fa", label: "Decompressing"    },
+};
 
-  const pts: [number, number][] = curve.map((raw, i) => {
-    const v = Math.pow(raw, 1.2);
-    return [(i / (curve.length - 1)) * W, H - PAD_Y - v * plotH];
-  });
-  const linePath = catmullRomPath(pts);
-  const fillPath = `${linePath} L${W},${H} L0,${H} Z`;
-  const peakColor = tColor(Math.max(...curve));
-  const lineId = `${idBase}-l`;
-  const fillId = `${idBase}-f`;
-
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
-         preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id={lineId} x1="0%" y1="0%" x2="100%" y2="0%">
-          {pts.map((_, i) => (
-            <stop key={i}
-                  offset={`${((i / (pts.length - 1)) * 100).toFixed(1)}%`}
-                  stopColor={tColor(curve[i])} />
-          ))}
-        </linearGradient>
-        <linearGradient id={fillId} x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%"   stopColor={peakColor} stopOpacity={isCurrent ? "0.28" : "0.16"} />
-          <stop offset="100%" stopColor={peakColor} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      <path d={fillPath} fill={`url(#${fillId})`} />
-      <path d={linePath} fill="none" stroke={`url(#${lineId})`}
-            strokeWidth={isCurrent ? 1.7 : 1.3}
-            strokeLinecap="round" strokeLinejoin="round"
-            vectorEffect="non-scaling-stroke"
-            opacity={isCurrent ? 1 : 0.85} />
-    </svg>
-  );
-}
-
-// 3-chapter peak-pattern lookup — same map as the reader's HighModeDeepAnalysis.
-// Encodes the prev-curr-next peakTension triple as a human-readable shape.
 const CROSS_PATTERN: Record<string, string> = {
   "high-high-high":   "sustained",
   "calm-high-calm":   "tension & release",
@@ -99,28 +70,111 @@ const CROSS_PATTERN: Record<string, string> = {
   "high-calm-calm":   "decompressing",
 };
 
+// ── Mini-arc — sparkline with peak pip, tinted cell background ────────
+interface MiniArcProps {
+  curve: number[];
+  idBase: string;
+  isCurrent?: boolean;
+}
+
+function MiniArc({ curve, idBase, isCurrent = false }: MiniArcProps) {
+  const W = 100;
+  const H = isCurrent ? 36 : 28;
+  const PAD_Y = 4;
+  const plotH = H - 2 * PAD_Y;
+
+  if (curve.length < 2) {
+    return (
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
+           preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1={H / 2} x2={W} y2={H / 2}
+              stroke="rgba(255,255,255,0.10)" strokeWidth="1"
+              strokeDasharray="2 3" />
+      </svg>
+    );
+  }
+
+  const pts: [number, number][] = curve.map((raw, i) => {
+    // Mild gamma so peaks read with more drama at small sizes.
+    const v = Math.pow(raw, 1.2);
+    return [(i / (curve.length - 1)) * W, H - PAD_Y - v * plotH];
+  });
+  const linePath = catmullRomPath(pts);
+  const fillPath = `${linePath} L${W},${H} L0,${H} Z`;
+
+  // Locate the chapter's peak — first occurrence of max — for the pip.
+  const maxV = Math.max(...curve);
+  const peakIdx = curve.findIndex((v) => v === maxV);
+  const peakPt = peakIdx >= 0 ? pts[peakIdx] : null;
+  const peakColor = tColor(maxV);
+
+  const lineId = `${idBase}-l`;
+  const fillId = `${idBase}-f`;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H}
+         preserveAspectRatio="none" aria-hidden="true"
+         style={{ overflow: "visible" }}>
+      <defs>
+        <linearGradient id={lineId} x1="0%" y1="0%" x2="100%" y2="0%">
+          {pts.map((_, i) => (
+            <stop key={i}
+                  offset={`${((i / (pts.length - 1)) * 100).toFixed(1)}%`}
+                  stopColor={tColor(curve[i])} />
+          ))}
+        </linearGradient>
+        <linearGradient id={fillId} x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%"   stopColor={peakColor} stopOpacity={isCurrent ? "0.30" : "0.18"} />
+          <stop offset="100%" stopColor={peakColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={fillPath} fill={`url(#${fillId})`} />
+      <path d={linePath} fill="none" stroke={`url(#${lineId})`}
+            strokeWidth={isCurrent ? 1.9 : 1.4}
+            strokeLinecap="round" strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+            opacity={isCurrent ? 1 : 0.86} />
+      {/* Peak pip — small ring + dot at the chapter's peak. Smaller than
+          TensionWidget's pin (no vertical hairline) since the cell is
+          tiny; the pip alone communicates "the peak is here" without
+          dominating the cell. */}
+      {peakPt && (
+        <>
+          <circle cx={peakPt[0]} cy={peakPt[1]}
+                  r={isCurrent ? 2.4 : 1.8}
+                  fill={peakColor} opacity={0.32} />
+          <circle cx={peakPt[0]} cy={peakPt[1]}
+                  r={isCurrent ? 1.4 : 1.1}
+                  fill={peakColor} />
+        </>
+      )}
+    </svg>
+  );
+}
+
 interface Props {
-  /** Current chapter's analysis. Required — widget is gated on it externally. */
   current: ChapterAnalysisResult;
-  /** Previous chapter analysis if cached (user has visited it). */
   prev: ChapterAnalysisResult | null;
-  /** Next chapter analysis if cached. */
   next: ChapterAnalysisResult | null;
 }
 
 /**
- * CrossArcWidget — replicates the reader's high-mode "Arc" row inside the
- * editor's analysis panel. Shows tension-curve sparklines for prev / current
- * / next chapter side-by-side with arrow connectors between them, plus a
- * cross-chapter pattern label (e.g., "escalating", "tension & release").
+ * CrossArcWidget — three-chapter arc context. HI redesign over the
+ * earlier flat sparkline row:
  *
- * Gating: callers should only render this in high intelligence mode.
- *
- * Data source: pulls tensionCurve and peakTension from each ChapterAnalysis.
- * No fresh analysis is triggered — adjacent chapters are read from the
- * useAnalysis cache, which is populated organically as the user navigates.
- * If a neighbour hasn't been visited yet, that cell shows a dashed
- * placeholder line and the cross-pattern is suppressed.
+ *   • Pattern label is a tinted pill placed prominently above the row
+ *     (red for high-energy patterns, amber for transitional, blue for
+ *     decompressing/breather, slate for plateau).
+ *   • Each chapter cell tinted by its peak-tension energy band (calm /
+ *     rising / high) so the energy class is encoded TWICE — in the
+ *     cell wash and in the curve itself. Reduces eye-jump between
+ *     legend and chart.
+ *   • Each sparkline carries a peak pip at the chapter's peak point —
+ *     small ring + dot, same idiom as TensionWidget's peak pin scaled
+ *     down for the small cells.
+ *   • Cast continuity uses chip rows with directional arrows (← gone,
+ *     → incoming) instead of the previous key/value text rows.
+ *   • Empty state gets a quiet hint with an icon.
  */
 export function CrossArcWidget({ current, prev, next }: Props) {
   const uid = useId().replace(/:/g, "_");
@@ -129,15 +183,13 @@ export function CrossArcWidget({ current, prev, next }: Props) {
   const prevA = prev?.analysis ?? null;
   const nextA = next?.analysis ?? null;
 
-  // Cross-pattern label requires BOTH neighbours present — three-chapter
-  // shapes are inherently triple-keyed.
   const crossKey = prevA && nextA
     ? `${prevA.peakTension}-${currA.peakTension}-${nextA.peakTension}`
     : null;
-  const pattern = crossKey ? CROSS_PATTERN[crossKey] ?? null : null;
+  const patternKey = crossKey ? CROSS_PATTERN[crossKey] : null;
+  const patternMeta = patternKey ? PATTERN_META[patternKey] : null;
 
-  // Cast continuity: characters in the prev/next chapter that aren't in the
-  // current one. Surfaces "who left" / "who's about to enter" as a sublabel.
+  // Cast continuity (same logic as before, just now consumed by chips).
   const currCast = new Set(currA.speakerCounts.map(c => c.name.toLowerCase()));
   const filterReal = (s: { name: string; turns: number }) =>
     s.turns >= 3 && s.name.toLowerCase() !== "narration" && s.name.toLowerCase() !== "unknown";
@@ -146,84 +198,164 @@ export function CrossArcWidget({ current, prev, next }: Props) {
   const incomingChars = (nextA?.speakerCounts ?? [])
     .filter(filterReal).filter(s => !currCast.has(s.name.toLowerCase()));
 
-  const peakTriple = `${prevA?.peakTension ?? "—"} → ${currA.peakTension} → ${nextA?.peakTension ?? "—"}`;
+  // Cell tints by peak tension band.
+  const prevTint = prevA ? PEAK_TINT[prevA.peakTension] : PEAK_TINT.calm;
+  const currTint = PEAK_TINT[currA.peakTension] ?? PEAK_TINT.calm;
+  const nextTint = nextA ? PEAK_TINT[nextA.peakTension] : PEAK_TINT.calm;
+
+  const accent = patternMeta?.color ?? "#7dd8ff";
 
   return (
     <WidgetCard
       bg="#0d1729"
-      accent="#7dd8ff"
+      accent={accent}
       heroAlign="start"
       topLeft="CROSS-ARC"
-      topRight={pattern ? pattern.toUpperCase() : "ARC RELATION"}
-      bottomLeft={peakTriple}
-      bottomRight=""
+      topRight={
+        prevA && nextA
+          ? `${prevA.peakTension} → ${currA.peakTension} → ${nextA.peakTension}`
+          : "ARC RELATION"
+      }
     >
       <div className="wg-content">
-        <div className="cross-arc-row">
-          {/* Previous chapter cell */}
-          <div className="cross-arc-cell">
-            <div className="cross-arc-graph">
-              {prevA ? (
-                <MiniArc curve={prevA.tensionCurve} idBase={`${uid}p`} />
-              ) : (
-                <MiniArc curve={[]} idBase={`${uid}p`} />
-              )}
+        {/* Pattern badge — front-and-centre when both neighbours are
+            cached, otherwise hidden so the empty state can speak. */}
+        {patternMeta && (
+          <div className="wg-cross-pattern-row">
+            <span
+              className="wg-cross-pattern-pill"
+              style={{
+                color: patternMeta.color,
+                borderColor: `${patternMeta.color}55`,
+                background: `${patternMeta.color}12`,
+              }}
+            >
+              <Sparkles size={11} strokeWidth={2.4} />
+              <span>{patternMeta.label}</span>
+            </span>
+          </div>
+        )}
+
+        {/* Three-cell sparkline row */}
+        <div className="wg-cross-row">
+          <div
+            className={`wg-cross-cell ${prevA ? "" : "wg-cross-cell--empty"}`}
+            style={prevA ? {
+              background: prevTint.bg,
+              borderColor: prevTint.border,
+            } : undefined}
+          >
+            <span className="wg-cross-cell-key">prev</span>
+            <div className="wg-cross-graph">
+              <MiniArc
+                curve={prevA?.tensionCurve ?? []}
+                idBase={`${uid}p`}
+              />
             </div>
-            <span className="cross-arc-cell-label">prev</span>
+            <span
+              className="wg-cross-cell-tension"
+              style={prevA ? { color: prevTint.label } : undefined}
+            >
+              {prevA?.peakTension ?? "—"}
+            </span>
           </div>
 
-          <span className="cross-arc-connector" aria-hidden="true">→</span>
+          <span className="wg-cross-arrow" aria-hidden="true">
+            <ChevronRight size={14} strokeWidth={2.4} />
+          </span>
 
-          {/* Current chapter cell — visually emphasised */}
-          <div className="cross-arc-cell cross-arc-cell--current">
-            <div className="cross-arc-graph">
+          <div
+            className="wg-cross-cell wg-cross-cell--current"
+            style={{
+              background: currTint.bg,
+              borderColor: currTint.border,
+              boxShadow: `inset 0 0 0 1px ${currTint.border}`,
+            }}
+          >
+            <span className="wg-cross-cell-key wg-cross-cell-key--current">
+              current
+            </span>
+            <div className="wg-cross-graph">
               <MiniArc curve={currA.tensionCurve} idBase={`${uid}c`} isCurrent />
             </div>
-            <span className="cross-arc-cell-label">current</span>
+            <span
+              className="wg-cross-cell-tension"
+              style={{ color: currTint.label }}
+            >
+              {currA.peakTension}
+            </span>
           </div>
 
-          <span className="cross-arc-connector" aria-hidden="true">→</span>
+          <span className="wg-cross-arrow" aria-hidden="true">
+            <ChevronRight size={14} strokeWidth={2.4} />
+          </span>
 
-          {/* Next chapter cell */}
-          <div className="cross-arc-cell">
-            <div className="cross-arc-graph">
-              {nextA ? (
-                <MiniArc curve={nextA.tensionCurve} idBase={`${uid}n`} />
-              ) : (
-                <MiniArc curve={[]} idBase={`${uid}n`} />
-              )}
+          <div
+            className={`wg-cross-cell ${nextA ? "" : "wg-cross-cell--empty"}`}
+            style={nextA ? {
+              background: nextTint.bg,
+              borderColor: nextTint.border,
+            } : undefined}
+          >
+            <span className="wg-cross-cell-key">next</span>
+            <div className="wg-cross-graph">
+              <MiniArc
+                curve={nextA?.tensionCurve ?? []}
+                idBase={`${uid}n`}
+              />
             </div>
-            <span className="cross-arc-cell-label">next</span>
+            <span
+              className="wg-cross-cell-tension"
+              style={nextA ? { color: nextTint.label } : undefined}
+            >
+              {nextA?.peakTension ?? "—"}
+            </span>
           </div>
         </div>
 
+        {/* Cast continuity — visual flow rows with directional arrows */}
         {(goneChars.length > 0 || incomingChars.length > 0) && (
           <>
             <div className="wg-divider" />
-            <div className="cross-arc-cast">
+            <div className="wg-cross-cast">
               {goneChars.length > 0 && (
-                <span className="cross-arc-cast-line">
-                  <span className="cross-arc-cast-key">gone</span>
-                  <span className="cross-arc-cast-val">
-                    {goneChars.slice(0, 3).map(c => c.name).join(", ")}
+                <div className="wg-cross-cast-row">
+                  <span className="wg-cross-cast-key">
+                    <ArrowLeft size={10} strokeWidth={2.4} />
+                    <span>gone</span>
                   </span>
-                </span>
+                  <div className="wg-cross-cast-chips">
+                    {goneChars.slice(0, 4).map((c) => (
+                      <span key={c.name} className="wg-cross-cast-chip wg-cross-cast-chip--gone">
+                        {c.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
               {incomingChars.length > 0 && (
-                <span className="cross-arc-cast-line">
-                  <span className="cross-arc-cast-key">incoming</span>
-                  <span className="cross-arc-cast-val">
-                    {incomingChars.slice(0, 3).map(c => c.name).join(", ")}
+                <div className="wg-cross-cast-row">
+                  <span className="wg-cross-cast-key wg-cross-cast-key--in">
+                    <ArrowRight size={10} strokeWidth={2.4} />
+                    <span>incoming</span>
                   </span>
-                </span>
+                  <div className="wg-cross-cast-chips">
+                    {incomingChars.slice(0, 4).map((c) => (
+                      <span key={c.name} className="wg-cross-cast-chip wg-cross-cast-chip--in">
+                        {c.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </>
         )}
 
         {!prevA && !nextA && (
-          <div className="cross-arc-hint">
-            Visit adjacent chapters to populate the cross-arc view.
+          <div className="wg-cross-hint">
+            <Sparkles size={11} strokeWidth={2.4} style={{ opacity: 0.55 }} />
+            <span>Visit adjacent chapters to populate the cross-arc view.</span>
           </div>
         )}
       </div>

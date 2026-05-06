@@ -1,6 +1,20 @@
 import { memo, useMemo } from "react";
+import { Eye, ArrowLeftRight, Megaphone, FileType, Quote } from "lucide-react";
 import { WidgetCard } from "./WidgetCard";
+import { ArcRing } from "./ArcRing";
 import { checkGrammar, type GrammarSuggestion } from "../../lib/grammar-check";
+
+// Per-kind icon — gives each mini-dial a distinct visual identity that
+// reads at a glance without needing to read the label below. The icons
+// pick up the same colour as the dial fill, so the kind is encoded
+// twice (icon shape + colour) for redundancy.
+const KIND_ICON: Record<string, typeof Eye> = {
+  filter:  Eye,            // "filter words" = perception verbs
+  passive: ArrowLeftRight, // passive voice flips subject ↔ object
+  adverb:  Megaphone,      // -ly attribution loudens dialogue
+  wordy:   FileType,       // wordy = excess text
+  cliche:  Quote,          // clichés are quoted-from-elsewhere phrases
+};
 
 // Style Watch — derives prose-style metrics from the same grammar pass
 // already running on the chapter, plus a couple of light NLP signals
@@ -183,32 +197,53 @@ function StyleWatchWidgetImpl({ content }: Props) {
       topRight={headline}
     >
       <div className="wg-content">
-        <div className="wg-section">
-          {orderedKinds.length === 0 ? (
-            <div className="wg-momentum-row">
-              <div className="wg-momentum-label" style={{ color: accent }}>—</div>
-              <div className="wg-momentum-bar"><div className="wg-momentum-bar-fill" style={{ width: "0%", background: accent }} /></div>
-              <div className="wg-momentum-trend" style={{ color: "#94a3b8" }}>0</div>
-            </div>
-          ) : (
-            orderedKinds.map(({ kind, count }) => {
-              const pct = Math.max(8, Math.round((count / max) * 100));
-              const color = KIND_META[kind].color;
-              return (
-                <div className="wg-momentum-row" key={kind}>
-                  <div className="wg-momentum-label">
-                    {KIND_META[kind].label}
-                  </div>
-                  <div className="wg-momentum-bar">
-                    <div className="wg-momentum-bar-fill" style={{ width: `${pct}%`, background: color }} />
-                  </div>
-                  <div className="wg-momentum-trend" style={{ color, fontVariantNumeric: "tabular-nums" }}>
+        {/* Row of five mini dials — one per style category. Each dial's
+            fill is the count vs. the chapter-relative max, so the
+            highest-count category fills its ring fully and the others
+            scale proportionally. Zero-count categories get a muted
+            opacity rather than disappearing, so the row's grid stays
+            stable across chapters. */}
+        <div className="wg-mini-dials">
+          {STYLE_KINDS.map((kind) => {
+            const count = data.counts[kind] ?? 0;
+            const color = KIND_META[kind].color;
+            const fill = max === 0 ? 0 : count / max;
+            const Icon = KIND_ICON[kind];
+            return (
+              <div
+                key={kind}
+                className={`wg-mini-dial ${count === 0 ? "wg-mini-dial--zero" : ""}`}
+              >
+                <ArcRing
+                  size={58}
+                  thickness={4.5}
+                  startAngle={-90}
+                  sweep={360}
+                  color={color}
+                  fill={count === 0 ? 0 : Math.max(0.06, fill)}
+                  trackColor="rgba(255, 255, 255, 0.07)"
+                  rounded
+                  indicatorDot={count > 0}
+                >
+                  <span
+                    className="wg-mini-dial-num"
+                    style={{ color: count === 0 ? "rgba(255,255,255,0.42)" : color }}
+                  >
                     {count}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                  </span>
+                  {Icon && (
+                    <span
+                      className="wg-mini-dial-icon"
+                      style={{ color: count === 0 ? "rgba(255,255,255,0.32)" : color }}
+                    >
+                      <Icon size={9} strokeWidth={2.4} />
+                    </span>
+                  )}
+                </ArcRing>
+                <span className="wg-mini-dial-label">{KIND_META[kind].label}</span>
+              </div>
+            );
+          })}
         </div>
 
         <div className="wg-section wg-section-divider">
