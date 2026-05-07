@@ -24,6 +24,7 @@ import {
   Type as _Ty,
   Frame as _Fr,
   Pilcrow as _Pi,
+  Highlighter as _Hi,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -52,3 +53,4 @@ export const ImageIcon     = wrap(_Im);
 export const TypeIcon      = wrap(_Ty);
 export const FrameIcon     = wrap(_Fr);
 export const PilcrowIcon   = wrap(_Pi);
+export const AnnotateIcon  = wrap(_Hi);

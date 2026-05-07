@@ -210,6 +210,19 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
           ariaLabel="Toggle fun mode"
         />
       </div>
+      <div className="settings-toggle-row">
+        <div className="settings-toggle-row-text">
+          <span className="settings-toggle-row-title">Debug panel</span>
+          <span className="settings-toggle-row-desc">
+            Shows adaptive model confidence, review load, and training samples.
+          </span>
+        </div>
+        <GlassToggle
+          checked={!!prefs.debugPanel}
+          onChange={(v) => onSetPrefs({ ...prefs, debugPanel: v })}
+          ariaLabel="Toggle debug panel"
+        />
+      </div>
 
       <p className="settings-hint">
         Settings persist locally. Goals reset at midnight.
@@ -534,7 +547,7 @@ export function AnalysisPanel({
             aria-label="Auto-insert scene breaks"
             title="Auto-insert scene breaks"
           >
-            <SeparatorHorizontal size={13} strokeWidth={2.4} />
+            <SeparatorHorizontal size={13} strokeWidth={1.8} />
           </button>
         )}
 
@@ -584,7 +597,7 @@ export function AnalysisPanel({
               </div>
             ) : (
               <div className="widget-list" key={`placeholder-${placeholderVariant}`}>
-                <PlaceholderWidget variant={placeholderVariant} />
+                <PlaceholderWidget variant={placeholderVariant} intelMode={intelMode} />
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 // @ts-nocheck — vendored copy; suppress unused-variable errors from the original source
+import { rerankAdaptiveCandidates } from "./adaptive-inference";
 /**
  * speech-detect.ts  (v2 — smarter attribution)
  *
@@ -47,6 +48,16 @@ export interface SpeechDetectOptions {
   prevChapterContext?: ChapterEndContext;
   /** Box to receive the final weights and state at the end of this chapter. */
   contextOut?: { value: ChapterEndContext | null };
+  /**
+   * Learned bias derived from the annotation store.
+   * Applied additively to speakWeights init, pronoun resolution, and
+   * speaker-transition scoring. Undefined → pure existing behaviour.
+   */
+  learnedBias?: import("../types").LearnedBias;
+  /** Optional adaptive ranker + memory layer layered on top of the rules. */
+  adaptiveContext?: import("../types").AdaptiveInferenceContext;
+  /** Collects per-span prediction traces for feedback logging. */
+  predictionTraceOut?: { value: import("../types").AdaptivePredictionTrace[] };
 }
 
 export interface SpeechSegment {
@@ -628,6 +639,7 @@ interface Attribution {
   speaker: string | undefined;
   type: 'speech' | 'narrative';
   confidence: number;
+  trace?: Omit<import("../types").AdaptivePredictionTrace, "task" | "paragraphIndex" | "spanIndex">;
 }
 
 /**
@@ -781,6 +793,8 @@ function findAttribution(
   thread?: DialogueThread,
   extCtxDensity?: Map<string, number>,
   activeSubjectIsLocal?: boolean,
+  learnedBias?: import("../types").LearnedBias,
+  adaptiveContext?: import("../types").AdaptiveInferenceContext,
 ): Attribution {
   const localBefore = before.slice(-LOCAL_VERB_WINDOW);
   const localAfter  = after.slice(0, LOCAL_VERB_WINDOW);
@@ -1117,48 +1131,142 @@ function findAttribution(
     }
 
     // Build scored candidate list using gender-filtered names
-    const scores: Array<{ name: string; score: number }> = [];
+    const scores: Array<{
+      name: string;
+      score: number;
+      features: Record<string, number>;
+      evidence: string[];
+    }> = [];
+    const pronounMatch = /\b(he|she|they|him|her|them|his|hers|their)\b/i.exec(pronounCtx);
     for (const name of genderFilteredNames) {
       const k = normKey(name);
       const sw = speakWeights.get(k)   ?? 0;
       const mw = mentionWeights.get(k) ?? 0;
       let score = sw * 75 + mw * 55;
+      const features: Record<string, number> = {
+        base_score: 0,
+        speak_weight: sw,
+        mention_weight: mw,
+        active_subject_match: 0,
+        prev_focus_ratio: 0,
+        thread_turns: 0,
+        ext_ctx_density: 0,
+        pronoun_posterior: 0,
+      };
+      const evidence: string[] = [];
       if (activeSubject && normKey(name) === normKey(activeSubject)) score += 45;
+      if (activeSubject && normKey(name) === normKey(activeSubject)) {
+        features.active_subject_match = 1;
+        evidence.push("active-subject");
+      }
       if (prevParaFocus && normKey(name) === normKey(prevParaFocus.name)) {
         score += prevParaFocus.ratio * NARRATIVE_FOCUS_MAX;
+        features.prev_focus_ratio = prevParaFocus.ratio;
+        evidence.push(`prev-focus=${prevParaFocus.ratio.toFixed(2)}`);
       }
       // Thread participant bonus: characters who are active in the extCtx dialogue
       // get additional weight proportional to how many turns they've taken.
       if (thread?.turnCounts.has(k)) {
         score += (thread.turnCounts.get(k)! * 60);
+        features.thread_turns = thread.turnCounts.get(k) ?? 0;
+        evidence.push(`thread=${features.thread_turns}`);
       }
       // Local extCtx density bonus: raw undecayed occurrence count in the 5-para window.
       if (extCtxDensity) {
         score += (extCtxDensity.get(k) ?? 0) * 14;
+        features.ext_ctx_density = extCtxDensity.get(k) ?? 0;
       }
-      if (score > 0) scores.push({ name, score });
+      // ── Learned pronoun posterior (Bayesian annotation bias) ─────────────
+      // Multiply score by P(speaker | pronoun) derived from user corrections.
+      // Defaults to 1 (identity) when no bias or no pronoun match in context.
+      if (learnedBias && pronounMatch) {
+        const pronoun = pronounMatch[1].toLowerCase();
+        const posteriorWeight =
+          learnedBias.pronounSpeakerWeights[pronoun]?.[name] ?? undefined;
+        if (posteriorWeight !== undefined) {
+          score *= 1 + posteriorWeight;
+          features.pronoun_posterior = posteriorWeight;
+          evidence.push(`posterior=${posteriorWeight.toFixed(2)}`);
+        }
+      }
+      features.base_score = score / 100;
+      if (score > 0) scores.push({ name, score, features, evidence });
     }
-    scores.sort((a, b) => b.score - a.score);
-    const best = scores[0];
-    const second = scores[1];
+    const ranked = rerankAdaptiveCandidates(
+      adaptiveContext,
+      scores.map((candidate) => ({
+        label: candidate.name,
+        source: "pronoun-bayes",
+        baseScore: candidate.score,
+        learnedAdjustment: 0,
+        finalScore: candidate.score,
+        features: candidate.features,
+        evidence: candidate.evidence,
+      })),
+      {
+        task: "speech",
+        spanText: quoteContent ?? "",
+        contextBefore: before.slice(-120),
+        contextAfter: after.slice(0, 120),
+        previousSpeaker: recentSpeakers?.length ? recentSpeakers[recentSpeakers.length - 1] : activeSubject,
+      },
+    );
+    const best = ranked.candidates[0];
+    const second = ranked.candidates[1];
     // Cast-size penalty: more candidates dilute the posterior even when one
     // character clearly dominates. Scale the threshold up slightly per extra cast
     // member beyond 4, and require a minimum dominance ratio over the runner-up.
-    const dominanceRatio = second ? best?.score / second.score : Infinity;
+    const dominanceRatio = second ? best?.finalScore / Math.max(1, second.finalScore) : Infinity;
     const castPenalty = Math.max(0, (genderFilteredNames.length - 4) * 0.03);
     const adjustedThreshold = (pronounMinScore ?? PRONOUN_MIN_SCORE) + castPenalty;
 
-    if (best && best.score >= adjustedThreshold) {
-      const totalScore = scores.reduce((s, x) => s + x.score, 0);
-      const topProb = totalScore > 0 ? best.score / totalScore : 0;
+    if (best && best.finalScore >= adjustedThreshold) {
+      const totalScore = ranked.candidates.reduce((s, x) => s + Math.max(0, x.finalScore), 0);
+      const topProb = totalScore > 0 ? Math.max(0, best.finalScore) / totalScore : ranked.confidence;
+      const traceBase = {
+        spanText: quoteContent ?? "",
+        contextBefore: before.slice(-120),
+        contextAfter: after.slice(0, 120),
+        candidates: ranked.candidates,
+        predictedLabel: best.label ?? null,
+        confidence: ranked.confidence,
+        needsReview: ranked.needsReview,
+        ambiguityGap: ranked.ambiguityGap,
+        source: "pronoun-bayes",
+      };
 
       if (topProb >= 0.40 && dominanceRatio >= 1.8) {
-        return { speaker: best.name, type: 'speech', confidence: topProb * 0.85 };
+        return {
+          speaker: best.label ?? undefined,
+          type: 'speech',
+          confidence: Math.max(topProb * 0.85, ranked.confidence * 0.8),
+          trace: traceBase,
+        };
       } else if (topProb >= PRONOUN_MIN_POSTERIOR && second && dominanceRatio >= 1.4) {
-        return { speaker: best.name, type: 'speech', confidence: topProb * 0.50 };
+        return {
+          speaker: best.label ?? undefined,
+          type: 'speech',
+          confidence: Math.max(topProb * 0.50, ranked.confidence * 0.55),
+          trace: traceBase,
+        };
       }
     }
-    return { speaker: undefined, type: 'speech', confidence: 0 };
+    return {
+      speaker: undefined,
+      type: 'speech',
+      confidence: 0,
+      trace: {
+        spanText: quoteContent ?? "",
+        contextBefore: before.slice(-120),
+        contextAfter: after.slice(0, 120),
+        candidates: ranked.candidates,
+        predictedLabel: null,
+        confidence: ranked.confidence,
+        needsReview: true,
+        ambiguityGap: ranked.ambiguityGap,
+        source: "pronoun-bayes",
+      },
+    };
   }
 
   // ── Step 4: extended context (previous paragraphs) ──
@@ -1168,7 +1276,19 @@ function findAttribution(
       // Validate with recency: only use if this character was recently active
       const k = normKey(extName);
       const recency = Math.max(speakWeights.get(k) ?? 0, mentionWeights.get(k) ?? 0);
-      if (recency >= 0.3) return { speaker: extName, type: 'speech', confidence: 0.58 };
+      // ── Learned transition boost ──────────────────────────────────────
+      // If the user's annotation data indicates that extName frequently
+      // follows the most-recent attributed speaker, raise confidence slightly.
+      // This is a read-only check; `learnedBias` is captured in the outer
+      // `detectSpeechInChapter` closure and available here via `options`.
+      const prevSpeaker = recentSpeakers[recentSpeakers.length - 1];
+      const transitionBoost =
+        learnedBias && prevSpeaker
+          ? (learnedBias.speakerTransitions[prevSpeaker]?.[extName] ?? 0)
+          : 0;
+      if (recency >= 0.3) {
+        return { speaker: extName, type: 'speech', confidence: Math.min(0.72, 0.58 + transitionBoost * 0.3) };
+      }
     }
   }
 
@@ -1184,6 +1304,7 @@ interface ParaResult {
 
 function processParagraph(
   text: string,
+  paragraphIndex: number,
   knownNames: string[],
   isContinuation: boolean,
   extCtx: string,
@@ -1200,6 +1321,9 @@ function processParagraph(
   extCtxDensity?: Map<string, number>,
   continuationDepth?: number,
   activeSubjectIsLocal?: boolean,
+  learnedBias?: import("../types").LearnedBias,
+  adaptiveContext?: import("../types").AdaptiveInferenceContext,
+  predictionTraceOut?: { value: import("../types").AdaptivePredictionTrace[] },
 ): ParaResult {
   const segments: SpeechSegment[] = [];
 
@@ -1213,25 +1337,80 @@ function processParagraph(
     }
     if (closeIdx === -1) {
       const attr = findAttribution(text, nextParaStart, extCtx, knownNames,
-        speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal);
+        speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext);
       const confMod = Math.max(0.6, 1.0 - ((continuationDepth ?? 0) * 0.12));
+      const spanIndex = segments.length;
       segments.push({ start: 0, end: text.length, speaker: attr.speaker, continuation: true, type: 'speech', confidence: attr.confidence * confMod });
+      if (predictionTraceOut) {
+        predictionTraceOut.value.push({
+          ...(attr.trace ?? {
+            spanText: text,
+            contextBefore: "",
+            contextAfter: nextParaStart.slice(0, 120),
+            candidates: [{
+              label: attr.speaker ?? null,
+              source: attr.type === 'speech' ? 'rule' : 'narrative',
+              baseScore: attr.confidence * 100,
+              learnedAdjustment: 0,
+              finalScore: attr.confidence * 100,
+              features: { base_score: attr.confidence, direct_rule: 1 },
+            }],
+            predictedLabel: attr.speaker ?? null,
+            confidence: attr.confidence * confMod,
+            needsReview: attr.confidence > 0 && attr.confidence < 0.58,
+            ambiguityGap: attr.confidence * 100,
+            source: 'rule',
+          }),
+          task: 'speech',
+          paragraphIndex,
+          spanIndex,
+        });
+      }
       if (attr.speaker) speakWeights.set(normKey(attr.speaker), 1.0);
       return { segments, endsOpen: true };
     }
     const contBefore = text.slice(0, closeIdx + 1);
     const contAfter  = text.slice(closeIdx + 1);
     const attr = findAttribution(contBefore, contAfter, extCtx, knownNames,
-      speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal);
+      speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext);
     const confMod = Math.max(0.6, 1.0 - ((continuationDepth ?? 0) * 0.12));
+    const spanIndex = segments.length;
     segments.push({ start: 0, end: closeIdx + 1, speaker: attr.speaker, continuation: true, type: 'speech', confidence: attr.confidence * confMod });
+    if (predictionTraceOut) {
+      predictionTraceOut.value.push({
+        ...(attr.trace ?? {
+          spanText: contBefore,
+          contextBefore: "",
+          contextAfter: contAfter.slice(0, 120),
+          candidates: [{
+            label: attr.speaker ?? null,
+            source: attr.type === 'speech' ? 'rule' : 'narrative',
+            baseScore: attr.confidence * 100,
+            learnedAdjustment: 0,
+            finalScore: attr.confidence * 100,
+            features: { base_score: attr.confidence, direct_rule: 1 },
+          }],
+          predictedLabel: attr.speaker ?? null,
+          confidence: attr.confidence * confMod,
+          needsReview: attr.confidence > 0 && attr.confidence < 0.58,
+          ambiguityGap: attr.confidence * 100,
+          source: 'rule',
+        }),
+        task: 'speech',
+        paragraphIndex,
+        spanIndex,
+      });
+    }
     if (attr.speaker) speakWeights.set(normKey(attr.speaker), 1.0);
 
     const rest = processParagraph(
-      text.slice(closeIdx + 1), knownNames, false, extCtx, nextParaStart,
+      text.slice(closeIdx + 1), paragraphIndex, knownNames, false, extCtx, nextParaStart,
       speakWeights, mentionWeights, activeSubject, prevParaFocus, recentSpeakers, genderMap, maxRecentSpeakers, pronounMinScore, thread, extCtxDensity,
       undefined,
       activeSubjectIsLocal,
+      learnedBias,
+      adaptiveContext,
+      predictionTraceOut,
     );
     for (const seg of rest.segments) {
       segments.push({ ...seg, start: seg.start + closeIdx + 1, end: seg.end + closeIdx + 1 });
@@ -1253,7 +1432,7 @@ function processParagraph(
     const after  = text.slice(pair.end + 1);
     const quoteContent = text.slice(pair.start + 1, pair.end);
     let attr = findAttribution(before, after, extCtx, knownNames,
-      speakWeights, mentionWeights, activeSubject, prevParaFocus, quoteContent, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal);
+      speakWeights, mentionWeights, activeSubject, prevParaFocus, quoteContent, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext);
 
     // Adjacent quote inheritance: if attribution failed but the immediately
     // preceding attributed quote had high confidence and no new named actor
@@ -1267,7 +1446,33 @@ function processParagraph(
       }
     }
 
+    const spanIndex = segments.length;
     segments.push({ start: pair.start, end: pair.end + 1, speaker: attr.speaker, type: attr.type, confidence: attr.confidence });
+    if (predictionTraceOut) {
+      predictionTraceOut.value.push({
+        ...(attr.trace ?? {
+          spanText: text.slice(pair.start, pair.end + 1),
+          contextBefore: before.slice(-120),
+          contextAfter: after.slice(0, 120),
+          candidates: [{
+            label: attr.speaker ?? null,
+            source: attr.type === 'speech' ? 'rule' : 'narrative',
+            baseScore: attr.confidence * 100,
+            learnedAdjustment: 0,
+            finalScore: attr.confidence * 100,
+            features: { base_score: attr.confidence, direct_rule: 1 },
+          }],
+          predictedLabel: attr.speaker ?? null,
+          confidence: attr.confidence,
+          needsReview: attr.confidence > 0 && attr.confidence < 0.58,
+          ambiguityGap: attr.confidence * 100,
+          source: 'rule',
+        }),
+        task: 'speech',
+        paragraphIndex,
+        spanIndex,
+      });
+    }
     if (attr.speaker && attr.type === 'speech') {
       lastAttributedSpeaker = attr.speaker;
       lastAttributedConfidence = attr.confidence;
@@ -1845,6 +2050,17 @@ export function detectSpeechInChapter(
     if (!speakWeights.has(k))   speakWeights.set(k, 0);
     if (!mentionWeights.has(k)) mentionWeights.set(k, 0);
   }
+  // Apply learned speaker priors (additive boost, identity when bias is absent).
+  const learnedBias = options?.learnedBias;
+  const adaptiveContext = options?.adaptiveContext;
+  const predictionTraceOut = options?.predictionTraceOut;
+  if (predictionTraceOut) predictionTraceOut.value = [];
+  if (learnedBias) {
+    for (const [name, prior] of Object.entries(learnedBias.speakerPriors)) {
+      const k = normKey(name);
+      speakWeights.set(k, (speakWeights.get(k) ?? 0) + prior);
+    }
+  }
 
   let openContinuation = false;
   let activeSubject: string | undefined = prev?.activeSubject;
@@ -1963,10 +2179,13 @@ export function detectSpeechInChapter(
 
     // ── Process quotes ──
     const { segments, endsOpen } = processParagraph(
-      para, knownNames, openContinuation,
+      para, i, knownNames, openContinuation,
       extCtx, nextParaStart,
       speakWeights, mentionWeights, localActiveSubject ?? activeSubject, prevParaFocus, recentSpeakers,
       genderMap, maxRecentSpeakers, pronounMinScore, thread, extCtxDens, continuationDepth, activeSubjectIsLocal,
+      learnedBias,
+      adaptiveContext,
+      predictionTraceOut,
     );
 
     // ── High mode: confidence upgrade / demotion pass ──────────────────
@@ -2046,5 +2265,5 @@ export function detectSpeechInParagraph(
   const sw = new Map<string, number>();
   const mw = new Map<string, number>();
   for (const n of knownNames) { sw.set(normKey(n), 0); mw.set(normKey(n), 0); }
-  return processParagraph(text, knownNames, isOpenContinuation, '', '', sw, mw, undefined, undefined, []);
+  return processParagraph(text, 0, knownNames, isOpenContinuation, '', '', sw, mw, undefined, undefined, []);
 }

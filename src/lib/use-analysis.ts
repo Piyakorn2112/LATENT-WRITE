@@ -16,6 +16,8 @@ import {
   type ProseRegister,
 } from "./chapter-analysis";
 import { resolveKnownNames } from "./world-data";
+import { findActionSentences, predictActionActor, type ActionPrediction } from "./action-detect";
+import type { AdaptiveInferenceContext, AdaptivePredictionTrace } from "../types";
 
 export type {
   ChapterParaResult,
@@ -29,9 +31,67 @@ export type {
 export interface ChapterAnalysisResult {
   paragraphs: string[];
   speechResults: ChapterParaResult[];
+  speechPredictions: AdaptivePredictionTrace[];
+  actionPredictions: ActionPrediction[][];
   analysis: ChapterAnalysis;
   /** Captured at end of detection — passed forward to seed the next chapter. */
   endContext: ChapterEndContext | null;
+}
+
+function clipActionSpans(spans: Array<{ start: number; end: number }>, from: number, to: number) {
+  const out: Array<{ start: number; end: number }> = [];
+  for (const span of spans) {
+    if (span.end <= from || span.start >= to) continue;
+    if (span.start < from || span.end > to) continue;
+    out.push({ start: span.start - from, end: span.end - from });
+  }
+  return out;
+}
+
+function buildActionPredictions(
+  paragraphs: string[],
+  speechResults: ChapterParaResult[],
+  knownNames: string[],
+  learnedBias: import("../types").LearnedBias | undefined,
+  adaptiveContext: AdaptiveInferenceContext | undefined,
+): ActionPrediction[][] {
+  return paragraphs.map((para, paragraphIndex) => {
+    const paraActions = findActionSentences(para);
+    const segs = [...(speechResults[paragraphIndex]?.segments ?? [])].sort((a, b) => a.start - b.start);
+    const predictions: ActionPrediction[] = [];
+    let carryingSpeaker: string | null = null;
+    let cursor = 0;
+
+    const pushPredictions = (chunkStart: number, chunkEnd: number) => {
+      const localActions = clipActionSpans(paraActions, chunkStart, chunkEnd);
+      for (const action of localActions) {
+        const start = action.start + chunkStart;
+        const end = action.end + chunkStart;
+        const spanText = para.slice(start, end);
+        const prediction = predictActionActor(
+          spanText,
+          knownNames,
+          carryingSpeaker,
+          learnedBias,
+          adaptiveContext,
+          para.slice(Math.max(0, start - 120), start),
+          para.slice(end, Math.min(para.length, end + 120)),
+        );
+        predictions.push({ start, end, ...prediction });
+      }
+    };
+
+    for (const seg of segs) {
+      if (seg.start > cursor) pushPredictions(cursor, seg.start);
+      if (seg.type === "speech" && seg.confidence >= 0.65) {
+        carryingSpeaker = seg.speaker ?? carryingSpeaker;
+      }
+      cursor = seg.end;
+    }
+    if (cursor < para.length) pushPredictions(cursor, para.length);
+
+    return predictions;
+  });
 }
 
 // Split chapter content into non-empty paragraphs (double-newline or single-newline separated)
@@ -49,16 +109,41 @@ function analyzeOne(
   siblingStats: ChapterStats[],
   knownNames: string[],
   level: IntelligenceLevel,
+  learnedBias?: import("../types").LearnedBias,
+  adaptiveContext?: AdaptiveInferenceContext,
+  collectPredictionDetails = false,
 ): ChapterAnalysisResult {
   const paragraphs = toParagraphs(chapter.content);
   const contextOut: { value: ChapterEndContext | null } = { value: null };
+  const predictionTraceOut: { value: AdaptivePredictionTrace[] } | undefined = collectPredictionDetails
+    ? { value: [] }
+    : undefined;
   const speechResults = detectSpeechInChapter(paragraphs, knownNames, {
     intelligenceLevel: level,
     prevChapterContext: prevContext ?? undefined,
     contextOut,
+    learnedBias,
+    adaptiveContext,
+    predictionTraceOut,
   });
+  const actionPredictions = collectPredictionDetails
+    ? buildActionPredictions(
+        paragraphs,
+        speechResults,
+        knownNames,
+        learnedBias,
+        adaptiveContext,
+      )
+    : [];
   const analysis = analyzeChapter(paragraphs, speechResults, siblingStats);
-  return { paragraphs, speechResults, analysis, endContext: contextOut.value };
+  return {
+    paragraphs,
+    speechResults,
+    speechPredictions: predictionTraceOut?.value ?? [],
+    actionPredictions,
+    analysis,
+    endContext: contextOut.value,
+  };
 }
 
 interface UseAnalysisOptions {
@@ -66,6 +151,12 @@ interface UseAnalysisOptions {
   debounceMs?: number;
   /** Intelligence tier — falls through directly to speech-detect. */
   level?: IntelligenceLevel;
+  /** Learned biases derived from user annotation corrections. */
+  learnedBias?: import("../types").LearnedBias;
+  /** Adaptive online ranker + memory layer layered on top of deterministic rules. */
+  adaptiveContext?: AdaptiveInferenceContext;
+  /** Collect per-span prediction details used by annotation/debug surfaces. */
+  collectPredictionDetails?: boolean;
 }
 
 interface UseAnalysisReturn {
@@ -92,6 +183,8 @@ export function useAnalysis(
   options: UseAnalysisOptions = {},
 ): UseAnalysisReturn {
   const { debounceMs = 1000, level = "default" } = options;
+  const adaptiveSpeechVersion = options.adaptiveContext?.store.models.speech.version ?? 0;
+  const adaptiveActionVersion = options.adaptiveContext?.store.models.action.version ?? 0;
   const [result, setResult] = useState<ChapterAnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   // Bumped when background adjacent-chapter scans complete so the
@@ -191,7 +284,16 @@ export function useAnalysis(
         if (cached?.endContext) { prevContext = cached.endContext; break; }
       }
 
-      const fresh = analyzeOne(chapter, prevContext, siblingStats, knownNames, level);
+      const fresh = analyzeOne(
+        chapter,
+        prevContext,
+        siblingStats,
+        knownNames,
+        level,
+        options.learnedBias,
+        options.adaptiveContext,
+        options.collectPredictionDetails,
+      );
       cache.current.set(currentChapterId, fresh);
       setResult(fresh);
       resultChapterId.current = currentChapterId;
@@ -201,7 +303,7 @@ export function useAnalysis(
     return () => {
       window.clearTimeout(timer);
     };
-  }, [novel.chapters, currentChapterId, debounceMs, level, knownNames]);
+  }, [novel.chapters, currentChapterId, debounceMs, level, knownNames, options.learnedBias, adaptiveSpeechVersion, adaptiveActionVersion, options.collectPredictionDetails]);
 
   // High-mode background pre-scan: when intelligence is set to "high" and an
   // adjacent chapter hasn't been visited yet, run its analysis in the background
@@ -243,12 +345,12 @@ export function useAnalysis(
           const c = cache.current.get(chapters[i].id);
           if (c?.endContext) { prevCtx = c.endContext; break; }
         }
-        cache.current.set(prevChapter.id, analyzeOne(prevChapter, prevCtx, buildSiblings(prevChapter.id), knownNames, level));
+        cache.current.set(prevChapter.id, analyzeOne(prevChapter, prevCtx, buildSiblings(prevChapter.id), knownNames, level, options.learnedBias));
       }
 
       if (needNext) {
         const nextChapter = chapters[idx + 1];
-        cache.current.set(nextChapter.id, analyzeOne(nextChapter, currentCached.endContext, buildSiblings(nextChapter.id), knownNames, level));
+        cache.current.set(nextChapter.id, analyzeOne(nextChapter, currentCached.endContext, buildSiblings(nextChapter.id), knownNames, level, options.learnedBias));
       }
 
       setAdjacentReady((v) => v + 1);

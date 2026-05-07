@@ -22,6 +22,8 @@ export interface Preferences {
    *  intel orb (bouncy gooey eyes that move and blink). Off by default;
    *  surfaced as a toggle in the settings panel. */
   funMode?: boolean;
+  /** Shows the adaptive-learning debug footer panel above word count. */
+  debugPanel?: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -35,6 +37,7 @@ const DEFAULTS: Preferences = {
     dailyWords: 0,
   },
   funMode: false,
+  debugPanel: false,
 };
 
 const KEY = "latentwrite:prefs-v1";
@@ -49,6 +52,7 @@ export function loadPrefs(): Preferences {
       goals: { ...DEFAULTS.goals, ...(p.goals ?? {}) },
       hasSeenOnboarding: p.hasSeenOnboarding,
       funMode: p.funMode ?? DEFAULTS.funMode,
+      debugPanel: p.debugPanel ?? DEFAULTS.debugPanel,
     };
   } catch {
     return { ...DEFAULTS };

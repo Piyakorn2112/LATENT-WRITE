@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type {
+  AdaptiveInferenceContext,
+  AdaptivePredictionTrace,
   Novel,
   WorldData,
   WorldCharacter,
@@ -33,7 +35,13 @@ interface Props {
   currentChapterId: string | null;
   worldData: WorldData | undefined;
   intelMode: IntelMode;
+  adaptiveContext?: AdaptiveInferenceContext;
   onChange: (next: WorldData) => void;
+  onEntityPredictionBatch?: (scopeId: string, predictions: AdaptivePredictionTrace[]) => void;
+  onEntityPredictionFeedback?: (
+    scopeId: string,
+    decisions: Array<{ prediction: AdaptivePredictionTrace; correctedLabel: string | null }>,
+  ) => void;
   onRename: (oldName: string, newName: string, scope: "chapter" | "book") => void;
   onClose: () => void;
 }
@@ -70,7 +78,8 @@ const emptySelected = (): Record<ScanCategory, Set<string>> => ({
 });
 
 export function WorldDataView({
-  novel, currentChapterId, worldData, intelMode, onChange, onRename, onClose,
+  novel, currentChapterId, worldData, intelMode, adaptiveContext,
+  onChange, onEntityPredictionBatch, onEntityPredictionFeedback, onRename, onClose,
 }: Props) {
   const wd = useMemo(
     () => ensureWorldData({ meta: { title: "", author: "", description: "" }, chapters: [], worldData }),
@@ -85,6 +94,7 @@ export function WorldDataView({
   const [scanMode,     setScanMode]     = useState<"chapter" | "novel">("chapter");
   const [scanResults,  setScanResults]  = useState<ScanResult>({ characters: [], places: [], factions: [] });
   const [scanSelected, setScanSelected] = useState<Record<ScanCategory, Set<string>>>(emptySelected);
+  const [scanPredictions, setScanPredictions] = useState<AdaptivePredictionTrace[]>([]);
 
   // Run heavy computation after the "scanning" loading state has painted
   useEffect(() => {
@@ -97,8 +107,17 @@ export function WorldDataView({
             scanMode === "chapter"
               ? (novel.chapters.find((c) => c.id === currentChapterId)?.content ?? "")
               : novel.chapters.map((c) => c.content).join("\n\n");
-          const results = scanAndClassify(text, wd, scanMode === "chapter" ? 2 : 3);
+          const predictionTraceOut: { value: AdaptivePredictionTrace[] } = { value: [] };
+          const results = scanAndClassify(text, wd, scanMode === "chapter" ? 2 : 3, {
+            adaptiveContext,
+            predictionTraceOut,
+          });
           setScanResults(results);
+          setScanPredictions(predictionTraceOut.value);
+          const scopeId = scanMode === "chapter"
+            ? `entity-scan:chapter:${currentChapterId ?? "none"}`
+            : "entity-scan:novel";
+          onEntityPredictionBatch?.(scopeId, predictionTraceOut.value);
           setScanSelected({
             characters: new Set(results.characters),
             places:     new Set(results.places),
@@ -113,7 +132,7 @@ export function WorldDataView({
       cancelAnimationFrame(raf2);
       clearTimeout(timer);
     };
-  }, [scanPhase]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adaptiveContext, currentChapterId, novel.chapters, onEntityPredictionBatch, scanMode, scanPhase, wd]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -218,6 +237,19 @@ export function WorldDataView({
         (name) => ({ name, aliases: [], type: "", description: "" } as WorldFaction),
       ),
     });
+    const scopeId = scanMode === "chapter"
+      ? `entity-scan:chapter:${currentChapterId ?? "none"}`
+      : "entity-scan:novel";
+    onEntityPredictionFeedback?.(
+      scopeId,
+      scanPredictions.map((prediction) => {
+        const correctedLabel =
+          prediction.predictedLabel && scanSelected[`${prediction.predictedLabel}s` as ScanCategory]?.has(prediction.spanText)
+            ? prediction.predictedLabel
+            : null;
+        return { prediction, correctedLabel };
+      }),
+    );
     setScanPhase(null);
   };
 

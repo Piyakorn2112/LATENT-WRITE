@@ -8,6 +8,12 @@
 // This is intentionally heuristic — no NLP, no parsing. Cheap to call per
 // render. False positives are acceptable; the visual treatment is light.
 
+import { rerankAdaptiveCandidates } from "./adaptive-inference";
+import type {
+  AdaptiveCandidateOption,
+  AdaptiveInferenceContext,
+} from "../types";
+
 const ACTION_VERBS = new Set([
   // Locomotion
   "walk","walked","walks","walking",
@@ -130,6 +136,16 @@ export interface ActionSpan {
   end: number;
 }
 
+export interface ActionPrediction {
+  start: number;
+  end: number;
+  actor: string | null;
+  confidence: number;
+  needsReview: boolean;
+  ambiguityGap: number;
+  candidates: AdaptiveCandidateOption[];
+}
+
 function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -153,16 +169,109 @@ export function attributeActor(
   actionText: string,
   knownNames: string[],
   carryingSpeaker: string | null,
+  learnedBias?: import("../types").LearnedBias,
+  adaptiveContext?: AdaptiveInferenceContext,
 ): string | null {
-  if (knownNames.length > 0) {
-    // Longest-match-first so "Mary Sue" wins over "Mary"
-    const sorted = [...knownNames].sort((a, b) => b.length - a.length);
-    for (const name of sorted) {
-      const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
-      if (re.test(actionText)) return name;
+  // Most hot-path callers (notably HighlightLayer during live typing) do not
+  // need adaptive ranking. Keep the original cheap longest-match/carrying-
+  // speaker path for that case so the visible mirror layer tracks typing
+  // immediately instead of waiting on a heavier candidate-building pass.
+  if (!learnedBias && !adaptiveContext) {
+    if (knownNames.length > 0) {
+      const sorted = [...knownNames].sort((a, b) => b.length - a.length);
+      for (const name of sorted) {
+        const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
+        if (re.test(actionText)) return name;
+      }
     }
+    return carryingSpeaker;
   }
-  return carryingSpeaker;
+  return predictActionActor(actionText, knownNames, carryingSpeaker, learnedBias, adaptiveContext).actor;
+}
+
+export function predictActionActor(
+  actionText: string,
+  knownNames: string[],
+  carryingSpeaker: string | null,
+  learnedBias?: import("../types").LearnedBias,
+  adaptiveContext?: AdaptiveInferenceContext,
+  contextBefore = "",
+  contextAfter = "",
+): {
+  actor: string | null;
+  confidence: number;
+  needsReview: boolean;
+  ambiguityGap: number;
+  candidates: AdaptiveCandidateOption[];
+} {
+  const candidates: AdaptiveCandidateOption[] = [];
+  const sorted = [...knownNames].sort((a, b) => b.length - a.length);
+
+  for (const name of sorted) {
+    const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
+    const explicitMatch = re.test(actionText) ? 1 : 0;
+    const carryingMatch = carryingSpeaker && carryingSpeaker.toLowerCase() === name.toLowerCase() ? 1 : 0;
+    const actorPrior = learnedBias?.actorPriors[name] ?? 0;
+    const baseScore = explicitMatch
+      ? 78 + actorPrior * 8 + carryingMatch * 6
+      : carryingMatch
+      ? 58 + actorPrior * 6
+      : actorPrior > 0
+      ? 18 + actorPrior * 5
+      : 0;
+    if (baseScore <= 0) continue;
+    candidates.push({
+      label: name,
+      source: explicitMatch ? "action-name" : carryingMatch ? "carrying-speaker" : "actor-prior",
+      baseScore,
+      learnedAdjustment: 0,
+      finalScore: baseScore,
+      features: {
+        base_score: baseScore / 100,
+        explicit_name_match: explicitMatch,
+        carrying_speaker: carryingMatch,
+        actor_prior: actorPrior,
+        token_length: Math.min(3, name.split(/\s+/).length) / 3,
+      },
+      evidence: [
+        ...(explicitMatch ? ["explicit-name"] : []),
+        ...(carryingMatch ? ["carry"] : []),
+        ...(actorPrior > 0 ? [`prior=${actorPrior.toFixed(2)}`] : []),
+      ],
+    });
+  }
+
+  candidates.push({
+    label: null,
+    source: "neutral",
+    baseScore: carryingSpeaker ? 12 : 22,
+    learnedAdjustment: 0,
+    finalScore: carryingSpeaker ? 12 : 22,
+    features: {
+      base_score: (carryingSpeaker ? 12 : 22) / 100,
+      explicit_name_match: 0,
+      carrying_speaker: 0,
+      actor_prior: 0,
+      token_length: 0,
+    },
+    evidence: ["null-candidate"],
+  });
+
+  const ranked = rerankAdaptiveCandidates(adaptiveContext, candidates, {
+    task: "action",
+    spanText: actionText,
+    contextBefore,
+    contextAfter,
+    previousSpeaker: carryingSpeaker,
+  });
+  const winner = ranked.candidates[0];
+  return {
+    actor: winner?.label ?? carryingSpeaker ?? null,
+    confidence: ranked.confidence,
+    needsReview: ranked.needsReview,
+    ambiguityGap: ranked.ambiguityGap,
+    candidates: ranked.candidates,
+  };
 }
 
 // Sentence boundary: . ! ? optionally followed by closing quote/paren, then whitespace or EOL.

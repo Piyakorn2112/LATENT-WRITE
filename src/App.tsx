@@ -4,6 +4,9 @@ import { Editor } from "./components/Editor";
 import { IndexView } from "./components/IndexView";
 import { WorldDataView } from "./components/WorldDataView";
 import { EntityPopover } from "./components/EntityPopover";
+import { AnnotationPopover } from "./components/AnnotationPopover";
+import { DebugPanel } from "./components/DebugPanel";
+
 import { StatusPill, type StatusTask } from "./components/StatusPill";
 import { AnalysisPanel } from "./components/AnalysisPanel";
 import { ScrollEdgeTop } from "./components/ScrollEdgeTop";
@@ -33,7 +36,31 @@ import {
   loadPrefs, savePrefs, todayKey, loadDailyTotal, saveDailyTotal,
   FONT_STACKS, type Preferences,
 } from "./lib/preferences";
-import type { Novel, WorldData } from "./types";
+import {
+  loadAnnotationStore,
+  saveAnnotationStore,
+  addCorrection,
+  clearAnnotations,
+  exportAnnotationsJSON,
+} from "./lib/annotation-store";
+import { computeLearnedBias, characterBreakdown } from "./lib/annotation-learn";
+import {
+  computeAdaptiveMetrics,
+  emptyAdaptiveStore,
+  loadAdaptiveStore,
+  saveAdaptiveStore,
+  upsertAdaptivePredictions,
+} from "./lib/adaptive-store";
+import { buildAdaptiveInferenceContext } from "./lib/adaptive-inference";
+import { applyOnlineAdaptiveUpdate, retrainAdaptiveModels } from "./lib/adaptive-ranker";
+import type {
+  AdaptivePredictionRecord,
+  AdaptivePredictionTrace,
+  Novel,
+  WorldData,
+  AnnotationTarget,
+  LearnedBias,
+} from "./types";
 
 declare global {
   interface Window {
@@ -99,6 +126,118 @@ export default function App() {
   // Inline entity popover — opened by clicking a highlighted name in the editor.
   const [entityPopover, setEntityPopover] = useState<{ name: string; anchor: DOMRect } | null>(null);
 
+  // ── Annotation mode ────────────────────────────────────────────────────
+  const [annotationMode, setAnnotationMode] = useState(false);
+  const [annotationStore, setAnnotationStore] = useState(() => loadAnnotationStore());
+  const [adaptiveStore, setAdaptiveStore] = useState(() => loadAdaptiveStore());
+  const [learnedBias, setLearnedBias] = useState<LearnedBias | null>(null);
+  const [annotationTarget, setAnnotationTarget] = useState<{ target: AnnotationTarget; anchor: DOMRect; correctedSpeaker?: string | null } | null>(null);
+
+  // Persist annotation store + recompute learned bias whenever it changes.
+  useEffect(() => {
+    saveAnnotationStore(annotationStore);
+    const bias = computeLearnedBias(annotationStore, novel.worldData);
+    setLearnedBias(bias);
+  }, [annotationStore, novel.worldData]);
+
+  useEffect(() => {
+    saveAdaptiveStore(adaptiveStore);
+  }, [adaptiveStore]);
+
+  useEffect(() => {
+    setAdaptiveStore((store) => {
+      const labeledPredictions = store.predictions.filter((prediction) => prediction.correctedLabel !== undefined);
+      return labeledPredictions.length === store.predictions.length
+        ? store
+        : { ...store, predictions: labeledPredictions };
+    });
+  }, []);
+
+  const adaptiveContext = useMemo(
+    () => buildAdaptiveInferenceContext(adaptiveStore, novel.worldData),
+    [adaptiveStore, novel.worldData],
+  );
+
+  const adaptiveMetrics = useMemo(
+    () => computeAdaptiveMetrics(adaptiveStore),
+    [adaptiveStore],
+  );
+
+  const collectPredictionDetails = annotationMode || !!prefs.debugPanel;
+  // Prediction-detail collection should not change the baseline chapter-analysis
+  // cadence; forcing 0 ms here makes the analyzing indicator flicker on every
+  // keystroke and changes refresh-time behaviour versus the original app.
+  const analysisDebounceMs = 1000;
+
+  const annotationBreakdown = useMemo(
+    () => characterBreakdown(annotationStore, currentId),
+    [annotationStore, currentId],
+  );
+
+
+  // Build a lookup map so HighlightLayer can colour corrected spans immediately
+  // without waiting for a full re-analysis pass.
+  const annotationOverrides = useMemo<Map<string, string | null> | undefined>(() => {
+    if (!currentId) return undefined;
+    const relevant = annotationStore.corrections.filter((c) => c.chapterId === currentId);
+    if (!relevant.length) return undefined;
+    const map = new Map<string, string | null>();
+    for (const c of relevant) {
+      map.set(`${c.paragraphIndex}-${c.spanIndex}-${c.spanType}`, c.correctedSpeaker);
+    }
+    return map;
+  }, [annotationStore.corrections, currentId]);
+
+  const handleSpeechAnnotate = useCallback((info: AnnotationTarget, anchor: DOMRect) => {
+    // If this span has already been corrected, feed the corrected speaker back
+    // into the popover so it pre-selects the right item.
+    const existing = currentId
+      ? annotationStore.corrections.find(
+          (c) =>
+            c.chapterId === currentId &&
+            c.paragraphIndex === info.paragraphIndex &&
+            c.spanIndex === info.spanIndex &&
+            c.spanType === "speech",
+        )
+      : undefined;
+    const correctedSpeaker = existing ? existing.correctedSpeaker : undefined;
+    setAnnotationTarget({ target: info, anchor, correctedSpeaker });
+  }, [currentId, annotationStore.corrections]);
+
+  const handleActionAnnotate = useCallback((info: AnnotationTarget, anchor: DOMRect) => {
+    const existing = currentId
+      ? annotationStore.corrections.find(
+          (c) =>
+            c.chapterId === currentId &&
+            c.paragraphIndex === info.paragraphIndex &&
+            c.spanIndex === info.spanIndex &&
+            c.spanType === "action",
+        )
+      : undefined;
+    const correctedSpeaker = existing ? existing.correctedSpeaker : undefined;
+    setAnnotationTarget({ target: info, anchor, correctedSpeaker });
+  }, [currentId, annotationStore.corrections]);
+
+  const handleExportAnnotations = useCallback(() => {
+    exportAnnotationsJSON(annotationStore, novel.meta.title);
+  }, [annotationStore, novel.meta.title]);
+
+  const handleClearAnnotations = useCallback(() => {
+    setAnnotationStore(clearAnnotations());
+    setAdaptiveStore((store) => {
+      const cleared = {
+        ...store,
+        predictions: store.predictions.map((prediction) => {
+          const { correctedLabel, ...rest } = prediction;
+          return rest;
+        }),
+      };
+      return {
+        ...cleared,
+        models: retrainAdaptiveModels(cleared),
+      };
+    });
+  }, []);
   const [renameTask, setRenameTask] = useState<StatusTask | null>(null);
   const cycleIntel = useCallback(() => {
     setIntelMode((m) => {
@@ -192,10 +331,135 @@ export default function App() {
     knownNames,
     prevResult: prevAnalysisResult,
     nextResult: nextAnalysisResult,
-  } = useAnalysis(novel, currentId, { level: effectiveLevel });
+  } = useAnalysis(novel, currentId, {
+    debounceMs: analysisDebounceMs,
+    level: effectiveLevel,
+    learnedBias: learnedBias ?? undefined,
+    adaptiveContext: annotationStore.corrections.length > 0 ? adaptiveContext : undefined,
+    collectPredictionDetails,
+  });
+
+  const handleAnnotationConfirm = useCallback((correctedName: string | null) => {
+    if (!annotationTarget || !currentId) { setAnnotationTarget(null); return; }
+    const { target } = annotationTarget;
+    const timestamp = Date.now();
+    const correction = {
+      id: uid(),
+      timestamp,
+      chapterId: currentId,
+      paragraphIndex: target.paragraphIndex,
+      spanIndex: target.spanIndex,
+      spanType: target.spanType,
+      originalSpeaker: target.currentSpeaker,
+      correctedSpeaker: correctedName,
+      spanText: target.spanText,
+      contextBefore: target.contextBefore,
+      contextAfter: target.contextAfter,
+    };
+    setAnnotationStore((s) => addCorrection(s, correction));
+
+    let predictionRecord: AdaptivePredictionRecord | null = null;
+    if (analysisResult) {
+      if (target.spanType === "speech") {
+        const prediction = analysisResult.speechPredictions.find(
+          (candidate) =>
+            candidate.paragraphIndex === target.paragraphIndex &&
+            candidate.spanIndex === target.spanIndex,
+        );
+        if (prediction) {
+          predictionRecord = {
+            ...prediction,
+            id: `${currentId}:speech:${prediction.paragraphIndex}:${prediction.spanIndex}`,
+            chapterId: currentId,
+            correctedLabel: correctedName,
+            timestamp,
+            modelVersion: adaptiveContext.store.models.speech.version,
+          };
+        }
+      } else {
+        const prediction = analysisResult.actionPredictions[target.paragraphIndex]?.find(
+          (candidate) => candidate.start === target.spanIndex,
+        );
+        if (prediction) {
+          const paragraph = analysisResult.paragraphs[target.paragraphIndex] ?? "";
+          predictionRecord = {
+            id: `${currentId}:action:${target.paragraphIndex}:${prediction.start}`,
+            task: "action",
+            chapterId: currentId,
+            paragraphIndex: target.paragraphIndex,
+            spanIndex: prediction.start,
+            spanText: paragraph.slice(prediction.start, prediction.end),
+            contextBefore: paragraph.slice(Math.max(0, prediction.start - 120), prediction.start),
+            contextAfter: paragraph.slice(prediction.end, Math.min(paragraph.length, prediction.end + 120)),
+            candidates: prediction.candidates,
+            predictedLabel: prediction.actor,
+            correctedLabel: correctedName,
+            confidence: prediction.confidence,
+            needsReview: prediction.needsReview,
+            ambiguityGap: prediction.ambiguityGap,
+            source: "action-rules",
+            timestamp,
+            modelVersion: adaptiveContext.store.models.action.version,
+          };
+        }
+      }
+    }
+
+    if (predictionRecord) {
+      setAdaptiveStore((store) => {
+        const alreadyLabeled = store.predictions.some(
+          (prediction) =>
+            prediction.chapterId === currentId &&
+            prediction.paragraphIndex === target.paragraphIndex &&
+            prediction.spanIndex === target.spanIndex &&
+            prediction.task === target.spanType &&
+            prediction.correctedLabel !== undefined,
+        );
+        const next = upsertAdaptivePredictions(store, [predictionRecord]);
+        return {
+          ...next,
+          models: alreadyLabeled
+            ? retrainAdaptiveModels(next)
+            : applyOnlineAdaptiveUpdate(next.models, predictionRecord),
+        };
+      });
+    }
+
+    setAnnotationTarget(null);
+  }, [annotationTarget, currentId, analysisResult, adaptiveContext.store.models.action.version, adaptiveContext.store.models.speech.version]);
+
+  const reviewCount = useMemo(() => {
+    if (!analysisResult) return 0;
+    const speech = analysisResult.speechPredictions.filter((prediction) => prediction.needsReview).length;
+    const actions = analysisResult.actionPredictions.flat().filter((prediction) => prediction.needsReview).length;
+    return speech + actions;
+  }, [analysisResult]);
 
   const handleWorldChange = useCallback((next: WorldData) => {
     setNovel((n) => ({ ...n, worldData: next }));
+  }, []);
+
+  const handleEntityPredictionFeedback = useCallback((
+    scopeId: string,
+    decisions: Array<{ prediction: AdaptivePredictionTrace; correctedLabel: string | null }>,
+  ) => {
+    if (decisions.length === 0) return;
+    setAdaptiveStore((store) => {
+      const now = Date.now();
+      const records: AdaptivePredictionRecord[] = decisions.map(({ prediction, correctedLabel }) => ({
+        ...prediction,
+        id: `${scopeId}:entity:${prediction.spanIndex}`,
+        chapterId: scopeId,
+        correctedLabel,
+        timestamp: now,
+        modelVersion: store.models.entity.version,
+      }));
+      const next = upsertAdaptivePredictions(store, records);
+      return {
+        ...next,
+        models: retrainAdaptiveModels(next),
+      };
+    });
   }, []);
 
   // Stable callback identity — feeds into HighlightLayer's useMemo dep list,
@@ -429,10 +693,21 @@ export default function App() {
     if (!file) return;
     const text = await file.text();
     const parsed = parseNovel(text);
+    const nextChapterId = parsed.chapters[0]?.id ?? null;
+    const clearedAnnotations = clearAnnotations();
+    const clearedAdaptiveStore = emptyAdaptiveStore();
     setNovel(parsed);
-    setCurrentId(parsed.chapters[0]?.id ?? null);
+    setCurrentId(nextChapterId);
+    setAnnotationStore(clearedAnnotations);
+    setAdaptiveStore(clearedAdaptiveStore);
+    setLearnedBias(null);
+    setAnnotationTarget(null);
     // Reset daily baseline since the document just got swapped wholesale.
     baselineRef.current = totalWordsInNovel(parsed);
+    saveNovel(parsed);
+    saveCurrentChapterId(nextChapterId);
+    saveAnnotationStore(clearedAnnotations);
+    saveAdaptiveStore(clearedAdaptiveStore);
   }, []);
 
   // Jump to a search hit: open the chapter, then scroll to the offset and
@@ -580,6 +855,8 @@ export default function App() {
         onCycleIntel={cycleIntel}
         isAnalyzing={analysisRunning}
         funMode={prefs.funMode}
+        annotationMode={annotationMode}
+        onToggleAnnotation={() => setAnnotationMode((v) => !v)}
       />
 
       <input
@@ -598,8 +875,15 @@ export default function App() {
           chapter={current}
           onContentChange={(content) => updateCurrent((c) => ({ ...c, content }))}
           analysisResult={intelMode !== "off" ? analysisResult : null}
+          speechPredictions={intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
+          actionPredictions={intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
           knownNames={intelMode !== "off" ? knownNames : []}
           onEntityClick={handleEntityClick}
+          annotationMode={annotationMode}
+          onSpeechAnnotate={handleSpeechAnnotate}
+          onActionAnnotate={handleActionAnnotate}
+          annotationOverrides={annotationOverrides}
+          typingSettleMs={analysisDebounceMs}
         />
       ) : (
         <div className="empty-state">
@@ -630,7 +914,9 @@ export default function App() {
           currentChapterId={currentId ?? null}
           worldData={novel.worldData}
           intelMode={intelMode}
+          adaptiveContext={adaptiveContext}
           onChange={handleWorldChange}
+          onEntityPredictionFeedback={handleEntityPredictionFeedback}
           onRename={handleRename}
           onClose={() => setWorldOpen(false)}
         />
@@ -644,6 +930,89 @@ export default function App() {
           onUpdate={handleWorldChange}
           onRename={handleRename}
           onClose={() => setEntityPopover(null)}
+        />
+      )}
+      {annotationMode && (
+        <div className="annotation-panel-shell">
+          <div className="annotation-panel liquid-glass">
+            {/* Correction count */}
+            <span className="annotation-panel-count">
+              {annotationStore.corrections.filter((c) => c.chapterId === currentId).length} correction{annotationStore.corrections.filter((c) => c.chapterId === currentId).length !== 1 ? "s" : ""}
+            </span>
+
+            {reviewCount > 0 && (
+              <>
+                <span className="annotation-panel-divider" />
+                <span className="annotation-panel-review-count">
+                  {reviewCount} need{reviewCount !== 1 ? "s" : ""} review
+                </span>
+              </>
+            )}
+
+            {adaptiveMetrics.labeled > 0 && (
+              <>
+                <span className="annotation-panel-divider" />
+                <span className="annotation-panel-mini-metric">
+                  {Math.round((1 - adaptiveMetrics.corrected / Math.max(1, adaptiveMetrics.labeled)) * 100)}% auto-match
+                </span>
+              </>
+            )}
+
+            {/* Per-character breakdown — shown when there are corrections */}
+            {annotationBreakdown.length > 0 && (
+              <>
+                <span className="annotation-panel-divider" />
+                <span className="annotation-panel-chars">
+                  {annotationBreakdown.slice(0, 3).map((c, i) => (
+                    <span key={c.name} className="annotation-panel-char-chip">
+                      {i > 0 && <span className="annotation-panel-char-sep">·</span>}
+                      <span className="annotation-panel-char-name">{c.name}</span>
+                      <span className="annotation-panel-char-counts">
+                        {c.speechCount > 0 && <span>{c.speechCount}s</span>}
+                        {c.actionCount > 0 && <span>{c.actionCount}a</span>}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              </>
+            )}
+
+            {/* Right-side actions */}
+            <span className="annotation-panel-divider" />
+
+            <button
+              className="annotation-panel-action-btn"
+              onClick={handleExportAnnotations}
+              title="Export annotations as JSON"
+            >
+              Export
+            </button>
+            <button
+              className="annotation-panel-action-btn"
+              onClick={handleClearAnnotations}
+              title="Clear all annotation corrections"
+            >
+              Clear
+            </button>
+            <button
+              className="annotation-panel-exit-btn"
+              onClick={() => setAnnotationMode(false)}
+              title="Exit annotation mode"
+              aria-label="Exit annotation mode"
+            >
+              Exit
+            </button>
+          </div>
+        </div>
+      )}
+      {annotationTarget && (
+        <AnnotationPopover
+          target={annotationTarget.target}
+          anchor={annotationTarget.anchor}
+          worldData={novel.worldData}
+          correctedSpeaker={annotationTarget.correctedSpeaker}
+          onConfirm={handleAnnotationConfirm}
+          onClose={() => setAnnotationTarget(null)}
         />
       )}
 
@@ -670,6 +1039,20 @@ export default function App() {
         }
         sceneBreaking={sceneBreaking}
       />
+
+      {current && prefs.debugPanel && analysisResult && (
+        <DebugPanel
+          reviewCount={reviewCount}
+          speechPredictions={analysisResult.speechPredictions.length}
+          actionPredictions={analysisResult.actionPredictions.flat().length}
+          metrics={adaptiveMetrics}
+          modelSamples={{
+            speech: adaptiveContext.store.models.speech.sampleCount,
+            action: adaptiveContext.store.models.action.sampleCount,
+            entity: adaptiveContext.store.models.entity.sampleCount,
+          }}
+        />
+      )}
 
       {current && (
         <WordCount

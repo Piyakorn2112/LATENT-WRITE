@@ -976,13 +976,14 @@ body {
   50%      { transform: scale(1);   opacity: 1; }
 }
 
-/* Empty-state hero — a thin vertical bar that blinks like a writing caret. */
+/* Empty-state hero — a vertical bar that blinks like a writing caret.
+   Wider and rounder than a real cursor to read as a glyph, not a bug. */
 .placeholder-cursor {
-  width: 3px;
+  width: 5px;
   height: 38px;
-  border-radius: 2px;
-  background: #aab0c0;
-  box-shadow: 0 0 18px rgba(170, 176, 192, 0.5);
+  border-radius: 3.5px;
+  background: #a0b4d0;
+  box-shadow: 0 0 22px rgba(160, 180, 210, 0.55), 0 0 6px rgba(160, 180, 210, 0.3);
   animation: placeholderCursorBlink 1.1s steps(2, jump-none) infinite;
   position: relative;
   z-index: 1;
@@ -990,7 +991,7 @@ body {
 
 @keyframes placeholderCursorBlink {
   0%, 50%      { opacity: 1; }
-  50.01%, 100% { opacity: 0.18; }
+  50.01%, 100% { opacity: 0.15; }
 }
 
 /* ─── Decorative SVG layer — absolutely fills the card, pointer-events none ─── */
@@ -2721,23 +2722,55 @@ body {
   background: rgba(255,255,255,0.04);
   color: rgba(255,255,255,0.62);
 }
+.wg-diag-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+.wg-diag-count {
+  font-family: var(--font-ui);
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.wg-diag-count-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255,255,255,0.38);
+  letter-spacing: 0.02em;
+}
 .wg-diag-list {
   display: flex;
   flex-direction: column;
-  gap: 11px;
+  gap: 8px;
 }
 .wg-diag-item {
   display: flex;
   gap: 9px;
   align-items: flex-start;
+  padding: 7px 9px 7px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.04);
+  position: relative;
+  overflow: hidden;
+}
+.wg-diag-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-top: 1px;
+  opacity: 0.85;
 }
 .wg-diag-indicator {
-  width: 3px;
-  flex-shrink: 0;
+  position: absolute;
+  top: 7px;
+  left: 4px;
+  bottom: 7px;
+  width: 2.5px;
   border-radius: 2px;
-  margin-top: 2px;
-  align-self: stretch;
-  min-height: 16px;
+  opacity: 0.55;
 }
 .wg-diag-body {
   flex: 1;
@@ -2759,6 +2792,12 @@ body {
   letter-spacing: 0.10em;
   color: rgba(255,255,255,0.28);
   text-transform: uppercase;
+}
+.wg-diag-item--warn {
+  border-color: rgba(251, 146, 60, 0.12);
+}
+.wg-diag-item--info {
+  border-color: rgba(96, 165, 250, 0.10);
 }
 .wg-full-text {
   font-family: var(--font-ui);
@@ -2801,7 +2840,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 7px;
+  margin-bottom: 10px;
 }
 .wg-role-pill {
   font-family: var(--font-ui);
@@ -2810,11 +2849,140 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+.wg-role-pill-v2 {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 7px;
+  border: 1px solid;
+  flex-shrink: 0;
+}
 .wg-role-sub {
   font-family: var(--font-ui);
   font-size: 9.5px;
   font-weight: 400;
   color: rgba(255,255,255,0.45);
+}
+.wg-role-hero-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+.wg-role-ring-wrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.wg-role-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.wg-role-ring-num {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+.wg-role-ring-unit {
+  font-family: var(--font-ui);
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.38);
+  margin-top: 1px;
+}
+.wg-role-meta-col {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.wg-role-density-pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: capitalize;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid;
+  width: fit-content;
+}
+.wg-role-trend {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: capitalize;
+  opacity: 0.78;
+}
+
+/* Center-deviation bars — bar extends from center, left=below avg, right=above */
+.wg-role-deviation-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 4px 0;
+}
+.wg-dev-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.wg-dev-key {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.10em;
+  color: rgba(255,255,255,0.5);
+  width: 24px;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.wg-dev-track {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  position: relative;
+  overflow: hidden;
+}
+.wg-dev-center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 1px;
+  height: 100%;
+  background: rgba(255,255,255,0.18);
+}
+.wg-dev-fill {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.wg-dev-val {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  width: 34px;
+  text-align: right;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 .wg-note-line {
   display: block;
@@ -3104,6 +3272,117 @@ body {
   text-align: center;
   padding: 8px 4px 4px;
   line-height: 1.4;
+}
+
+/* ─── Phase-arc visualization (CrossPacingWidget) ────────────────────────── */
+.wg-phase-arc {
+  display: block;
+  width: 100%;
+  overflow: visible;
+  margin-bottom: 4px;
+}
+.wg-phase-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+.wg-phase-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 52px;
+}
+.wg-phase-label--current .wg-phase-label-name {
+  color: rgba(255,255,255,0.75);
+}
+.wg-phase-label-name {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+}
+.wg-phase-label-val {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.55);
+  font-variant-numeric: tabular-nums;
+}
+.wg-phase-label-tension {
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: capitalize;
+  opacity: 0.7;
+}
+
+/* ─── Radar — processing placeholder (AirDrop / FindMy style) ─── */
+
+/* Rings — 6 layers, outer ones overflow and clip at the card edge.
+   A bright wave originates at center and sweeps outward: each ring
+   rises smoothly from dim → bright → dim, staggered so the peak
+   travels ring-to-ring like a sonar ping. One shared keyframe
+   driven by per-ring custom properties for the low/high opacity. */
+.ph-ring {
+  transform-origin: 100px 60px;
+  animation: phWave 2.8s ease-in-out infinite backwards;
+}
+.ph-ring--1 { --lo: 0.16; --hi: 0.54; animation-delay: 0.00s; }
+.ph-ring--2 { --lo: 0.12; --hi: 0.46; animation-delay: 0.18s; }
+.ph-ring--3 { --lo: 0.08; --hi: 0.38; animation-delay: 0.36s; }
+.ph-ring--4 { --lo: 0.05; --hi: 0.28; animation-delay: 0.54s; }
+.ph-ring--5 { --lo: 0.03; --hi: 0.20; animation-delay: 0.72s; }
+.ph-ring--6 { --lo: 0.015; --hi: 0.14; animation-delay: 0.90s; }
+
+@keyframes phWave {
+  0%, 58%, 100% { opacity: var(--lo); transform: scale(1);     }
+  26%           { opacity: var(--hi); transform: scale(1.045);  }
+}
+
+/* Orbiting dots — each orbits the center at a different speed,
+   some reversed, so they drift past each other. Smooth linear. */
+.ph-orbit--1 { animation: phOrbit  7s linear infinite; }
+.ph-orbit--2 { animation: phOrbit 11s linear infinite reverse; }
+.ph-orbit--3 { animation: phOrbit 15s linear infinite; }
+.ph-orbit--4 { animation: phOrbit 19s linear infinite reverse; }
+
+@keyframes phOrbit {
+  from { transform: rotate(0deg);   }
+  to   { transform: rotate(360deg); }
+}
+
+/* Orbiting dot opacity — gentle twinkle layered on top of orbit. */
+.ph-orbit circle {
+  opacity: 0.65;
+  animation: phDotGlow 3.4s ease-in-out infinite;
+}
+.ph-orbit--2 circle { animation-delay: 0.8s; }
+.ph-orbit--3 circle { animation-delay: 1.6s; }
+.ph-orbit--4 circle { animation-delay: 2.4s; }
+
+@keyframes phDotGlow {
+  0%, 100% { opacity: 0.5;  }
+  50%      { opacity: 0.92; }
+}
+
+/* Center dot — bold, smooth heartbeat. */
+.ph-radar-core {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #0A84FF;
+  position: relative;
+  z-index: 1;
+  animation: phCorebeat 3.2s ease-in-out infinite;
+}
+@keyframes phCorebeat {
+  0%, 100% { transform: scale(1);    opacity: 0.88; }
+  50%      { transform: scale(1.12); opacity: 1; }
 }
 
 /* ═══════════════════════════════════════════
@@ -4641,6 +4920,108 @@ body {
   background: var(--divider-line);
 }
 
+/* ─── Debug footer ───
+   Sits directly above the word-count pill and reuses the same glass language. */
+.debug-panel {
+  position: fixed;
+  bottom: 58px;
+  left: 16px;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 250px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 9px 12px 10px;
+  border-radius: 18px;
+  background: rgba(0, 0, 0, 0.04);
+  -webkit-backdrop-filter: blur(12px) saturate(160%);
+  backdrop-filter: blur(12px) saturate(160%);
+  font-family: var(--font-ui);
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .debug-panel {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.debug-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.debug-panel-eyebrow {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.debug-panel-head-meta {
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-panel-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.debug-panel-stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.debug-panel-num {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-panel-label {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.debug-panel-divider {
+  width: 1px;
+  height: 10px;
+  background: var(--divider-line);
+}
+
+.debug-panel-models {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.debug-panel-model-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Word count: daily goal ──────────────────────────────────────────── */
 .word-count-goal {
   display: inline-flex;
@@ -5391,7 +5772,14 @@ body {
   opacity: 0.35;
   transition: opacity 0.25s ease;
 }
+.app--focus .debug-panel {
+  opacity: 0.35;
+  transition: opacity 0.25s ease;
+}
 .app--focus .word-count:hover {
+  opacity: 1;
+}
+.app--focus .debug-panel:hover {
   opacity: 1;
 }
 .app--focus .document {
@@ -7226,4 +7614,471 @@ body {
   92%      { transform: translate(0, 0) scaleY(0.08); }
   96%      { transform: translate(0, 0) scaleY(1); }
   100%     { transform: translate(0, 0) scaleY(1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ANNOTATION MODE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Annotation mode click capture ─────────────────────────────────────── */
+/* In annotation mode the highlight layer receives clicks; the textarea is
+   moved behind it so it keeps the caret position but doesn't intercept
+   pointer events. */
+.editor-wrap--annotate .editor-highlight {
+  pointer-events: auto;
+  cursor: default;
+}
+
+.editor-wrap--annotate .document-editor {
+  pointer-events: none;
+}
+
+/* ── Annotation panel (minimal pill — "ANNOTATION" + count + exit) ──────── */
+.annotation-panel-shell {
+  position: fixed;
+  top: 66px;
+  left: 0;
+  right: 0;
+  z-index: 36;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.annotation-panel {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 10px;
+  border-radius: var(--pill-radius);
+  font-family: var(--font-ui);
+  animation: widgetReveal 0.28s cubic-bezier(0.22, 0.9, 0.32, 1) backwards;
+}
+
+.annotation-panel-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--divider-line);
+  flex-shrink: 0;
+  margin: 0 2px;
+}
+
+.annotation-panel-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #3b82f6;
+  padding: 0 2px;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .annotation-panel-badge { color: #9ec0f5; }
+}
+
+.annotation-panel-count {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  padding: 0 2px;
+}
+
+.annotation-panel-review-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: #3b82f6;
+  white-space: nowrap;
+}
+
+.annotation-panel-mini-metric {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+
+.annotation-panel-chars {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.annotation-panel-char-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.annotation-panel-char-sep {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-right: 2px;
+}
+
+.annotation-panel-char-name {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.annotation-panel-char-counts {
+  display: inline-flex;
+  gap: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: 0.03em;
+}
+
+/* Concentric action buttons — rounded pill matching the panel shape */
+.annotation-panel-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--pill-radius);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.annotation-panel-action-btn:hover {
+  background: var(--panel-btn-bg);
+  color: var(--text);
+}
+
+/* Concentric exit button — rounded pill shape matching the panel radius */
+.annotation-panel-exit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--pill-radius);
+  background: var(--panel-btn-bg);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.annotation-panel-exit-btn:hover {
+  background: var(--panel-btn-bg-hover);
+  color: var(--text);
+}
+
+/* ── Annotation popover — refined floating editor card ─────────────────── */
+/* Uses the same liquid-glass surface + widgetReveal enter as the entity
+   popover. Absolute positioning with JS-computed top/left + scrollY so the
+   card scrolls with the document, sticking to the anchor span. */
+.annotation-popover {
+  position: absolute;
+  z-index: 80;
+  width: 280px;
+  border-radius: 20px;
+  padding: 12px;
+  box-sizing: border-box;
+  font-family: var(--font-ui);
+  animation: widgetReveal 0.26s cubic-bezier(0.22, 0.9, 0.32, 1);
+  transform-origin: center top;
+}
+
+/* Header row: eyebrow label + close button */
+.annotation-popover-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.annotation-popover-header-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.annotation-popover-eyebrow {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 4px;
+}
+
+.annotation-popover-preview {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.annotation-popover-close {
+  width: 24px !important;
+  height: 24px !important;
+  flex-shrink: 0;
+}
+
+/* Current attribution pill */
+.annotation-popover-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: var(--panel-btn-bg);
+  margin-bottom: 6px;
+}
+
+.annotation-popover-current-label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.annotation-popover-current-value {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Scrollable character list */
+.annotation-popover-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background: var(--panel-btn-bg);
+  scrollbar-width: thin;
+}
+
+.annotation-popover-item {
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 7px;
+  margin: 1px 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.annotation-popover-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+}
+
+@media (prefers-color-scheme: dark) {
+  .annotation-popover-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.annotation-popover-item--null {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+.annotation-popover-item--selected {
+  background: var(--panel-btn-bg-hover);
+  color: var(--text);
+}
+
+.annotation-popover-item-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+/* Action row — concentric button design */
+.annotation-popover-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.annotation-popover-btn {
+  flex: 1;
+  height: 32px;
+  border: none;
+  border-radius: 9px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+
+.annotation-popover-btn--confirm {
+  background: var(--text);
+  color: var(--bg);
+}
+
+.annotation-popover-btn--confirm:not(:disabled):hover {
+  opacity: 0.85;
+}
+
+.annotation-popover-btn--confirm:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.annotation-popover-btn--cancel {
+  background: var(--panel-btn-bg);
+  color: var(--text-secondary);
+}
+
+.annotation-popover-btn--cancel:hover {
+  background: var(--panel-btn-bg-hover);
+  color: var(--text);
+}
+
+/* Speech spans become clickable in annotation mode.
+   Use underline instead of outline so the indicator doesn't blob/expand
+   around inline entity-tag shapes which have their own padding. */
+.speech-annotatable {
+  cursor: pointer;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.12s ease;
+}
+
+.speech-annotatable:hover {
+  text-decoration-color: rgba(59, 130, 246, 0.55);
+}
+
+/* Action spans annotatable — same underline approach */
+.action-annotatable {
+  cursor: pointer;
+  text-decoration: underline 2px transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.12s ease;
+}
+
+.action-annotatable:hover {
+  text-decoration-color: rgba(59, 130, 246, 0.55);
+}
+
+/* Low-confidence predictions are persistently flagged in annotation mode so the
+   user can confirm them. The review marker stays subtle and system-blue. */
+.editor-wrap--annotate .prediction-needs-review {
+  text-decoration-style: dotted;
+  text-decoration-color: rgba(59, 130, 246, 0.38);
+}
+
+.editor-wrap--annotate .prediction-needs-review:hover {
+  text-decoration-color: rgba(59, 130, 246, 0.7);
+}
+
+/* In annotation mode, entity tags should not steal pointer events
+   (annotation span click must take priority over entity popover). */
+.editor-wrap--annotate .entity-tag {
+  pointer-events: none;
+}
+
+/* ── Annotation pill tag — inline badge on corrected spans ──────────────── */
+/* Appears at the end of speech/action spans that have annotation overrides.
+   Shows the corrected speaker name + small highlighter icon in the
+   speaker's colour. Purely visual (pointer-events: none inherited from
+   .editor-highlight). */
+.annotation-tagged {
+  position: relative;
+}
+
+.annotation-pill-slot {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  vertical-align: baseline;
+  pointer-events: none;
+  user-select: none;
+  --annotation-pill-inline-offset: 5px;
+}
+
+.annotation-pill-slot--speech,
+.annotation-pill-slot--action {
+  z-index: 4;
+}
+
+.annotation-pill-slot--action {
+  --annotation-pill-inline-offset: 6px;
+}
+
+.annotation-pill-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 2px 5px 2px 4px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.annotation-pill-tag {
+  position: absolute;
+  left: var(--annotation-pill-inline-offset);
+  bottom: 0.92em;
+  /* color is set inline from the speaker colour */
+  background: var(--bg);
+  border: 1px solid var(--divider-line);
+  pointer-events: none;
+}
+
+.annotation-pill-tag svg {
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.annotation-pill-tag-name {
+  text-transform: uppercase;
+}
+
+/* Corrected attribution pill in the popover (shows when a previous
+   correction exists that differs from the detected speaker) */
+.annotation-popover-current--corrected {
+  margin-top: -2px;
+  margin-bottom: 6px;
 }

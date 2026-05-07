@@ -1,8 +1,9 @@
-import { memo, useMemo, type ReactNode, type CSSProperties } from "react";
+import React, { memo, useMemo, type ReactNode, type CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
-import { findActionSentences, attributeActor, type ActionSpan } from "../lib/action-detect";
+import { findActionSentences, attributeActor, type ActionPrediction, type ActionSpan } from "../lib/action-detect";
 import type { GrammarSuggestion } from "../lib/grammar-check";
+import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 
 const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
@@ -75,6 +76,7 @@ function renderInline(
   grammarLocal: GrammarSuggestion[],
   keyPrefix: string,
   onEntityClick?: (name: string, anchor: DOMRect) => void,
+  annotationMode?: boolean,
 ): ReactNode[] {
   // Build a unified list of decoration ranges sorted by start.
   type Deco =
@@ -155,7 +157,16 @@ function renderInline(
           data-kind={d.gkind}
           style={baseStyle}
           onMouseDown={isStyleKind ? (e) => e.preventDefault() : undefined}
-          onClick={isStyleKind ? (e) => {
+          /* `.focus()` here is a backup for browsers that don't honour
+             the mousedown preventDefault — keeps typing focus on the
+             textarea when clicking a style underline mid-paragraph.
+             In annotation mode the textarea is intentionally blurred
+             (Editor.tsx) AND the speech/action spans wrap these
+             grammar children, so the inner refocus would steal focus
+             back to the textarea, scrolling the page to the textarea's
+             top edge — that's the "click jumps to top" bug. Skip the
+             refocus entirely in annotation mode. */
+          onClick={isStyleKind && !annotationMode ? (e) => {
             (e.currentTarget as HTMLElement)
               .closest(".editor-wrap")
               ?.querySelector<HTMLTextAreaElement>("textarea")
@@ -191,16 +202,21 @@ function renderInline(
 function renderActionable(
   text: string,
   actionsLocal: ActionSpan[],
-  actionColors: (string | null)[],   // parallel to actionsLocal
+  actionColors: (string | null)[],   // parallel to actionsLocal — hex colours
+  actionActors: (string | null)[],   // parallel to actionsLocal — character NAMES
+  actionOverrideFlags: boolean[],    // parallel to actionsLocal — true if annotation override
+  actionReviewFlags: boolean[],      // parallel to actionsLocal — true if confidence is low
   speakerNames: string[],
   palette: Map<string, ColorPair>,
   baseStyle: CSSProperties,
   grammarLocal: GrammarSuggestion[],
   keyPrefix: string,
   onEntityClick?: (name: string, anchor: DOMRect) => void,
+  onActionClick?: (localActionIndex: number, text: string, actor: string | null, anchor: DOMRect) => void,
+  annotationMode?: boolean,
 ): ReactNode[] {
   if (actionsLocal.length === 0) {
-    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick);
+    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode);
   }
 
   const parts: ReactNode[] = [];
@@ -213,20 +229,37 @@ function renderActionable(
       const grammarChunk = sliceGrammar(grammarLocal, cursor, a.start);
       parts.push(
         <span key={`${keyPrefix}-pre${i}`}>
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick)}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode)}
         </span>,
       );
     }
     const chunk = text.slice(a.start, a.end);
     const grammarChunk = sliceGrammar(grammarLocal, a.start, a.end);
-    const actor = actionColors[i] ?? null;
-    const apStyle: CSSProperties | undefined = actor
-      ? ({ "--ap-color": actor } as CSSProperties)
+    const actor = actionActors[i] ?? null;
+    const colorVal = actionColors[i] ?? null;
+    const hasOvr = actionOverrideFlags[i] ?? false;
+    const needsReview = actionReviewFlags[i] ?? false;
+    const apStyle: CSSProperties | undefined = colorVal
+      ? ({ "--ap-color": colorVal } as CSSProperties)
       : undefined;
+    // IMPORTANT: capture `i` as a const to avoid the classic closure-in-a-loop
+    // bug — `let i` is shared across iterations so by click time it would be
+    // `actionsLocal.length`, not the current index.
+    const actionIdx = i;
     parts.push(
-      <span key={`${keyPrefix}-act${i}`} className="action-phrase" style={apStyle}>
-        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick)}
-      </span>,
+      <React.Fragment key={`${keyPrefix}-actgrp${i}`}>
+        <span
+          className={`action-phrase${onActionClick ? " action-annotatable" : ""}${hasOvr ? " annotation-tagged" : ""}${needsReview ? " prediction-needs-review" : ""}`}
+          style={apStyle}
+          onClick={onActionClick ? (e) => {
+            e.stopPropagation();
+            onActionClick(actionIdx, chunk, actor, (e.currentTarget as HTMLElement).getBoundingClientRect());
+          } : undefined}
+        >
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode)}
+        </span>
+        {hasOvr && renderAnnotationPill(`${keyPrefix}-act${i}`, actor, colorVal || "var(--text-secondary)", "action")}
+      </React.Fragment>,
     );
     cursor = a.end;
     i++;
@@ -237,11 +270,35 @@ function renderActionable(
     const grammarChunk = sliceGrammar(grammarLocal, cursor, text.length);
     parts.push(
       <span key={`${keyPrefix}-post${i}`}>
-        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${i}`, onEntityClick)}
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${i}`, onEntityClick, annotationMode)}
       </span>,
     );
   }
   return parts;
+}
+
+function renderAnnotationPillContent(label: string | null | undefined): ReactNode {
+  return (
+    <>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+      <span className="annotation-pill-tag-name">{label ?? "none"}</span>
+    </>
+  );
+}
+
+function renderAnnotationPill(
+  keyPrefix: string,
+  label: string | null | undefined,
+  color: string,
+  variant: "speech" | "action",
+): ReactNode {
+  return (
+    <span key={`${keyPrefix}-pill`} className={`annotation-pill-slot annotation-pill-slot--${variant}`} aria-hidden="true">
+      <span className="annotation-pill-tag" style={{ color }}>
+        {renderAnnotationPillContent(label)}
+      </span>
+    </span>
+  );
 }
 
 // Slice a grammar list to text-relative offsets, restricted to [from, to].
@@ -303,11 +360,21 @@ interface Props {
   /** Grammar suggestions over the FULL `content` (absolute offsets). */
   grammarSuggestions?: GrammarSuggestion[];
   onEntityClick?: (name: string, anchor: DOMRect) => void;
+  /** When true, speech and action spans are clickable to open the annotation popover. */
+  annotationMode?: boolean;
+  onSpeechAnnotate?: (info: AnnotationTarget, anchor: DOMRect) => void;
+  onActionAnnotate?: (info: AnnotationTarget, anchor: DOMRect) => void;
+  /** Mapping of "paragraphIndex-spanIndex-spanType" → corrected speaker name (or null for narrative).
+   *  Applied immediately to highlight layer so corrections are visible before re-analysis. */
+  annotationOverrides?: Map<string, string | null>;
+  speechPredictions?: AdaptivePredictionTrace[];
+  actionPredictions?: ActionPrediction[][];
 }
 
 function HighlightLayerImpl({
   content, paragraphs, speechResults, knownNames, visible = true,
-  grammarSuggestions = [], onEntityClick,
+  grammarSuggestions = [], onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
+  annotationOverrides, speechPredictions, actionPredictions,
 }: Props) {
   // Building the highlight nodes is the heavy bit (string indexOf per
   // paragraph + per-segment span construction + grammar slicing). Memoising
@@ -328,16 +395,50 @@ function HighlightLayerImpl({
       }
     }
     for (const n of knownNames ?? []) speakerSet.add(n);
+    // Also include any corrected speaker names from annotation overrides so they
+    // get a deterministic palette entry (colour) rather than the grey fallback.
+    if (annotationOverrides) {
+      for (const name of annotationOverrides.values()) {
+        if (name) speakerSet.add(name);
+      }
+    }
     const speakerNames = [...speakerSet];
 
     const palette = buildSpeakerPalette(speakerNames);
+    const speechPredictionMap = new Map<string, AdaptivePredictionTrace>();
+    for (const prediction of speechPredictions ?? []) {
+      speechPredictionMap.set(`${prediction.paragraphIndex}-${prediction.spanIndex}`, prediction);
+    }
+    const actionPredictionMap = new Map<string, ActionPrediction>();
+    for (let pi = 0; pi < (actionPredictions?.length ?? 0); pi++) {
+      for (const prediction of actionPredictions?.[pi] ?? []) {
+        actionPredictionMap.set(`${pi}-${prediction.start}`, prediction);
+      }
+    }
+    const resolvedActionActorCache = new Map<string, string | null>();
 
     // Carrying speaker: the most recent attributed speaker (confidence ≥ 0.65).
     let carryingSpeaker: string | null = null;
 
-    const actorColor = (paraText: string, as: number, ae: number): string | null => {
-      const actor = attributeActor(paraText.slice(as, ae), speakerNames, carryingSpeaker);
+    const resolveActionActor = (paraIndex: number, paraText: string, as: number, ae: number): string | null => {
+      const cacheKey = `${paraIndex}-${as}-${ae}-${carryingSpeaker ?? ""}`;
+      if (resolvedActionActorCache.has(cacheKey)) {
+        return resolvedActionActorCache.get(cacheKey) ?? null;
+      }
+      const predicted = actionPredictionMap.get(`${paraIndex}-${as}`);
+      const actor = predicted?.actor ?? attributeActor(paraText.slice(as, ae), speakerNames, carryingSpeaker);
+      resolvedActionActorCache.set(cacheKey, actor ?? null);
+      return actor ?? null;
+    };
+
+    const actorColor = (paraIndex: number, paraText: string, as: number, ae: number): string | null => {
+      const actor = resolveActionActor(paraIndex, paraText, as, ae);
       return actor ? getSpeakerColor(palette, actor).text : null;
+    };
+
+    /** Return the attributed actor NAME (not colour) for a given action slice. */
+    const actorName = (paraIndex: number, paraText: string, as: number, ae: number): string | null => {
+      return resolveActionActor(paraIndex, paraText, as, ae);
     };
 
     for (let pi = 0; pi < paragraphs.length; pi++) {
@@ -355,7 +456,7 @@ function HighlightLayerImpl({
         out.push(
           <span key={`gap${pi}`}>
             {renderInline(gapText, speakerNames, palette, { color: BASE_COLOR },
-              grammarGap, `gap${pi}`, onEntityClick)}
+              grammarGap, `gap${pi}`, onEntityClick, annotationMode)}
           </span>,
         );
       }
@@ -368,7 +469,7 @@ function HighlightLayerImpl({
         out.push(
           <span key={`para${pi}-stale`}>
             {renderInline(sliceText, speakerNames, palette, { color: BASE_COLOR },
-              grammarSlice, `para${pi}-stale`, onEntityClick)}
+              grammarSlice, `para${pi}-stale`, onEntityClick, annotationMode)}
           </span>,
         );
         cursor = paraEnd;
@@ -385,45 +486,118 @@ function HighlightLayerImpl({
       const sorted = [...segs].sort((a, b) => a.start - b.start);
       let pc = 0;
 
-      for (const seg of sorted) {
+      for (let segIndex = 0; segIndex < sorted.length; segIndex++) {
+        const seg = sorted[segIndex];
         // Non-speech gap before this segment — eligible for action wrapping.
         if (seg.start > pc) {
           const gapText = para.slice(pc, seg.start);
           const gapActions = clipSpans(paraActions, pc, seg.start);
           const gapGrammar = clipGrammar(paraGrammar, pc, seg.start);
-          const gapColors = gapActions.map((a: ActionSpan) =>
-            actorColor(para, a.start + pc, a.end + pc)
-          );
+          const gapColors = gapActions.map((a: ActionSpan) => {
+            const paraRelStart = a.start + pc;
+            const overrideKey = `${pi}-${paraRelStart}-action`;
+            if (annotationOverrides?.has(overrideKey)) {
+              const overriddenActor = annotationOverrides.get(overrideKey);
+              return overriddenActor ? getSpeakerColor(palette, overriddenActor).text : null;
+            }
+            return actorColor(pi, para, paraRelStart, a.end + pc);
+          });
+          const gapActors = gapActions.map((a: ActionSpan) => {
+            const paraRelStart = a.start + pc;
+            const overrideKey = `${pi}-${paraRelStart}-action`;
+            if (annotationOverrides?.has(overrideKey)) {
+              return annotationOverrides.get(overrideKey) ?? null;
+            }
+            return actorName(pi, para, paraRelStart, a.end + pc);
+          });
+          const gapOverrideFlags = gapActions.map((a: ActionSpan) => {
+            const paraRelStart = a.start + pc;
+            return !!annotationOverrides?.has(`${pi}-${paraRelStart}-action`);
+          });
+          const gapReviewFlags = gapActions.map((a: ActionSpan) => {
+            const paraRelStart = a.start + pc;
+            return actionPredictionMap.get(`${pi}-${paraRelStart}`)?.needsReview ?? false;
+          });
           paraNodes.push(
             <span key={`bp${seg.start}`}>
-              {renderActionable(gapText, gapActions, gapColors, speakerNames, palette,
-                { color: BASE_COLOR }, gapGrammar, `bp${pi}-${seg.start}`, onEntityClick)}
+              {renderActionable(gapText, gapActions, gapColors, gapActors, gapOverrideFlags, gapReviewFlags, speakerNames, palette,
+                { color: BASE_COLOR }, gapGrammar, `bp${pi}-${seg.start}`, onEntityClick,
+                annotationMode && onActionAnnotate
+                  ? (localIdx, text, actor, anchor) => {
+                      const paraRelStart = gapActions[localIdx]?.start + pc;
+                      onActionAnnotate({
+                        paragraphIndex: pi,
+                        spanIndex: paraRelStart,
+                        spanType: "action",
+                        currentSpeaker: actor,
+                        spanText: text,
+                        contextBefore: para.slice(Math.max(0, paraRelStart - 80), paraRelStart),
+                        contextAfter: para.slice(paraRelStart + text.length, Math.min(para.length, paraRelStart + text.length + 80)),
+                      }, anchor);
+                    }
+                  : undefined,
+                annotationMode,
+              )}
             </span>,
           );
         }
-        // Update carrying speaker BEFORE rendering the speech segment so any
-        // action in the next gap can attribute to this speaker.
-        if (seg.type === "speech" && seg.speaker && seg.confidence >= 0.65) {
-          carryingSpeaker = seg.speaker;
+        const speechOverrideKey = `${pi}-${segIndex}-speech`;
+        const speechPrediction = speechPredictionMap.get(`${pi}-${segIndex}`);
+        const effectiveSpeaker = annotationOverrides?.has(speechOverrideKey)
+          ? annotationOverrides.get(speechOverrideKey)
+          : seg.speaker;
+        // Update carrying speaker AFTER resolving overrides so subsequent
+        // action gaps colour from the corrected speaker, not the raw one.
+        if (seg.type === "speech" && seg.confidence >= 0.65) {
+          carryingSpeaker = (effectiveSpeaker ?? seg.speaker) || carryingSpeaker;
         }
         const color =
           seg.type === "narrative"
             ? NARRATIVE_COLOR
-            : seg.speaker
-            ? getSpeakerColor(palette, seg.speaker).text
+            : effectiveSpeaker
+            ? getSpeakerColor(palette, effectiveSpeaker).text
             : ACTION_TEXT;
 
         const segText = para.slice(seg.start, seg.end);
+        const isAnnotatable = seg.type === "speech" || seg.type === "narrative";
         const segStyle: CSSProperties = {
           color,
           fontStyle: seg.type === "narrative" ? "italic" : undefined,
+          cursor: annotationMode && isAnnotatable ? "pointer" : undefined,
         };
         const segGrammar = clipGrammar(paraGrammar, seg.start, seg.end);
+        // Build speech/narrative annotation click handler
+        const segSpeechOnClick =
+          annotationMode && isAnnotatable && onSpeechAnnotate
+            ? (segIdx: number) => (e: React.MouseEvent) => {
+                e.stopPropagation();
+                onSpeechAnnotate({
+                  paragraphIndex: pi,
+                  spanIndex: segIdx,
+                  spanType: "speech",
+                  currentSpeaker: seg.speaker ?? null,
+                  spanText: segText,
+                  contextBefore: para.slice(Math.max(0, seg.start - 80), seg.start),
+                  contextAfter: para.slice(seg.end, Math.min(para.length, seg.end + 80)),
+                }, (e.currentTarget as HTMLElement).getBoundingClientRect());
+              }
+            : undefined;
+        // Check if this span has an active annotation override
+        const hasOverride = annotationOverrides?.has(speechOverrideKey) && isAnnotatable;
+        const overrideName = hasOverride ? annotationOverrides!.get(speechOverrideKey) : undefined;
+
+        // segIndex already computed above (reused for override lookup)
         paraNodes.push(
-          <span key={`sg${seg.start}`}>
-            {renderInline(segText, speakerNames, palette, segStyle,
-              segGrammar, `sg${pi}-${seg.start}`, onEntityClick)}
-          </span>,
+          <React.Fragment key={`sggrp${seg.start}`}>
+            <span
+              className={`${annotationMode && isAnnotatable ? "speech-annotatable" : ""}${hasOverride ? " annotation-tagged" : ""}${speechPrediction?.needsReview ? " prediction-needs-review" : ""}`}
+              onClick={segSpeechOnClick ? segSpeechOnClick(segIndex) : undefined}
+            >
+              {renderInline(segText, speakerNames, palette, segStyle,
+                segGrammar, `sg${pi}-${seg.start}`, onEntityClick, annotationMode)}
+            </span>
+            {hasOverride && renderAnnotationPill(`sg${pi}-${seg.start}`, overrideName, color, "speech")}
+          </React.Fragment>,
         );
         pc = seg.end;
       }
@@ -432,13 +606,51 @@ function HighlightLayerImpl({
         const tailText = para.slice(pc);
         const tailActions = clipSpans(paraActions, pc, para.length);
         const tailGrammar = clipGrammar(paraGrammar, pc, para.length);
-        const tailColors = tailActions.map((a: ActionSpan) =>
-          actorColor(para, a.start + pc, a.end + pc)
-        );
+        const tailColors = tailActions.map((a: ActionSpan) => {
+          const paraRelStart = a.start + pc;
+          const overrideKey = `${pi}-${paraRelStart}-action`;
+          if (annotationOverrides?.has(overrideKey)) {
+            const overriddenActor = annotationOverrides.get(overrideKey);
+            return overriddenActor ? getSpeakerColor(palette, overriddenActor).text : null;
+          }
+          return actorColor(pi, para, paraRelStart, a.end + pc);
+        });
+        const tailActors = tailActions.map((a: ActionSpan) => {
+          const paraRelStart = a.start + pc;
+          const overrideKey = `${pi}-${paraRelStart}-action`;
+          if (annotationOverrides?.has(overrideKey)) {
+            return annotationOverrides.get(overrideKey) ?? null;
+          }
+          return actorName(pi, para, paraRelStart, a.end + pc);
+        });
+        const tailOverrideFlags = tailActions.map((a: ActionSpan) => {
+          const paraRelStart = a.start + pc;
+          return !!annotationOverrides?.has(`${pi}-${paraRelStart}-action`);
+        });
+        const tailReviewFlags = tailActions.map((a: ActionSpan) => {
+          const paraRelStart = a.start + pc;
+          return actionPredictionMap.get(`${pi}-${paraRelStart}`)?.needsReview ?? false;
+        });
         paraNodes.push(
           <span key="tail">
-            {renderActionable(tailText, tailActions, tailColors, speakerNames, palette,
-              { color: BASE_COLOR }, tailGrammar, `tail${pi}`, onEntityClick)}
+            {renderActionable(tailText, tailActions, tailColors, tailActors, tailOverrideFlags, tailReviewFlags, speakerNames, palette,
+              { color: BASE_COLOR }, tailGrammar, `tail${pi}`, onEntityClick,
+              annotationMode && onActionAnnotate
+                ? (localIdx, text, actor, anchor) => {
+                    const paraRelStart = tailActions[localIdx]?.start + pc;
+                    onActionAnnotate({
+                      paragraphIndex: pi,
+                      spanIndex: paraRelStart,
+                      spanType: "action",
+                      currentSpeaker: actor,
+                      spanText: text,
+                      contextBefore: para.slice(Math.max(0, paraRelStart - 80), paraRelStart),
+                      contextAfter: para.slice(paraRelStart + text.length, Math.min(para.length, paraRelStart + text.length + 80)),
+                    }, anchor);
+                  }
+                : undefined,
+              annotationMode,
+            )}
           </span>,
         );
       }
@@ -463,13 +675,13 @@ function HighlightLayerImpl({
       out.push(
         <span key="trail">
           {renderInline(trailText, speakerNames, palette, { color: BASE_COLOR },
-            trailGrammar, "trail", onEntityClick)}
+            trailGrammar, "trail", onEntityClick, annotationMode)}
         </span>,
       );
     }
 
     return out;
-  }, [content, paragraphs, speechResults, knownNames, grammarSuggestions, onEntityClick]);
+  }, [content, paragraphs, speechResults, knownNames, grammarSuggestions, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
 
   if (nodes.length === 0) return null;
 
@@ -477,7 +689,7 @@ function HighlightLayerImpl({
     <div
       className="editor-highlight"
       aria-hidden="true"
-      style={{ opacity: visible ? 1 : 0, transition: "opacity 0.25s ease" }}
+      style={{ opacity: visible ? 1 : 0, transition: "opacity 0.25s ease", pointerEvents: visible ? undefined : "none" }}
     >
       {nodes}
     </div>

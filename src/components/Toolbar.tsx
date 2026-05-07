@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, BookOpenIcon,
-  PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon,
+  PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon,
 } from "./Icon";
 
 export type IntelMode = "off" | "low" | "default" | "high" | "auto";
@@ -207,6 +207,9 @@ interface Props {
   isAnalyzing: boolean;
   /** Fun-mode easter egg — overlays bouncy gooey eyes on the intel orb. */
   funMode?: boolean;
+  /** Annotation mode toggle. */
+  annotationMode: boolean;
+  onToggleAnnotation: () => void;
 }
 
 export function Toolbar({
@@ -215,6 +218,7 @@ export function Toolbar({
   onPrev, onNext, onOpenIndex, onOpenWorld, onAddChapter,
   onImport, onExport, onExportPdf, hasChapter,
   intelMode, intelResolvedLevel, onCycleIntel, isAnalyzing, funMode,
+  annotationMode, onToggleAnnotation,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -302,6 +306,14 @@ export function Toolbar({
         </button>
         <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
           <DownloadIcon />
+        </button>
+        <button
+          className={`icon-btn${annotationMode ? " icon-btn-active" : ""}`}
+          onClick={onToggleAnnotation}
+          aria-label="Annotation mode"
+          title="Annotation mode — click speech or action spans to correct attribution"
+        >
+          <AnnotateIcon size={16} />
         </button>
         <button className="icon-btn" onClick={onExportPdf} aria-label="Export PDF" title="Export PDF">
           <FileTextIcon size={16} />
