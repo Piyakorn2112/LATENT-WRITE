@@ -1,4 +1,5 @@
 import React, { memo, useMemo, type ReactNode, type CSSProperties } from "react";
+import { PenLine } from "lucide-react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
 import { findActionSentences, attributeActor, type ActionPrediction, type ActionSpan } from "../lib/action-detect";
@@ -259,6 +260,7 @@ function renderActionable(
           {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode)}
         </span>
         {hasOvr && renderAnnotationPill(`${keyPrefix}-act${i}`, actor, colorVal || "var(--text-secondary)", "action")}
+        {annotationMode && needsReview && !hasOvr && renderReviewPill(`${keyPrefix}-act${i}`, colorVal || ACTION_TEXT, "action")}
       </React.Fragment>,
     );
     cursor = a.end;
@@ -296,6 +298,17 @@ function renderAnnotationPill(
     <span key={`${keyPrefix}-pill`} className={`annotation-pill-slot annotation-pill-slot--${variant}`} aria-hidden="true">
       <span className="annotation-pill-tag" style={{ color }}>
         {renderAnnotationPillContent(label)}
+      </span>
+    </span>
+  );
+}
+
+function renderReviewPill(keyPrefix: string, color: string, variant: "speech" | "action"): ReactNode {
+  return (
+    <span key={`${keyPrefix}-review-pill`} className={`annotation-pill-slot annotation-pill-slot--${variant}`} aria-hidden="true">
+      <span className="annotation-pill-tag annotation-pill-tag--review" style={{ color }}>
+        <PenLine className="annotation-pill-icon--review" size={10} strokeWidth={2.2} />
+        <span className="annotation-pill-tag-name">Review</span>
       </span>
     </span>
   );
@@ -597,6 +610,7 @@ function HighlightLayerImpl({
                 segGrammar, `sg${pi}-${seg.start}`, onEntityClick, annotationMode)}
             </span>
             {hasOverride && renderAnnotationPill(`sg${pi}-${seg.start}`, overrideName, color, "speech")}
+            {annotationMode && speechPrediction?.needsReview && !hasOverride && renderReviewPill(`sg${pi}-${seg.start}`, color, "speech")}
           </React.Fragment>,
         );
         pc = seg.end;

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { useDebouncedValue } from "../lib/use-debounced";
@@ -72,6 +72,8 @@ interface Props {
   onAutoSceneBreak?: () => void;
   /** Mirror of autoParagraphing for the scene-break button. */
   sceneBreaking?: boolean;
+  /** Reports whether the drawer is currently expanded. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
@@ -177,6 +179,21 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs }: Setting
           min={50} max={100} step={2}
           value={typography.measure}
           onChange={(v) => setTypography({ measure: v })}
+        />
+      </div>
+
+      <p className="settings-section-label">Layout</p>
+      <div className="settings-toggle-row">
+        <div className="settings-toggle-row-text">
+          <span className="settings-toggle-row-title">Side panel compensation</span>
+          <span className="settings-toggle-row-desc">
+            Shifts the writing surface left when the right drawer opens on narrow windows.
+          </span>
+        </div>
+        <GlassToggle
+          checked={!!prefs.sidePanelCompensation}
+          onChange={(v) => onSetPrefs({ ...prefs, sidePanelCompensation: v })}
+          ariaLabel="Toggle side panel compensation"
         />
       </div>
 
@@ -410,7 +427,7 @@ export function AnalysisPanel({
   prefs, onSetPrefs, chapterId, chapterContent,
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
-  onAutoSceneBreak, sceneBreaking,
+  onAutoSceneBreak, sceneBreaking, onOpenChange,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
   // under high intelligence. Auto resolves dynamically per chapter, so we
@@ -464,6 +481,10 @@ export function AnalysisPanel({
 
   const isOpen = view !== null;
   const hasContent = displayed && displayed.paragraphs.length > 0;
+
+  useLayoutEffect(() => {
+    onOpenChange?.(isOpen);
+  }, [isOpen, onOpenChange]);
 
   // Word-count threshold check used twice (widgetCount badge + WidgetSet
   // gating). Computing once at this level avoids a second .split on every

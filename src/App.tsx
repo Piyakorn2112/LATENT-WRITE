@@ -116,6 +116,7 @@ export default function App() {
   const [findOpen, setFindOpen] = useState(false);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [analysisPanelOpen, setAnalysisPanelOpen] = useState(false);
   const [prefs, setPrefs] = useState<Preferences>(() => loadPrefs());
   // Onboarding auto-shows on first launch and is re-openable from the
   // Help menu. Initial value is derived from prefs once at mount.
@@ -133,12 +134,26 @@ export default function App() {
   const [learnedBias, setLearnedBias] = useState<LearnedBias | null>(null);
   const [annotationTarget, setAnnotationTarget] = useState<{ target: AnnotationTarget; anchor: DOMRect; correctedSpeaker?: string | null } | null>(null);
 
-  // Persist annotation store + recompute learned bias whenever it changes.
+  const chapterOrderKey = novel.chapters.map((chapter) => chapter.id).join("\u001f");
+  const chapterOrderIds = useMemo(
+    () => novel.chapters.map((chapter) => chapter.id),
+    [chapterOrderKey],
+  );
+
+  // Persist annotation store whenever it changes.
   useEffect(() => {
     saveAnnotationStore(annotationStore);
-    const bias = computeLearnedBias(annotationStore, novel.worldData);
+  }, [annotationStore]);
+
+  // Chapter-aware bias uses chapter order + current chapter, not chapter text,
+  // so it stays off the live-typing hot path.
+  useEffect(() => {
+    const bias = computeLearnedBias(annotationStore, novel.worldData, {
+      currentChapterId: currentId,
+      chapterIds: chapterOrderIds,
+    });
     setLearnedBias(bias);
-  }, [annotationStore, novel.worldData]);
+  }, [annotationStore, novel.worldData, currentId, chapterOrderIds]);
 
   useEffect(() => {
     saveAdaptiveStore(adaptiveStore);
@@ -168,6 +183,13 @@ export default function App() {
   // cadence; forcing 0 ms here makes the analyzing indicator flicker on every
   // keystroke and changes refresh-time behaviour versus the original app.
   const analysisDebounceMs = 1000;
+
+  const chapterCorrectionCount = useMemo(
+    () => annotationStore.corrections.filter((correction) => correction.chapterId === currentId).length,
+    [annotationStore.corrections, currentId],
+  );
+
+  const globalCorrectionCount = annotationStore.corrections.length;
 
   const annotationBreakdown = useMemo(
     () => characterBreakdown(annotationStore, currentId),
@@ -428,12 +450,17 @@ export default function App() {
     setAnnotationTarget(null);
   }, [annotationTarget, currentId, analysisResult, adaptiveContext.store.models.action.version, adaptiveContext.store.models.speech.version]);
 
-  const reviewCount = useMemo(() => {
-    if (!analysisResult) return 0;
-    const speech = analysisResult.speechPredictions.filter((prediction) => prediction.needsReview).length;
-    const actions = analysisResult.actionPredictions.flat().filter((prediction) => prediction.needsReview).length;
-    return speech + actions;
-  }, [analysisResult]);
+  const speechReviewCount = useMemo(
+    () => analysisResult?.speechPredictions.filter((prediction) => prediction.needsReview).length ?? 0,
+    [analysisResult],
+  );
+
+  const actionReviewCount = useMemo(
+    () => analysisResult?.actionPredictions.flat().filter((prediction) => prediction.needsReview).length ?? 0,
+    [analysisResult],
+  );
+
+  const reviewCount = speechReviewCount + actionReviewCount;
 
   const handleWorldChange = useCallback((next: WorldData) => {
     setNovel((n) => ({ ...n, worldData: next }));
@@ -700,7 +727,6 @@ export default function App() {
     setCurrentId(nextChapterId);
     setAnnotationStore(clearedAnnotations);
     setAdaptiveStore(clearedAdaptiveStore);
-    setLearnedBias(null);
     setAnnotationTarget(null);
     // Reset daily baseline since the document just got swapped wholesale.
     baselineRef.current = totalWordsInNovel(parsed);
@@ -819,6 +845,7 @@ export default function App() {
   } as CSSProperties), [prefs.typography, orbColor]);
 
   const appClass = `app${focusMode ? " app--focus" : ""}`;
+  const editorLayoutKey = `${prefs.typography.fontFamily}:${prefs.typography.fontSize}:${prefs.typography.measure}`;
 
   return (
     <div className={appClass} style={editorStyle}>
@@ -884,6 +911,9 @@ export default function App() {
           onActionAnnotate={handleActionAnnotate}
           annotationOverrides={annotationOverrides}
           typingSettleMs={analysisDebounceMs}
+          sidePanelOpen={analysisPanelOpen && !focusMode}
+          sidePanelCompensation={!!prefs.sidePanelCompensation}
+          layoutWidthKey={editorLayoutKey}
         />
       ) : (
         <div className="empty-state">
@@ -935,9 +965,8 @@ export default function App() {
       {annotationMode && (
         <div className="annotation-panel-shell">
           <div className="annotation-panel liquid-glass">
-            {/* Correction count */}
             <span className="annotation-panel-count">
-              {annotationStore.corrections.filter((c) => c.chapterId === currentId).length} correction{annotationStore.corrections.filter((c) => c.chapterId === currentId).length !== 1 ? "s" : ""}
+              {chapterCorrectionCount} correction{chapterCorrectionCount !== 1 ? "s" : ""}
             </span>
 
             {reviewCount > 0 && (
@@ -949,16 +978,6 @@ export default function App() {
               </>
             )}
 
-            {adaptiveMetrics.labeled > 0 && (
-              <>
-                <span className="annotation-panel-divider" />
-                <span className="annotation-panel-mini-metric">
-                  {Math.round((1 - adaptiveMetrics.corrected / Math.max(1, adaptiveMetrics.labeled)) * 100)}% auto-match
-                </span>
-              </>
-            )}
-
-            {/* Per-character breakdown — shown when there are corrections */}
             {annotationBreakdown.length > 0 && (
               <>
                 <span className="annotation-panel-divider" />
@@ -1038,18 +1057,23 @@ export default function App() {
             : undefined
         }
         sceneBreaking={sceneBreaking}
+        onOpenChange={setAnalysisPanelOpen}
       />
 
       {current && prefs.debugPanel && analysisResult && (
         <DebugPanel
           reviewCount={reviewCount}
+          speechReviewCount={speechReviewCount}
+          actionReviewCount={actionReviewCount}
           speechPredictions={analysisResult.speechPredictions.length}
           actionPredictions={analysisResult.actionPredictions.flat().length}
           metrics={adaptiveMetrics}
+          learnedBias={learnedBias}
+          globalCorrectionCount={globalCorrectionCount}
+          typingSettleMs={analysisDebounceMs}
           modelSamples={{
             speech: adaptiveContext.store.models.speech.sampleCount,
             action: adaptiveContext.store.models.action.sampleCount,
-            entity: adaptiveContext.store.models.entity.sampleCount,
           }}
         />
       )}

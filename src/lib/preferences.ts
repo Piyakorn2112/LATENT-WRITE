@@ -24,6 +24,9 @@ export interface Preferences {
   funMode?: boolean;
   /** Shows the adaptive-learning debug footer panel above word count. */
   debugPanel?: boolean;
+  /** Shifts the writing surface left when the right analysis drawer opens on
+   *  narrower windows, keeping the text column clear of the panel. */
+  sidePanelCompensation?: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -38,6 +41,7 @@ const DEFAULTS: Preferences = {
   },
   funMode: false,
   debugPanel: false,
+  sidePanelCompensation: false,
 };
 
 const KEY = "latentwrite:prefs-v1";
@@ -53,6 +57,7 @@ export function loadPrefs(): Preferences {
       hasSeenOnboarding: p.hasSeenOnboarding,
       funMode: p.funMode ?? DEFAULTS.funMode,
       debugPanel: p.debugPanel ?? DEFAULTS.debugPanel,
+      sidePanelCompensation: p.sidePanelCompensation ?? DEFAULTS.sidePanelCompensation,
     };
   } catch {
     return { ...DEFAULTS };

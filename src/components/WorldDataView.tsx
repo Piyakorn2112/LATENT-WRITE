@@ -265,7 +265,7 @@ export function WorldDataView({
       className="index-overlay"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="world-panel liquid-glass">
+      <div className="world-panel">
 
         {/* ── Ambient orb — always mounted, CSS-transitioned in/out ── */}
         <div

@@ -150,6 +150,12 @@ function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function countNameMentions(text: string, name: string) {
+  if (!text || !name) return 0;
+  const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "gi");
+  return (text.match(re) ?? []).length;
+}
+
 /**
  * Predict the actor performing an action sentence.
  *
@@ -212,6 +218,14 @@ export function predictActionActor(
     const explicitMatch = re.test(actionText) ? 1 : 0;
     const carryingMatch = carryingSpeaker && carryingSpeaker.toLowerCase() === name.toLowerCase() ? 1 : 0;
     const actorPrior = learnedBias?.actorPriors[name] ?? 0;
+    const beforeMentions = countNameMentions(contextBefore, name);
+    const afterMentions = countNameMentions(contextAfter, name);
+    const cueWeights = learnedBias?.contextCueWeights;
+    const contextBoost = cueWeights
+      ? beforeMentions * (2 + cueWeights.beforeName * 8) +
+        afterMentions * (2 + cueWeights.afterName * 6) +
+        (beforeMentions + afterMentions > 0 ? cueWeights.surroundingName * 8 : 0)
+      : 0;
     const baseScore = explicitMatch
       ? 78 + actorPrior * 8 + carryingMatch * 6
       : carryingMatch
@@ -223,20 +237,25 @@ export function predictActionActor(
     candidates.push({
       label: name,
       source: explicitMatch ? "action-name" : carryingMatch ? "carrying-speaker" : "actor-prior",
-      baseScore,
+      baseScore: baseScore + contextBoost,
       learnedAdjustment: 0,
-      finalScore: baseScore,
+      finalScore: baseScore + contextBoost,
       features: {
-        base_score: baseScore / 100,
+        base_score: (baseScore + contextBoost) / 100,
         explicit_name_match: explicitMatch,
         carrying_speaker: carryingMatch,
         actor_prior: actorPrior,
+        before_name_mentions: beforeMentions,
+        after_name_mentions: afterMentions,
+        surrounding_name_weight: cueWeights?.surroundingName ?? 0,
         token_length: Math.min(3, name.split(/\s+/).length) / 3,
       },
       evidence: [
         ...(explicitMatch ? ["explicit-name"] : []),
         ...(carryingMatch ? ["carry"] : []),
         ...(actorPrior > 0 ? [`prior=${actorPrior.toFixed(2)}`] : []),
+        ...(beforeMentions > 0 ? [`before=${beforeMentions}`] : []),
+        ...(afterMentions > 0 ? [`after=${afterMentions}`] : []),
       ],
     });
   }

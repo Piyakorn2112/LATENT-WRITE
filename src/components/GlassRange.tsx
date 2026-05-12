@@ -6,6 +6,12 @@ interface Props {
   step: number;
   value: number;
   onChange: (v: number) => void;
+  className?: string;
+  trackStyle?: CSSProperties;
+  trackUnderlayStyle?: CSSProperties;
+  fillStyle?: CSSProperties;
+  showFill?: boolean;
+  ariaLabel?: string;
 }
 
 /**
@@ -19,13 +25,27 @@ interface Props {
  * backdrop-filter on ::-webkit-slider-thumb is silently ignored by Chromium;
  * this component works around that constraint entirely.
  */
-export function GlassRange({ min, max, step, value, onChange }: Props) {
-  const fraction = (value - min) / (max - min);
+export function GlassRange({
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  className = "",
+  trackStyle,
+  trackUnderlayStyle,
+  fillStyle,
+  showFill = true,
+  ariaLabel,
+}: Props) {
+  const fraction = max === min ? 0 : Math.min(1, Math.max(0, (value - min) / (max - min)));
+  const wrapClassName = className ? `glass-range-wrap ${className}` : "glass-range-wrap";
 
   return (
-    <div className="glass-range-wrap">
-      <div className="glass-range-track">
-        <div className="glass-range-fill" style={{ width: `${fraction * 100}%` }} />
+    <div className={wrapClassName}>
+      <div className="glass-range-track" style={trackStyle}>
+        {trackUnderlayStyle && <div className="glass-range-underlay" style={trackUnderlayStyle} />}
+        {showFill && <div className="glass-range-fill" style={{ width: `${fraction * 100}%`, ...fillStyle }} />}
         <div
           className="glass-range-knob"
           style={{ "--glass-range-frac": String(fraction) } as CSSProperties}
@@ -39,6 +59,7 @@ export function GlassRange({ min, max, step, value, onChange }: Props) {
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         className="glass-range-input"
+        aria-label={ariaLabel}
       />
     </div>
   );

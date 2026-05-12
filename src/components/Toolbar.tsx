@@ -308,7 +308,7 @@ export function Toolbar({
           <DownloadIcon />
         </button>
         <button
-          className={`icon-btn${annotationMode ? " icon-btn-active" : ""}`}
+          className={`icon-btn toolbar-annotation-btn${annotationMode ? " icon-btn-active" : ""}`}
           onClick={onToggleAnnotation}
           aria-label="Annotation mode"
           title="Annotation mode — click speech or action spans to correct attribution"

@@ -78,6 +78,47 @@ export interface AnnotationStore {
   corrections: AnnotationCorrection[];
 }
 
+export interface LearnedBiasContextCueWeights {
+  beforeName: number;
+  afterName: number;
+  surroundingName: number;
+  previousSpeakerCarry: number;
+}
+
+export interface LearnedBiasChapterWindow {
+  chapterId: string;
+  distance: number;
+  rawCorrections: number;
+  weightedCorrections: number;
+}
+
+export interface LearnedBiasSpeakerScope {
+  name: string;
+  globalWeight: number;
+  localWeight: number;
+  blendedWeight: number;
+  speechCorrections: number;
+  actionCorrections: number;
+}
+
+export interface LearnedBiasScope {
+  chapterId: string | null;
+  chapterRadius: number;
+  chapterHalfLife: number;
+  localBlend: number;
+  localCorrectionCount: number;
+  localWeightedSamples: number;
+  globalCorrectionCount: number;
+  pronounLocalWeight: number;
+  transitionLocalWeight: number;
+  contextCueLocalWeight: number;
+  nearestChapterDistance: number | null;
+  effectiveChapterCount: number;
+  contextCueWeights: LearnedBiasContextCueWeights;
+  chapterWindow: LearnedBiasChapterWindow[];
+  topSpeakers: LearnedBiasSpeakerScope[];
+}
+
 /**
  * Learned biases derived from the annotation store. Applied additively to
  * speech-detect and action-detect — when undefined or zeroed every value
@@ -108,6 +149,13 @@ export interface LearnedBias {
    * `actorPriors["Alice"] = 1.8` boosts Alice as an actor tiebreaker.
    */
   actorPriors: Record<string, number>;
+  /**
+   * Learned reliability of nearby-name and continuity clues extracted from
+   * corrected spans. Used to scale local context bonuses during inference.
+   */
+  contextCueWeights: LearnedBiasContextCueWeights;
+  /** Diagnostics describing how nearby chapters are blended with global data. */
+  scope: LearnedBiasScope;
   /** How many corrections were used to compute this bias. */
   sampleCount: number;
 }

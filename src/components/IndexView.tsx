@@ -74,7 +74,7 @@ export function IndexView({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="world-panel index-panel-v2 liquid-glass">
+      <div className="world-panel index-panel-v2">
         <div className="world-header">
           <h2 className="world-title">Index</h2>
           <div className="world-tabs">

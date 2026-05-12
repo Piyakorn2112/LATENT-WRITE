@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { GlassRange } from "./GlassRange";
 
 interface Props {
   value: string;
@@ -6,6 +8,9 @@ interface Props {
 }
 
 interface HSV { h: number; s: number; v: number; }
+
+const GCP_POPOVER_WIDTH = 256;
+const GCP_POPOVER_GAP = 8;
 
 // ── Color math (HSV ↔ RGB ↔ hex) ──────────────────────────────────────────
 
@@ -91,9 +96,10 @@ function hexToHsv(hex: string): HSV {
 export function GlassColorPicker({ value, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const [hsv, setHsv] = useState<HSV>(() => hexToHsv(value));
-  const rootRef = useRef<HTMLDivElement>(null);
+  const swatchRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const areaRef = useRef<HTMLDivElement>(null);
-  const sliderRef = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({ visibility: "hidden" });
 
   // External value sync. When the incoming hex maps to (almost) zero
   // saturation we keep the user's last hue angle so the handle stays
@@ -109,9 +115,11 @@ export function GlassColorPicker({ value, onChange }: Props) {
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
+      const target = e.target as Node;
+      if (swatchRef.current?.contains(target) || popoverRef.current?.contains(target)) {
+        return;
       }
+        setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -122,6 +130,46 @@ export function GlassColorPicker({ value, onChange }: Props) {
       window.clearTimeout(t);
       window.removeEventListener("mousedown", onDoc);
       window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    let frame = 0;
+    const refreshPosition = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const swatch = swatchRef.current;
+        if (!swatch) return;
+
+        const rect = swatch.getBoundingClientRect();
+        const popoverWidth = popoverRef.current?.offsetWidth ?? GCP_POPOVER_WIDTH;
+        const popoverHeight = popoverRef.current?.offsetHeight ?? 0;
+        let left = rect.right - popoverWidth;
+        left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, left));
+
+        const below = rect.bottom + GCP_POPOVER_GAP;
+        const above = rect.top - popoverHeight - GCP_POPOVER_GAP;
+        const top = below + popoverHeight > window.innerHeight - 12 && above >= 12 ? above : below;
+
+        setPopoverStyle({
+          position: "fixed",
+          top: Math.max(12, top),
+          left,
+          width: popoverWidth,
+          visibility: "visible",
+        });
+      });
+    };
+
+    refreshPosition();
+    window.addEventListener("resize", refreshPosition);
+    window.addEventListener("scroll", refreshPosition, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", refreshPosition);
+      window.removeEventListener("scroll", refreshPosition, true);
     };
   }, [open]);
 
@@ -141,12 +189,8 @@ export function GlassColorPicker({ value, onChange }: Props) {
     onChange(hsvToHex(next.h, next.s, next.v));
   };
 
-  const updateFromSliderPoint = (clientX: number) => {
-    const s = sliderRef.current;
-    if (!s) return;
-    const rect = s.getBoundingClientRect();
-    const t = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    const next = { h: hsv.h, s: hsv.s, v: t };
+  const updateBrightness = (nextValue: number) => {
+    const next = { h: hsv.h, s: hsv.s, v: nextValue };
     setHsv(next);
     onChange(hsvToHex(next.h, next.s, next.v));
   };
@@ -166,21 +210,6 @@ export function GlassColorPicker({ value, onChange }: Props) {
     (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
   };
 
-  const draggingSlider = useRef(false);
-  const onSliderDown = (e: React.PointerEvent) => {
-    draggingSlider.current = true;
-    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
-    updateFromSliderPoint(e.clientX);
-  };
-  const onSliderMove = (e: React.PointerEvent) => {
-    if (!draggingSlider.current) return;
-    updateFromSliderPoint(e.clientX);
-  };
-  const onSliderUp = (e: React.PointerEvent) => {
-    draggingSlider.current = false;
-    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-  };
-
   // Handle position from HSV — polar mapping.
   const handleStyle: CSSProperties = (() => {
     const a = (hsv.h * Math.PI) / 180;
@@ -197,57 +226,64 @@ export function GlassColorPicker({ value, onChange }: Props) {
     background: `linear-gradient(to right, #000 0%, ${hsvToHex(hsv.h, hsv.s, 1)} 100%)`,
   };
 
+  const popover = (
+    <div
+      ref={popoverRef}
+      className="gcp-popover liquid-glass"
+      style={popoverStyle}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="gcp-area-shell">
+        <div
+          className="gcp-area"
+          ref={areaRef}
+          onPointerDown={onAreaDown}
+          onPointerMove={onAreaMove}
+          onPointerUp={onAreaUp}
+          onPointerCancel={onAreaUp}
+        >
+          <div className="gcp-area-cloud" aria-hidden="true" />
+        </div>
+        <div className="gcp-handle-layer" aria-hidden="true">
+          <div className="gcp-handle" style={handleStyle as CSSProperties}>
+            <div
+              className="gcp-handle-inner"
+              style={{ background: value } as CSSProperties}
+            />
+          </div>
+        </div>
+      </div>
+      <div className="gcp-bottom">
+        <div
+          className="gcp-preview"
+          style={{ background: value } as CSSProperties}
+        />
+        <GlassRange
+          min={0}
+          max={1}
+          step={0.01}
+          value={hsv.v}
+          onChange={updateBrightness}
+          className="gcp-slider"
+          trackUnderlayStyle={sliderTrackStyle}
+          showFill={false}
+          ariaLabel="Brightness"
+        />
+      </div>
+    </div>
+  );
+
   return (
-    <div className="gcp-root" ref={rootRef}>
+    <div className="gcp-root">
       <button
         type="button"
+        ref={swatchRef}
         className="gcp-swatch"
         style={{ background: value } as CSSProperties}
         onClick={() => setOpen((o) => !o)}
         aria-label="Pick color"
       />
-      {open && (
-        <div className="gcp-popover liquid-glass">
-          <div
-            className="gcp-area"
-            ref={areaRef}
-            onPointerDown={onAreaDown}
-            onPointerMove={onAreaMove}
-            onPointerUp={onAreaUp}
-            onPointerCancel={onAreaUp}
-          >
-            {/* Blurred + saturated rainbow cloud (the "soft glowing orb"). */}
-            <div className="gcp-area-cloud" aria-hidden="true" />
-            {/* Handle is a sibling so it stays sharp despite the cloud's blur. */}
-            <div className="gcp-handle" style={handleStyle as CSSProperties}>
-              <div
-                className="gcp-handle-inner"
-                style={{ background: value } as CSSProperties}
-              />
-            </div>
-          </div>
-          <div className="gcp-bottom">
-            <div
-              className="gcp-preview"
-              style={{ background: value } as CSSProperties}
-            />
-            <div
-              className="gcp-slider"
-              ref={sliderRef}
-              onPointerDown={onSliderDown}
-              onPointerMove={onSliderMove}
-              onPointerUp={onSliderUp}
-              onPointerCancel={onSliderUp}
-            >
-              <div className="gcp-slider-track" style={sliderTrackStyle as CSSProperties} />
-              <div
-                className="gcp-slider-knob"
-                style={{ left: `${hsv.v * 100}%` } as CSSProperties}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+      {open && typeof document !== "undefined" && createPortal(popover, document.body)}
     </div>
   );
 }

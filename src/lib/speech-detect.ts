@@ -216,6 +216,12 @@ function normKey(s: string): string {
   return s.toLowerCase().trim();
 }
 
+function countNameMentions(text: string, name: string): number {
+  if (!text || !name) return 0;
+  const re = new RegExp(`\\b${esc(name)}\\b`, 'gi');
+  return (text.match(re) ?? []).length;
+}
+
 // ── Quote pair extraction ─────────────────────────────────────────────────
 
 interface QuotePair {
@@ -1152,6 +1158,10 @@ function findAttribution(
         thread_turns: 0,
         ext_ctx_density: 0,
         pronoun_posterior: 0,
+        before_name_mentions: 0,
+        after_name_mentions: 0,
+        surrounding_name_weight: 0,
+        previous_speaker_carry: 0,
       };
       const evidence: string[] = [];
       if (activeSubject && normKey(name) === normKey(activeSubject)) score += 45;
@@ -1175,6 +1185,31 @@ function findAttribution(
       if (extCtxDensity) {
         score += (extCtxDensity.get(k) ?? 0) * 14;
         features.ext_ctx_density = extCtxDensity.get(k) ?? 0;
+      }
+      const beforeNameMentions = countNameMentions(before, name);
+      const afterNameMentions = countNameMentions(after, name);
+      const cueWeights = learnedBias?.contextCueWeights;
+      if (cueWeights) {
+        if (beforeNameMentions > 0) {
+          score += beforeNameMentions * (6 + cueWeights.beforeName * 22);
+          features.before_name_mentions = beforeNameMentions;
+          evidence.push(`before=${beforeNameMentions}`);
+        }
+        if (afterNameMentions > 0) {
+          score += afterNameMentions * (5 + cueWeights.afterName * 18);
+          features.after_name_mentions = afterNameMentions;
+          evidence.push(`after=${afterNameMentions}`);
+        }
+        if (beforeNameMentions + afterNameMentions > 0) {
+          score += cueWeights.surroundingName * 18;
+          features.surrounding_name_weight = cueWeights.surroundingName;
+        }
+        const previousSpeaker = recentSpeakers[recentSpeakers.length - 1];
+        if (previousSpeaker && normKey(previousSpeaker) === k) {
+          score += cueWeights.previousSpeakerCarry * 16;
+          features.previous_speaker_carry = cueWeights.previousSpeakerCarry;
+          evidence.push(`carry=${cueWeights.previousSpeakerCarry.toFixed(2)}`);
+        }
       }
       // ── Learned pronoun posterior (Bayesian annotation bias) ─────────────
       // Multiply score by P(speaker | pronoun) derived from user corrections.

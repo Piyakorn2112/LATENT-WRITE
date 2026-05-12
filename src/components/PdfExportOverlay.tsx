@@ -1,4 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import {
+  AlignCenterVertical,
+  ArrowDownToLine,
+  ArrowUpToLine,
+  Bold as BoldIcon,
+  CaseSensitive,
+  Check,
+  ChevronDown,
+  Italic as ItalicIcon,
+  TextAlignCenter,
+  TextAlignEnd,
+  TextAlignStart,
+} from "lucide-react";
 import {
   PAGE_FORMAT_PRESETS,
   PAPER_SIZE_PRESETS,
@@ -21,6 +35,7 @@ import {
   PlusIcon, TrashIcon, UploadIcon,
 } from "./Icon";
 import { GlassColorPicker } from "./GlassColorPicker";
+import { NumberStepper } from "./NumberStepper";
 
 interface Props {
   /** Used to seed default text boxes (title / subtitle / author / description)
@@ -200,7 +215,7 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="world-panel pdf-panel liquid-glass">
+      <div className="world-panel pdf-panel">
         <div className="world-header">
           <h2 className="world-title">Export PDF</h2>
           <div className="world-tabs">
@@ -227,7 +242,9 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
               <ImageIcon size={13} />
               <span>Front cover</span>
               {opts.frontCover && (opts.frontCover.imageDataUrl || opts.frontCover.textBoxes.length > 0) && (
-                <span className="world-tab-count">●</span>
+                <span className="world-tab-status" aria-label="Front cover configured">
+                  <Check size={11} strokeWidth={3.2} />
+                </span>
               )}
             </button>
             <button
@@ -237,7 +254,9 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
               <TypeIcon size={13} />
               <span>Back cover</span>
               {opts.backCover && (opts.backCover.imageDataUrl || opts.backCover.textBoxes.length > 0) && (
-                <span className="world-tab-count">●</span>
+                <span className="world-tab-status" aria-label="Back cover configured">
+                  <Check size={11} strokeWidth={3.2} />
+                </span>
               )}
             </button>
           </div>
@@ -546,6 +565,148 @@ const FIELD_LABEL: Record<CoverTextField, string> = {
   description: "Description", custom: "Custom",
 };
 
+const COVER_FONT_CATEGORY_LABELS: Record<(typeof COVER_FONTS)[number]["category"], string> = {
+  serif: "Serif",
+  sans: "Sans",
+  display: "Display",
+  mono: "Mono",
+  script: "Script",
+};
+
+const COVER_FONT_POPOVER_WIDTH = 280;
+const COVER_FONT_POPOVER_GAP = 8;
+
+interface CoverFontPickerProps {
+  value: string;
+  fontGroups: Record<string, typeof COVER_FONTS>;
+  onChange: (fontId: string) => void;
+}
+
+function CoverFontPicker({ value, fontGroups, onChange }: CoverFontPickerProps) {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>({ visibility: "hidden" });
+  const currentFont = findCoverFont(value);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
+        return;
+      }
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    const t = window.setTimeout(() => window.addEventListener("mousedown", onDoc), 0);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    let frame = 0;
+    const refreshPosition = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const trigger = triggerRef.current;
+        if (!trigger) return;
+
+        const rect = trigger.getBoundingClientRect();
+        const popoverWidth = popoverRef.current?.offsetWidth ?? COVER_FONT_POPOVER_WIDTH;
+        const popoverHeight = popoverRef.current?.offsetHeight ?? 0;
+        let left = rect.left;
+        left = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, left));
+
+        const below = rect.bottom + COVER_FONT_POPOVER_GAP;
+        const above = rect.top - popoverHeight - COVER_FONT_POPOVER_GAP;
+        const top = below + popoverHeight > window.innerHeight - 12 && above >= 12 ? above : below;
+
+        setPopoverStyle({
+          position: "fixed",
+          top: Math.max(12, top),
+          left,
+          width: popoverWidth,
+          visibility: "visible",
+        });
+      });
+    };
+
+    refreshPosition();
+    window.addEventListener("resize", refreshPosition);
+    window.addEventListener("scroll", refreshPosition, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", refreshPosition);
+      window.removeEventListener("scroll", refreshPosition, true);
+    };
+  }, [open]);
+
+  const popover = (
+    <div
+      ref={popoverRef}
+      className="pdf-font-popover liquid-glass"
+      style={popoverStyle}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <div className="pdf-font-popover-scroll">
+        {Object.entries(fontGroups).map(([category, fonts]) => {
+          const categoryLabel = COVER_FONT_CATEGORY_LABELS[category as keyof typeof COVER_FONT_CATEGORY_LABELS] ?? category;
+          return (
+            <div key={category} className="pdf-font-popover-group">
+              <div className="pdf-font-popover-heading">{categoryLabel}</div>
+              {fonts.map((font) => (
+                <button
+                  key={font.id}
+                  type="button"
+                  className={`pdf-font-popover-option ${font.id === value ? "pdf-font-popover-option--active" : ""}`}
+                  style={{ fontFamily: font.stack } as CSSProperties}
+                  onClick={() => {
+                    onChange(font.id);
+                    setOpen(false);
+                  }}
+                >
+                  <span className="pdf-font-popover-option-label">{font.label}</span>
+                </button>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="pdf-textbox-font-picker">
+      <button
+        type="button"
+        ref={triggerRef}
+        className="pdf-textbox-select pdf-textbox-font-trigger"
+        onClick={() => setOpen((current) => !current)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
+        <span className="pdf-textbox-font-trigger-label" style={{ fontFamily: currentFont.stack } as CSSProperties}>
+          {currentFont.label}
+        </span>
+        <span className="pdf-textbox-font-trigger-chevron" aria-hidden="true">
+          <ChevronDown size={14} strokeWidth={1.9} />
+        </span>
+      </button>
+      {open && typeof document !== "undefined" && createPortal(popover, document.body)}
+    </div>
+  );
+}
+
 function TextBoxEditor({ box, onChange, onRemove }: TextBoxEditorProps) {
   // Group fonts by category for a navigable picker.
   const fontGroups = useMemo(() => {
@@ -584,30 +745,19 @@ function TextBoxEditor({ box, onChange, onRemove }: TextBoxEditorProps) {
       )}
 
       <div className="pdf-textbox-row pdf-textbox-row--controls">
-        <select
-          className="pdf-textbox-select pdf-textbox-select--font"
+        <CoverFontPicker
           value={box.fontId}
-          onChange={(e) => onChange({ fontId: e.target.value })}
-          style={{ fontFamily: findCoverFont(box.fontId).stack } as CSSProperties}
-        >
-          {Object.entries(fontGroups).map(([cat, fonts]) => (
-            <optgroup key={cat} label={cat[0].toUpperCase() + cat.slice(1)}>
-              {fonts.map((f) => (
-                <option key={f.id} value={f.id} style={{ fontFamily: f.stack } as CSSProperties}>
-                  {f.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+          onChange={(fontId) => onChange({ fontId })}
+          fontGroups={fontGroups}
+        />
 
-        <input
-          type="number"
-          className="pdf-textbox-num"
+        <NumberStepper
           value={box.fontSizePt}
-          onChange={(e) => onChange({ fontSizePt: Math.max(6, Math.min(120, +e.target.value || 12)) })}
+          onChange={(fontSizePt) => onChange({ fontSizePt })}
           min={6}
           max={120}
+          step={1}
+          className="pdf-textbox-stepper"
         />
         <span className="pdf-textbox-unit">pt</span>
 
@@ -618,19 +768,37 @@ function TextBoxEditor({ box, onChange, onRemove }: TextBoxEditorProps) {
       </div>
 
       <div className="pdf-textbox-row pdf-textbox-row--toggles">
-        <ToggleBtn label="B" active={!!box.bold} title="Bold"
-          onClick={() => onChange({ bold: !box.bold })} bold />
-        <ToggleBtn label="I" active={!!box.italic} title="Italic"
-          onClick={() => onChange({ italic: !box.italic })} italic />
-        <ToggleBtn label="AA" active={!!box.uppercase} title="Uppercase"
-          onClick={() => onChange({ uppercase: !box.uppercase })} />
+        <ToggleBtn
+          icon={<BoldIcon size={14} strokeWidth={1.9} />}
+          active={!!box.bold}
+          title="Bold"
+          onClick={() => onChange({ bold: !box.bold })}
+        />
+        <ToggleBtn
+          icon={<ItalicIcon size={14} strokeWidth={1.9} />}
+          active={!!box.italic}
+          title="Italic"
+          onClick={() => onChange({ italic: !box.italic })}
+        />
+        <ToggleBtn
+          icon={<CaseSensitive size={14} strokeWidth={1.9} />}
+          active={!!box.uppercase}
+          title="Uppercase"
+          onClick={() => onChange({ uppercase: !box.uppercase })}
+        />
 
         <span className="pdf-textbox-divider" />
 
         {(["left", "center", "right"] as const).map((a) => (
           <ToggleBtn
             key={a}
-            label={a === "left" ? "⬅" : a === "center" ? "≡" : "➡"}
+            icon={
+              a === "left"
+                ? <TextAlignStart size={14} strokeWidth={1.9} />
+                : a === "center"
+                ? <TextAlignCenter size={14} strokeWidth={1.9} />
+                : <TextAlignEnd size={14} strokeWidth={1.9} />
+            }
             active={box.align === a}
             title={`Align ${a}`}
             onClick={() => onChange({ align: a })}
@@ -642,7 +810,13 @@ function TextBoxEditor({ box, onChange, onRemove }: TextBoxEditorProps) {
         {(["top", "center", "bottom"] as CoverTextPosition[]).map((p) => (
           <ToggleBtn
             key={p}
-            label={p[0].toUpperCase() + p.slice(1)}
+            icon={
+              p === "top"
+                ? <ArrowUpToLine size={14} strokeWidth={1.9} />
+                : p === "center"
+                ? <AlignCenterVertical size={14} strokeWidth={1.9} />
+                : <ArrowDownToLine size={14} strokeWidth={1.9} />
+            }
             active={box.position === p}
             title={`Position ${p}`}
             onClick={() => onChange({ position: p })}
@@ -654,26 +828,22 @@ function TextBoxEditor({ box, onChange, onRemove }: TextBoxEditorProps) {
 }
 
 interface ToggleBtnProps {
-  label: string;
+  icon: ReactNode;
   active: boolean;
   title: string;
   onClick: () => void;
-  bold?: boolean;
-  italic?: boolean;
 }
 
-function ToggleBtn({ label, active, title, onClick, bold, italic }: ToggleBtnProps) {
+function ToggleBtn({ icon, active, title, onClick }: ToggleBtnProps) {
   return (
     <button
+      type="button"
       className={`pdf-toggle-btn ${active ? "pdf-toggle-btn--active" : ""}`}
       title={title}
+      aria-label={title}
       onClick={onClick}
-      style={{
-        fontWeight: bold ? 700 : 500,
-        fontStyle: italic ? "italic" : "normal",
-      } as CSSProperties}
     >
-      {label}
+      {icon}
     </button>
   );
 }

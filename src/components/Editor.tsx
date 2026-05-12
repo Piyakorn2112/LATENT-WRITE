@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { Chapter } from "../types";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
@@ -20,15 +20,28 @@ interface Props {
   speechPredictions?: AdaptivePredictionTrace[];
   actionPredictions?: ActionPrediction[][];
   typingSettleMs?: number;
+  sidePanelOpen?: boolean;
+  sidePanelCompensation?: boolean;
+  layoutWidthKey?: string;
 }
+
+const ANALYSIS_PANEL_RESERVED_WIDTH = 410;
+const ANALYSIS_PANEL_GAP = 18;
+const DOCUMENT_LEFT_MIN_GAP = 16;
 
 export function Editor({
   chapter, onContentChange, analysisResult, knownNames, onEntityClick,
   annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides,
   speechPredictions, actionPredictions, typingSettleMs = 1000,
+  sidePanelOpen = false,
+  sidePanelCompensation = false,
+  layoutWidthKey,
 }: Props) {
+  const articleRef = useRef<HTMLElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const resizeFrameRef = useRef<number | null>(null);
+  const [compensationShift, setCompensationShift] = useState(0);
 
   const resize = () => {
     const ta = taRef.current;
@@ -121,8 +134,55 @@ export function Editor({
     [settledContent, speechSpans],
   );
 
+  const recomputeCompensation = useCallback(() => {
+    if (!sidePanelCompensation || !sidePanelOpen) {
+      setCompensationShift((prev) => (prev === 0 ? prev : 0));
+      return;
+    }
+
+    const article = articleRef.current;
+    const wrap = wrapRef.current;
+    if (!article || !wrap || typeof window === "undefined") {
+      setCompensationShift((prev) => (prev === 0 ? prev : 0));
+      return;
+    }
+
+    const viewportWidth = window.innerWidth;
+    const articleWidth = article.offsetWidth;
+    const wrapWidth = wrap.offsetWidth;
+    const computed = window.getComputedStyle(article);
+    const padLeft = Number.parseFloat(computed.paddingLeft) || 0;
+    const padRight = Number.parseFloat(computed.paddingRight) || 0;
+    const innerWidth = Math.max(0, articleWidth - padLeft - padRight);
+    const centeredOffset = Math.max(0, (innerWidth - wrapWidth) / 2);
+    const baseArticleLeft = Math.max(0, (viewportWidth - articleWidth) / 2);
+    const baseWrapLeft = baseArticleLeft + padLeft + centeredOffset;
+    const baseWrapRight = baseWrapLeft + wrapWidth;
+    const panelLeftEdge = viewportWidth - ANALYSIS_PANEL_RESERVED_WIDTH;
+    const safeRight = panelLeftEdge - ANALYSIS_PANEL_GAP;
+    const desiredShift = Math.max(0, baseWrapRight - safeRight);
+    const maxShift = Math.max(0, baseWrapLeft - DOCUMENT_LEFT_MIN_GAP);
+    const nextShift = Math.min(desiredShift, maxShift);
+
+    setCompensationShift((prev) => (Math.abs(prev - nextShift) < 0.5 ? prev : nextShift));
+  }, [sidePanelCompensation, sidePanelOpen]);
+
+  useLayoutEffect(() => {
+    recomputeCompensation();
+  }, [recomputeCompensation, layoutWidthKey]);
+
+  useEffect(() => {
+    const onWinResize = () => recomputeCompensation();
+    window.addEventListener("resize", onWinResize);
+    return () => window.removeEventListener("resize", onWinResize);
+  }, [recomputeCompensation]);
+
   return (
-    <article className="document">
+    <article
+      ref={articleRef}
+      className="document"
+      style={{ "--document-compensation-shift": `${-compensationShift}px` } as CSSProperties}
+    >
       <header className="document-header">
         <div className="document-chapter-num">Chapter {chapter.number}</div>
         <h1 className="document-chapter-title">
@@ -130,7 +190,7 @@ export function Editor({
         </h1>
       </header>
 
-      <div className={`editor-wrap${annotationMode ? " editor-wrap--annotate" : ""}`}>
+      <div ref={wrapRef} className={`editor-wrap${annotationMode ? " editor-wrap--annotate" : ""}`}>
         {analysisResult && analysisResult.paragraphs.length > 0 && (
           <HighlightLayer
             content={chapter.content}
