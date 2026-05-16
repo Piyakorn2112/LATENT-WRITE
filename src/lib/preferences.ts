@@ -18,15 +18,15 @@ export interface Preferences {
   /** Set to true once the user dismisses the welcome flow. Missing on first
    *  launch — we use that to decide whether to auto-show onboarding. */
   hasSeenOnboarding?: boolean;
-  /** Easter-egg "fun mode" — toggles whimsical animations on the toolbar
-   *  intel orb (bouncy gooey eyes that move and blink). Off by default;
-   *  surfaced as a toggle in the settings panel. */
   funMode?: boolean;
-  /** Shows the adaptive-learning debug footer panel above word count. */
   debugPanel?: boolean;
-  /** Shifts the writing surface left when the right analysis drawer opens on
-   *  narrower windows, keeping the text column clear of the panel. */
   sidePanelCompensation?: boolean;
+  /** Anthropic API key for Renderer review pass. Stored locally only. */
+  apiKey?: string;
+  /** Model ID for Renderer review. Defaults to Haiku if unset. */
+  reviewModel?: string;
+  /** Enable background NLP story graph analysis. Default true. */
+  storyNlpEnabled?: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -58,6 +58,9 @@ export function loadPrefs(): Preferences {
       funMode: p.funMode ?? DEFAULTS.funMode,
       debugPanel: p.debugPanel ?? DEFAULTS.debugPanel,
       sidePanelCompensation: p.sidePanelCompensation ?? DEFAULTS.sidePanelCompensation,
+      apiKey: p.apiKey,
+      reviewModel: p.reviewModel,
+      storyNlpEnabled: p.storyNlpEnabled ?? true,
     };
   } catch {
     return { ...DEFAULTS };

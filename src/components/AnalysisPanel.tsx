@@ -23,7 +23,10 @@ import { MomentumWidget } from "./widgets/MomentumWidget";
 import { SensoryBalanceWidget } from "./widgets/SensoryBalanceWidget";
 import { CrossPacingWidget } from "./widgets/CrossPacingWidget";
 import { PlaceholderWidget } from "./widgets/PlaceholderWidget";
-import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon } from "./Icon";
+import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon, LayersIcon, Wand2Icon } from "./Icon";
+import { StoryGraphPanel } from "./StoryGraphPanel";
+import { RendererPanel } from "./RendererPanel";
+import type { StoryGraph, ReviewResult } from "../types";
 import { SeparatorHorizontal } from "lucide-react";
 import { IOS_COLORS } from "../lib/palette";
 import type { Preferences, Typography, WritingGoals } from "../lib/preferences";
@@ -31,6 +34,8 @@ import { FONT_LABELS } from "../lib/preferences";
 import { NumberStepper } from "./NumberStepper";
 import { GlassRange } from "./GlassRange";
 import { GlassToggle } from "./GlassToggle";
+
+const EMPTY_CHAPTERS: Chapter[] = [];
 
 type IntelMode = "off" | "low" | "default" | "high" | "auto";
 
@@ -43,37 +48,23 @@ interface Props {
   onSetIntelMode: (m: IntelMode) => void;
   prefs: Preferences;
   onSetPrefs: (next: Preferences) => void;
-  /** Stable ID of the open chapter — triggers the reveal animation only on
-   *  actual chapter navigation, not on every incremental analysis update. */
   chapterId?: string | null;
-  /** Raw chapter content — required by StyleWatchWidget for its grammar
-   *  and echo passes. */
+  chapterTitle?: string;
   chapterContent?: string;
-  /** Full chapter list — Continuity widget needs the surrounding book
-   *  to compute first-appearance and Chekhov candidates. */
   allChapters?: Chapter[];
   chapterIndex?: number;
-  /** worldData — used by Continuity (place hand-off) and Character Voice
-   *  (gender / pronoun reconciliation). */
   worldData?: WorldData;
-  /** Smart auto-paragraphing — when invoked, the host (App) re-segments
-   *  the current chapter using speech / action / time-shift signals.
-   *  The button next to the chevron/settings tabs fires this; the host
-   *  drives the loading state + orb animation. */
   onAutoParagraph?: () => void;
-  /** While true, the auto-paragraph button shows the same processing
-   *  treatment as the analyzing pill — used to disable double-clicks
-   *  and signal the user that the chapter is being re-segmented. */
   autoParagraphing?: boolean;
-  /** Auto-scene-break inserter — companion to auto-paragraph. Walks the
-   *  chapter's existing paragraph stream and inserts `* * *` markers at
-   *  detected scene boundaries (tension flips, time-shift markers, POV
-   *  changes). The host drives the actual mutation. */
   onAutoSceneBreak?: () => void;
-  /** Mirror of autoParagraphing for the scene-break button. */
   sceneBreaking?: boolean;
-  /** Reports whether the drawer is currently expanded. */
   onOpenChange?: (open: boolean) => void;
+  /** Story Graph — full novel structure accumulated from NLP analysis. */
+  storyGraph?: StoryGraph;
+  onSelectChapter?: (id: string) => void;
+  /** Renderer review result for the current chapter (null = not yet run). */
+  reviewResult?: ReviewResult | null;
+  onReviewComplete?: (result: ReviewResult) => void;
 }
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
@@ -424,10 +415,12 @@ function WidgetSet({
 
 export function AnalysisPanel({
   result, prevResult, nextResult, isAnalyzing, intelMode, onSetIntelMode,
-  prefs, onSetPrefs, chapterId, chapterContent,
+  prefs, onSetPrefs, chapterId, chapterTitle, chapterContent,
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
   onAutoSceneBreak, sceneBreaking, onOpenChange,
+  storyGraph, onSelectChapter,
+  reviewResult, onReviewComplete,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
   // under high intelligence. Auto resolves dynamically per chapter, so we
@@ -435,7 +428,7 @@ export function AnalysisPanel({
   const showCrossArc =
     intelMode === "high" ||
     (intelMode === "auto" && !!result?.analysis.highModeAnalysis);
-  const [view, setView] = useState<"widgets" | "settings" | null>(null);
+  const [view, setView] = useState<"widgets" | "settings" | "graph" | "renderer" | null>(null);
 
   // Debounce live content props so widgets don't recompute on every keystroke
   // — the widget tree contains heavy passes (grammar, echo detection, prose
@@ -444,6 +437,20 @@ export function AnalysisPanel({
   // separately at 1 s in useAnalysis.
   const debouncedContent = useDebouncedValue(chapterContent ?? "", 350);
   const debouncedChapters = useDebouncedValue(allChapters, 350);
+  const graphSyncSource = view === "graph" ? (allChapters ?? EMPTY_CHAPTERS) : EMPTY_CHAPTERS;
+  const graphSyncChapters = useDebouncedValue(graphSyncSource, 1200);
+  const graphDisplayKey = useMemo(
+    () => (allChapters ?? EMPTY_CHAPTERS).map((chapter) => `${chapter.id}\u001f${chapter.number}\u001f${chapter.title}`).join("\u001e"),
+    [allChapters],
+  );
+  const graphDisplayChapters = useMemo(
+    () => (allChapters ?? EMPTY_CHAPTERS).map(({ id, number, title }) => ({ id, number, title })),
+    [graphDisplayKey],
+  );
+  const handleGraphSelectChapter = useCallback((id: string) => {
+    onSelectChapter?.(id);
+    setView(null);
+  }, [onSelectChapter]);
 
   // Cross-fade state: old widgets exit, new ones stagger in on chapter change.
   // For same-chapter re-analyses (data updates), just swap displayed silently
@@ -474,7 +481,7 @@ export function AnalysisPanel({
   }, []);
 
   const toggle = useCallback(
-    (target: "widgets" | "settings") =>
+    (target: "widgets" | "settings" | "graph" | "renderer") =>
       setView((v) => (v === target ? null : target)),
     [],
   );
@@ -539,38 +546,62 @@ export function AnalysisPanel({
           )}
         </button>
 
-        {/* Auto-paragraph — single-shot action button, NOT a tab toggle.
-            Click runs the smart paragrapher on the current chapter
-            content and applies the result. The host (App) drives the
-            actual processing loop, including the analyzing pill
-            ("Analysing chapter…") and the editor-scan orb gradient. */}
-        {onAutoParagraph && (
-          <button
-            className={`analysis-tab analysis-tab--action ${autoParagraphing ? "analysis-tab--working" : ""}`}
-            onClick={onAutoParagraph}
-            disabled={autoParagraphing}
-            aria-label="Smart auto-paragraph chapter"
-            title="Smart auto-paragraph chapter"
-          >
-            <PilcrowIcon size={13} />
-          </button>
+        {(onAutoParagraph || onAutoSceneBreak) && (
+          <div className="analysis-action-group" aria-label="Formatting actions" role="group">
+            {/* Auto-paragraph — single-shot action button, NOT a tab toggle.
+                Click runs the smart paragrapher on the current chapter
+                content and applies the result. The host (App) drives the
+                actual processing loop, including the analyzing pill
+                ("Analysing chapter…") and the editor-scan orb gradient. */}
+            {onAutoParagraph && (
+              <button
+                className={`analysis-action-button ${autoParagraphing ? "analysis-tab--working" : ""}`}
+                onClick={onAutoParagraph}
+                disabled={autoParagraphing}
+                aria-label="Smart auto-paragraph chapter"
+                title="Smart auto-paragraph chapter"
+              >
+                <PilcrowIcon size={13} />
+              </button>
+            )}
+
+            {onAutoParagraph && onAutoSceneBreak && <span className="analysis-action-divider" aria-hidden="true" />}
+
+            {/* Auto-scene-break — companion to auto-paragraph. Inserts `* * *`
+                markers at detected scene boundaries (tension flips,
+                time-shift markers, speaker-discontinuity gaps). Same single-
+                shot button language; pulses while the host runs the pass. */}
+            {onAutoSceneBreak && (
+              <button
+                className={`analysis-action-button ${sceneBreaking ? "analysis-tab--working" : ""}`}
+                onClick={onAutoSceneBreak}
+                disabled={sceneBreaking}
+                aria-label="Auto-insert scene breaks"
+                title="Auto-insert scene breaks"
+              >
+                <SeparatorHorizontal size={13} strokeWidth={1.8} />
+              </button>
+            )}
+          </div>
         )}
 
-        {/* Auto-scene-break — companion to auto-paragraph. Inserts `* * *`
-            markers at detected scene boundaries (tension flips,
-            time-shift markers, speaker-discontinuity gaps). Same single-
-            shot button language; pulses while the host runs the pass. */}
-        {onAutoSceneBreak && (
-          <button
-            className={`analysis-tab analysis-tab--action ${sceneBreaking ? "analysis-tab--working" : ""}`}
-            onClick={onAutoSceneBreak}
-            disabled={sceneBreaking}
-            aria-label="Auto-insert scene breaks"
-            title="Auto-insert scene breaks"
-          >
-            <SeparatorHorizontal size={13} strokeWidth={1.8} />
-          </button>
-        )}
+        <button
+          className={`analysis-tab analysis-tab--settings ${view === "graph" ? "analysis-tab--active" : ""}`}
+          onClick={() => toggle("graph")}
+          aria-label="Story graph"
+          title="Story graph"
+        >
+          <LayersIcon size={13} />
+        </button>
+
+        <button
+          className={`analysis-tab analysis-tab--settings ${view === "renderer" ? "analysis-tab--active" : ""}`}
+          onClick={() => toggle("renderer")}
+          aria-label="Renderer review"
+          title="Renderer review"
+        >
+          <Wand2Icon size={13} />
+        </button>
 
         <button
           className={`analysis-tab analysis-tab--settings ${view === "settings" ? "analysis-tab--active" : ""}`}
@@ -629,6 +660,35 @@ export function AnalysisPanel({
             <SettingsPanel
               intelMode={intelMode}
               onSetIntelMode={onSetIntelMode}
+              prefs={prefs}
+              onSetPrefs={onSetPrefs}
+            />
+          </div>
+        )}
+
+        {view === "graph" && (
+          <div className="analysis-inner analysis-inner--settings">
+            <StoryGraphPanel
+              storyGraph={storyGraph ?? { version: 1, entries: {} }}
+              chapters={graphDisplayChapters}
+              syncChapters={graphSyncChapters}
+              worldData={worldData}
+              currentChapterId={chapterId ?? null}
+              onSelectChapter={handleGraphSelectChapter}
+              prefs={prefs}
+              onSetPrefs={onSetPrefs}
+            />
+          </div>
+        )}
+
+        {view === "renderer" && (
+          <div className="analysis-inner analysis-inner--settings">
+            <RendererPanel
+              chapterId={chapterId ?? null}
+              chapterContent={chapterContent}
+              chapterTitle={chapterTitle}
+              reviewResult={reviewResult ?? null}
+              onReviewComplete={(r) => onReviewComplete?.(r)}
               prefs={prefs}
               onSetPrefs={onSetPrefs}
             />

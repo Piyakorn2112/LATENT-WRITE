@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebouncedValue } from "./use-debounced";
-import type { Chapter, Novel } from "../types";
+import type { AdaptiveInferenceContext, LearnedBias, Novel } from "../types";
 import {
-  detectSpeechInChapter,
   type ChapterParaResult,
   type ChapterEndContext,
   type IntelligenceLevel,
 } from "./speech-detect";
 import {
-  analyzeChapter,
   computeChapterStats,
   type ChapterAnalysis,
   type ChapterStats,
@@ -16,8 +14,9 @@ import {
   type ProseRegister,
 } from "./chapter-analysis";
 import { resolveKnownNames } from "./world-data";
-import { findActionSentences, predictActionActor, type ActionPrediction } from "./action-detect";
-import type { AdaptiveInferenceContext, AdaptivePredictionTrace } from "../types";
+import { runChapterAnalysisInWorker } from "./analysis-worker-client";
+import { runChapterAnalysis, type ChapterAnalysisResult } from "./chapter-analysis-runner";
+import { logPerfEvent } from "./perf-trace";
 
 export type {
   ChapterParaResult,
@@ -27,124 +26,18 @@ export type {
   ProseRegister,
   IntelligenceLevel,
 };
+export type { ChapterAnalysisResult } from "./chapter-analysis-runner";
 
-export interface ChapterAnalysisResult {
-  paragraphs: string[];
-  speechResults: ChapterParaResult[];
-  speechPredictions: AdaptivePredictionTrace[];
-  actionPredictions: ActionPrediction[][];
-  analysis: ChapterAnalysis;
-  /** Captured at end of detection — passed forward to seed the next chapter. */
-  endContext: ChapterEndContext | null;
-}
+type IdleHandle = number;
+const scheduleIdle: (cb: () => void) => IdleHandle =
+  typeof (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number }).requestIdleCallback === "function"
+    ? ((cb) => (globalThis as { requestIdleCallback: (cb: () => void, opts?: { timeout?: number }) => number }).requestIdleCallback(cb, { timeout: 200 }))
+    : ((cb) => requestAnimationFrame(cb) as IdleHandle);
 
-function clipActionSpans(spans: Array<{ start: number; end: number }>, from: number, to: number) {
-  const out: Array<{ start: number; end: number }> = [];
-  for (const span of spans) {
-    if (span.end <= from || span.start >= to) continue;
-    if (span.start < from || span.end > to) continue;
-    out.push({ start: span.start - from, end: span.end - from });
-  }
-  return out;
-}
-
-function buildActionPredictions(
-  paragraphs: string[],
-  speechResults: ChapterParaResult[],
-  knownNames: string[],
-  learnedBias: import("../types").LearnedBias | undefined,
-  adaptiveContext: AdaptiveInferenceContext | undefined,
-): ActionPrediction[][] {
-  return paragraphs.map((para, paragraphIndex) => {
-    const paraActions = findActionSentences(para);
-    const segs = [...(speechResults[paragraphIndex]?.segments ?? [])].sort((a, b) => a.start - b.start);
-    const predictions: ActionPrediction[] = [];
-    let carryingSpeaker: string | null = null;
-    let cursor = 0;
-
-    const pushPredictions = (chunkStart: number, chunkEnd: number) => {
-      const localActions = clipActionSpans(paraActions, chunkStart, chunkEnd);
-      for (const action of localActions) {
-        const start = action.start + chunkStart;
-        const end = action.end + chunkStart;
-        const spanText = para.slice(start, end);
-        const prediction = predictActionActor(
-          spanText,
-          knownNames,
-          carryingSpeaker,
-          learnedBias,
-          adaptiveContext,
-          para.slice(Math.max(0, start - 120), start),
-          para.slice(end, Math.min(para.length, end + 120)),
-        );
-        predictions.push({ start, end, ...prediction });
-      }
-    };
-
-    for (const seg of segs) {
-      if (seg.start > cursor) pushPredictions(cursor, seg.start);
-      if (seg.type === "speech" && seg.confidence >= 0.65) {
-        carryingSpeaker = seg.speaker ?? carryingSpeaker;
-      }
-      cursor = seg.end;
-    }
-    if (cursor < para.length) pushPredictions(cursor, para.length);
-
-    return predictions;
-  });
-}
-
-// Split chapter content into non-empty paragraphs (double-newline or single-newline separated)
-function toParagraphs(content: string): string[] {
-  return content
-    .split(/\n{2,}|\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-}
-
-// Run speech detection + chapter analysis for one chapter, threading context.
-function analyzeOne(
-  chapter: Chapter,
-  prevContext: ChapterEndContext | null,
-  siblingStats: ChapterStats[],
-  knownNames: string[],
-  level: IntelligenceLevel,
-  learnedBias?: import("../types").LearnedBias,
-  adaptiveContext?: AdaptiveInferenceContext,
-  collectPredictionDetails = false,
-): ChapterAnalysisResult {
-  const paragraphs = toParagraphs(chapter.content);
-  const contextOut: { value: ChapterEndContext | null } = { value: null };
-  const predictionTraceOut: { value: AdaptivePredictionTrace[] } | undefined = collectPredictionDetails
-    ? { value: [] }
-    : undefined;
-  const speechResults = detectSpeechInChapter(paragraphs, knownNames, {
-    intelligenceLevel: level,
-    prevChapterContext: prevContext ?? undefined,
-    contextOut,
-    learnedBias,
-    adaptiveContext,
-    predictionTraceOut,
-  });
-  const actionPredictions = collectPredictionDetails
-    ? buildActionPredictions(
-        paragraphs,
-        speechResults,
-        knownNames,
-        learnedBias,
-        adaptiveContext,
-      )
-    : [];
-  const analysis = analyzeChapter(paragraphs, speechResults, siblingStats);
-  return {
-    paragraphs,
-    speechResults,
-    speechPredictions: predictionTraceOut?.value ?? [],
-    actionPredictions,
-    analysis,
-    endContext: contextOut.value,
-  };
-}
+const cancelIdle: (handle: IdleHandle) => void =
+  typeof (globalThis as { cancelIdleCallback?: (handle: number) => void }).cancelIdleCallback === "function"
+    ? ((handle) => (globalThis as { cancelIdleCallback: (handle: number) => void }).cancelIdleCallback(handle))
+    : ((handle) => cancelAnimationFrame(handle));
 
 interface UseAnalysisOptions {
   /** How long after the last keystroke to wait before running analysis (ms) */
@@ -152,7 +45,7 @@ interface UseAnalysisOptions {
   /** Intelligence tier — falls through directly to speech-detect. */
   level?: IntelligenceLevel;
   /** Learned biases derived from user annotation corrections. */
-  learnedBias?: import("../types").LearnedBias;
+  learnedBias?: LearnedBias;
   /** Adaptive online ranker + memory layer layered on top of deterministic rules. */
   adaptiveContext?: AdaptiveInferenceContext;
   /** Collect per-span prediction details used by annotation/debug surfaces. */
@@ -263,44 +156,55 @@ export function useAnalysis(
     }
 
     setIsAnalyzing(true);
+    let cancelled = false;
 
     const timer = window.setTimeout(() => {
-      // Sibling stats for chapters that already have results cached
-      const siblingStats: ChapterStats[] = [];
-      for (let i = 0; i < chapters.length; i++) {
-        if (i === currentIndex) continue;
-        const cached = cache.current.get(chapters[i].id);
-        if (!cached) continue;
-        siblingStats.push(
-          computeChapterStats(cached.paragraphs, cached.speechResults),
-        );
-      }
+      void (async () => {
+        try {
+          const siblingStats: ChapterStats[] = [];
+          for (let i = 0; i < chapters.length; i++) {
+            if (i === currentIndex) continue;
+            const cached = cache.current.get(chapters[i].id);
+            if (!cached) continue;
+            siblingStats.push(
+              computeChapterStats(cached.paragraphs, cached.speechResults),
+            );
+          }
 
-      // Thread end-context forward from the nearest preceding analysed chapter.
-      // Reading from cache directly — no re-running detect just for context.
-      let prevContext: ChapterEndContext | null = null;
-      for (let i = currentIndex - 1; i >= 0; i--) {
-        const cached = cache.current.get(chapters[i].id);
-        if (cached?.endContext) { prevContext = cached.endContext; break; }
-      }
+          let prevContext: ChapterEndContext | null = null;
+          for (let i = currentIndex - 1; i >= 0; i--) {
+            const cached = cache.current.get(chapters[i].id);
+            if (cached?.endContext) { prevContext = cached.endContext; break; }
+          }
 
-      const fresh = analyzeOne(
-        chapter,
-        prevContext,
-        siblingStats,
-        knownNames,
-        level,
-        options.learnedBias,
-        options.adaptiveContext,
-        options.collectPredictionDetails,
-      );
-      cache.current.set(currentChapterId, fresh);
-      setResult(fresh);
-      resultChapterId.current = currentChapterId;
-      setIsAnalyzing(false);
+          const input = {
+            chapter,
+            prevContext,
+            siblingStats,
+            knownNames,
+            level,
+            learnedBias: options.learnedBias,
+            adaptiveContext: options.adaptiveContext,
+            collectPredictionDetails: options.collectPredictionDetails,
+          };
+          const startedAt = performance.now();
+          const fresh = await runChapterAnalysisInWorker(input).catch(() => runChapterAnalysis(input));
+          logPerfEvent("analysis.current", performance.now() - startedAt, 8, {
+            chapterId: chapter.id,
+            paragraphs: fresh.paragraphs.length,
+          });
+          if (cancelled) return;
+          cache.current.set(currentChapterId, fresh);
+          setResult(fresh);
+          resultChapterId.current = currentChapterId;
+        } finally {
+          if (!cancelled) setIsAnalyzing(false);
+        }
+      })();
     }, debounceMs);
 
     return () => {
+      cancelled = true;
       window.clearTimeout(timer);
     };
   }, [novel.chapters, currentChapterId, debounceMs, level, knownNames, options.learnedBias, adaptiveSpeechVersion, adaptiveActionVersion, options.collectPredictionDetails]);
@@ -313,6 +217,22 @@ export function useAnalysis(
   useEffect(() => {
     if (level !== "high") return;
     if (!currentChapterId) return;
+
+    let cancelled = false;
+    let idleHandle: IdleHandle | null = null;
+
+    const scheduleTaskQueue = (tasks: Array<() => Promise<void>>) => {
+      if (cancelled || tasks.length === 0) return;
+      idleHandle = scheduleIdle(() => {
+        idleHandle = null;
+        if (cancelled) return;
+        const task = tasks.shift();
+        if (!task) return;
+        void task().finally(() => {
+          if (tasks.length > 0) scheduleTaskQueue(tasks);
+        });
+      });
+    };
 
     const t = window.setTimeout(() => {
       const chapters = novel.chapters;
@@ -338,6 +258,8 @@ export function useAnalysis(
         return stats;
       };
 
+      const tasks: Array<() => Promise<void>> = [];
+
       if (needPrev) {
         const prevChapter = chapters[idx - 1];
         let prevCtx: ChapterEndContext | null = null;
@@ -345,18 +267,48 @@ export function useAnalysis(
           const c = cache.current.get(chapters[i].id);
           if (c?.endContext) { prevCtx = c.endContext; break; }
         }
-        cache.current.set(prevChapter.id, analyzeOne(prevChapter, prevCtx, buildSiblings(prevChapter.id), knownNames, level, options.learnedBias));
+        tasks.push(async () => {
+          const input = {
+            chapter: prevChapter,
+            prevContext: prevCtx,
+            siblingStats: buildSiblings(prevChapter.id),
+            knownNames,
+            level,
+            learnedBias: options.learnedBias,
+          };
+          const fresh = await runChapterAnalysisInWorker(input).catch(() => runChapterAnalysis(input));
+          if (cancelled) return;
+          cache.current.set(prevChapter.id, fresh);
+          setAdjacentReady((v) => v + 1);
+        });
       }
 
       if (needNext) {
         const nextChapter = chapters[idx + 1];
-        cache.current.set(nextChapter.id, analyzeOne(nextChapter, currentCached.endContext, buildSiblings(nextChapter.id), knownNames, level, options.learnedBias));
+        tasks.push(async () => {
+          const input = {
+            chapter: nextChapter,
+            prevContext: currentCached.endContext,
+            siblingStats: buildSiblings(nextChapter.id),
+            knownNames,
+            level,
+            learnedBias: options.learnedBias,
+          };
+          const fresh = await runChapterAnalysisInWorker(input).catch(() => runChapterAnalysis(input));
+          if (cancelled) return;
+          cache.current.set(nextChapter.id, fresh);
+          setAdjacentReady((v) => v + 1);
+        });
       }
 
-      setAdjacentReady((v) => v + 1);
+      scheduleTaskQueue(tasks);
     }, 200); // yield to the main analysis render before starting background work
 
-    return () => window.clearTimeout(t);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+      if (idleHandle !== null) cancelIdle(idleHandle);
+    };
   }, [result, level, currentChapterId, novel.chapters, knownNames]);
 
   // Adjacent chapter analyses pulled from cache — no fresh runs triggered for

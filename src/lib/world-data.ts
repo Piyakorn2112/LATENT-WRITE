@@ -11,7 +11,7 @@ import { rerankAdaptiveCandidates } from "./adaptive-inference";
 
 export interface WorldEntity {
   name: string;
-  type: "character" | "place" | "faction";
+  type: "character" | "place" | "faction" | "entity";
   role?: string;
   description?: string;
 }
@@ -21,6 +21,7 @@ interface EntityContextSignals {
   charScore: number;
   placeScore: number;
   factScore: number;
+  entityScore: number;
   totalContext: number;
   previewBefore: string;
   previewAfter: string;
@@ -31,7 +32,7 @@ interface EntityContextSignals {
 // ── Empty / construction helpers ───────────────────────────────────────────
 
 export function emptyWorldData(): WorldData {
-  return { characters: [], places: [], factions: [] };
+  return { characters: [], places: [], factions: [], entities: [] };
 }
 
 export function ensureWorldData(novel: Novel): WorldData {
@@ -41,6 +42,7 @@ export function ensureWorldData(novel: Novel): WorldData {
     characters: wd.characters ?? [],
     places: wd.places ?? [],
     factions: wd.factions ?? [],
+    entities: wd.entities ?? [],
   };
 }
 
@@ -49,7 +51,8 @@ export function isWorldDataEmpty(wd: WorldData | undefined): boolean {
   return (
     (wd.characters?.length ?? 0) === 0 &&
     (wd.places?.length ?? 0) === 0 &&
-    (wd.factions?.length ?? 0) === 0
+    (wd.factions?.length ?? 0) === 0 &&
+    (wd.entities?.length ?? 0) === 0
   );
 }
 
@@ -57,7 +60,7 @@ export function isWorldDataEmpty(wd: WorldData | undefined): boolean {
 const STOPLIST = new Set([
   "The", "This", "That", "These", "Those", "There", "Then", "Than", "What",
   "When", "Where", "Why", "How", "Who", "Which", "He", "She", "It", "They",
-  "We", "His", "Her", "Its", "Their", "Our", "My", "Your", "Was", "Were",
+  "We", "You", "His", "Her", "Its", "Their", "Our", "My", "Your", "Was", "Were",
   "Had", "Has", "Have", "Be", "Been", "Being", "Is", "Are", "Do", "Does",
   "Did", "Will", "Would", "Could", "Should", "May", "Might", "Must", "Can",
   "All", "Any", "Not", "No", "So", "As", "If", "But", "And", "Or", "For",
@@ -79,6 +82,8 @@ const STOPLIST = new Set([
   "Naturally", "Probably", "Possibly", "Obviously", "Apparently", "Nearly",
   "Quietly", "Briefly", "Partly", "Mostly", "Barely", "Deeply",
   "Quite", "Rather", "Exactly", "Almost", "Enough", "Ahead", "Away",
+  "Yes", "Well", "Okay", "Sure", "Hello", "Hi", "Hey", "Please", "Thanks", "Thank",
+  "Because", "Maybe", "Though", "Although", "Unless", "Meanwhile", "Otherwise", "Later",
   "Chapter",
 ]);
 
@@ -107,7 +112,7 @@ const COMMON_CAPITALIZED: ReadonlySet<string> = new Set([
   "Spring","Summer","Autumn","Winter",
   // Time-of-day / relative-time expressions
   "Morning","Afternoon","Evening","Midnight","Noon","Dusk",
-  "Today","Tomorrow","Yesterday",
+  "Today","Tomorrow","Yesterday","Year","Years",
 ]);
 
 // ── TF-IDF: English prose word-frequency table (IDF proxy) ────────────────
@@ -217,9 +222,37 @@ const MIN_IDF_WITH_CONTEXT     = 0.72; // log(1 + 1/0.55)
 const CONTEXT_SIGNAL_THRESHOLD = 3;    // min accumulated context points to unlock relaxed gate
 
 const TITLE_TOKEN_PATTERN = `[A-Z][a-z]{1,}(?:['’-][A-Z][a-z]{1,})*`;
+const TITLE_JOINER_PATTERN = `(?:of|the|for|de|du|del|da|di|la|le)`;
+const LEADING_ARTICLES = new Set(["The"]);
+const CONNECTOR_WORDS = new Set(["of", "the", "for", "de", "du", "del", "da", "di", "la", "le"]);
 
 function buildTitleCaseCandidateRe(maxWords: number): RegExp {
-  return new RegExp(`\\b(${TITLE_TOKEN_PATTERN}(?:\\s${TITLE_TOKEN_PATTERN}){0,${Math.max(0, maxWords - 1)}})\\b`, "g");
+  return new RegExp(
+    `\\b(${TITLE_TOKEN_PATTERN}(?:[ \\t]+(?:${TITLE_JOINER_PATTERN}[ \\t]+)?${TITLE_TOKEN_PATTERN}){0,${Math.max(0, maxWords - 1)}})\\b`,
+    "g",
+  );
+}
+
+function allowLeadingArticle(words: string[]): boolean {
+  if (!LEADING_ARTICLES.has(words[0] ?? "")) return false;
+  const meaningfulTail = words.slice(1).filter((word) => !CONNECTOR_WORDS.has(word.toLowerCase()));
+  return meaningfulTail.length >= 2;
+}
+
+function shouldRejectCandidateName(name: string): boolean {
+  const words = name.split(/\s+/).filter(Boolean);
+  const first = words[0];
+  if (!first || name.length < 3) return true;
+  if (STOPLIST.has(first) || COMMON_CAPITALIZED.has(first)) {
+    return !allowLeadingArticle(words);
+  }
+  if (words.length > 1) {
+    const tailWords = words.slice(1);
+    const hasBlockedTail = tailWords.some((word) => STOPLIST.has(word) || COMMON_CAPITALIZED.has(word));
+    const hasConnector = words.some((word) => CONNECTOR_WORDS.has(word.toLowerCase()));
+    if (hasBlockedTail && !hasConnector) return true;
+  }
+  return false;
 }
 
 /** Compute IDF weight for a candidate word or phrase. */
@@ -235,18 +268,26 @@ function collectTitleCaseCandidates(text: string, maxWords: number): Map<string,
   const pattern = buildTitleCaseCandidateRe(maxWords);
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
-    const name = match[1];
-    const first = name.split(" ")[0];
-    if (STOPLIST.has(first) || COMMON_CAPITALIZED.has(first) || name.length < 3) continue;
+    let name = match[1];
+    const words = name.split(/\s+/).filter(Boolean);
+    const prefix = text.slice(Math.max(0, match.index - 4), match.index);
+    if (/\bthe\s$/i.test(prefix) && words.length >= 2) {
+      name = `The ${name}`;
+    }
+    if (shouldRejectCandidateName(name)) continue;
     freq.set(name, (freq.get(name) ?? 0) + 1);
   }
   return freq;
 }
 
-const CHAR_NAMED_RE = /\b(named|called)\s*$/i;
+const CHAR_NAMED_RE = /\b(named|called|name is)\s*$/i;
 const CHAR_POSSESSIVE_AFTER_RE = /^\s*['’]s\b/i;
-const PLACE_OF_RE = /\b(city|town|village|hamlet|kingdom|empire|realm|province|district|ward|sector|port|harbor|harbour|temple|fortress|castle|keep|mount|mountain|river|lake|forest|woods|island|sea|bay|garden|market|road|street|avenue|hall|inn|bridge|gate|capital|region|territory|basin)\s+(?:of|called)\s*$/i;
+const PLACE_OF_RE = /\b(city|town|village|hamlet|kingdom|empire|realm|province|district|ward|sector|port|harbor|harbour|temple|fortress|castle|keep|mount|mountain|river|lake|forest|woods|island|sea|bay|garden|market|road|street|avenue|hall|inn|bridge|gate|capital|region|territory|basin|ring|plaza|station|library|campus)\s+(?:of|called)\s*$/i;
 const FACTION_PREFIX_RE = /\b(the|house|order|guild|clan|legion|council|academy|guard|watch|union|alliance|ministry|court|brotherhood|sisterhood|syndicate|collective|committee|board)\s*$/i;
+const ENTITY_PREFIX_RE = /\b(the|directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative)\s*$/i;
+const ENTITY_OF_RE = /\b(directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative|unit|processing)\s+(?:of|for)\s*$/i;
+const ENTITY_PREP_RE = /\b(under|within|through|via|per|according\s+to|pursuant\s+to)\s*$/i;
+const ENTITY_AFTER_RE = /^\s*(requires|mandates|governs|defines|permits|forbids|authorizes|regulates|maintains|tracks|allocates|routes|weights|classifies|stabilizes|monitors|enforces|codifies)\b/i;
 
 function computeEntityContextSignals(text: string, name: string): EntityContextSignals {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -256,11 +297,13 @@ function computeEntityContextSignals(text: string, name: string): EntityContextS
   let charScore = 0;
   let placeScore = 0;
   let factScore = 0;
+  let entityScore = 0;
   let previewBefore = "";
   let previewAfter = "";
 
   if (PLACE_SUFFIX_RE.test(name)) placeScore += 4;
   if (FACTION_SUFFIX_RE.test(name)) factScore += 4;
+  if (ENTITY_SUFFIX_RE.test(name)) entityScore += 4;
 
   let match: RegExpExecArray | null;
   while ((match = ctxRe.exec(text)) !== null) {
@@ -283,6 +326,11 @@ function computeEntityContextSignals(text: string, name: string): EntityContextS
 
     if (/\bthe\s*$/i.test(before) && FACTION_COLLECTIVE_RE.test(after)) factScore += 2;
     if (FACTION_PREFIX_RE.test(before)) factScore += 1.5;
+
+    if (ENTITY_PREFIX_RE.test(before)) entityScore += 1.5;
+    if (ENTITY_OF_RE.test(before)) entityScore += 2.5;
+    if (ENTITY_PREP_RE.test(before)) entityScore += 1.25;
+    if (ENTITY_AFTER_RE.test(after)) entityScore += 1.1;
   }
 
   return {
@@ -290,7 +338,8 @@ function computeEntityContextSignals(text: string, name: string): EntityContextS
     charScore,
     placeScore,
     factScore,
-    totalContext: charScore + placeScore + factScore,
+    entityScore,
+    totalContext: charScore + placeScore + factScore + entityScore,
     previewBefore,
     previewAfter,
     isMultiWord: /\s/.test(name),
@@ -304,10 +353,15 @@ function shouldKeepEntityCandidate(
   signals: EntityContextSignals,
   minFreq: number,
 ): boolean {
-  const strongest = Math.max(signals.charScore, signals.placeScore, signals.factScore);
-  const structural = signals.isMultiWord || signals.hasJoiner || PLACE_SUFFIX_RE.test(name) || FACTION_SUFFIX_RE.test(name);
+  const strongest = Math.max(signals.charScore, signals.placeScore, signals.factScore, signals.entityScore);
+  const structural = signals.isMultiWord || signals.hasJoiner || PLACE_SUFFIX_RE.test(name) || FACTION_SUFFIX_RE.test(name) || ENTITY_SUFFIX_RE.test(name);
+  const wordCount = name.trim().split(/\s+/).filter(Boolean).length;
+  if (wordCount === 1 && occurrences < Math.max(2, minFreq + 1) && strongest < 2 && signals.totalContext < 2.75) {
+    return false;
+  }
   if (occurrences >= minFreq + 2) return true;
   if (structural && occurrences >= minFreq) return true;
+  if (structural && wordCount >= 3 && occurrences >= Math.max(1, minFreq - 1)) return true;
   if (signals.totalContext >= 2) return true;
   if (strongest >= 1.5 && occurrences >= minFreq) return true;
   return false;
@@ -319,6 +373,72 @@ function candidateSortScore(
   signals: EntityContextSignals,
 ): number {
   return occurrences * 14 + signals.totalContext * 6 + (signals.isMultiWord ? 5 : 0) + (signals.hasJoiner ? 3 : 0) + idf * 4;
+}
+
+const ENTITY_SUFFIX_RE = /\b(directive|framework|orthodoxy|protocol|act|policy|program|system|charter|doctrine|standard|authority|shell|compact|accord|network|initiative|unit|processing|committee|commission|board|bureau|directorate|registry)\b/i;
+const INSTITUTIONAL_TERM_RE = /\b(executive|hierarchical|administrative|continuity|distributed|adaptive|civic|informed|processing|authority|framework|directive|orthodoxy|protocol|program|policy|system)\b/i;
+const ENTITY_SEMANTIC_ANCHORS = {
+  entity: "a doctrine, directive, framework, act, policy, protocol, institution, committee, commission, board, bureau, directorate, registry office, executive directive, governing framework, ideology, orthodoxy, administrative program",
+  faction: "a faction, alliance, guild, order, wing, political group, organization, ministry, council, military unit, collective",
+  place: "a place, planet, city, district, station, campus, world, location, building, plaza",
+} as const;
+
+let semanticSimilarityFn: ((text: string, anchor: string) => Promise<number>) | null = null;
+let semanticSimilarityLoader: Promise<((text: string, anchor: string) => Promise<number>) | null> | null = null;
+
+function runtimeSupportsSemanticEntityAssist(): boolean {
+  if (typeof window === "undefined") return true;
+  return !!((window as Window & {
+    electronAPI?: { narrativeLMEmbed?: ((text: string) => Promise<number[] | null>) | undefined };
+  }).electronAPI?.narrativeLMEmbed);
+}
+
+function looksInstitutionalName(name: string): boolean {
+  return name.trim().split(/\s+/).length >= 2 && (ENTITY_SUFFIX_RE.test(name) || INSTITUTIONAL_TERM_RE.test(name));
+}
+
+async function getSemanticSimilarityFn() {
+  if (!runtimeSupportsSemanticEntityAssist()) return null;
+  if (semanticSimilarityFn) return semanticSimilarityFn;
+  if (semanticSimilarityLoader) return semanticSimilarityLoader;
+  semanticSimilarityLoader = import("./narrative-lm")
+    .then((mod) => {
+      semanticSimilarityFn = mod.semanticSimilarity;
+      return semanticSimilarityFn;
+    })
+    .catch(() => null);
+  return semanticSimilarityLoader;
+}
+
+async function maybeRefineInstitutionalLabel(
+  name: string,
+  signals: EntityContextSignals,
+  previewBefore: string,
+  previewAfter: string,
+  rankedConfidence: number,
+  predictedLabel: "character" | "place" | "faction" | "entity",
+  enabled: boolean | undefined,
+): Promise<"character" | "place" | "faction" | "entity"> {
+  if (enabled === false) return predictedLabel;
+  if (!looksInstitutionalName(name)) return predictedLabel;
+  if (signals.charScore >= 2.25) return predictedLabel;
+  if (rankedConfidence >= 0.82 && predictedLabel === "entity") return predictedLabel;
+  if (signals.entityScore <= 0 && signals.factScore <= 0) return predictedLabel;
+
+  const similarity = await getSemanticSimilarityFn();
+  if (!similarity) return predictedLabel;
+
+  const query = `${previewBefore.slice(-80)} ${name} ${previewAfter.slice(0, 80)}`.replace(/\s+/g, " ").trim() || name;
+  const [entitySim, factionSim, placeSim] = await Promise.all([
+    similarity(query, ENTITY_SEMANTIC_ANCHORS.entity),
+    similarity(query, ENTITY_SEMANTIC_ANCHORS.faction),
+    similarity(query, ENTITY_SEMANTIC_ANCHORS.place),
+  ]);
+  const bestOther = Math.max(factionSim, placeSim);
+  if (entitySim >= 0.34 && entitySim - bestOther >= 0.07) return "entity";
+  if (factionSim >= 0.16 && factionSim - Math.max(entitySim, placeSim) >= 0.03) return "faction";
+  if (placeSim >= 0.2 && placeSim - Math.max(entitySim, factionSim) >= 0.04) return "place";
+  return predictedLabel;
 }
 
 // ── World data → entity map ────────────────────────────────────────────────
@@ -363,6 +483,9 @@ export function buildEntityMap(worldData: WorldData | undefined): {
   for (const f of worldData.factions ?? []) {
     push("faction", f.name, f.type, f.description, f.aliases);
   }
+  for (const e of worldData.entities ?? []) {
+    push("entity", e.name, e.type, e.description, e.aliases);
+  }
 
   return { map, names };
 }
@@ -396,23 +519,14 @@ export function autoExtractEntities(novel: Novel, minFreq = 3, max = 30): string
     .map(({ name }) => name);
 }
 
-function autoExtractKnownNamesFast(novel: Novel, minFreq = 3, max = 30): string[] {
+function autoExtractKnownNamesFast(novel: Novel, minFreq = 2, max = 30): string[] {
   const allText = novel.chapters.map((c) => c.content).join("\n");
   if (!allText) return [];
-  const freq = new Map<string, number>();
-  const pattern = /\b([A-Z][a-z]{1,}(?:\s[A-Z][a-z]{1,})?)\b/g;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(allText)) !== null) {
-    const name = match[1];
-    const first = name.split(" ")[0];
-    if (!STOPLIST.has(first) && name.length >= 3) {
-      freq.set(name, (freq.get(name) ?? 0) + 1);
-    }
-  }
+  const freq = collectTitleCaseCandidates(allText, 3);
 
   return [...freq.entries()]
-    .filter(([, n]) => n >= minFreq)
-    .sort((a, b) => b[1] - a[1])
+    .filter(([name, n]) => n >= minFreq && computeIDF(name) >= MIN_IDF_SOLO)
+    .sort((a, b) => b[0].length - a[0].length || b[1] - a[1])
     .slice(0, max)
     .map(([name]) => name);
 }
@@ -421,7 +535,7 @@ function autoExtractKnownNamesFast(novel: Novel, minFreq = 3, max = 30): string[
 
 const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|valley|plains|plain|desert|island|islands|lake|river|sea|ocean|bay|gulf|cove|creek|brook|stream|falls|harbor|harbour|port|city|town|village|hamlet|castle|keep|tower|gate|bridge|road|street|avenue|square|market|hall|inn|tavern|temple|shrine|palace|manor|estate|fortress|citadel|dungeon|ruins|cave|cavern|mine|district|quarter|ward|sector|region|territory|province|country|land|field|fields|garden|gardens|cliff|pass|hills|hill|marsh|swamp|bog|inlet|basin)\b/i;
 
-const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant)\b/i;
+const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|wing|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant)\b/i;
 
 const CHAR_TITLE_RE = /\b(lord|lady|sir|captain|master|doctor|dr|father|mother|queen|king|prince|princess|elder|chief|general|colonel|major|sergeant|inspector|professor|saint)\s*$/i;
 
@@ -437,11 +551,192 @@ export interface ScanResult {
   characters: string[];
   places:     string[];
   factions:   string[];
+  entities:   string[];
 }
 
 interface ScanAndClassifyOptions {
   adaptiveContext?: AdaptiveInferenceContext;
   predictionTraceOut?: { value: AdaptivePredictionTrace[] };
+  onProgress?: (progress: ScanProgress) => void;
+  signal?: AbortSignal;
+  yieldEvery?: number;
+  semanticEntityAssist?: boolean;
+}
+
+export interface ScanProgress {
+  stage: "extract" | "analyze" | "classify";
+  label: string;
+  detail: string;
+  completed: number;
+  total: number;
+  fraction: number;
+}
+
+const SCAN_STAGE_WEIGHTS = {
+  extract: 0.46,
+  analyze: 0.34,
+  classify: 0.20,
+} as const;
+
+function makeAbortError(): Error {
+  const error = new Error("World scan aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw makeAbortError();
+}
+
+function stageFraction(stage: ScanProgress["stage"], completed: number, total: number): number {
+  const safeTotal = Math.max(1, total);
+  const local = Math.max(0, Math.min(1, completed / safeTotal));
+  if (stage === "extract") return local * SCAN_STAGE_WEIGHTS.extract;
+  if (stage === "analyze") return SCAN_STAGE_WEIGHTS.extract + local * SCAN_STAGE_WEIGHTS.analyze;
+  return SCAN_STAGE_WEIGHTS.extract + SCAN_STAGE_WEIGHTS.analyze + local * SCAN_STAGE_WEIGHTS.classify;
+}
+
+function reportScanProgress(
+  onProgress: ScanAndClassifyOptions["onProgress"],
+  stage: ScanProgress["stage"],
+  completed: number,
+  total: number,
+  detail: string,
+) {
+  if (!onProgress) return;
+  const label =
+    stage === "extract"
+      ? "Reading chapters"
+      : stage === "analyze"
+        ? "Scoring name candidates"
+        : "Classifying entities";
+  onProgress({
+    stage,
+    label,
+    detail,
+    completed,
+    total,
+    fraction: stageFraction(stage, completed, total),
+  });
+}
+
+async function yieldToMainThread() {
+  await new Promise<void>((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+function buildExcludedNameSet(existing: WorldData | undefined): Set<string> {
+  const excluded = new Set<string>();
+  for (const e of [
+    ...(existing?.characters ?? []),
+    ...(existing?.places     ?? []),
+    ...(existing?.factions   ?? []),
+    ...(existing?.entities   ?? []),
+  ]) {
+    excluded.add(e.name.toLowerCase());
+    for (const a of e.aliases ?? []) excluded.add(a.toLowerCase());
+  }
+  return excluded;
+}
+
+function emptySignals(name: string): EntityContextSignals {
+  return {
+    occurrences: 0,
+    charScore: 0,
+    placeScore: 0,
+    factScore: 0,
+    entityScore: 0,
+    totalContext: 0,
+    previewBefore: "",
+    previewAfter: "",
+    isMultiWord: /\s/.test(name),
+    hasJoiner: /['’-]/.test(name),
+  };
+}
+
+function mergeSignals(target: EntityContextSignals, next: EntityContextSignals): EntityContextSignals {
+  target.occurrences += next.occurrences;
+  target.charScore += next.charScore;
+  target.placeScore += next.placeScore;
+  target.factScore += next.factScore;
+  target.entityScore += next.entityScore;
+  target.totalContext = target.charScore + target.placeScore + target.factScore + target.entityScore;
+  if ((!target.previewBefore && !target.previewAfter) && (next.previewBefore || next.previewAfter)) {
+    target.previewBefore = next.previewBefore;
+    target.previewAfter = next.previewAfter;
+  }
+  return target;
+}
+
+function hasCoordinatingJoiner(name: string): boolean {
+  return /\b(and|or)\b/i.test(name);
+}
+
+function containsWholeWordSequence(longerName: string, shorterName: string): boolean {
+  const longerWords = longerName.toLowerCase().split(/\s+/).filter(Boolean);
+  const shorterWords = shorterName.toLowerCase().split(/\s+/).filter(Boolean);
+  if (shorterWords.length === 0 || shorterWords.length >= longerWords.length) return false;
+
+  for (let index = 0; index <= longerWords.length - shorterWords.length; index += 1) {
+    let matches = true;
+    for (let offset = 0; offset < shorterWords.length; offset += 1) {
+      if (longerWords[index + offset] !== shorterWords[offset]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+function finalizeCandidates(
+  freqEntries: Array<[string, number]>,
+  signalMap: Map<string, EntityContextSignals>,
+  minFreq: number,
+): string[] {
+  const countMap = new Map(freqEntries.map(([name, count]) => [name.toLowerCase(), count]));
+  const candidates = freqEntries
+    .filter(([name, n]) => {
+      const wordCount = name.trim().split(/\s+/).filter(Boolean).length;
+      const allowLowFreqLongName = wordCount >= 3 && n >= Math.max(1, minFreq - 1);
+      if (n < minFreq && !allowLowFreqLongName) return false;
+      const signals = signalMap.get(name) ?? emptySignals(name);
+      const idf = computeIDF(name);
+      const minIdf = signals.totalContext >= CONTEXT_SIGNAL_THRESHOLD
+        ? MIN_IDF_WITH_CONTEXT
+        : MIN_IDF_SOLO;
+      return idf >= minIdf && shouldKeepEntityCandidate(name, n, signals, minFreq);
+    })
+    .sort((a, b) => {
+      const lengthDelta = b[0].length - a[0].length;
+      if (lengthDelta !== 0) return lengthDelta;
+      const aSignals = signalMap.get(a[0]) ?? emptySignals(a[0]);
+      const bSignals = signalMap.get(b[0]) ?? emptySignals(b[0]);
+      return candidateSortScore(b[1], computeIDF(b[0]), bSignals) - candidateSortScore(a[1], computeIDF(a[0]), aSignals);
+    })
+    .map(([name]) => name);
+
+  const kept: string[] = [];
+  for (const name of candidates) {
+    const lc = name.toLowerCase();
+    const count = countMap.get(lc) ?? 0;
+    if (!kept.some((candidate) => {
+      const candidateLc = candidate.toLowerCase();
+      if (candidateLc === lc) return false;
+      if (hasCoordinatingJoiner(candidate)) return false;
+      if (!containsWholeWordSequence(candidate, name)) return false;
+      return (countMap.get(candidateLc) ?? 0) >= count;
+    })) {
+      kept.push(name);
+    }
+  }
+  return kept;
 }
 
 /**
@@ -449,61 +744,93 @@ interface ScanAndClassifyOptions {
  * then classifies each into character / place / faction using name-internal
  * keywords and contextual signals from the surrounding prose.
  */
-export function scanAndClassify(
-  text: string,
+export async function scanAndClassify(
+  text: string | string[],
   existing: WorldData | undefined,
   minFreq = 2,
   options?: ScanAndClassifyOptions,
-): ScanResult {
-  // Build exclusion set from already-registered names + aliases
-  const excluded = new Set<string>();
-  for (const e of [
-    ...(existing?.characters ?? []),
-    ...(existing?.places     ?? []),
-    ...(existing?.factions   ?? []),
-  ]) {
-    excluded.add(e.name.toLowerCase());
-    for (const a of e.aliases ?? []) excluded.add(a.toLowerCase());
-  }
+): Promise<ScanResult> {
+  const chunks = (Array.isArray(text) ? text : [text]).filter((chunk) => !!chunk);
+  const excluded = buildExcludedNameSet(existing);
+  const predictionTraceOut = options?.predictionTraceOut;
+  const onProgress = options?.onProgress;
+  const signal = options?.signal;
+  const yieldEvery = Math.max(1, options?.yieldEvery ?? (chunks.length > 24 ? 2 : 1));
 
-  // Extract 1–3 word Title-Case sequences with frequency count
-  const freq = collectTitleCaseCandidates(text, 3);
-  for (const name of [...freq.keys()]) {
-    if (excluded.has(name.toLowerCase())) freq.delete(name);
-  }
+  const freq = new Map<string, number>();
+  const perChunkFreq: Map<string, number>[] = [];
+  const extractTotal = Math.max(1, chunks.length);
 
-  // Filter, sort longest-first (so longer names win de-overlap), then by freq
-  const candidates = [...freq.entries()]
-    .filter(([name, n]) => {
-      if (n < minFreq) return false;
-      const signals = computeEntityContextSignals(text, name);
-      const idf = computeIDF(name);
-      const minIdf = signals.totalContext >= CONTEXT_SIGNAL_THRESHOLD
-        ? MIN_IDF_WITH_CONTEXT
-        : MIN_IDF_SOLO;
-      return idf >= minIdf && shouldKeepEntityCandidate(name, n, signals, minFreq);
-    })
-    .sort((a, b) => b[0].length - a[0].length || b[1] - a[1])
-    .map(([name]) => name);
+  reportScanProgress(onProgress, "extract", 0, extractTotal, chunks.length === 1 ? "Chapter 1 / 1" : `Chapter 0 / ${chunks.length}`);
 
-  // De-overlap: drop shorter names that are strict substrings of a kept name
-  const kept: string[] = [];
-  for (const name of candidates) {
-    const lc = name.toLowerCase();
-    if (!kept.some((k) => k.toLowerCase() !== lc && k.toLowerCase().includes(lc))) {
-      kept.push(name);
+  for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+    throwIfAborted(signal);
+    const chunk = chunks[chunkIndex];
+    const chunkFreq = collectTitleCaseCandidates(chunk, 3);
+    const filtered = new Map<string, number>();
+
+    for (const [name, count] of chunkFreq) {
+      if (excluded.has(name.toLowerCase())) continue;
+      filtered.set(name, count);
+      freq.set(name, (freq.get(name) ?? 0) + count);
+    }
+
+    perChunkFreq.push(filtered);
+    reportScanProgress(
+      onProgress,
+      "extract",
+      chunkIndex + 1,
+      extractTotal,
+      chunks.length === 1 ? "Chapter 1 / 1" : `Chapter ${chunkIndex + 1} / ${chunks.length}`,
+    );
+
+    if (chunkIndex + 1 < chunks.length && (chunkIndex + 1) % yieldEvery === 0) {
+      await yieldToMainThread();
     }
   }
 
-  const result: ScanResult = { characters: [], places: [], factions: [] };
-  if (options?.predictionTraceOut) options.predictionTraceOut.value = [];
+  const candidateEntries = [...freq.entries()].filter(([name, count]) => {
+    if (count >= minFreq) return true;
+    const wordCount = name.trim().split(/\s+/).filter(Boolean).length;
+    return wordCount >= 3;
+  });
+  const signalMap = new Map<string, EntityContextSignals>();
+  const analyzeTotal = Math.max(1, candidateEntries.length);
+  reportScanProgress(onProgress, "analyze", 0, analyzeTotal, candidateEntries.length === 0 ? "No viable candidates" : `Candidate 0 / ${candidateEntries.length}`);
+
+  for (let candidateIndex = 0; candidateIndex < candidateEntries.length; candidateIndex += 1) {
+    throwIfAborted(signal);
+    const [name] = candidateEntries[candidateIndex];
+    const aggregate = emptySignals(name);
+
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      if (!perChunkFreq[chunkIndex]?.has(name)) continue;
+      mergeSignals(aggregate, computeEntityContextSignals(chunks[chunkIndex], name));
+    }
+
+    signalMap.set(name, aggregate);
+    reportScanProgress(onProgress, "analyze", candidateIndex + 1, analyzeTotal, `Candidate ${candidateIndex + 1} / ${candidateEntries.length}`);
+
+    if (candidateIndex + 1 < candidateEntries.length && (candidateIndex + 1) % yieldEvery === 0) {
+      await yieldToMainThread();
+    }
+  }
+
+  const kept = finalizeCandidates(candidateEntries, signalMap, minFreq);
+  const result: ScanResult = { characters: [], places: [], factions: [], entities: [] };
+  if (predictionTraceOut) predictionTraceOut.value = [];
+
+  const classifyTotal = Math.max(1, kept.length);
+  reportScanProgress(onProgress, "classify", 0, classifyTotal, kept.length === 0 ? "No entities to classify" : `Entity 0 / ${kept.length}`);
 
   for (let keptIndex = 0; keptIndex < kept.length; keptIndex++) {
+    throwIfAborted(signal);
     const name = kept[keptIndex];
-    const signals = computeEntityContextSignals(text, name);
+    const signals = signalMap.get(name) ?? emptySignals(name);
     const charScore = signals.charScore;
     const placeScore = signals.placeScore;
     const factScore = signals.factScore;
+    const entityScore = signals.entityScore;
     const previewBefore = signals.previewBefore;
     const previewAfter = signals.previewAfter;
 
@@ -561,10 +888,29 @@ export function scanAndClassify(
           char_score: charScore,
           place_score: placeScore,
           faction_score: factScore,
+          entity_score: entityScore,
           total_context: totalContext,
           idf,
           place_suffix: PLACE_SUFFIX_RE.test(name) ? 1 : 0,
           faction_suffix: FACTION_SUFFIX_RE.test(name) ? 1 : 0,
+        },
+      },
+      {
+        label: "entity",
+        source: "entity-heuristic",
+        baseScore: entityScore * 25 + idf * 8,
+        learnedAdjustment: 0,
+        finalScore: entityScore * 25 + idf * 8,
+        features: {
+          char_score: charScore,
+          place_score: placeScore,
+          faction_score: factScore,
+          entity_score: entityScore,
+          total_context: totalContext,
+          idf,
+          place_suffix: PLACE_SUFFIX_RE.test(name) ? 1 : 0,
+          faction_suffix: FACTION_SUFFIX_RE.test(name) ? 1 : 0,
+          entity_suffix: ENTITY_SUFFIX_RE.test(name) ? 1 : 0,
         },
       },
       {
@@ -577,6 +923,7 @@ export function scanAndClassify(
           char_score: charScore,
           place_score: placeScore,
           faction_score: factScore,
+          entity_score: entityScore,
           total_context: totalContext,
           idf,
           place_suffix: PLACE_SUFFIX_RE.test(name) ? 1 : 0,
@@ -585,10 +932,11 @@ export function scanAndClassify(
       },
     ];
 
-    const max = Math.max(charScore, placeScore, factScore);
-    let predictedLabel: "character" | "place" | "faction" = "character";
-    if (factScore === max && factScore > charScore) predictedLabel = "faction";
-    else if (placeScore === max && placeScore > charScore) predictedLabel = "place";
+    const max = Math.max(charScore, placeScore, factScore, entityScore);
+    let predictedLabel: "character" | "place" | "faction" | "entity" = "character";
+    if (entityScore === max && entityScore > Math.max(charScore, placeScore, factScore)) predictedLabel = "entity";
+    else if (factScore === max && factScore > Math.max(charScore, placeScore, entityScore)) predictedLabel = "faction";
+    else if (placeScore === max && placeScore > Math.max(charScore, factScore, entityScore)) predictedLabel = "place";
 
     const ranked = rerankAdaptiveCandidates(options?.adaptiveContext, entityCandidates, {
       task: "entity",
@@ -597,12 +945,21 @@ export function scanAndClassify(
       contextAfter: previewAfter.slice(0, 120),
     });
     const chosenLabel = ranked.candidates[0]?.label;
-    const finalLabel =
+    let finalLabel =
       options?.adaptiveContext && typeof chosenLabel === "string" && ranked.confidence >= 0.68
-        ? chosenLabel as "character" | "place" | "faction"
+        ? chosenLabel as "character" | "place" | "faction" | "entity"
         : predictedLabel;
+    finalLabel = await maybeRefineInstitutionalLabel(
+      name,
+      signals,
+      previewBefore,
+      previewAfter,
+      ranked.confidence,
+      finalLabel,
+      options?.semanticEntityAssist,
+    );
 
-    options?.predictionTraceOut?.value.push({
+    predictionTraceOut?.value.push({
       task: "entity",
       paragraphIndex: 0,
       spanIndex: keptIndex,
@@ -617,9 +974,15 @@ export function scanAndClassify(
       source: "entity-scan",
     });
 
-    if (finalLabel === "faction") { result.factions.push(name); continue; }
-    if (finalLabel === "place") { result.places.push(name); continue; }
-    result.characters.push(name);
+    if (finalLabel === "faction") result.factions.push(name);
+    else if (finalLabel === "place") result.places.push(name);
+    else if (finalLabel === "entity") result.entities.push(name);
+    else result.characters.push(name);
+
+    reportScanProgress(onProgress, "classify", keptIndex + 1, classifyTotal, `Entity ${keptIndex + 1} / ${kept.length}`);
+    if (keptIndex + 1 < kept.length && (keptIndex + 1) % yieldEvery === 0) {
+      await yieldToMainThread();
+    }
   }
 
   return result;
@@ -646,6 +1009,66 @@ export function resolveKnownNames(novel: Novel): string[] {
     return out;
   }
   return autoExtractKnownNamesFast(novel);
+}
+
+/**
+ * Lightweight current-text resolver for live highlight updates.
+ *
+ * Merges fast exact matches from already-known names with cheap title-case
+ * extraction from the current text so entity tags can appear almost
+ * immediately while the heavier chapter analysis catches up.
+ */
+export function resolveLiveKnownNames(text: string, seedNames: string[] = [], max = 24): string[] {
+  if (!text.trim()) return [];
+
+  const seedCanonical = new Map<string, string>();
+  for (const name of seedNames) {
+    const trimmed = name.trim();
+    if (!trimmed) continue;
+    seedCanonical.set(trimmed.toLowerCase(), trimmed);
+  }
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (name: string) => {
+    const canonical = seedCanonical.get(name.toLowerCase()) ?? name;
+    const key = canonical.toLowerCase();
+    if (!canonical || seen.has(key)) return;
+    seen.add(key);
+    out.push(canonical);
+  };
+
+  for (const name of seedNames) {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length < 3) continue;
+    if (text.includes(trimmed)) push(trimmed);
+  }
+
+  const freq = collectTitleCaseCandidates(text, 3);
+  const ranked = [...freq.entries()]
+    .map(([name, occurrences]) => {
+      const signals = computeEntityContextSignals(text, name);
+      const idf = computeIDF(name);
+      return { name, occurrences, signals, idf };
+    })
+    .filter(({ name, occurrences, signals, idf }) => {
+      if (seen.has(name.toLowerCase())) return false;
+      const wordCount = name.trim().split(/\s+/).filter(Boolean).length;
+      const minIdf = signals.totalContext >= CONTEXT_SIGNAL_THRESHOLD
+        ? MIN_IDF_WITH_CONTEXT
+        : MIN_IDF_SOLO;
+      if (idf < minIdf) return false;
+      if (occurrences >= 2) return shouldKeepEntityCandidate(name, occurrences, signals, 1);
+      return wordCount >= 2 && signals.totalContext >= 1.25;
+    })
+    .sort((a, b) => candidateSortScore(b.occurrences, b.idf, b.signals) - candidateSortScore(a.occurrences, a.idf, a.signals));
+
+  for (const candidate of ranked) {
+    push(candidate.name);
+    if (out.length >= max) break;
+  }
+
+  return out.slice(0, max);
 }
 
 // ── Regex pattern builder ──────────────────────────────────────────────────
@@ -728,7 +1151,7 @@ export function renameInBook(
 export function findEntityIndex(
   worldData: WorldData | undefined,
   name: string,
-): { kind: "characters" | "places" | "factions"; index: number } | null {
+): { kind: "characters" | "places" | "factions" | "entities"; index: number } | null {
   if (!worldData || !name) return null;
   const lc = name.toLowerCase();
   const match = (
@@ -747,5 +1170,7 @@ export function findEntityIndex(
   if (i >= 0) return { kind: "places", index: i };
   i = match(worldData.factions);
   if (i >= 0) return { kind: "factions", index: i };
+  i = match(worldData.entities);
+  if (i >= 0) return { kind: "entities", index: i };
   return null;
 }

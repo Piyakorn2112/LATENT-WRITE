@@ -25,6 +25,12 @@ import {
   Frame as _Fr,
   Pilcrow as _Pi,
   Highlighter as _Hi,
+  Layers as _Ly,
+  Wand2 as _W2,
+  ExternalLink as _El,
+  Maximize2 as _Mx,
+  Eye as _Ey,
+  EyeOff as _Eo,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -52,5 +58,11 @@ export const MinusIcon     = wrap(_Mn);
 export const ImageIcon     = wrap(_Im);
 export const TypeIcon      = wrap(_Ty);
 export const FrameIcon     = wrap(_Fr);
-export const PilcrowIcon   = wrap(_Pi);
-export const AnnotateIcon  = wrap(_Hi);
+export const PilcrowIcon       = wrap(_Pi);
+export const AnnotateIcon      = wrap(_Hi);
+export const LayersIcon        = wrap(_Ly);
+export const Wand2Icon         = wrap(_W2);
+export const ExternalLinkIcon  = wrap(_El);
+export const Maximize2Icon     = wrap(_Mx);
+export const EyeIcon           = wrap(_Ey);
+export const EyeOffIcon        = wrap(_Eo);

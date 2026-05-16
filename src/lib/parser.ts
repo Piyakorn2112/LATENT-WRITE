@@ -34,6 +34,7 @@ export function parseNovel(raw: string): Novel {
           if (Array.isArray(parsed.characters)) worldData.characters = parsed.characters;
           if (Array.isArray(parsed.places)) worldData.places = parsed.places;
           if (Array.isArray(parsed.factions)) worldData.factions = parsed.factions;
+          if (Array.isArray(parsed.entities)) worldData.entities = parsed.entities;
         } catch {
           /* malformed JSON — silently drop, novel still loads */
         }
@@ -80,7 +81,7 @@ export function parseNovel(raw: string): Novel {
   flush();
   const novel: Novel = { meta, chapters };
   if (
-    worldData.characters.length || worldData.places.length || worldData.factions.length
+    worldData.characters.length || worldData.places.length || worldData.factions.length || (worldData.entities?.length ?? 0) > 0
   ) {
     novel.worldData = worldData;
   }
@@ -96,13 +97,14 @@ export function serializeNovel(novel: Novel): string {
 
   // World data — embedded as a JSON block so the .txt round-trips losslessly
   const wd = novel.worldData;
-  if (wd && (wd.characters?.length || wd.places?.length || wd.factions?.length)) {
+  if (wd && (wd.characters?.length || wd.places?.length || wd.factions?.length || wd.entities?.length)) {
     out.push("===WORLD-DATA===");
     out.push(JSON.stringify(
       {
         characters: wd.characters ?? [],
         places: wd.places ?? [],
         factions: wd.factions ?? [],
+        entities: wd.entities ?? [],
       },
       null,
       2,

@@ -36,10 +36,18 @@ export interface WorldFaction {
   description?: string;
 }
 
+export interface WorldGenericEntity {
+  name: string;
+  type?: string;
+  aliases?: string[];
+  description?: string;
+}
+
 export interface WorldData {
   characters: WorldCharacter[];
   places: WorldPlace[];
   factions: WorldFaction[];
+  entities?: WorldGenericEntity[];
 }
 
 export interface Novel {
@@ -275,6 +283,54 @@ export interface AdaptiveLearningStore {
   version: 1;
   predictions: AdaptivePredictionRecord[];
   models: AdaptiveRankModelStore;
+}
+
+// ── Story Graph ───────────────────────────────────────────────────────────
+
+export interface MajorEvent {
+  label: string;
+  type: "climax" | "transition" | "introduction" | "confrontation" | "revelation" | "scene-break";
+  detailType?: string;
+  detailLabel?: string;
+  detailConfidence?: number;
+  tensionPosition: number; // 0–1 position within chapter
+  confidence: number;      // 0–1 scoring confidence
+}
+
+export interface ChapterGraphEntry {
+  chapterId: string;
+  chapterNumber: number;
+  chapterTitle: string;
+  /** ChapterRole string — stored as string to avoid cross-module import cycles. */
+  role: string;
+  tensionPeak: number;    // 0–1 normalized
+  tensionCurve: number[]; // 8-point downsampled for sparkline
+  charactersPresent: string[];
+  wordCount: number;
+  proseRegister: string;  // ProseRegister string
+  majorEvents: MajorEvent[];
+  lastUpdated: number;    // timestamp ms
+  contentHash: string;   // cheap dedup key — prevents re-running NLP if content unchanged
+}
+
+export interface StoryGraph {
+  version: 1;
+  entries: Record<string, ChapterGraphEntry>; // keyed by chapterId
+}
+
+// ── Renderer Review ───────────────────────────────────────────────────────
+
+export interface ReviewFlag {
+  type: string;
+  quote: string;
+  fix: string;
+}
+
+export interface ReviewResult {
+  chapterId: string;
+  model: string;
+  timestamp: number;
+  flags: ReviewFlag[];
 }
 
 export interface AdaptiveInferenceContext {

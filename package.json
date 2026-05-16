@@ -14,10 +14,16 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test:event-labels": "tsx scripts/test-event-labels.ts",
+    "test:event-lm": "tsx scripts/test-event-lm.ts",
+    "test:entity-scan": "tsx scripts/test-entity-scan.ts",
+    "test:local-review": "tsx scripts/test-local-review.ts",
+    "test:chapter-roles": "tsx scripts/test-chapter-roles.ts",
     "electron:dev": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder --mac --config electron-builder.yml"
   },
   "dependencies": {
+    "@xenova/transformers": "^2.17.2",
     "lucide-react": "^1.14.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
@@ -28,6 +34,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^41.4.0",
     "electron-builder": "^25.1.8",
+    "tsx": "^4.22.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.0"
   }

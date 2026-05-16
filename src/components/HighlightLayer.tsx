@@ -2,6 +2,7 @@ import React, { memo, useMemo, type ReactNode, type CSSProperties } from "react"
 import { PenLine } from "lucide-react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
+import { measurePerfSync } from "../lib/perf-trace";
 import { findActionSentences, attributeActor, type ActionPrediction, type ActionSpan } from "../lib/action-detect";
 import type { GrammarSuggestion } from "../lib/grammar-check";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
@@ -158,15 +159,6 @@ function renderInline(
           data-kind={d.gkind}
           style={baseStyle}
           onMouseDown={isStyleKind ? (e) => e.preventDefault() : undefined}
-          /* `.focus()` here is a backup for browsers that don't honour
-             the mousedown preventDefault — keeps typing focus on the
-             textarea when clicking a style underline mid-paragraph.
-             In annotation mode the textarea is intentionally blurred
-             (Editor.tsx) AND the speech/action spans wrap these
-             grammar children, so the inner refocus would steal focus
-             back to the textarea, scrolling the page to the textarea's
-             top edge — that's the "click jumps to top" bug. Skip the
-             refocus entirely in annotation mode. */
           onClick={isStyleKind && !annotationMode ? (e) => {
             (e.currentTarget as HTMLElement)
               .closest(".editor-wrap")
@@ -203,10 +195,10 @@ function renderInline(
 function renderActionable(
   text: string,
   actionsLocal: ActionSpan[],
-  actionColors: (string | null)[],   // parallel to actionsLocal — hex colours
-  actionActors: (string | null)[],   // parallel to actionsLocal — character NAMES
-  actionOverrideFlags: boolean[],    // parallel to actionsLocal — true if annotation override
-  actionReviewFlags: boolean[],      // parallel to actionsLocal — true if confidence is low
+  actionColors: (string | null)[],
+  actionActors: (string | null)[],
+  actionOverrideFlags: boolean[],
+  actionReviewFlags: boolean[],
   speakerNames: string[],
   palette: Map<string, ColorPair>,
   baseStyle: CSSProperties,
@@ -222,9 +214,9 @@ function renderActionable(
 
   const parts: ReactNode[] = [];
   let cursor = 0;
-  let i = 0;
 
-  for (const a of actionsLocal) {
+  for (let i = 0; i < actionsLocal.length; i++) {
+    const a = actionsLocal[i];
     if (a.start > cursor) {
       const chunk = text.slice(cursor, a.start);
       const grammarChunk = sliceGrammar(grammarLocal, cursor, a.start);
@@ -264,15 +256,14 @@ function renderActionable(
       </React.Fragment>,
     );
     cursor = a.end;
-    i++;
   }
 
   if (cursor < text.length) {
     const chunk = text.slice(cursor);
     const grammarChunk = sliceGrammar(grammarLocal, cursor, text.length);
     parts.push(
-      <span key={`${keyPrefix}-post${i}`}>
-        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${i}`, onEntityClick, annotationMode)}
+      <span key={`${keyPrefix}-post${actionsLocal.length}`}>
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode)}
       </span>,
     );
   }
@@ -366,10 +357,13 @@ function mapPositions(content: string, paragraphs: string[]): ParaPos[] {
 
 interface Props {
   content: string;
+  snapshotContent: string;
   paragraphs: string[];
   visible?: boolean;
   speechResults: ChapterAnalysisResult["speechResults"];
   knownNames?: string[];
+  liveKnownNames?: string[];
+  liveParagraphRange?: { start: number; end: number } | null;
   /** Grammar suggestions over the FULL `content` (absolute offsets). */
   grammarSuggestions?: GrammarSuggestion[];
   onEntityClick?: (name: string, anchor: DOMRect) => void;
@@ -385,21 +379,22 @@ interface Props {
 }
 
 function HighlightLayerImpl({
-  content, paragraphs, speechResults, knownNames, visible = true,
+  content, snapshotContent, paragraphs, speechResults, knownNames, liveKnownNames, liveParagraphRange, visible = true,
   grammarSuggestions = [], onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
   annotationOverrides, speechPredictions, actionPredictions,
 }: Props) {
-  // Building the highlight nodes is the heavy bit (string indexOf per
-  // paragraph + per-segment span construction + grammar slicing). Memoising
-  // here means the work runs only when content/paragraphs/grammar actually
-  // change, not on every parent re-render — and combined with React.memo
-  // and the editor's `useDeferredValue` on content it runs at low priority.
-  const nodes = useMemo<ReactNode[]>(() => {
-    if (!paragraphs.length || !content) return [];
+  const snapshotPlan = useMemo(() => {
+    const emptyPalette = new Map<string, ColorPair>();
+    if (!paragraphs.length) {
+      return {
+        speakerNames: [] as string[],
+        palette: emptyPalette,
+        paragraphNodes: [] as ReactNode[][],
+        paragraphMeta: [] as Array<ChapterAnalysisResult["speechResults"][number]["meta"] | undefined>,
+      };
+    }
 
-    const positions = mapPositions(content, paragraphs);
-    const out: ReactNode[] = [];
-    let cursor = 0;
+    const snapshotPositions = mapPositions(snapshotContent, paragraphs);
 
     const speakerSet = new Set<string>();
     for (const r of speechResults) {
@@ -429,6 +424,8 @@ function HighlightLayerImpl({
       }
     }
     const resolvedActionActorCache = new Map<string, string | null>();
+    const paragraphNodes: ReactNode[][] = [];
+    const paragraphMeta: Array<ChapterAnalysisResult["speechResults"][number]["meta"] | undefined> = [];
 
     // Carrying speaker: the most recent attributed speaker (confidence ≥ 0.65).
     let carryingSpeaker: string | null = null;
@@ -455,44 +452,17 @@ function HighlightLayerImpl({
     };
 
     for (let pi = 0; pi < paragraphs.length; pi++) {
-      const pos       = positions[pi];
+      const pos       = snapshotPositions[pi];
       const paraStart = pos.start;
       const paraEnd   = pos.end;
       const para      = paragraphs[pi];
       const segs      = speechResults[pi]?.segments ?? [];
       const meta      = speechResults[pi]?.meta;
 
-      // Gap (newlines / freshly-typed text) before this paragraph's slot.
-      if (paraStart > cursor) {
-        const gapText = content.slice(cursor, paraStart);
-        const grammarGap = sliceGrammar(grammarSuggestions, cursor, paraStart);
-        out.push(
-          <span key={`gap${pi}`}>
-            {renderInline(gapText, speakerNames, palette, { color: BASE_COLOR },
-              grammarGap, `gap${pi}`, onEntityClick, annotationMode)}
-          </span>,
-        );
-      }
-
-      if (!pos.matched) {
-        // Stale paragraph: render the corresponding slice of CURRENT content as
-        // plain text. Other paragraphs keep their colours.
-        const sliceText = content.slice(paraStart, paraEnd);
-        const grammarSlice = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
-        out.push(
-          <span key={`para${pi}-stale`}>
-            {renderInline(sliceText, speakerNames, palette, { color: BASE_COLOR },
-              grammarSlice, `para${pi}-stale`, onEntityClick, annotationMode)}
-          </span>,
-        );
-        cursor = paraEnd;
-        continue;
-      }
-
       // Action sentences are detected paragraph-locally (offsets relative to para).
       const paraActions = findActionSentences(para);
       // Grammar for THIS paragraph, shifted to para-relative.
-      const paraGrammar = sliceGrammar(grammarSuggestions, paraStart, paraEnd);
+      const paraGrammar = pos.matched ? sliceGrammar(grammarSuggestions, paraStart, paraEnd) : [];
 
       const paraNodes: ReactNode[] = [];
 
@@ -669,6 +639,117 @@ function HighlightLayerImpl({
         );
       }
 
+      paragraphNodes.push(paraNodes);
+      paragraphMeta.push(meta);
+    }
+
+    return { speakerNames, palette, paragraphNodes, paragraphMeta };
+  }, [snapshotContent, paragraphs, speechResults, knownNames, grammarSuggestions, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
+
+  const livePlan = useMemo(() => {
+    const names = [...new Set([...(liveKnownNames ?? []), ...snapshotPlan.speakerNames])];
+    return {
+      speakerNames: names,
+      palette: buildSpeakerPalette(names),
+    };
+  }, [liveKnownNames, snapshotPlan.speakerNames]);
+
+  // Keep the rich, analysed paragraph markup frozen to the last completed
+  // snapshot. While typing, only paragraph-position mapping updates.
+  const nodes = useMemo<ReactNode[]>(() => measurePerfSync("highlight.nodes", () => {
+    if (!paragraphs.length || !content) return [];
+
+    const positions = mapPositions(content, paragraphs);
+    const out: ReactNode[] = [];
+    let cursor = 0;
+    const snapshotActive = snapshotContent !== content;
+    const renderPlainText = (text: string, key: string) => {
+      if (!text) return null;
+      return (
+        <span key={key} style={{ color: BASE_COLOR }}>
+          {text}
+        </span>
+      );
+    };
+
+    const renderLiveText = (text: string, from: number, to: number, key: string) => {
+      if (!text) return null;
+      if (snapshotActive) {
+        if (!liveParagraphRange || to <= liveParagraphRange.start || from >= liveParagraphRange.end) {
+          return renderPlainText(text, key);
+        }
+
+        const overlapStart = Math.max(from, liveParagraphRange.start);
+        const overlapEnd = Math.min(to, liveParagraphRange.end);
+        const overlapLocalStart = overlapStart - from;
+        const overlapLocalEnd = overlapEnd - from;
+        const parts: ReactNode[] = [];
+
+        if (overlapLocalStart > 0) {
+          const beforeText = renderPlainText(text.slice(0, overlapLocalStart), `${key}-pre`);
+          if (beforeText) parts.push(beforeText);
+        }
+
+        const liveText = text.slice(overlapLocalStart, overlapLocalEnd);
+        if (liveText) {
+          parts.push(
+            <span key={`${key}-live`}>
+              {renderInline(
+                liveText,
+                livePlan.speakerNames,
+                livePlan.palette,
+                { color: BASE_COLOR },
+                [],
+                `${key}-live`,
+                onEntityClick,
+                annotationMode,
+              )}
+            </span>,
+          );
+        }
+
+        if (overlapLocalEnd < text.length) {
+          const afterText = renderPlainText(text.slice(overlapLocalEnd), `${key}-post`);
+          if (afterText) parts.push(afterText);
+        }
+
+        return <React.Fragment key={key}>{parts}</React.Fragment>;
+      }
+      const grammarSlice = sliceGrammar(grammarSuggestions, from, to);
+      return (
+        <span key={key}>
+          {renderInline(
+            text,
+            snapshotPlan.speakerNames,
+            snapshotPlan.palette,
+            { color: BASE_COLOR },
+            grammarSlice,
+            key,
+            onEntityClick,
+            annotationMode,
+          )}
+        </span>
+      );
+    };
+
+    for (let pi = 0; pi < paragraphs.length; pi++) {
+      const pos = positions[pi];
+      const paraStart = pos.start;
+      const paraEnd = pos.end;
+      const meta = snapshotPlan.paragraphMeta[pi];
+
+      if (paraStart > cursor) {
+        const gap = renderLiveText(content.slice(cursor, paraStart), cursor, paraStart, `gap${pi}`);
+        if (gap) out.push(gap);
+      }
+
+      if (!pos.matched) {
+        const stale = renderLiveText(content.slice(paraStart, paraEnd), paraStart, paraEnd, `para${pi}-stale`);
+        if (stale) out.push(stale);
+        cursor = paraEnd;
+        continue;
+      }
+
       const tension = meta?.sceneTension ?? "calm";
       out.push(
         <span key={`para${pi}`}>
@@ -677,25 +758,19 @@ function HighlightLayerImpl({
               <span style={sceneTagStyle(tension)}>| {meta.sceneLabel}</span>
             </span>
           )}
-          {paraNodes}
+          {snapshotPlan.paragraphNodes[pi]}
         </span>
       );
       cursor = paraEnd;
     }
 
     if (cursor < content.length) {
-      const trailText = content.slice(cursor);
-      const trailGrammar = sliceGrammar(grammarSuggestions, cursor, content.length);
-      out.push(
-        <span key="trail">
-          {renderInline(trailText, speakerNames, palette, { color: BASE_COLOR },
-            trailGrammar, "trail", onEntityClick, annotationMode)}
-        </span>,
-      );
+      const trail = renderLiveText(content.slice(cursor), cursor, content.length, "trail");
+      if (trail) out.push(trail);
     }
 
     return out;
-  }, [content, paragraphs, speechResults, knownNames, grammarSuggestions, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
+  }, 4, { snapshotActive: snapshotContent !== content, paragraphs: paragraphs.length }), [content, snapshotContent, paragraphs, grammarSuggestions, onEntityClick, annotationMode, snapshotPlan, livePlan, liveParagraphRange]);
 
   if (nodes.length === 0) return null;
 
@@ -711,6 +786,7 @@ function HighlightLayerImpl({
 }
 
 export const HighlightLayer = memo(HighlightLayerImpl);
+export default HighlightLayer;
 
 // Clip an ActionSpan list to a [from, to] window, returning ranges
 // shifted to be relative to `from`. Spans that don't fully fit are dropped.

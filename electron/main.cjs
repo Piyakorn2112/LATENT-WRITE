@@ -4,6 +4,32 @@ const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron')
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const https = require('https');
+
+// ── sharp stub ────────────────────────────────────────────────────────────────
+// @xenova/transformers/src/utils/image.js has a TOP-LEVEL STATIC ESM import:
+//   import sharp from 'sharp'
+// Node.js loads CJS modules for ESM callers via Module._load, passing the FULL
+// resolved path (/…/sharp/lib/index.js), not the bare 'sharp' specifier. We
+// must check for both. Returning a no-op Proxy prevents any sharp initialization
+// code from running. Text embedding never calls image methods so it's safe.
+;(function stubSharp() {
+  const Module = require('module');
+  const _orig  = Module._load;
+  const noop   = function() {};
+  const mock   = new Proxy(noop, {
+    get:       (_, k) => k === 'then' ? undefined : mock,
+    apply:     ()     => mock,
+    construct: ()     => ({}),
+  });
+  Module._load = function(id, parent, isMain) {
+    if (id === 'sharp' ||
+        (typeof id === 'string' && id.includes('node_modules/sharp/lib/index.js'))) {
+      return mock;
+    }
+    return _orig.call(this, id, parent, isMain);
+  };
+})();
 
 // Force Display P3 with D65 white-point so colours render the way Safari
 // does on macOS (warmer, slightly less saturated). Chromium otherwise picks
@@ -209,7 +235,115 @@ function createWindow() {
     shell.openExternal(url);
     return { action: 'deny' };
   });
+
+  // DevTools — auto-open in development + F12 / Cmd+Option+I shortcut
+  if (!app.isPackaged) {
+    win.webContents.on('did-finish-load', () => {
+      win.webContents.openDevTools({ mode: 'detach' });
+    });
+    win.webContents.on('before-input-event', (_e, input) => {
+      // F12  or  Cmd+Option+I  or  Ctrl+Shift+I
+      const devToolsKey =
+        input.key === 'F12' ||
+        (input.meta  && input.alt   && input.key === 'i') ||
+        (input.control && input.shift && input.key === 'I');
+      if (devToolsKey && input.type === 'keyDown') {
+        win.webContents.toggleDevTools();
+      }
+    });
+  }
 }
+
+// ── Narrative LM — sentence embedding (all-MiniLM-L6-v2) ──────────────────
+// Runs in the Node.js main process via onnxruntime-node (native binaries).
+// This sidesteps all browser WASM / web-worker restrictions in the renderer.
+// The model lives in dist/models/ (bundled) or public/models/ (dev).
+
+let _lmPipe    = null;
+let _lmLoading = null;
+let _lmStatus  = 'idle'; // 'idle' | 'loading' | 'ready' | 'offline'
+
+async function getLMPipeline() {
+  if (_lmPipe)    return _lmPipe;
+  if (_lmLoading) return _lmLoading;
+  _lmStatus  = 'loading';
+  _lmLoading = (async () => {
+    const modelBase = app.isPackaged
+      ? path.join(app.getAppPath(), 'dist',   'models') + path.sep
+      : path.join(app.getAppPath(), 'public', 'models') + path.sep;
+    console.log('[NarrativeLM main] Loading all-MiniLM-L6-v2 from:', modelBase);
+    const { pipeline, env } = await import('@xenova/transformers');
+    env.localModelPath   = modelBase;
+    env.allowLocalModels = true;
+    env.useBrowserCache  = false;
+    const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+    _lmPipe   = pipe;
+    _lmStatus = 'ready';
+    console.log('[NarrativeLM main] ✓ Model ready (onnxruntime-node native)');
+    return pipe;
+  })().catch((err) => {
+    _lmStatus  = 'offline';
+    _lmLoading = null; // allow retry
+    console.error('[NarrativeLM main] Failed to load model:', err.message);
+    throw err;
+  });
+  return _lmLoading;
+}
+
+// Warm as soon as ready — first embed is instant instead of blocking
+app.whenReady().then(() => getLMPipeline().catch(() => {}));
+
+ipcMain.handle('narrative-lm-embed', async (_event, text) => {
+  try {
+    const pipe = await getLMPipeline();
+    const out  = await pipe(String(text).slice(0, 500), { pooling: 'mean', normalize: true });
+    return Array.from(out.data.slice(0, 384));
+  } catch { return null; }
+});
+
+ipcMain.handle('narrative-lm-status', () => _lmStatus);
+
+// ── Renderer review — Anthropic API proxy ─────────────────────────────────
+// Makes the HTTPS call from the main process so the renderer's sandbox never
+// needs a direct network connection to api.anthropic.com (avoids CORS issues
+// and keeps the API key out of the renderer's memory).
+ipcMain.handle('renderer-review', (_event, { apiKey, model, systemPrompt, userMessage }) => {
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      model,
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userMessage }],
+    });
+    const options = {
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+    };
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, body: JSON.parse(data) });
+        } catch {
+          resolve({ ok: false, status: res.statusCode, body: { error: { message: data } } });
+        }
+      });
+    });
+    req.on('error', (err) => {
+      resolve({ ok: false, status: 0, body: { error: { message: err.message } } });
+    });
+    req.write(body);
+    req.end();
+  });
+});
 
 // ── PDF export ────────────────────────────────────────────────────────────
 // Renderer sends the full novel HTML string; we load it in a hidden window,

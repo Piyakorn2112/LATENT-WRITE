@@ -29,6 +29,11 @@ import {
   loadCurrentChapterId,
   saveCurrentChapterId,
 } from "./lib/storage";
+import {
+  loadStoryGraph, saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
+} from "./lib/story-graph";
+import { loadReviewResults, saveReviewResults } from "./lib/renderer-review";
+import type { StoryGraph, ReviewResult } from "./types";
 import { useAnalysis } from "./lib/use-analysis";
 import { lightweightPrescan } from "./lib/auto-intel";
 import { renameInBook, renameInText } from "./lib/world-data";
@@ -118,6 +123,11 @@ export default function App() {
   const [focusMode, setFocusMode] = useState(false);
   const [analysisPanelOpen, setAnalysisPanelOpen] = useState(false);
   const [prefs, setPrefs] = useState<Preferences>(() => loadPrefs());
+  const [storyGraph, setStoryGraph] = useState<StoryGraph>(() => loadStoryGraph());
+  // Ref so the storyGraph effect can read current entries without stale closure
+  const storyGraphRef = useRef(storyGraph);
+  useEffect(() => { storyGraphRef.current = storyGraph; }, [storyGraph]);
+  const [reviewResults, setReviewResults] = useState<Record<string, ReviewResult>>(() => loadReviewResults());
   // Onboarding auto-shows on first launch and is re-openable from the
   // Help menu. Initial value is derived from prefs once at mount.
   const [onboardingOpen, setOnboardingOpen] = useState<boolean>(
@@ -360,6 +370,38 @@ export default function App() {
     adaptiveContext: annotationStore.corrections.length > 0 ? adaptiveContext : undefined,
     collectPredictionDetails,
   });
+
+  // Update StoryGraph entry whenever analysis settles.
+  // Deferred with setTimeout so heavy NLP never blocks a keystroke frame.
+  // Content hash dedup prevents re-running NLP if the chapter text is unchanged.
+  useEffect(() => {
+    if (!analysisResult || !current || !current.content.trim()) return;
+    if (prefs.storyNlpEnabled === false) return; // user disabled background analysis
+    const chapterId = current.id;
+    const content   = current.content;
+    const hash = `${content.length}|${content.slice(0, 60)}`;
+
+    const timer = setTimeout(() => {
+      // Skip if content unchanged since last build
+      if (storyGraphRef.current.entries[chapterId]?.contentHash === hash) return;
+
+      const entry = buildChapterEntry(current, analysisResult, novel.worldData);
+      setStoryGraph(prev => ({ ...prev, entries: { ...prev.entries, [chapterId]: entry } }));
+
+      enrichChapterEntryWithLM(entry, content).then(enriched => {
+        setStoryGraph(prev => ({ ...prev, entries: { ...prev.entries, [enriched.chapterId]: enriched } }));
+      }).catch(() => {});
+    }, 120); // yield current frame; 120ms is imperceptible for graph updates
+
+    return () => clearTimeout(timer);
+  }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { saveStoryGraph(storyGraph); }, [storyGraph]);
+  useEffect(() => { saveReviewResults(reviewResults); }, [reviewResults]);
+
+  const handleReviewComplete = useCallback((result: ReviewResult) => {
+    setReviewResults((prev) => ({ ...prev, [result.chapterId]: result }));
+  }, []);
 
   const handleAnnotationConfirm = useCallback((correctedName: string | null) => {
     if (!annotationTarget || !currentId) { setAnnotationTarget(null); return; }
@@ -1045,10 +1087,15 @@ export default function App() {
         prefs={prefs}
         onSetPrefs={setPrefs}
         chapterId={currentId}
+        chapterTitle={current?.title}
         chapterContent={current?.content}
         allChapters={chapters}
         chapterIndex={currentIndex}
         worldData={novel.worldData}
+        storyGraph={storyGraph}
+        onSelectChapter={(id) => { setCurrentId(id); }}
+        reviewResult={currentId ? (reviewResults[currentId] ?? null) : null}
+        onReviewComplete={handleReviewComplete}
         onAutoParagraph={current ? handleAutoParagraph : undefined}
         autoParagraphing={autoParagraphing}
         onAutoSceneBreak={

@@ -1915,14 +1915,15 @@ function classifyChapterRole(
   register: ProseRegister,
 ): ChapterRole {
   const tensionVsAvg = comparative?.tensionVsAvg ?? 1;
-
-  // Climax: high sustained tension, well above arc average, events present
-  if (
-    peakTension === 'high' &&
-    avgTensionScore >= 0.5 &&
-    tensionVsAvg >= 1.3 &&
-    events.length > 0
-  ) return 'climax';
+  const eventful = events.length > 0;
+  const nonLiterary = register !== 'literary';
+  const shapeCanCarryClimax = eventful || register !== 'literary';
+  const sustainedHigh = avgTensionScore >= 0.50;
+  const strongOutlier = tensionVsAvg >= 1.30;
+  const elevatedOutlier = tensionVsAvg >= 1.10;
+  const climacticTexture = register === 'action' || avgDialogueDensity >= 0.18;
+  const latePeak = peakPosition != null && peakPosition >= 60;
+  const midPeak = peakPosition != null && peakPosition >= 35 && peakPosition <= 70;
 
   // Resolution: tension drops significantly from arc average, after high tension
   if (
@@ -1934,30 +1935,65 @@ function classifyChapterRole(
   // Breather: tension well below arc average, light pacing
   if (tensionVsAvg < 0.4 && avgDialogueDensity < 0.2) return 'breather';
 
-  // Pivot: calm tension but contains quiet pivot events
+  // Pivot: quiet turning point or a valley-shaped structural reversal.
   if (
-    peakTension === 'calm' &&
-    events.some(e => e === 'quiet pivot')
+    (events.some(e => e === 'quiet pivot') || arcShape === 'valley') &&
+    midPeak &&
+    tensionVsAvg >= 0.9 &&
+    tensionVsAvg < 1.5
   ) return 'pivot';
 
-  // Expository: world-building register, low dialogue, no high tension
+  // Expository: world-building register, low dialogue, not a strong tension outlier.
   if (
     register === 'expository' &&
     avgDialogueDensity < 0.15 &&
-    peakTension !== 'high'
+    (peakTension !== 'high' || (tensionVsAvg < 1.2 && avgTensionScore < 0.45))
   ) return 'expository';
 
-  // Buildup: tension rising relative to arc average, slope-up arc
+  // Climax: reserve this for the strongest structural peaks, not every spike.
+  if (peakTension === 'high' && shapeCanCarryClimax) {
+    if (
+      arcShape === 'plateau-high' &&
+      sustainedHigh &&
+      elevatedOutlier
+    ) return 'climax';
+
+    if (
+      arcShape === 'double-peak' &&
+      (
+        (sustainedHigh && strongOutlier) ||
+        (climacticTexture && avgTensionScore >= 0.44 && tensionVsAvg >= 1.18) ||
+        (nonLiterary && avgTensionScore >= 0.42 && tensionVsAvg >= 1.12)
+      )
+    ) return 'climax';
+
+    if (
+      arcShape === 'spike' &&
+      (
+        (avgTensionScore >= 0.48 && tensionVsAvg >= 1.35) ||
+        (climacticTexture && avgTensionScore >= 0.40 && tensionVsAvg >= 1.22) ||
+        (nonLiterary && avgTensionScore >= 0.34 && tensionVsAvg >= 1.12)
+      )
+    ) return 'climax';
+
+    if (
+      arcShape === 'slope-up' &&
+      avgTensionScore >= 0.58 &&
+      strongOutlier
+    ) return 'climax';
+
+    if (
+      arcShape === 'valley' &&
+      sustainedHigh &&
+      tensionVsAvg >= 1.6
+    ) return 'climax';
+  }
+
+  // Buildup: rising or elevated pressure that hasn't earned full climax status.
   if (
-    (arcShape === 'slope-up' || arcShape === 'valley') &&
-    (tensionVsAvg >= 0.9 || peakTension === 'rising')
+    (arcShape === 'slope-up' || arcShape === 'valley' || arcShape === 'double-peak' || arcShape === 'spike') &&
+    (elevatedOutlier || peakTension === 'rising' || avgTensionScore >= 0.4)
   ) return 'buildup';
-
-  // Spike climax: brief intense peak
-  if (arcShape === 'spike' && peakTension === 'high') return 'climax';
-
-  // Double-peak acts like a climax chapter
-  if (arcShape === 'double-peak') return 'climax';
 
   return 'standard';
 }

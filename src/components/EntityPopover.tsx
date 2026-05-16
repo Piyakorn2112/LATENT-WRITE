@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import type { WorldData, WorldCharacter } from "../types";
+import type { WorldData, WorldCharacter, WorldFaction, WorldGenericEntity, WorldPlace } from "../types";
 import { findEntityIndex } from "../lib/world-data";
 import { CloseIcon } from "./Icon";
+
+type DraftEntity = WorldCharacter | WorldPlace | WorldFaction | WorldGenericEntity;
 
 interface Props {
   /** Name as clicked in the document — may match a name OR an alias. */
@@ -28,9 +30,9 @@ export function EntityPopover({
   const foundRef = useRef(findEntityIndex(worldData, initialName));
 
   // Local working copy. Initialized from world data, or as a stub for new entities.
-  const [draft, setDraft] = useState<WorldCharacter>(() => {
+  const [draft, setDraft] = useState<DraftEntity>(() => {
     if (foundRef.current && worldData) {
-      const list = worldData[foundRef.current.kind] as WorldCharacter[];
+      const list = worldData[foundRef.current.kind] as DraftEntity[];
       return { ...list[foundRef.current.index] };
     }
     return { name: initialName, aliases: [], role: "", description: "" };
@@ -39,11 +41,12 @@ export function EntityPopover({
   // The "saved" name the document currently uses. Rename buttons only show
   // when the user has actually changed the name in the form.
   const originalNameRef = useRef(foundRef.current && worldData
-    ? (worldData[foundRef.current.kind] as WorldCharacter[])[foundRef.current.index].name
+    ? (worldData[foundRef.current.kind] as DraftEntity[])[foundRef.current.index].name
     : initialName,
   );
   const originalName = originalNameRef.current;
   const nameChanged = draft.name.trim().length > 0 && draft.name !== originalName;
+  const isCharacterKind = foundRef.current?.kind === "characters" || !("type" in draft);
 
   // ── Position the popover relative to the anchor ──
   const [pos, setPos] = useState<CSSProperties>({ visibility: "hidden" });
@@ -100,7 +103,7 @@ export function EntityPopover({
   // all fields EXCEPT name — the name field only updates local draft state
   // on each keystroke, then calls flushToWorld() on blur/Enter/rename to
   // avoid partial names lighting up in the text mid-typing.
-  const commit = (patch: Partial<WorldCharacter>) => {
+  const commit = (patch: Partial<DraftEntity>) => {
     const next = { ...draft, ...patch };
     setDraft(next);
 
@@ -108,10 +111,11 @@ export function EntityPopover({
       characters: worldData?.characters ?? [],
       places: worldData?.places ?? [],
       factions: worldData?.factions ?? [],
+      entities: worldData?.entities ?? [],
     };
 
     if (foundRef.current) {
-      const list = [...(wd[foundRef.current.kind] as WorldCharacter[])];
+      const list = [...(wd[foundRef.current.kind] as DraftEntity[])];
       list[foundRef.current.index] = next;
       onUpdate({ ...wd, [foundRef.current.kind]: list });
     } else {
@@ -190,12 +194,12 @@ export function EntityPopover({
       </label>
 
       <label className="world-field">
-        <span className="world-field-label">Role</span>
+        <span className="world-field-label">{isCharacterKind ? "Role" : "Type"}</span>
         <input
           className="world-input"
-          value={draft.role ?? ""}
-          onChange={(e) => commit({ role: e.target.value })}
-          placeholder="e.g. Protagonist"
+          value={(isCharacterKind ? (draft as WorldCharacter).role : (draft as WorldPlace).type) ?? ""}
+          onChange={(e) => commit(isCharacterKind ? { role: e.target.value } : { type: e.target.value })}
+          placeholder={isCharacterKind ? "e.g. Protagonist" : "e.g. Doctrine"}
         />
       </label>
 

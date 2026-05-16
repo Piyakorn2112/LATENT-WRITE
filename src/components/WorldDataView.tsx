@@ -5,10 +5,11 @@ import type {
   Novel,
   WorldData,
   WorldCharacter,
-  WorldPlace,
+  WorldGenericEntity,
   WorldFaction,
+  WorldPlace,
 } from "../types";
-import { ensureWorldData, scanAndClassify, type ScanResult } from "../lib/world-data";
+import { ensureWorldData, scanAndClassify, type ScanProgress, type ScanResult } from "../lib/world-data";
 import { parseNovel } from "../lib/parser";
 import {
   CloseIcon,
@@ -23,9 +24,10 @@ import {
   ListIcon,
 } from "./Icon";
 
-type Tab = "characters" | "places" | "factions";
-type Entity = WorldCharacter | WorldPlace | WorldFaction;
-type ScanCategory = "characters" | "places" | "factions";
+type Tab = "characters" | "places" | "factions" | "entities";
+type Entity = WorldCharacter | WorldPlace | WorldFaction | WorldGenericEntity;
+type ScanCategory = "characters" | "places" | "factions" | "entities";
+type ScanLabel = "character" | "place" | "faction" | "entity";
 type ScanPhase = "pick" | "scanning" | "review";
 
 type IntelMode = "off" | "low" | "default" | "high" | "auto";
@@ -46,16 +48,18 @@ interface Props {
   onClose: () => void;
 }
 
-const TAB_META: Record<Tab, { label: string; Icon: typeof UsersIcon; roleLabel: string }> = {
-  characters: { label: "Characters", Icon: UsersIcon, roleLabel: "Role" },
-  places:     { label: "Places",     Icon: MapPinIcon, roleLabel: "Type" },
-  factions:   { label: "Factions",   Icon: FlagIcon,   roleLabel: "Type" },
+const TAB_META: Record<Tab, { label: string; singular: string; Icon: typeof UsersIcon; roleLabel: string }> = {
+  characters: { label: "Characters", singular: "character", Icon: UsersIcon, roleLabel: "Role" },
+  places:     { label: "Places", singular: "place", Icon: MapPinIcon, roleLabel: "Type" },
+  factions:   { label: "Factions", singular: "faction", Icon: FlagIcon, roleLabel: "Type" },
+  entities:   { label: "Entities", singular: "entity", Icon: ListIcon, roleLabel: "Type" },
 };
 
 const SCAN_CATEGORY_META: Record<ScanCategory, { label: string; Icon: typeof UsersIcon }> = {
   characters: { label: "Characters", Icon: UsersIcon  },
   places:     { label: "Places",     Icon: MapPinIcon },
   factions:   { label: "Factions",   Icon: FlagIcon   },
+  entities:   { label: "Entities",   Icon: ListIcon   },
 };
 
 // Orb color per intel mode — vivid but not over-saturated
@@ -67,20 +71,67 @@ const ORB_COLOR: Record<IntelMode, string> = {
   high:    "#A828B8",
 };
 
-function newEntity(): Entity {
-  return { name: "", aliases: [], role: "", description: "" } as Entity;
-}
-
 const emptySelected = (): Record<ScanCategory, Set<string>> => ({
   characters: new Set(),
   places:     new Set(),
   factions:   new Set(),
+  entities:   new Set(),
 });
+
+const scanCategoryForLabel = (label: string | null): ScanCategory | null => {
+  if (label === "character") return "characters";
+  if (label === "place") return "places";
+  if (label === "faction") return "factions";
+  if (label === "entity") return "entities";
+  return null;
+};
+
+function entityRoleValue(entity: Entity | undefined): string {
+  if (!entity) return "";
+  return (entity as WorldCharacter).role
+    ?? (entity as WorldPlace).type
+    ?? (entity as WorldFaction).type
+    ?? (entity as WorldGenericEntity).type
+    ?? "";
+}
+
+function mergeEntityAliases(...groups: Array<string[] | undefined>): string[] {
+  const seen = new Set<string>();
+  const aliases: string[] = [];
+  for (const group of groups) {
+    for (const alias of group ?? []) {
+      const trimmed = alias.trim();
+      const key = trimmed.toLowerCase();
+      if (!trimmed || seen.has(key)) continue;
+      seen.add(key);
+      aliases.push(trimmed);
+    }
+  }
+  return aliases;
+}
+
+function buildMovedEntity(target: Tab, source: Entity, existingTarget?: Entity): Entity {
+  const shared = {
+    name: source.name,
+    aliases: mergeEntityAliases(existingTarget?.aliases, source.aliases),
+    description: existingTarget?.description?.trim() ? existingTarget.description : source.description,
+  };
+  const movedRole = entityRoleValue(existingTarget) || entityRoleValue(source);
+
+  if (target === "characters") {
+    return { ...shared, role: movedRole } satisfies WorldCharacter;
+  }
+
+  return { ...shared, type: movedRole } satisfies WorldPlace | WorldFaction | WorldGenericEntity;
+}
 
 export function WorldDataView({
   novel, currentChapterId, worldData, intelMode, adaptiveContext,
   onChange, onEntityPredictionBatch, onEntityPredictionFeedback, onRename, onClose,
 }: Props) {
+  const hasElectronNarrativeLM = typeof window !== "undefined" && !!((window as Window & {
+    electronAPI?: { narrativeLMEmbed?: ((text: string) => Promise<number[] | null>) | undefined };
+  }).electronAPI?.narrativeLMEmbed);
   const wd = useMemo(
     () => ensureWorldData({ meta: { title: "", author: "", description: "" }, chapters: [], worldData }),
     [worldData],
@@ -92,47 +143,75 @@ export function WorldDataView({
   // ── Scan state ──────────────────────────────────────────────────────────
   const [scanPhase,    setScanPhase]    = useState<ScanPhase | null>(null);
   const [scanMode,     setScanMode]     = useState<"chapter" | "novel">("chapter");
-  const [scanResults,  setScanResults]  = useState<ScanResult>({ characters: [], places: [], factions: [] });
+  const [scanResults,  setScanResults]  = useState<ScanResult>({ characters: [], places: [], factions: [], entities: [] });
   const [scanSelected, setScanSelected] = useState<Record<ScanCategory, Set<string>>>(emptySelected);
   const [scanPredictions, setScanPredictions] = useState<AdaptivePredictionTrace[]>([]);
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
 
   // Run heavy computation after the "scanning" loading state has painted
   useEffect(() => {
     if (scanPhase !== "scanning") return;
-    let raf1: number, raf2: number, timer: ReturnType<typeof setTimeout>;
+    let raf1 = 0;
+    let raf2 = 0;
+    const controller = new AbortController();
+
+    const scanTexts =
+      scanMode === "chapter"
+        ? [(novel.chapters.find((c) => c.id === currentChapterId)?.content ?? "")]
+        : novel.chapters.map((c) => c.content);
+
+    setScanProgress({
+      stage: "extract",
+      label: "Preparing scan",
+      detail: scanMode === "chapter"
+        ? "Chapter 1 / 1"
+        : `Chapter 0 / ${Math.max(1, novel.chapters.length)}`,
+      completed: 0,
+      total: Math.max(1, scanTexts.length),
+      fraction: 0,
+    });
+
     raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
-        timer = setTimeout(() => {
-          const text =
-            scanMode === "chapter"
-              ? (novel.chapters.find((c) => c.id === currentChapterId)?.content ?? "")
-              : novel.chapters.map((c) => c.content).join("\n\n");
+        void (async () => {
           const predictionTraceOut: { value: AdaptivePredictionTrace[] } = { value: [] };
-          const results = scanAndClassify(text, wd, scanMode === "chapter" ? 2 : 3, {
-            adaptiveContext,
-            predictionTraceOut,
-          });
-          setScanResults(results);
-          setScanPredictions(predictionTraceOut.value);
-          const scopeId = scanMode === "chapter"
-            ? `entity-scan:chapter:${currentChapterId ?? "none"}`
-            : "entity-scan:novel";
-          onEntityPredictionBatch?.(scopeId, predictionTraceOut.value);
-          setScanSelected({
-            characters: new Set(results.characters),
-            places:     new Set(results.places),
-            factions:   new Set(results.factions),
-          });
-          setScanPhase("review");
-        }, 0);
+          try {
+            const results = await scanAndClassify(scanTexts, wd, scanMode === "chapter" ? 1 : 2, {
+              adaptiveContext,
+              predictionTraceOut,
+              onProgress: setScanProgress,
+              signal: controller.signal,
+              semanticEntityAssist: hasElectronNarrativeLM,
+            });
+            if (controller.signal.aborted) return;
+            setScanResults(results);
+            setScanPredictions(predictionTraceOut.value);
+            const scopeId = scanMode === "chapter"
+              ? `entity-scan:chapter:${currentChapterId ?? "none"}`
+              : "entity-scan:novel";
+            onEntityPredictionBatch?.(scopeId, predictionTraceOut.value);
+            setScanSelected({
+              characters: new Set(results.characters),
+              places:     new Set(results.places),
+              factions:   new Set(results.factions),
+              entities:   new Set(results.entities),
+            });
+            setScanPhase("review");
+          } catch (error) {
+            if ((error as Error)?.name !== "AbortError") {
+              console.error(error);
+              setScanPhase(null);
+            }
+          }
+        })();
       });
     });
     return () => {
+      controller.abort();
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
-      clearTimeout(timer);
     };
-  }, [adaptiveContext, currentChapterId, novel.chapters, onEntityPredictionBatch, scanMode, scanPhase, wd]);
+  }, [adaptiveContext, currentChapterId, hasElectronNarrativeLM, novel.chapters, onEntityPredictionBatch, scanMode, scanPhase, wd]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -162,6 +241,7 @@ export function WorldDataView({
         characters: mergeList(wd.characters, imported.characters ?? []),
         places:     mergeList(wd.places,     imported.places     ?? []),
         factions:   mergeList(wd.factions,   imported.factions   ?? []),
+        entities:   mergeList(wd.entities ?? [], imported.entities ?? []),
       });
     };
     reader.readAsText(file);
@@ -174,7 +254,10 @@ export function WorldDataView({
   const updateList = (next: Entity[]) => onChange({ ...wd, [tab]: next });
 
   const handleAdd = () => {
-    const next = [...list, newEntity()];
+    const created = tab === "characters"
+      ? ({ name: "", aliases: [], role: "", description: "" } as Entity)
+      : ({ name: "", aliases: [], type: "", description: "" } as Entity);
+    const next = [...list, created];
     updateList(next);
     setSelected(next.length - 1);
   };
@@ -194,8 +277,41 @@ export function WorldDataView({
     updateList(next);
   };
 
+  const moveCurrentTo = (targetTab: Tab) => {
+    if (selected === null || !current || targetTab === tab) return;
+
+    const buckets: Record<Tab, Entity[]> = {
+      characters: [...wd.characters],
+      places: [...wd.places],
+      factions: [...wd.factions],
+      entities: [...(wd.entities ?? [])],
+    };
+
+    buckets[tab].splice(selected, 1);
+
+    const existingIndex = buckets[targetTab].findIndex(
+      (entry) => entry.name.trim().toLowerCase() === current.name.trim().toLowerCase(),
+    );
+    const moved = buildMovedEntity(targetTab, current, existingIndex >= 0 ? buckets[targetTab][existingIndex] : undefined);
+    if (existingIndex >= 0) buckets[targetTab][existingIndex] = moved;
+    else buckets[targetTab].push(moved);
+
+    onChange({
+      characters: buckets.characters as WorldCharacter[],
+      places: buckets.places as WorldPlace[],
+      factions: buckets.factions as WorldFaction[],
+      entities: buckets.entities as WorldGenericEntity[],
+    });
+    setTab(targetTab);
+    setSelected(existingIndex >= 0 ? existingIndex : buckets[targetTab].length - 1);
+  };
+
   const startScan = (mode: "chapter" | "novel") => {
     setScanMode(mode);
+    setScanResults({ characters: [], places: [], factions: [], entities: [] });
+    setScanPredictions([]);
+    setScanSelected(emptySelected());
+    setScanProgress(null);
     setScanPhase("scanning");
   };
 
@@ -209,7 +325,7 @@ export function WorldDataView({
   };
 
   const totalScanSelected =
-    scanSelected.characters.size + scanSelected.places.size + scanSelected.factions.size;
+    scanSelected.characters.size + scanSelected.places.size + scanSelected.factions.size + scanSelected.entities.size;
 
   const doRegister = () => {
     const mergeNew = <T extends { name: string }>(
@@ -236,6 +352,11 @@ export function WorldDataView({
         [...scanSelected.factions],
         (name) => ({ name, aliases: [], type: "", description: "" } as WorldFaction),
       ),
+      entities: mergeNew(
+        wd.entities ?? [],
+        [...scanSelected.entities],
+        (name) => ({ name, aliases: [], type: "", description: "" } as WorldGenericEntity),
+      ),
     });
     const scopeId = scanMode === "chapter"
       ? `entity-scan:chapter:${currentChapterId ?? "none"}`
@@ -243,8 +364,9 @@ export function WorldDataView({
     onEntityPredictionFeedback?.(
       scopeId,
       scanPredictions.map((prediction) => {
+        const category = scanCategoryForLabel(prediction.predictedLabel as ScanLabel | null);
         const correctedLabel =
-          prediction.predictedLabel && scanSelected[`${prediction.predictedLabel}s` as ScanCategory]?.has(prediction.spanText)
+          category && scanSelected[category]?.has(prediction.spanText)
             ? prediction.predictedLabel
             : null;
         return { prediction, correctedLabel };
@@ -254,7 +376,7 @@ export function WorldDataView({
   };
 
   const hasScanResults =
-    scanResults.characters.length + scanResults.places.length + scanResults.factions.length > 0;
+    scanResults.characters.length + scanResults.places.length + scanResults.factions.length + scanResults.entities.length > 0;
 
   const currentChapter = novel.chapters.find((c) => c.id === currentChapterId);
   const orbColor = ORB_COLOR[intelMode] ?? ORB_COLOR.default;
@@ -288,7 +410,7 @@ export function WorldDataView({
                 className="icon-btn"
                 onClick={() => setScanPhase("pick")}
                 aria-label="Auto-scan text for entities"
-                title="Auto-scan for characters, places & factions"
+                title="Auto-scan for characters, places, factions, and entities"
               >
                 <SparklesIcon size={16} />
               </button>
@@ -324,8 +446,24 @@ export function WorldDataView({
         {scanPhase === "pick" && (
           <div className="world-scan-pick" style={{ position: "relative", zIndex: 1 }}>
             <p className="world-scan-pick-title">
-              Scan the text and auto-register characters,<br />places, and factions.
+              Scan the text and auto-register characters,<br />places, factions, and institutional entities.
             </p>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 8,
+                padding: "0 2px 10px",
+              }}
+            >
+              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "var(--panel-text-4)" }}>
+                Entity LM
+              </span>
+              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "var(--panel-text-4)" }}>
+                {hasElectronNarrativeLM ? "Available" : "Electron required"}
+              </span>
+            </div>
             <div className="world-scan-mode-row">
               <button
                 className="world-scan-mode-btn"
@@ -358,6 +496,24 @@ export function WorldDataView({
             <span className="world-scan-loading-label">
               Scanning {scanMode === "chapter" ? "chapter" : "novel"}…
             </span>
+            {scanProgress && (
+              <div className="world-scan-progress-shell">
+                <div className="world-scan-progress-head">
+                  <span className="world-scan-progress-stage">{scanProgress.label}</span>
+                  <span className="world-scan-progress-percent">{Math.round(scanProgress.fraction * 100)}%</span>
+                </div>
+                <div className="world-scan-progress-track" aria-hidden="true">
+                  <div
+                    className="world-scan-progress-fill"
+                    style={{
+                      width: `${Math.max(3, Math.round(scanProgress.fraction * 100))}%`,
+                      "--spinner-color": orbColor,
+                    } as CSSProperties}
+                  />
+                </div>
+                <div className="world-scan-progress-detail">{scanProgress.detail}</div>
+              </div>
+            )}
           </div>
         )}
 
@@ -367,11 +523,11 @@ export function WorldDataView({
             {hasScanResults ? (
               <>
                 <p className="world-scan-pick-title world-scan-pick-title--sm">
-                  {scanResults.characters.length + scanResults.places.length + scanResults.factions.length} new
+                  {scanResults.characters.length + scanResults.places.length + scanResults.factions.length + scanResults.entities.length} new
                   {" "}{scanMode === "chapter" ? "in this chapter" : "across the novel"} — uncheck any to skip.
                 </p>
                 <div className="world-scan-list">
-                  {(["characters", "places", "factions"] as ScanCategory[]).map((cat) => {
+                  {(["characters", "places", "factions", "entities"] as ScanCategory[]).map((cat) => {
                     const items = scanResults[cat];
                     if (items.length === 0) return null;
                     const { label, Icon } = SCAN_CATEGORY_META[cat];
@@ -447,7 +603,7 @@ export function WorldDataView({
                 ) : (
                   list.map((e, i) => {
                     const roleish =
-                      (e as WorldCharacter).role ?? (e as WorldPlace).type ?? "";
+                      (e as WorldCharacter).role ?? (e as WorldPlace).type ?? (e as WorldGenericEntity).type ?? "";
                     return (
                       <button
                         key={i}
@@ -474,7 +630,7 @@ export function WorldDataView({
                 )}
                 <button className="world-add-btn" onClick={handleAdd}>
                   <PlusIcon size={14} />
-                  <span>Add {TAB_META[tab].label.slice(0, -1).toLowerCase()}</span>
+                  <span>Add {TAB_META[tab].singular}</span>
                 </button>
               </div>
 
@@ -482,8 +638,10 @@ export function WorldDataView({
                 {current ? (
                   <EntityForm
                     entity={current}
+                    currentTab={tab}
                     roleLabel={TAB_META[tab].roleLabel}
                     onPatch={patchCurrent}
+                    onMoveTo={moveCurrentTo}
                     onRename={onRename}
                     tabKey={`${tab}:${selected}`}
                     isCharacter={tab === "characters"}
@@ -491,7 +649,7 @@ export function WorldDataView({
                 ) : (
                   <div className="world-edit-empty">
                     {list.length === 0
-                      ? `Add a ${TAB_META[tab].label.slice(0, -1).toLowerCase()} to begin.`
+                      ? `Add a ${TAB_META[tab].singular} to begin.`
                       : "Select an entry to edit."}
                   </div>
                 )}
@@ -505,11 +663,13 @@ export function WorldDataView({
 }
 
 function EntityForm({
-  entity, roleLabel, onPatch, onRename, tabKey, isCharacter,
+  entity, currentTab, roleLabel, onPatch, onMoveTo, onRename, tabKey, isCharacter,
 }: {
   entity: Entity;
+  currentTab: Tab;
   roleLabel: string;
   onPatch: (patch: Partial<Entity>) => void;
+  onMoveTo: (target: Tab) => void;
   onRename: (oldName: string, newName: string, scope: "chapter" | "book") => void;
   tabKey: string;
   isCharacter: boolean;
@@ -518,7 +678,7 @@ function EntityForm({
   const roleField = (entity as WorldCharacter).role ?? (entity as WorldPlace).type ?? "";
 
   const setRole = (v: string) => {
-    if ("role" in entity) onPatch({ role: v } as Partial<Entity>);
+    if (isCharacter) onPatch({ role: v } as Partial<Entity>);
     else onPatch({ type: v } as Partial<Entity>);
   };
 
@@ -597,6 +757,24 @@ function EntityForm({
           rows={5}
         />
       </label>
+
+      <div className="world-field">
+        <span className="world-field-label">Move To</span>
+        <div className="world-rename-row">
+          {(Object.keys(TAB_META) as Tab[])
+            .filter((target) => target !== currentTab)
+            .map((target) => (
+              <button
+                key={target}
+                className="rename-btn"
+                onClick={() => onMoveTo(target)}
+                title={`Move this ${TAB_META[currentTab].singular} into ${TAB_META[target].label.toLowerCase()}`}
+              >
+                {TAB_META[target].label}
+              </button>
+            ))}
+        </div>
+      </div>
     </div>
   );
 }

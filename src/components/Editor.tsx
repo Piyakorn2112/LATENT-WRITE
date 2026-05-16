@@ -4,8 +4,12 @@ import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import type { ActionPrediction } from "../lib/action-detect";
 import { useDebouncedValue } from "../lib/use-debounced";
-import { HighlightLayer } from "./HighlightLayer";
+import { measurePerfSync } from "../lib/perf-trace";
+import { resolveLiveKnownNames } from "../lib/world-data";
+import * as HighlightLayerModule from "./HighlightLayer";
 import { checkGrammar } from "../lib/grammar-check";
+
+const HighlightLayer = HighlightLayerModule.HighlightLayer;
 
 interface Props {
   chapter: Chapter;
@@ -29,6 +33,29 @@ const ANALYSIS_PANEL_RESERVED_WIDTH = 410;
 const ANALYSIS_PANEL_GAP = 18;
 const DOCUMENT_LEFT_MIN_GAP = 16;
 
+interface ParagraphSlice {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function resolveParagraphSlice(content: string, caret: number): ParagraphSlice {
+  if (!content) return { start: 0, end: 0, text: "" };
+
+  const clampedCaret = Math.max(0, Math.min(caret, content.length));
+  let start = clampedCaret;
+  while (start > 0 && content[start - 1] !== "\n") start--;
+
+  let end = clampedCaret;
+  while (end < content.length && content[end] !== "\n") end++;
+
+  return {
+    start,
+    end,
+    text: content.slice(start, end),
+  };
+}
+
 export function Editor({
   chapter, onContentChange, analysisResult, knownNames, onEntityClick,
   annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides,
@@ -42,6 +69,7 @@ export function Editor({
   const wrapRef = useRef<HTMLDivElement>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const [compensationShift, setCompensationShift] = useState(0);
+  const [caretPosition, setCaretPosition] = useState(0);
 
   const resize = () => {
     const ta = taRef.current;
@@ -61,6 +89,9 @@ export function Editor({
   };
 
   useLayoutEffect(resize, [chapter.id]);
+  useEffect(() => {
+    setCaretPosition(0);
+  }, [chapter.id]);
   useEffect(() => {
     return () => {
       if (resizeFrameRef.current !== null) {
@@ -103,7 +134,25 @@ export function Editor({
   // HighlightLayer already falls back to plain current text for stale regions,
   // which avoids the compositor flip caused by hiding/showing the mirror.
   const settledContent = useDebouncedValue(chapter.content, typingSettleMs);
-  const isLiveTyping = settledContent !== chapter.content;
+  const analysisSnapshotContent = analysisResult?.contentSnapshot ?? settledContent;
+  const syncCaretPosition = useCallback((element: HTMLTextAreaElement | null) => {
+    if (!element) return;
+    const nextPosition = Math.max(0, Math.min(element.selectionStart ?? 0, element.value.length));
+    setCaretPosition((prev) => (prev === nextPosition ? prev : nextPosition));
+  }, []);
+  const activeParagraph = useMemo(
+    () => resolveParagraphSlice(chapter.content, caretPosition),
+    [chapter.content, caretPosition],
+  );
+  const liveKnownNames = useMemo(
+    () => measurePerfSync(
+      "highlight.live-known-names",
+      () => resolveLiveKnownNames(activeParagraph.text, knownNames ?? []),
+      1,
+      { chapterId: chapter.id, paragraphLength: activeParagraph.text.length },
+    ),
+    [chapter.id, activeParagraph.text, knownNames],
+  );
 
   // Build context.speechSpans from the speech detector so the grammar checker
   // can suppress style hints (filter, passive, adverb, wordy, cliché) inside
@@ -117,7 +166,7 @@ export function Editor({
     let from = 0;
     for (let i = 0; i < analysisResult.paragraphs.length; i++) {
       const para = analysisResult.paragraphs[i];
-      const idx = settledContent.indexOf(para, from);
+      const idx = analysisSnapshotContent.indexOf(para, from);
       if (idx < 0) continue;
       const segs = analysisResult.speechResults[i]?.segments ?? [];
       for (const s of segs) {
@@ -127,11 +176,11 @@ export function Editor({
       from = idx + para.length;
     }
     return spans.length ? spans : undefined;
-  }, [analysisResult, settledContent]);
+  }, [analysisResult, analysisSnapshotContent]);
 
   const grammarSuggestions = useMemo(
-    () => checkGrammar(settledContent, { context: { speechSpans } }),
-    [settledContent, speechSpans],
+    () => checkGrammar(analysisSnapshotContent, { context: { speechSpans } }),
+    [analysisSnapshotContent, speechSpans],
   );
 
   const recomputeCompensation = useCallback(() => {
@@ -194,10 +243,15 @@ export function Editor({
         {analysisResult && analysisResult.paragraphs.length > 0 && (
           <HighlightLayer
             content={chapter.content}
+            snapshotContent={analysisSnapshotContent}
             paragraphs={analysisResult.paragraphs}
             speechResults={analysisResult.speechResults}
             knownNames={knownNames}
-            grammarSuggestions={isLiveTyping ? [] : grammarSuggestions}
+            liveKnownNames={liveKnownNames}
+            liveParagraphRange={activeParagraph.end > activeParagraph.start
+              ? { start: activeParagraph.start, end: activeParagraph.end }
+              : null}
+            grammarSuggestions={grammarSuggestions}
             visible={hasHighlight}
             onEntityClick={onEntityClick}
             annotationMode={annotationMode}
@@ -215,8 +269,13 @@ export function Editor({
           placeholder="Begin writing…"
           onChange={(e) => {
             onContentChange(e.target.value);
+            syncCaretPosition(e.target);
             scheduleResize();
           }}
+          onSelect={(e) => syncCaretPosition(e.currentTarget)}
+          onClick={(e) => syncCaretPosition(e.currentTarget)}
+          onKeyUp={(e) => syncCaretPosition(e.currentTarget)}
+          onFocus={(e) => syncCaretPosition(e.currentTarget)}
           spellCheck
           tabIndex={annotationMode ? -1 : undefined}
         />

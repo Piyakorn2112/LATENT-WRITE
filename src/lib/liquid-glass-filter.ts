@@ -25,7 +25,7 @@
 
 const SVG_ID = "lg-filter-svg";
 const NS = "http://www.w3.org/2000/svg";
-const SELECTOR = ".liquid-glass, .analysis-tab";
+const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group";
 
 // ── Tunables ─────────────────────────────────────────────────────────────
 //

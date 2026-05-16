@@ -10,4 +10,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('menu-command', listener);
     return () => ipcRenderer.removeListener('menu-command', listener);
   },
+  rendererReview:     (params) => ipcRenderer.invoke('renderer-review', params),
+  narrativeLMEmbed:   (text)   => ipcRenderer.invoke('narrative-lm-embed', text),
+  narrativeLMStatus:  ()       => ipcRenderer.invoke('narrative-lm-status'),
 });
