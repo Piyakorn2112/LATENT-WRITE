@@ -31,6 +31,8 @@ import {
   Maximize2 as _Mx,
   Eye as _Ey,
   EyeOff as _Eo,
+  FolderOpen as _Fo,
+  ArrowUp as _Au,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -66,3 +68,5 @@ export const ExternalLinkIcon  = wrap(_El);
 export const Maximize2Icon     = wrap(_Mx);
 export const EyeIcon           = wrap(_Ey);
 export const EyeOffIcon        = wrap(_Eo);
+export const FolderIcon        = wrap(_Fo);
+export const ArrowUpIcon       = wrap(_Au);

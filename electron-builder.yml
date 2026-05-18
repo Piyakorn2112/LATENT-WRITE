@@ -7,6 +7,15 @@ files:
   - dist/**/*
   - electron/**/*
 
+extraResources:
+  - from: "../novel-writing-system"
+    to: "novel-writing-system"
+    filter:
+      - "**/*"
+      - "!.git/**"
+      - "!.DS_Store"
+      - "!node_modules/**"
+
 directories:
   output: release
   buildResources: build

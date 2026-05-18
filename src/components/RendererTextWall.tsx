@@ -26,6 +26,13 @@ const NOISE_SCALE_Y   = 0.25;
 const QUANTIZE_STEPS  = 4;
 const FRAME_SKIP      = 3; // draw every Nth frame → ~20fps at 60fps
 
+interface RendererTextWallProps {
+  fontScale?: number;
+  height?: number;
+  topOffset?: number;
+  opacity?: number;
+}
+
 type C3 = readonly [number, number, number];
 function mix(a: C3, b: C3, t: number): [number, number, number] {
   return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
@@ -33,7 +40,12 @@ function mix(a: C3, b: C3, t: number): [number, number, number] {
 
 const TEXT_LINES = getRendererTextLines(9);
 
-export function RendererTextWall() {
+export function RendererTextWall({
+  fontScale = 1,
+  height = 500,
+  topOffset = -20,
+  opacity = 1,
+}: RendererTextWallProps = {}) {
   const canvasRef  = useRef<HTMLCanvasElement>(null);
   const wrapRef    = useRef<HTMLDivElement>(null);
   const tRef       = useRef(0);
@@ -67,7 +79,7 @@ export function RendererTextWall() {
       ctx.clearRect(0, 0, w, h);
 
       const time     = tRef.current;
-      const fontSize = Math.max(9, Math.min(14, w * 0.032)); // was 9–12px
+      const fontSize = Math.max(9 * fontScale, Math.min(14 * fontScale, w * 0.032 * fontScale)); // was 9–12px
       const lineH    = fontSize * 1.9;
       ctx.font          = `700 ${fontSize}px Georgia, "Times New Roman", serif`;
       ctx.textBaseline  = "top";
@@ -142,9 +154,10 @@ export function RendererTextWall() {
         overflow: "hidden",
         pointerEvents: "none",
         zIndex: 0,
-        height: 500,
-        top: "-20px",
+        height,
+        top: `${topOffset}px`,
         filter: "blur(1px)",
+        opacity,
         // Tight top-only mask: full opacity for just the peak area (~12%),
         // fades to transparent by ~38%. Keeps the text wall contained to the
         // top of the panel without bleeding into the form controls below.

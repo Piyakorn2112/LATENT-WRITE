@@ -5,6 +5,8 @@ import { detectMajorEvents } from "./event-detect";
 
 const DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV ?? false;
 
+import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+
 const STORY_GRAPH_KEY = "glass-editor:story-graph-v1";
 
 export function emptyStoryGraph(): StoryGraph {
@@ -12,6 +14,7 @@ export function emptyStoryGraph(): StoryGraph {
 }
 
 export function loadStoryGraph(): StoryGraph {
+  if (isDesktopApp()) return emptyStoryGraph();
   try {
     const raw = localStorage.getItem(STORY_GRAPH_KEY);
     if (!raw) return emptyStoryGraph();
@@ -23,7 +26,14 @@ export function loadStoryGraph(): StoryGraph {
   }
 }
 
+export async function loadStoryGraphFromProject(): Promise<StoryGraph | null> {
+  const data = await loadProjectState<StoryGraph>("story-graph");
+  if (!data || data.version !== 1 || typeof data.entries !== "object") return null;
+  return data;
+}
+
 export function saveStoryGraph(g: StoryGraph): void {
+  if (isDesktopApp()) { saveProjectState("story-graph", g); return; }
   try { localStorage.setItem(STORY_GRAPH_KEY, JSON.stringify(g)); }
   catch { /* quota — ignore */ }
 }

@@ -9,6 +9,8 @@ import type {
   AnnotationCorrection,
 } from "../types";
 
+import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+
 const KEY = "glass-editor:adaptive-learning-v1";
 const MAX_PERSISTED_PREDICTIONS = 2000;
 
@@ -45,6 +47,7 @@ export function emptyAdaptiveStore(): AdaptiveLearningStore {
 }
 
 export function loadAdaptiveStore(): AdaptiveLearningStore {
+  if (isDesktopApp()) return emptyAdaptiveStore();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return emptyAdaptiveStore();
@@ -71,15 +74,22 @@ export function loadAdaptiveStore(): AdaptiveLearningStore {
   }
 }
 
+export async function loadAdaptiveStoreFromProject(): Promise<AdaptiveLearningStore | null> {
+  const data = await loadProjectState<AdaptiveLearningStore>("adaptive");
+  if (!data || data.version !== 1 || !Array.isArray(data.predictions) || !data.models) return null;
+  return data;
+}
+
 export function saveAdaptiveStore(store: AdaptiveLearningStore): void {
+  const persisted = {
+    ...store,
+    predictions: store.predictions
+      .filter((prediction) => prediction.correctedLabel !== undefined)
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .slice(-MAX_PERSISTED_PREDICTIONS),
+  };
+  if (isDesktopApp()) { saveProjectState("adaptive", persisted); return; }
   try {
-    const persisted = {
-      ...store,
-      predictions: store.predictions
-        .filter((prediction) => prediction.correctedLabel !== undefined)
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .slice(-MAX_PERSISTED_PREDICTIONS),
-    };
     localStorage.setItem(KEY, JSON.stringify(persisted));
   } catch {
     /* quota */

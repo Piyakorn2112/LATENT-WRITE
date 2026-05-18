@@ -2,7 +2,11 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { ChevronLeft, ChevronRight, CloseIcon } from "./Icon";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { ProseProfileWidget } from "./widgets/ProseProfileWidget";
+import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
+import { ContinuityWidget } from "./widgets/ContinuityWidget";
+import rendererLogoUrl from "../assets/renderer-logo.svg";
 import type { ChapterAnalysis } from "../lib/use-analysis";
+import type { Chapter, WorldData } from "../types";
 
 // Each "mode" reuses the production orb's pre-saturated palette. Keeps the
 // welcome experience visually identical to the toolbar orb users see later.
@@ -64,7 +68,7 @@ function CyclingOrb({ active }: { active: boolean }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
     // Only run the colour cycle while page 1 is the visible page. With the
-    // interval running while the user is on page 2/3/4, the orb's colour
+    // interval running while the user is on page 2/3/4/5, the orb's colour
     // would tick every 4 s in an off-screen page, triggering a full
     // CyclingOrb → HeroOrb subtree re-render. Pausing here keeps the
     // onboarding render budget free for whatever the user is actually
@@ -122,15 +126,62 @@ function MockProseProfileWidget() {
   return <ProseProfileWidget content={MOCK_PROSE_TEXT} />;
 }
 
+function MockStyleWatchWidget() {
+  return <StyleWatchWidget content={MOCK_PROSE_TEXT} />;
+}
+
+const MOCK_CONTINUITY_CHAPTERS: Chapter[] = [
+  {
+    id: "onb-ch-001",
+    number: 1,
+    title: "Bridge",
+    content: "Rain dragged across the Myrhold Bridge until midnight. Nora waited under the iron span, counting each footfall as the city went quiet around her.",
+  },
+  {
+    id: "onb-ch-002",
+    number: 2,
+    title: "Plaza",
+    content: "By noon Nora crossed the City Plaza with the rusted compass hidden in her sleeve. The rusted compass tapped against her wrist while vendors watched the square wake around her.",
+  },
+  {
+    id: "onb-ch-003",
+    number: 3,
+    title: "Tower",
+    content: "Toward evening Mira waited in the Glass Tower and listened for the bell. She never saw the plaza, and she never heard about the object Nora carried there.",
+  },
+];
+
+const MOCK_CONTINUITY_WORLD: WorldData = {
+  characters: [{ name: "Nora" }, { name: "Mira" }],
+  places: [{ name: "Myrhold Bridge" }, { name: "City Plaza" }, { name: "Glass Tower" }],
+  factions: [],
+  entities: [],
+};
+
+function MockContinuityWidget() {
+  return (
+    <ContinuityWidget
+      chapters={MOCK_CONTINUITY_CHAPTERS}
+      worldData={MOCK_CONTINUITY_WORLD}
+      chapterIndex={1}
+    />
+  );
+}
+
 // ─── Pages ────────────────────────────────────────────────────────────────
 
 interface OnbPageProps {
   active: boolean;
+  widthPercent: number;
   children: React.ReactNode;
 }
-function OnbPage({ active, children }: OnbPageProps) {
+function OnbPage({ active, widthPercent, children }: OnbPageProps) {
   return (
-    <div className={`onb-page ${active ? "onb-page--active" : ""}`} aria-hidden={!active}>
+    <div
+      className={`onb-page ${active ? "onb-page--active" : ""}`}
+      aria-hidden={!active}
+      style={{ flexBasis: `${widthPercent}%` }}
+    >
       {children}
     </div>
   );
@@ -143,21 +194,94 @@ const MODE_DESCRIPTIONS: Array<{ mode: IntelMode; title: string; sub: string }> 
   { mode: "auto",    title: "Auto",    sub: "Adapts per chapter" },
 ];
 
-const TIPS = [
-  { keys: ["⌘", "⏎"],       label: "New chapter" },
-  { keys: ["⌘", "F"],        label: "Find in chapter" },
-  { keys: ["⌘", "⇧", "F"],   label: "Find across project" },
-  { keys: ["⌘", "."],        label: "Focus mode" },
-  { keys: ["⌘", "⇧", "P"],   label: "Export PDF" },
+const SHORTCUT_GROUPS = [
+  {
+    title: "Project",
+    items: [
+      { keys: ["⌘", "⇧", "O"], label: "Open project" },
+      { keys: ["⌘", "I"], label: "Open chapter index" },
+      { keys: ["⌘", "J"], label: "Open world data" },
+      { keys: ["⌘", "S"], label: "Save current work" },
+    ],
+  },
+  {
+    title: "Writing",
+    items: [
+      { keys: ["⌘", "⏎"], label: "New chapter" },
+      { keys: ["⌥", "←"], label: "Previous chapter" },
+      { keys: ["⌥", "→"], label: "Next chapter" },
+      { keys: ["⌘", "⇧", "I"], label: "Cycle intelligence" },
+    ],
+  },
+  {
+    title: "Search",
+    items: [
+      { keys: ["⌘", "F"], label: "Find in chapter" },
+      { keys: ["⌘", "⇧", "F"], label: "Find across project" },
+      { keys: ["Esc"], label: "Close find or project search" },
+    ],
+  },
+  {
+    title: "View & Export",
+    items: [
+      { keys: ["⌘", "."], label: "Toggle focus mode" },
+      { keys: ["⌘", "O"], label: "Import .txt" },
+      { keys: ["⌘", "⇧", "E"], label: "Export .txt" },
+      { keys: ["⌘", "⇧", "P"], label: "Export PDF" },
+    ],
+  },
+] as const;
+
+const RENDERER_FILES = [
+  "novel.txt",
+  "drafts/ch012.md",
+  "review-logs/review_ch012.md",
+  "anchors/ch012_anchor.md",
 ];
+
+const RENDERER_COMMANDS = ["/draft 12", "/review 12", "/assemble 12"];
 
 interface Props {
   onClose: () => void;
 }
 
+const ONBOARDING_OVERLAY_BODY_CLASS = "onboarding-overlay-freeze";
+
 export function Onboarding({ onClose }: Props) {
   const [page, setPage] = useState(0);
-  const total = 4;
+  const total = 5;
+  const pageWidth = 100 / total;
+
+  useEffect(() => {
+    const body = document.body;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
+    const prevBodyOverflow = body.style.overflow;
+    const prevBodyPosition = body.style.position;
+    const prevBodyTop = body.style.top;
+    const prevBodyLeft = body.style.left;
+    const prevBodyWidth = body.style.width;
+    const prevBodyTouchAction = body.style.touchAction;
+
+    body.classList.add(ONBOARDING_OVERLAY_BODY_CLASS);
+    body.style.position = "fixed";
+    body.style.top = `${-scrollY}px`;
+    body.style.left = `${-scrollX}px`;
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    body.style.touchAction = "none";
+
+    return () => {
+      body.classList.remove(ONBOARDING_OVERLAY_BODY_CLASS);
+      body.style.overflow = prevBodyOverflow;
+      body.style.position = prevBodyPosition;
+      body.style.top = prevBodyTop;
+      body.style.left = prevBodyLeft;
+      body.style.width = prevBodyWidth;
+      body.style.touchAction = prevBodyTouchAction;
+      window.scrollTo(scrollX, scrollY);
+    };
+  }, []);
 
   // Mount-only escape handler — Esc dismisses with the same effect as Skip,
   // matching the macOS Creator-Studio onboarding pattern.
@@ -171,13 +295,13 @@ export function Onboarding({ onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Compute slide transform — keeps all 4 pages mounted but only the active
-  // one visible. The track is 400% of the stage width and each page is
-  // 25% of the track, so one "page step" is -25% of the track's own width
-  // (which is -100% of the stage, i.e. one full page-width of slide).
+  // Compute slide transform — keeps all pages mounted but only the active
+  // one visible. The track width and page basis both scale from `total`, so
+  // one page-step always resolves to exactly one stage width of movement.
   const slideStyle = useMemo<CSSProperties>(() => ({
-    transform: `translate3d(${-page * 25}%, 0, 0)`,
-  }), [page]);
+    width: `${total * 100}%`,
+    transform: `translate3d(${-page * pageWidth}%, 0, 0)`,
+  }), [page, pageWidth, total]);
 
   const isLast = page === total - 1;
 
@@ -204,7 +328,7 @@ export function Onboarding({ onClose }: Props) {
           <div className="onb-track" style={slideStyle}>
 
             {/* PAGE 1 — Welcome */}
-            <OnbPage active={page === 0}>
+            <OnbPage active={page === 0} widthPercent={pageWidth}>
               <div className="onb-hero onb-hero--orb">
                 <CyclingOrb active={page === 0} />
               </div>
@@ -216,7 +340,7 @@ export function Onboarding({ onClose }: Props) {
             </OnbPage>
 
             {/* PAGE 2 — Intelligence modes */}
-            <OnbPage active={page === 1}>
+            <OnbPage active={page === 1} widthPercent={pageWidth}>
               <div className="onb-hero onb-hero--modes">
                 {MODE_DESCRIPTIONS.map(({ mode, title, sub }) => (
                   <div className="onb-mode" key={mode}>
@@ -235,39 +359,109 @@ export function Onboarding({ onClose }: Props) {
             </OnbPage>
 
             {/* PAGE 3 — Live analysis */}
-            <OnbPage active={page === 2}>
+            <OnbPage active={page === 2} widthPercent={pageWidth}>
               <div className="onb-hero onb-hero--widgets">
                 <MockTensionWidget />
                 <MockProseProfileWidget />
+                <MockStyleWatchWidget />
+                <MockContinuityWidget />
               </div>
               <h1 className="onb-title onb-title--small">It reads as you write</h1>
               <p className="onb-subtitle">
-                Tension arc, prose profile, voice fingerprint, continuity, style watch — every
-                chapter gets a live pass. Numbers stay quiet until something interesting changes.
+                Tension arc, prose profile, continuity, style watch — the live widget stack keeps
+                layering signals around the chapter so the interesting changes surface without
+                pulling you out of the paragraph.
               </p>
             </OnbPage>
 
-            {/* PAGE 4 — Ready */}
-            <OnbPage active={page === 3}>
-              <div className="onb-hero onb-hero--tips">
-                <div className="onb-tip-grid">
-                  {TIPS.map((t) => (
-                    <div className="onb-tip" key={t.label}>
-                      <div className="onb-tip-keys">
-                        {t.keys.map((k, i) => (
-                          <span key={i} className="onb-key">{k}</span>
+            {/* PAGE 4 — Renderer */}
+            <OnbPage active={page === 3} widthPercent={pageWidth}>
+              <div className="onb-hero onb-hero--renderer">
+                <div className="onb-renderer-preview">
+                  <div className="onb-renderer-preview-top">
+                    <div className="onb-renderer-brand">
+                      <img src={rendererLogoUrl} alt="" className="onb-renderer-brand-logo" />
+                      <span className="onb-renderer-brand-title">Renderer Workspace</span>
+                    </div>
+                    <div className="onb-renderer-runtime">
+                      <span className="onb-renderer-pill">sonnet-4</span>
+                      <span className="onb-renderer-pill">high</span>
+                      <span className="onb-renderer-status" aria-hidden="true" />
+                    </div>
+                  </div>
+
+                  <div className="onb-renderer-preview-body">
+                    <div className="onb-renderer-tree">
+                      {RENDERER_FILES.map((file, index) => (
+                        <div
+                          key={file}
+                          className={`onb-renderer-tree-row${index === 1 ? " onb-renderer-tree-row--active" : ""}`}
+                        >
+                          {file}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="onb-renderer-viewer">
+                      <div className="onb-renderer-viewer-file">drafts/ch012.md</div>
+                      <p className="onb-renderer-copy">
+                        A full-screen desktop workspace for Claude sessions, slash commands,
+                        markdown responses, and file previews that stay tied to the current project.
+                      </p>
+                      <div className="onb-renderer-command-row">
+                        {RENDERER_COMMANDS.map((command) => (
+                          <span key={command} className="onb-renderer-command">{command}</span>
                         ))}
                       </div>
-                      <div className="onb-tip-label">{t.label}</div>
+                    </div>
+
+                    <div className="onb-renderer-chat">
+                      <div className="onb-renderer-bubble onb-renderer-bubble--user">/review 12</div>
+                      <div className="onb-renderer-bubble onb-renderer-bubble--assistant">
+                        Renderer keeps the chat session alive, streams tool activity, and opens the
+                        changed files beside the conversation instead of hiding them behind another app.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <h1 className="onb-title onb-title--small">Renderer keeps the project in context</h1>
+              <p className="onb-subtitle">
+                Use the desktop-only renderer when you want Claude to stay inside the same project:
+                persistent sessions, slash commands, file previews, and a fullscreen workspace tuned
+                to the same glass language as the rest of the app.
+              </p>
+            </OnbPage>
+
+            {/* PAGE 5 — Shortcuts */}
+            <OnbPage active={page === 4} widthPercent={pageWidth}>
+              <div className="onb-hero onb-hero--shortcuts">
+                <div className="onb-shortcut-grid">
+                  {SHORTCUT_GROUPS.map((group) => (
+                    <div key={group.title} className="onb-shortcut-group">
+                      <div className="onb-shortcut-group-title">{group.title}</div>
+                      <div className="onb-shortcut-group-list">
+                        {group.items.map((item) => (
+                          <div key={item.label} className="onb-shortcut-row">
+                            <div className="onb-tip-keys">
+                              {item.keys.map((key, index) => (
+                                <span key={`${item.label}-${index}`} className="onb-key">{key}</span>
+                              ))}
+                            </div>
+                            <div className="onb-tip-label">{item.label}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
               </div>
-              <h1 className="onb-title onb-title--small">Ready when you are</h1>
+              <h1 className="onb-title onb-title--small">Keyboard shortcuts, properly wired</h1>
               <p className="onb-subtitle">
-                Open the index <kbd className="onb-inline-kbd">⌘ I</kbd> to add the book's
-                title and author, then press <kbd className="onb-inline-kbd">⌘ ⏎</kbd> to
-                start a chapter. The intelligence layer follows along quietly.
+                In the desktop app these come from the native menu, so the accelerators stay consistent
+                across the whole workspace. In the browser, the writing/search/focus shortcuts follow the
+                same shape. On Windows and Linux, use <kbd className="onb-inline-kbd">Ctrl</kbd> in place
+                of <kbd className="onb-inline-kbd">⌘</kbd>.
               </p>
             </OnbPage>
 

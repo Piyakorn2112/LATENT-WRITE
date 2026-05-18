@@ -1,8 +1,10 @@
 import type { ReviewFlag, ReviewResult } from "../types";
+import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
 
 const REVIEW_RESULTS_KEY = "glass-editor:review-results-v1";
 
 export function loadReviewResults(): Record<string, ReviewResult> {
+  if (isDesktopApp()) return {};
   try {
     const raw = localStorage.getItem(REVIEW_RESULTS_KEY);
     if (!raw) return {};
@@ -10,7 +12,12 @@ export function loadReviewResults(): Record<string, ReviewResult> {
   } catch { return {}; }
 }
 
+export async function loadReviewResultsFromProject(): Promise<Record<string, ReviewResult> | null> {
+  return loadProjectState<Record<string, ReviewResult>>("review-results");
+}
+
 export function saveReviewResults(results: Record<string, ReviewResult>): void {
+  if (isDesktopApp()) { saveProjectState("review-results", results); return; }
   try { localStorage.setItem(REVIEW_RESULTS_KEY, JSON.stringify(results)); }
   catch { /* quota — ignore */ }
 }

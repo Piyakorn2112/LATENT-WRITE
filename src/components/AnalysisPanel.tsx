@@ -51,6 +51,7 @@ interface Props {
   chapterId?: string | null;
   chapterTitle?: string;
   chapterContent?: string;
+  needsProjectSaveWarning?: boolean;
   allChapters?: Chapter[];
   chapterIndex?: number;
   worldData?: WorldData;
@@ -65,6 +66,7 @@ interface Props {
   /** Renderer review result for the current chapter (null = not yet run). */
   reviewResult?: ReviewResult | null;
   onReviewComplete?: (result: ReviewResult) => void;
+  onProjectLoaded?: (novel: import("../types").Novel | null) => void;
 }
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
@@ -415,12 +417,12 @@ function WidgetSet({
 
 export function AnalysisPanel({
   result, prevResult, nextResult, isAnalyzing, intelMode, onSetIntelMode,
-  prefs, onSetPrefs, chapterId, chapterTitle, chapterContent,
+  prefs, onSetPrefs, chapterId, chapterTitle, chapterContent, needsProjectSaveWarning,
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
   onAutoSceneBreak, sceneBreaking, onOpenChange,
   storyGraph, onSelectChapter,
-  reviewResult, onReviewComplete,
+  reviewResult, onReviewComplete, onProjectLoaded,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
   // under high intelligence. Auto resolves dynamically per chapter, so we
@@ -687,10 +689,12 @@ export function AnalysisPanel({
               chapterId={chapterId ?? null}
               chapterContent={chapterContent}
               chapterTitle={chapterTitle}
+              needsProjectSaveWarning={needsProjectSaveWarning}
               reviewResult={reviewResult ?? null}
               onReviewComplete={(r) => onReviewComplete?.(r)}
               prefs={prefs}
               onSetPrefs={onSetPrefs}
+              onProjectLoaded={(n) => onProjectLoaded?.(n)}
             />
           </div>
         )}

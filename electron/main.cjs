@@ -6,6 +6,8 @@ const fs = require('fs');
 const os = require('os');
 const https = require('https');
 
+const draftGuardStateByContentsId = new Map();
+
 // ── sharp stub ────────────────────────────────────────────────────────────────
 // @xenova/transformers/src/utils/image.js has a TOP-LEVEL STATIC ESM import:
 //   import sharp from 'sharp'
@@ -30,6 +32,10 @@ const https = require('https');
     return _orig.call(this, id, parent, isMain);
   };
 })();
+
+// ── Project filesystem + Claude Code integration ─────────────────────────
+const { registerProjectFS } = require('./project-fs.cjs');
+const { registerClaudeCode } = require('./claude-code.cjs');
 
 // Force Display P3 with D65 white-point so colours render the way Safari
 // does on macOS (warmer, slightly less saturated). Chromium otherwise picks
@@ -70,6 +76,11 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
+        {
+          label: 'Open Project…',
+          accelerator: 'CmdOrCtrl+Shift+O',
+          click: () => sendMenuCommand('open-project'),
+        },
         {
           label: 'New Chapter',
           accelerator: 'CmdOrCtrl+Enter',
@@ -227,6 +238,37 @@ function createWindow() {
       sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  });
+
+  win.on('close', (event) => {
+    const draftState = draftGuardStateByContentsId.get(win.webContents.id);
+    if (!draftState?.hasUnsavedLocalDraft) return;
+
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning',
+      buttons: ['Choose Folder', 'Close Without Saving', 'Cancel'],
+      defaultId: 0,
+      cancelId: 2,
+      noLink: true,
+      message: 'This draft has no project folder yet.',
+      detail:
+        'Latent Write lets you start writing immediately, but this desktop draft is only temporary until you open or create a project folder. Choose a folder now to save it as novel.txt before quitting.',
+    });
+
+    if (choice === 0) {
+      event.preventDefault();
+      win.focus();
+      win.webContents.send('menu-command', 'open-project');
+      return;
+    }
+
+    if (choice === 2) {
+      event.preventDefault();
+    }
+  });
+
+  win.on('closed', () => {
+    draftGuardStateByContentsId.delete(win.webContents.id);
   });
 
   win.loadFile(path.join(__dirname, '../dist/index.html'));
@@ -429,7 +471,15 @@ ipcMain.handle('export-pdf', async (_event, html, suggestedName) => {
   }
 });
 
+ipcMain.on('draft-guard:update', (event, state) => {
+  draftGuardStateByContentsId.set(event.sender.id, {
+    hasUnsavedLocalDraft: !!state?.hasUnsavedLocalDraft,
+  });
+});
+
 app.whenReady().then(() => {
+  registerProjectFS();
+  registerClaudeCode();
   buildMenu();
   createWindow();
   app.on('activate', () => {

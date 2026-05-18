@@ -2,7 +2,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useRef } from "react";
 import {
   ChevronLeft, ChevronRight, BookOpenIcon,
-  PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon,
+  PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon, FolderIcon,
 } from "./Icon";
 
 export type IntelMode = "off" | "low" | "default" | "high" | "auto";
@@ -199,6 +199,7 @@ interface Props {
   onImport: () => void;
   onExport: () => void;
   onExportPdf: () => void;
+  onOpenProject: () => void;
   hasChapter: boolean;
   intelMode: IntelMode;
   /** When intelMode === "auto", the level the prescan currently resolves to. */
@@ -216,7 +217,7 @@ export function Toolbar({
   chapterTitle, onChapterTitleChange,
   currentIndex, totalChapters,
   onPrev, onNext, onOpenIndex, onOpenWorld, onAddChapter,
-  onImport, onExport, onExportPdf, hasChapter,
+  onImport, onExport, onExportPdf, onOpenProject, hasChapter,
   intelMode, intelResolvedLevel, onCycleIntel, isAnalyzing, funMode,
   annotationMode, onToggleAnnotation,
 }: Props) {
@@ -301,9 +302,15 @@ export function Toolbar({
         <button className="icon-btn" onClick={onAddChapter} aria-label="New chapter" title="New chapter">
           <PlusIcon />
         </button>
-        <button className="icon-btn" onClick={onImport} aria-label="Import .txt" title="Import .txt">
-          <UploadIcon />
-        </button>
+        {typeof window !== "undefined" && (window as Window & { electronAPI?: { isElectron?: boolean } }).electronAPI?.isElectron ? (
+          <button className="icon-btn" onClick={onOpenProject} aria-label="Open project" title="Open project folder">
+            <FolderIcon />
+          </button>
+        ) : (
+          <button className="icon-btn" onClick={onImport} aria-label="Import .txt" title="Import .txt">
+            <UploadIcon />
+          </button>
+        )}
         <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
           <DownloadIcon />
         </button>

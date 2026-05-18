@@ -36,39 +36,47 @@ flowchart TD
     B --> F[Story Graph Store]
     B --> G[AnalysisPanel]
     B --> H[Annotation + Adaptive Stores]
-    B --> I[Renderer Review]
-    B --> J[PDF Export]
+    B --> I[Renderer Workspace]
+    B --> J[Renderer Review]
+    B --> K[PDF Export]
 
-    C --> K[HighlightLayer]
+    C --> L[HighlightLayer]
     C --> B
 
-    D --> L[analysis-worker-client]
-    L --> M[analysis-worker]
-    M --> N[chapter-analysis-runner]
-    N --> O[speech-detect]
-    N --> P[action-detect]
-    N --> Q[chapter-analysis]
+    D --> M[analysis-worker-client]
+    M --> N[analysis-worker]
+    N --> O[chapter-analysis-runner]
+    O --> P[speech-detect]
+    O --> Q[action-detect]
+    O --> R[chapter-analysis]
     D --> G
     D --> F
-    D --> K
+    D --> L
 
-    E --> R[world-data.ts]
-    R --> K
-    R --> F
+    E --> S[world-data.ts]
+    S --> L
+    S --> F
     E --> B
 
-    F --> S[StoryGraphPanel]
-    S --> T[TimelineGraph]
-    S --> U[TimelineGraphFull]
+    F --> T[StoryGraphPanel]
+    T --> U[TimelineGraph]
+    T --> V[TimelineGraphFull]
 
     H --> D
-    H --> K
+    H --> L
     H --> G
 
-    I --> V[Electron IPC / remote model]
-    I --> G
+    I --> W[RendererPanel]
+    W --> X[RendererWorkspaceFull]
+    W --> Y[project-manager.ts]
+    Y --> Z[Electron preload]
+    Z --> AA[project-fs.cjs + claude-code.cjs]
+    AA --> AB[project files + Claude CLI]
 
-    J --> W[pdf-export.ts]
+    J --> AC[Electron IPC / remote review model]
+    J --> G
+
+    K --> AD[pdf-export.ts]
 ```
 
 ### Data Ownership Summary
@@ -79,6 +87,8 @@ flowchart TD
 - `world-data.ts` owns entity extraction, name resolution, and rename utilities.
 - `story-graph.ts` owns persisted chapter graph entries and asynchronous LM enrichment.
 - `StoryGraphPanel` and `TimelineGraphFull` are presentation layers over precomputed graph/timeline data.
+- `RendererPanel` owns renderer chat presentation, slash-command routing, project-backed message persistence, and the bridge into the fullscreen renderer workspace.
+- `project-manager.ts` is the typed renderer-side gateway to Electron project filesystem handlers and Claude session status/streaming.
 
 ## System 1: App Shell And State Orchestration
 
@@ -370,41 +380,59 @@ flowchart LR
 - Retraining or updating adaptive state after many corrections can add background cost.
 - Debug mode expands the amount of prediction detail retained and displayed.
 
-## System 7: Renderer Review And Export
+## System 7: Renderer Workspace, Review, And Export
 
 ```mermaid
 flowchart LR
-    A[AnalysisPanel / RendererPanel trigger] --> B[runRendererReview]
-    B --> C[Electron IPC]
-    C --> D[remote review model]
-    D --> E[ReviewResult]
-    E --> F[reviewResults store]
-    F --> G[RendererPanel UI]
+    A[Renderer slash commands / chat input] --> B[RendererPanel]
+    B --> C[project-manager.ts]
+    C --> D[Electron preload bridge]
+    D --> E[claude-code.cjs]
+    D --> F[project-fs.cjs]
+    E --> G[Claude CLI stream-json]
+    F --> H[project tree / file IO / project state]
+    G --> I[stream events + file change events]
+    H --> B
+    I --> B
+    B --> J[RendererWorkspaceFull]
+    B --> K[project-backed chat persistence]
 
-    H[PDF export overlay] --> I[pdf-export.ts]
-    I --> J[Electron save dialog / browser print flow]
+    L[AnalysisPanel review trigger] --> M[runRendererReview]
+    M --> N[Electron IPC / remote review model]
+    N --> O[ReviewResult]
+    O --> P[reviewResults store]
+
+    Q[PDF export overlay] --> R[pdf-export.ts]
+    R --> S[Electron save dialog / browser print flow]
 ```
 
 ### Input Channels
 
-- Current chapter text.
+- Project-backed chapter files, `novel.txt`, and renderer session state.
+- Free-form renderer chat messages and slash commands (`/draft`, `/review`, `/assemble`, etc.).
+- Current chapter text for legacy renderer review.
 - API key + selected review model.
 - Novel metadata and export settings.
 
 ### Output Channels
 
+- Persistent Claude sessions, streamed assistant/thinking/tool lanes, and file-change notifications.
+- Fullscreen renderer workspace with file tree, markdown/text preview, and resizable chat pane.
 - Renderer review flags in the analysis surface.
 - Persisted review results.
 - Exported PDF / print HTML.
 
 ### Performance Paths
 
+- Claude workspace operations run in Electron subprocesses and stay off the live editor path.
+- Renderer file-tree updates are narrow: tree listing is project-scoped, file preview only reads the selected file, and chat persistence is project-backed rather than global localStorage.
 - Review work is remote and asynchronous; it does not run in the live editor path.
 - PDF export is on-demand and isolated behind its own overlay.
 
 ### Current Bottlenecks
 
-- Renderer review depends on Electron and network/API latency.
+- Renderer sessions still depend on Claude CLI availability and model latency.
+- Project-wide file-change bursts can refresh the renderer workspace more often than a single-file editor would.
 - Review result persistence can grow over time with many chapters.
 - PDF export is bounded more by document size and asset generation than by UI render cost.
 
@@ -419,7 +447,7 @@ flowchart LR
     E --> F[per-element backdrop-filter url(#id)]
     F --> G[visible glass surfaces]
 
-    H[Fullscreen timeline overlay] --> I[body.timeline-overlay-freeze]
+    H[Timeline / renderer / onboarding overlays] --> I[body.*-overlay-freeze]
     I --> J[background glass flattened]
 ```
 
@@ -428,18 +456,19 @@ flowchart LR
 - DOM elements matching the glass selector.
 - Element width, height, and border radius.
 - Worker-generated displacement maps.
+- Overlay open/close state for timeline, renderer workspace, and onboarding.
 
 ### Output Channels
 
 - Per-element SVG filter ids applied as backdrop filters.
 - Glass surfaces across panels, tabs, overlays, and action groups.
-- Freeze mode for the fullscreen timeline overlay.
+- Freeze modes for the fullscreen timeline, fullscreen renderer workspace, and onboarding overlay.
 
 ### Performance Paths
 
 - Filter generation is idle-scheduled and offloaded to a worker.
 - Filter instances are cached and reference-counted.
-- Fullscreen timeline freeze mode disables background blur computation while keeping the overlay panel glass effect active.
+- Overlay freeze modes disable background blur computation while preserving each overlay's own blur plane and visual treatment.
 
 ### Current Bottlenecks
 
@@ -453,7 +482,7 @@ flowchart LR
 - High intelligence mode remains intentionally expensive; low mode is the fast writing-safe path.
 - Whole-book world/entity scans remain expensive on large manuscripts.
 - LocalStorage persistence still needs disciplined payload sizes for annotations/adaptive data.
-- Complex backdrop-filter stacks are still a compositor risk when not explicitly frozen or isolated.
+- Complex backdrop-filter stacks are still a compositor risk when not explicitly frozen or isolated, which is why timeline, renderer workspace, and onboarding all use body-freeze overlay modes.
 
 ## Files To Start With
 
@@ -466,4 +495,10 @@ flowchart LR
 - `src/lib/story-graph.ts` — chapter graph generation and persistence.
 - `src/components/StoryGraphPanel.tsx` — compact graph and fullscreen entry point.
 - `src/components/TimelineGraphFull.tsx` — fullscreen story timeline.
+- `src/components/RendererPanel.tsx` — renderer chat surface and slash-command routing.
+- `src/components/RendererWorkspaceFull.tsx` — fullscreen renderer workspace with file tree + viewer.
+- `src/components/Onboarding.tsx` — welcome flow, widget previews, renderer intro, and shortcut guide.
+- `src/lib/project-manager.ts` — typed bridge for Electron project/session APIs.
+- `electron/project-fs.cjs` — project directory structure, file IO, and project state handlers.
+- `electron/claude-code.cjs` — Claude CLI subprocess/session manager.
 - `src/lib/liquid-glass-filter.ts` — glass filter worker orchestration.

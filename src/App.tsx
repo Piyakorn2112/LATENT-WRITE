@@ -15,7 +15,7 @@ import { WordCount } from "./components/WordCount";
 import { ProjectSearch } from "./components/ProjectSearch";
 import { Onboarding } from "./components/Onboarding";
 import { PdfExportOverlay } from "./components/PdfExportOverlay";
-import { newChapter, parseNovel, serializeNovel, uid } from "./lib/parser";
+import { newChapter, parseNovel, serializeNovel, uid, emptyNovel } from "./lib/parser";
 import { autoParagraph } from "./lib/auto-paragraph";
 import { autoSceneBreaks } from "./lib/auto-scene-break";
 import {
@@ -25,14 +25,20 @@ import {
 } from "./lib/pdf-export";
 import {
   loadNovel,
+  loadNovelFromProject,
   saveNovel,
   loadCurrentChapterId,
+  loadCurrentChapterIdFromProject,
   saveCurrentChapterId,
+  clearProjectLocalStorage,
 } from "./lib/storage";
 import {
-  loadStoryGraph, saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
+  emptyStoryGraph,
+  loadStoryGraph, loadStoryGraphFromProject,
+  saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
 } from "./lib/story-graph";
-import { loadReviewResults, saveReviewResults } from "./lib/renderer-review";
+import { loadReviewResults, loadReviewResultsFromProject, saveReviewResults } from "./lib/renderer-review";
+import { getCurrentProject, reopenLastProject, openProject } from "./lib/project-manager";
 import type { StoryGraph, ReviewResult } from "./types";
 import { useAnalysis } from "./lib/use-analysis";
 import { lightweightPrescan } from "./lib/auto-intel";
@@ -43,6 +49,7 @@ import {
 } from "./lib/preferences";
 import {
   loadAnnotationStore,
+  loadAnnotationStoreFromProject,
   saveAnnotationStore,
   addCorrection,
   clearAnnotations,
@@ -53,6 +60,7 @@ import {
   computeAdaptiveMetrics,
   emptyAdaptiveStore,
   loadAdaptiveStore,
+  loadAdaptiveStoreFromProject,
   saveAdaptiveStore,
   upsertAdaptivePredictions,
 } from "./lib/adaptive-store";
@@ -67,15 +75,7 @@ import type {
   LearnedBias,
 } from "./types";
 
-declare global {
-  interface Window {
-    electronAPI?: {
-      exportPdf: (html: string, filename: string) => Promise<{ ok: boolean; canceled?: boolean; path?: string }>;
-      isElectron?: boolean;
-      onMenuCommand?: (cb: (cmd: string) => void) => () => void;
-    };
-  }
-}
+// Window.electronAPI type is declared in src/lib/project-manager.ts
 
 function totalWordsInNovel(novel: Novel): number {
   let n = 0;
@@ -84,6 +84,22 @@ function totalWordsInNovel(novel: Novel): number {
     if (t) n += t.split(/\s+/).length;
   }
   return n;
+}
+
+function hasDesktopDraftContent(novel: Novel): boolean {
+  if ((novel.meta.title || "").trim() && novel.meta.title.trim() !== "Untitled") return true;
+  if ((novel.meta.subtitle || "").trim()) return true;
+  if ((novel.meta.author || "").trim()) return true;
+  if ((novel.meta.description || "").trim()) return true;
+  if (novel.chapters.some((chapter) => chapter.title.trim() || chapter.content.trim())) return true;
+
+  const worldData = novel.worldData;
+  return !!worldData && (
+    (worldData.characters?.length ?? 0) > 0 ||
+    (worldData.places?.length ?? 0) > 0 ||
+    (worldData.factions?.length ?? 0) > 0 ||
+    (worldData.entities?.length ?? 0) > 0
+  );
 }
 
 export default function App() {
@@ -103,6 +119,89 @@ export default function App() {
   useEffect(() => {
     saveCurrentChapterId(currentId);
   }, [currentId]);
+
+  const hydrateProjectState = useCallback(async () => {
+    const [pNovel, pChapterId, pStoryGraph, pReviews, pAnnotations, pAdaptive] = await Promise.all([
+      loadNovelFromProject(),
+      loadCurrentChapterIdFromProject(),
+      loadStoryGraphFromProject(),
+      loadReviewResultsFromProject(),
+      loadAnnotationStoreFromProject(),
+      loadAdaptiveStoreFromProject(),
+    ]);
+
+    const nextNovel = pNovel ?? emptyNovel();
+    const nextChapterId = pChapterId && nextNovel.chapters.some((chapter) => chapter.id === pChapterId)
+      ? pChapterId
+      : nextNovel.chapters[0]?.id ?? null;
+    const nextStoryGraph = pStoryGraph ?? emptyStoryGraph();
+    const nextReviewResults = pReviews ?? {};
+    const nextAnnotationStore = pAnnotations ?? { version: 1, corrections: [] };
+    const nextAdaptiveStore = pAdaptive ?? emptyAdaptiveStore();
+
+    setNovel(nextNovel);
+    setCurrentId(nextChapterId);
+    baselineRef.current = totalWordsInNovel(nextNovel);
+    setStoryGraph(nextStoryGraph);
+    setReviewResults(nextReviewResults);
+    setAnnotationStore(nextAnnotationStore);
+    setAdaptiveStore(nextAdaptiveStore);
+    setAnnotationTarget(null);
+    setEntityPopover(null);
+
+    // Empty folders must become explicit blank projects so a renderer refresh
+    // cannot fall back to whatever was previously cached before Electron IPC hydrates.
+    if (!pNovel) saveNovel(nextNovel);
+    if (!pNovel || pChapterId !== nextChapterId) saveCurrentChapterId(nextChapterId);
+    if (!pStoryGraph) saveStoryGraph(nextStoryGraph);
+    if (!pReviews) saveReviewResults(nextReviewResults);
+    if (!pAnnotations) saveAnnotationStore(nextAnnotationStore);
+    if (!pAdaptive) saveAdaptiveStore(nextAdaptiveStore);
+  }, []);
+
+  // ── Desktop project hydration ──────────────────────────────────────────
+  // On mount in Electron: reopen the last project and load all state from
+  // the project filesystem. Desktop mode never reads/writes localStorage
+  // for project data — clear any stale keys left from earlier versions.
+  const [projectLoading, setProjectLoading] = useState(() => !!window.electronAPI);
+  const [desktopProjectOpen, setDesktopProjectOpen] = useState(false);
+  const syncDesktopProjectOpen = useCallback(async () => {
+    if (!window.electronAPI) {
+      setDesktopProjectOpen(false);
+      return;
+    }
+    const project = await getCurrentProject();
+    setDesktopProjectOpen(!!project);
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI) return;
+    clearProjectLocalStorage();
+    let cancelled = false;
+    (async () => {
+      const project = await reopenLastProject();
+      if (cancelled || !project) {
+        setDesktopProjectOpen(false);
+        setProjectLoading(false);
+        return;
+      }
+      setDesktopProjectOpen(true);
+      await hydrateProjectState();
+      if (cancelled) return;
+      setProjectLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [hydrateProjectState]);
+
+  const needsProjectSaveWarning = useMemo(
+    () => !!window.electronAPI && !desktopProjectOpen && hasDesktopDraftContent(novel),
+    [desktopProjectOpen, novel],
+  );
+
+  useEffect(() => {
+    window.electronAPI?.setDraftGuardState?.({ hasUnsavedLocalDraft: needsProjectSaveWarning });
+  }, [needsProjectSaveWarning]);
+
   const [indexOpen, setIndexOpen] = useState(false);
   const [worldOpen, setWorldOpen] = useState(false);
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
@@ -280,6 +379,18 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const firstRunRef = useRef(true);
   const hideTimerRef = useRef<number | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const cancelPendingProjectSave = useCallback(() => {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    if (hideTimerRef.current !== null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    setSavedVisible(false);
+  }, []);
 
   // Daily writing tracking — anchored on the *baseline* total at session start
   // for today's date. Words written today = current total − baseline. If the
@@ -326,20 +437,29 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [novel]);
 
-  // Persist on every change (debounced).
+  // Persist on every change (debounced). Skip during project hydration so
+  // the stale localStorage cache doesn't overwrite filesystem state.
   useEffect(() => {
     if (firstRunRef.current) {
       firstRunRef.current = false;
       return;
     }
-    const saveTimer = window.setTimeout(() => {
+    if (projectLoading) return;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
       saveNovel(novel);
       setSavedVisible(true);
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
       hideTimerRef.current = window.setTimeout(() => setSavedVisible(false), 1200);
     }, 350);
-    return () => window.clearTimeout(saveTimer);
-  }, [novel]);
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [novel, projectLoading]);
 
   // Persist prefs immediately — they're tiny.
   useEffect(() => { savePrefs(prefs); }, [prefs]);
@@ -402,6 +522,51 @@ export default function App() {
   const handleReviewComplete = useCallback((result: ReviewResult) => {
     setReviewResults((prev) => ({ ...prev, [result.chapterId]: result }));
   }, []);
+
+  const handleProjectLoaded = useCallback(async (incomingNovel: Novel | null) => {
+    cancelPendingProjectSave();
+    if (window.electronAPI) {
+      setProjectLoading(true);
+      try {
+        await hydrateProjectState();
+        await syncDesktopProjectOpen();
+      } finally {
+        setProjectLoading(false);
+      }
+      return;
+    }
+
+    if (incomingNovel && incomingNovel.chapters.length > 0) {
+      setNovel(incomingNovel);
+      setCurrentId(incomingNovel.chapters[0]?.id ?? null);
+      baselineRef.current = totalWordsInNovel(incomingNovel);
+    } else {
+      const empty = { ...emptyNovel() };
+      setNovel(empty);
+      setCurrentId(null);
+      baselineRef.current = 0;
+    }
+    setStoryGraph(emptyStoryGraph());
+    setReviewResults({});
+    setAnnotationStore({ version: 1, corrections: [] });
+    setAdaptiveStore(emptyAdaptiveStore());
+    setAnnotationTarget(null);
+    setEntityPopover(null);
+  }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen]);
+
+  const handleOpenProject = useCallback(async () => {
+    cancelPendingProjectSave();
+    setProjectLoading(true);
+    try {
+      const proj = await openProject();
+      if (!proj) return;
+      clearProjectLocalStorage();
+      await hydrateProjectState();
+      await syncDesktopProjectOpen();
+    } finally {
+      setProjectLoading(false);
+    }
+  }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen]);
 
   const handleAnnotationConfirm = useCallback((correctedName: string | null) => {
     if (!annotationTarget || !currentId) { setAnnotationTarget(null); return; }
@@ -842,6 +1007,7 @@ export default function App() {
     if (!window.electronAPI?.onMenuCommand) return;
     const off = window.electronAPI.onMenuCommand((cmd) => {
       switch (cmd) {
+        case "open-project":    handleOpenProject(); break;
         case "new-chapter":     handleAddChapter(); break;
         case "open-index":      setIndexOpen(true); break;
         case "open-world":      setWorldOpen(true); break;
@@ -859,7 +1025,7 @@ export default function App() {
       }
     });
     return off;
-  }, [handleAddChapter, handleImport, handleExport, handleExportPdf, flushSave, cycleIntel, handlePrev, handleNext]);
+  }, [handleAddChapter, handleImport, handleExport, handleExportPdf, flushSave, cycleIntel, handlePrev, handleNext, handleOpenProject]);
 
   // Intel-mode tint colour exposed as a single CSS variable on the app
   // root so consumers (editor scan-orb, auto-paragraph status pill,
@@ -918,6 +1084,7 @@ export default function App() {
         onImport={handleImport}
         onExport={handleExport}
         onExportPdf={handleExportPdf}
+        onOpenProject={handleOpenProject}
         hasChapter={!!current}
         intelMode={intelMode}
         intelResolvedLevel={intelMode === "auto" ? autoResolvedLevel : undefined}
@@ -1089,6 +1256,7 @@ export default function App() {
         chapterId={currentId}
         chapterTitle={current?.title}
         chapterContent={current?.content}
+        needsProjectSaveWarning={needsProjectSaveWarning}
         allChapters={chapters}
         chapterIndex={currentIndex}
         worldData={novel.worldData}
@@ -1096,6 +1264,7 @@ export default function App() {
         onSelectChapter={(id) => { setCurrentId(id); }}
         reviewResult={currentId ? (reviewResults[currentId] ?? null) : null}
         onReviewComplete={handleReviewComplete}
+        onProjectLoaded={handleProjectLoaded}
         onAutoParagraph={current ? handleAutoParagraph : undefined}
         autoParagraphing={autoParagraphing}
         onAutoSceneBreak={
@@ -1171,6 +1340,7 @@ export default function App() {
           onClose={() => setPdfExportOpen(false)}
         />
       )}
+
 
       <div className={`saved-indicator ${savedVisible ? "visible" : ""}`}>
         saved
