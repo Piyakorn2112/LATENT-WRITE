@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rendererLogoUrl from "../assets/renderer-logo.svg";
@@ -139,6 +139,20 @@ function renderTree(
       </div>
     );
   });
+}
+
+function PlainTextPreview({ content }: { content: string }) {
+  const lines = useMemo(() => content.split("\n"), [content]);
+
+  return (
+    <div className="renderer-full-viewer-prose renderer-full-viewer-prose--text">
+      {lines.map((line, index) => (
+        <div key={index} className="renderer-full-viewer-text-line">
+          {line.length > 0 ? line : "\u00A0"}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToken, chatPane, onClose }: Props) {
@@ -425,7 +439,7 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
                 </div>
               )}
               {selectedPath && isPreviewableFile(selectedPath) && !fileLoading && !fileError && selectedPath.toLowerCase().endsWith(".txt") && (
-                <pre className="renderer-full-viewer-prose renderer-full-viewer-prose--text">{fileContent}</pre>
+                <PlainTextPreview content={fileContent} />
               )}
             </div>
           </section>

@@ -245,20 +245,20 @@ function StoryGraphPanelImpl({
           <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
             {hasElectron ? (
               <>
-                <span style={{
-                  width: 6, height: 6, borderRadius: "50%",
-                  background: LM_STATUS_COLOR[lmStatus],
-                  display: "inline-block",
-                  boxShadow: lmStatus === "ready" ? `0 0 4px ${LM_STATUS_COLOR.ready}` : "none",
-                }} />
-                <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: LM_STATUS_COLOR[lmStatus] }}>
+                <span
+                  className="rp-chat-status-dot"
+                  data-state={lmStatus}
+                  title={`Local LM ${LM_STATUS_LABEL[lmStatus]}`}
+                />
+                <span className="renderer-full-status-label" style={{ color: LM_STATUS_COLOR[lmStatus] }}>
                   {LM_STATUS_LABEL[lmStatus]}
                 </span>
               </>
             ) : (
-              <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "var(--panel-text-4)" }}>
-                Electron required
-              </span>
+              <>
+                <span className="rp-chat-status-dot" data-state="offline" title="Local LM offline — Electron required" />
+                <span className="renderer-full-status-label">Electron required</span>
+              </>
             )}
           </div>
         </div>

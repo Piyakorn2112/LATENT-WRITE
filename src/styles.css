@@ -6061,12 +6061,14 @@ body {
   padding: 8px 12px;
   border-radius: 12px;
   border: 1px solid transparent;
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  background: transparent;
   color: var(--text-body);
   font-family: var(--font-body);
   font-size: 13px;
   line-height: 1.5;
   cursor: pointer;
+  margin-top: 4px;
+  margin-bottom: 4px;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 .project-search-row:hover {
@@ -9377,8 +9379,25 @@ body {
   background: #ef4444;
   flex-shrink: 0;
 }
+
 .rp-chat-status-dot[data-ok] {
   background: #22c55e;
+}
+
+.rp-chat-status-dot[data-state="idle"] {
+  background: var(--panel-text-4);
+}
+
+.rp-chat-status-dot[data-state="loading"] {
+  background: #f59e0b;
+}
+
+.rp-chat-status-dot[data-state="ready"] {
+  background: #10b981;
+}
+
+.rp-chat-status-dot[data-state="offline"] {
+  background: #f43f5e;
 }
 
 .renderer-full-status-label {
@@ -9433,18 +9452,28 @@ body {
 .rp-chat-messages::-webkit-scrollbar { display: none; }
 
 .renderer-full-chat .rp-chat-messages {
+  --overlay-scroll-edge-top: 30px;
+  --overlay-scroll-edge-bottom: 20px;
+  --overlay-scroll-pad-top: 8px;
+  --overlay-scroll-pad-bottom: 22px;
+  --overlay-scroll-inset-top: 6px;
+  --overlay-scroll-inset-bottom: 10px;
   padding-inline: 16px;
-  margin-top: 0;
+  contain: layout paint style;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  overscroll-behavior: contain;
 }
 
 .renderer-full-chat .rp-chat-input-area {
-  padding-left: 14px;
-  padding-right: 14px;
+  padding: 6px 14px 14px;
 }
 
 .renderer-full-chat .rp-chat-body {
   height: 100%;
-  padding-top: 14px;
+  contain: layout paint style;
+  transform: translateZ(0);
+  backface-visibility: hidden;
 }
 
 /* Empty state */
@@ -10239,6 +10268,8 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  background: color-mix(in srgb, var(--panel-text) 2%, transparent);
+  contain: layout paint style;
 }
 
 .renderer-full-section-header {
@@ -10384,6 +10415,10 @@ body {
 
 .renderer-full-viewer-scroll {
   padding: 20px 24px 28px;
+  contain: layout paint style;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  overscroll-behavior: contain;
 }
 
 .renderer-full-viewer-prose {
@@ -10397,8 +10432,17 @@ body {
 }
 
 .renderer-full-viewer-prose--text {
-  white-space: pre-wrap;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.renderer-full-viewer-text-line {
+  white-space: pre-wrap;
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-size: auto 22px;
 }
 
 .renderer-full-viewer-prose--markdown > :first-child {
@@ -10416,6 +10460,12 @@ body {
 .renderer-full-viewer-prose--markdown blockquote,
 .renderer-full-viewer-prose--markdown table {
   margin: 0 0 0.9em;
+}
+
+.renderer-full-viewer-prose--markdown > * {
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-size: auto 32px;
 }
 
 .renderer-full-viewer-prose--markdown h1,

@@ -381,7 +381,7 @@ export function Onboarding({ onClose }: Props) {
                   <div className="onb-renderer-preview-top">
                     <div className="onb-renderer-brand">
                       <img src={rendererLogoUrl} alt="" className="onb-renderer-brand-logo" />
-                      <span className="onb-renderer-brand-title">Renderer Workspace</span>
+                      <span className="onb-renderer-brand-title">Workspace</span>
                     </div>
                     <div className="onb-renderer-runtime">
                       <span className="onb-renderer-pill">sonnet-4</span>
