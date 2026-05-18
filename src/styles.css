@@ -3598,6 +3598,7 @@ body {
   padding: 0;
   will-change: transform;
   isolation: isolate;
+  contain: layout style;
 }
 
 /* When highlight is active, make the textarea text transparent so only
@@ -9704,6 +9705,70 @@ body {
   border: none;
   border-top: 1px solid var(--divider-line);
   margin: 1em 0;
+}
+
+/* ── Collapsible long content ───────────────────────────────────────────── */
+
+.rp-chat-markdown--clamped {
+  max-height: 320px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+}
+
+.rp-chat-expand-toggle {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 5px 0 1px;
+  background: none;
+  border: none;
+  border-top: 1px solid color-mix(in srgb, var(--panel-text) 10%, transparent);
+  color: var(--accent, #ff9c00);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  text-align: center;
+  opacity: 0.75;
+  transition: opacity 0.15s;
+}
+
+.rp-chat-expand-toggle:hover {
+  opacity: 1;
+}
+
+.rp-code-wrap {
+  position: relative;
+}
+
+.rp-code--clamped {
+  max-height: 200px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent 100%);
+}
+
+.rp-code-expand {
+  display: block;
+  width: 100%;
+  padding: 4px 0 0;
+  background: none;
+  border: none;
+  color: var(--accent, #ff9c00);
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: center;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+}
+
+.rp-code-expand:hover {
+  opacity: 1;
 }
 
 .rp-chat-markdown table {

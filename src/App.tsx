@@ -554,6 +554,16 @@ export default function App() {
     setEntityPopover(null);
   }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen]);
 
+  const handleNovelRefresh = useCallback(async (incomingNovel: Novel | null) => {
+    if (!incomingNovel || incomingNovel.chapters.length === 0) return;
+    setNovel(incomingNovel);
+    setCurrentId((prev) => {
+      if (prev && incomingNovel.chapters.some((c) => c.id === prev)) return prev;
+      return incomingNovel.chapters[0]?.id ?? null;
+    });
+    baselineRef.current = totalWordsInNovel(incomingNovel);
+  }, []);
+
   const handleOpenProject = useCallback(async () => {
     cancelPendingProjectSave();
     setProjectLoading(true);
@@ -1265,6 +1275,7 @@ export default function App() {
         reviewResult={currentId ? (reviewResults[currentId] ?? null) : null}
         onReviewComplete={handleReviewComplete}
         onProjectLoaded={handleProjectLoaded}
+        onNovelRefresh={handleNovelRefresh}
         onAutoParagraph={current ? handleAutoParagraph : undefined}
         autoParagraphing={autoParagraphing}
         onAutoSceneBreak={

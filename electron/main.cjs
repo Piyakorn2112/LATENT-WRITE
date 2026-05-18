@@ -42,6 +42,14 @@ const { registerClaudeCode } = require('./claude-code.cjs');
 // sRGB, which gave the editor a colder, punchier look on this user's monitor.
 app.commandLine.appendSwitch('force-color-profile', 'display-p3-d65');
 
+// GPU compositor tuning — tile-based rasterization on the GPU instead of
+// software raster, zero-copy texture uploads (avoids an extra memcpy per
+// tile on Apple Silicon), and bypass the Chromium GPU blocklist so Metal
+// acceleration is always used even on hardware Chromium hasn't certified.
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+app.commandLine.appendSwitch('ignore-gpu-blocklist');
+
 app.setName('Latent Write');
 
 // ── App menu (macOS-conventional) ─────────────────────────────────────────

@@ -61,6 +61,25 @@ function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+let _lastSpeakerNames: string[] | null = null;
+let _lastSpeakerKey: string = "";
+let _lastSpeakerRegex: RegExp | null = null;
+
+function getSpeakerRegex(speakerNames: string[]): RegExp | null {
+  if (speakerNames.length === 0) return null;
+  if (speakerNames === _lastSpeakerNames) return _lastSpeakerRegex;
+  const key = speakerNames.join("\0");
+  if (key === _lastSpeakerKey) {
+    _lastSpeakerNames = speakerNames;
+    return _lastSpeakerRegex;
+  }
+  const sorted = [...speakerNames].sort((a, b) => b.length - a.length).map(escapeRegex);
+  _lastSpeakerRegex = new RegExp(`\\b(?:${sorted.join("|")})\\b`, "gi");
+  _lastSpeakerKey = key;
+  _lastSpeakerNames = speakerNames;
+  return _lastSpeakerRegex;
+}
+
 // ─── Inline-level render: entity tags + grammar ghost text ─────────────────
 //
 // Walks `text` and emits ReactNodes, splitting at:
@@ -87,10 +106,9 @@ function renderInline(
 
   const decos: Deco[] = [];
 
-  if (speakerNames.length > 0) {
-    const sorted = [...speakerNames].sort((a, b) => b.length - a.length).map(escapeRegex);
-    const re = new RegExp(`\\b(?:${sorted.join("|")})\\b`, "gi");
-    for (const m of text.matchAll(re)) {
+  const entityRe = getSpeakerRegex(speakerNames);
+  if (entityRe) {
+    for (const m of text.matchAll(entityRe)) {
       const idx = m.index ?? 0;
       decos.push({ kind: "entity", start: idx, end: idx + m[0].length, matched: m[0] });
     }

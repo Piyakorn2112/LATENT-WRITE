@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -39,6 +39,7 @@ interface Props {
   prefs: Preferences;
   onSetPrefs: (next: Preferences) => void;
   onProjectLoaded: (novel: Novel | null) => void | Promise<void>;
+  onNovelRefresh: (novel: Novel | null) => void | Promise<void>;
 }
 
 interface ChatMessage {
@@ -131,6 +132,80 @@ function PlainTextBlock({ text, tone }: { text: string; tone?: "user" | "system"
   return <div className={`rp-chat-plain-text${tone ? ` rp-chat-plain-text--${tone}` : ""}`}>{text}</div>;
 }
 
+// ── Collapsible wrappers for long content ───────────────────────────────────
+
+const MSG_COLLAPSE_HEIGHT = 320;
+const CODE_COLLAPSE_HEIGHT = 200;
+
+function CollapsiblePre({ node, children, ...rest }: any) {
+  const ref = useRef<HTMLPreElement>(null);
+  const [collapsed, setCollapsed] = useState(true);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setOverflows(el.scrollHeight > CODE_COLLAPSE_HEIGHT);
+  });
+
+  const isCollapsed = overflows && collapsed;
+
+  return (
+    <div className="rp-code-wrap">
+      <pre ref={ref} className={isCollapsed ? "rp-code--clamped" : undefined} {...rest}>
+        {children}
+      </pre>
+      {overflows && (
+        <button type="button" className="rp-code-expand" onClick={() => setCollapsed(v => !v)}>
+          {collapsed ? "Expand" : "Collapse"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const MD_COMPONENTS: Record<string, React.ComponentType<any>> = { pre: CollapsiblePre };
+
+function AssistantBubble({ msg }: { msg: ChatMessage }) {
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [collapsed, setCollapsed] = useState(true);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    if (msg.streaming) return;
+    const el = bodyRef.current;
+    if (!el) return;
+    setOverflows(el.scrollHeight > MSG_COLLAPSE_HEIGHT);
+  }, [msg.content, msg.streaming]);
+
+  const isClamped = overflows && collapsed && !msg.streaming;
+
+  return (
+    <div className="rp-chat-bubble rp-chat-bubble--assistant">
+      <div className="rp-chat-message-shell rp-chat-message-shell--assistant">
+        <div
+          ref={bodyRef}
+          className={`rp-chat-markdown${isClamped ? " rp-chat-markdown--clamped" : ""}`}
+        >
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+            {msg.content}
+          </ReactMarkdown>
+        </div>
+        {msg.streaming && <span className="rp-chat-stream-cursor" aria-hidden="true" />}
+        {overflows && !msg.streaming && (
+          <button
+            type="button"
+            className="rp-chat-expand-toggle"
+            onClick={() => setCollapsed(v => !v)}
+          >
+            {collapsed ? "Show full response" : "Collapse"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Thinking bubble — collapsed by default, shows last 3 lines, expandable ──
 
 const THINKING_PREVIEW_LINES = 3;
@@ -181,16 +256,7 @@ function ChatMessageBubble({ msg }: { msg: ChatMessage }) {
   if (msg.role === "thinking") return <ThinkingBubble msg={msg} />;
 
   if (msg.role === "assistant") {
-    return (
-      <div className="rp-chat-bubble rp-chat-bubble--assistant">
-        <div className="rp-chat-message-shell rp-chat-message-shell--assistant">
-          <div className="rp-chat-markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-          </div>
-          {msg.streaming && <span className="rp-chat-stream-cursor" aria-hidden="true" />}
-        </div>
-      </div>
-    );
+    return <AssistantBubble msg={msg} />;
   }
 
   if (msg.role === "tool") {
@@ -228,6 +294,7 @@ export function RendererPanel({
   reviewResult: _reviewResult, onReviewComplete,
   prefs: _prefs, onSetPrefs: _onSetPrefs,
   onProjectLoaded,
+  onNovelRefresh,
 }: Props) {
   void _prefs; void _onSetPrefs; void _chapterTitle; void _reviewResult;
 
@@ -533,12 +600,12 @@ export function RendererPanel({
           fileRefreshTimerRef.current = null;
           setWorkspaceRefreshToken((value) => value + 1);
           getCurrentProject().then((p) => { if (p) setProject(p); });
-          loadNovelFromProject().then((novel) => { if (novel) onProjectLoaded(novel); });
+          loadNovelFromProject().then((novel) => { if (novel) onNovelRefresh(novel); });
         }, 600);
       },
     });
     return unsub;
-  }, [desktop, addFailureMsg, addSystemMsg, appendStreamChunk, finishStreaming, onProjectLoaded, setClaudeRuntimeActive, clearClaudeRuntimeActive]);
+  }, [desktop, addFailureMsg, addSystemMsg, appendStreamChunk, finishStreaming, onNovelRefresh, setClaudeRuntimeActive, clearClaudeRuntimeActive]);
 
   const streamingRef = useRef(false);
   streamingRef.current = streaming;
@@ -562,7 +629,17 @@ export function RendererPanel({
       scrollChatToEnd(useSmooth ? "smooth" : "instant");
     });
     return () => cancelAnimationFrame(frameId);
-  }, [messages, awaitingFirstChunk, workspaceOpen, scrollChatToEnd]);
+  }, [messages, awaitingFirstChunk, scrollChatToEnd]);
+
+  useEffect(() => {
+    if (!workspaceOpen) return;
+    let id1 = requestAnimationFrame(() => {
+      id1 = requestAnimationFrame(() => {
+        scrollChatToEnd("instant");
+      });
+    });
+    return () => cancelAnimationFrame(id1);
+  }, [workspaceOpen, scrollChatToEnd]);
 
   // ── Handlers ───────────────────────────────────────────────────────────
 

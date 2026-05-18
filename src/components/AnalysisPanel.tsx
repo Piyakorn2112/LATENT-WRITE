@@ -67,6 +67,7 @@ interface Props {
   reviewResult?: ReviewResult | null;
   onReviewComplete?: (result: ReviewResult) => void;
   onProjectLoaded?: (novel: import("../types").Novel | null) => void;
+  onNovelRefresh?: (novel: import("../types").Novel | null) => void;
 }
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
@@ -422,7 +423,7 @@ export function AnalysisPanel({
   onAutoParagraph, autoParagraphing,
   onAutoSceneBreak, sceneBreaking, onOpenChange,
   storyGraph, onSelectChapter,
-  reviewResult, onReviewComplete, onProjectLoaded,
+  reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
   // under high intelligence. Auto resolves dynamically per chapter, so we
@@ -695,6 +696,7 @@ export function AnalysisPanel({
               prefs={prefs}
               onSetPrefs={onSetPrefs}
               onProjectLoaded={(n) => onProjectLoaded?.(n)}
+              onNovelRefresh={(n) => onNovelRefresh?.(n)}
             />
           </div>
         )}

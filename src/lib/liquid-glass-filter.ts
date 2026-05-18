@@ -45,6 +45,18 @@ const SATURATE = "1.8";
 // on every resize-observer tick during animations.
 const CACHE_GRID = 16;
 
+// Internal rasterization resolution of the filter chain, as a fraction of
+// element size. The GPU computes all 7 filter primitives at this reduced
+// resolution and bilinearly upsamples the result. At 0.35 the compositor
+// processes ~12% of the pixel count per frame — equivalent GPU savings to
+// running at ~15fps on a 120Hz display, but without stutter because every
+// frame still gets a freshly upsampled result. The existing blur (BLUR_PX)
+// hides upscaling artifacts; refraction edges stay sharp because the bezel
+// is already anti-aliased in the displacement map (MAP_DIVISOR=7).
+const FILTER_RES_SCALE = 0.35;
+const FILTER_RES_MIN   = 48;
+const FILTER_RES_MAX   = 280;
+
 // LRU cap so long-running sessions with varied panel sizes don't accrete
 // hundreds of <filter> nodes in the DOM. Eviction also skips any filter
 // currently bound to a live element (refcount > 0), so this cap only
@@ -146,6 +158,10 @@ function createElNS(tag: string, attrs: Record<string, string>) {
   return e;
 }
 
+function clampRes(v: number): number {
+  return Math.max(FILTER_RES_MIN, Math.min(FILTER_RES_MAX, Math.round(v)));
+}
+
 function buildFilterEl(
   id: string,
   w: number,
@@ -153,15 +169,18 @@ function buildFilterEl(
   overflow: number,
   mapUrl: string,
 ): SVGFilterElement {
+  const totalW = w + 2 * overflow;
+  const totalH = h + 2 * overflow;
   const filter = createElNS("filter", {
     id,
     filterUnits: "userSpaceOnUse",
     primitiveUnits: "userSpaceOnUse",
     x: String(-overflow),
     y: String(-overflow),
-    width: String(w + 2 * overflow),
-    height: String(h + 2 * overflow),
+    width: String(totalW),
+    height: String(totalH),
     "color-interpolation-filters": "sRGB",
+    filterRes: `${clampRes(totalW * FILTER_RES_SCALE)} ${clampRes(totalH * FILTER_RES_SCALE)}`,
   }) as SVGFilterElement;
 
   filter.append(
