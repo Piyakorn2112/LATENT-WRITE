@@ -192,14 +192,17 @@ function isPathInsideProject(filePath, projectDir) {
   return resolved === normalizedProject || resolved.startsWith(normalizedProject + path.sep);
 }
 
-function extractToolPaths(event) {
+function extractMutatingToolPaths(event) {
   const paths = [];
   const walk = (v) => {
     if (!v || typeof v !== 'object') return;
     if (Array.isArray(v)) { v.forEach(walk); return; }
     if (v.type === 'tool_use' && v.input) {
+      const name = typeof v.name === 'string' ? v.name : '';
       const fp = v.input.file_path || v.input.path;
-      if (fp) paths.push(fp);
+      if (fp && (name === 'Write' || name === 'Edit')) {
+        paths.push({ filePath: fp, toolName: name });
+      }
     }
     if (v.message) walk(v.message);
     if (v.content) walk(v.content);
@@ -224,13 +227,13 @@ function attachStructuredOutput(proc, initialSessionId, onAssistantText, safeCwd
       }
 
       if (safeCwd) {
-        const toolPaths = extractToolPaths(event);
-        for (const fp of toolPaths) {
-          if (!isPathInsideProject(fp, safeCwd)) {
+        const toolPaths = extractMutatingToolPaths(event);
+        for (const toolPath of toolPaths) {
+          if (!isPathInsideProject(toolPath.filePath, safeCwd)) {
             sendToRenderer('claude:stream-data', {
               sessionId: currentSessionId,
               lane: 'system',
-              text: `Blocked: ${path.basename(fp)} is outside the project directory. Session cancelled.`,
+              text: `Late safety stop: ${toolPath.toolName} targeted ${path.basename(toolPath.filePath)} outside the project directory. Session cancelled.`,
             });
             proc.kill('SIGTERM');
             return;

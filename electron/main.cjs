@@ -239,9 +239,10 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
+  const webContentsId = win.webContents.id;
 
   win.on('close', (event) => {
-    const draftState = draftGuardStateByContentsId.get(win.webContents.id);
+    const draftState = draftGuardStateByContentsId.get(webContentsId);
     if (!draftState?.hasUnsavedLocalDraft) return;
 
     const choice = dialog.showMessageBoxSync(win, {
@@ -268,7 +269,7 @@ function createWindow() {
   });
 
   win.on('closed', () => {
-    draftGuardStateByContentsId.delete(win.webContents.id);
+    draftGuardStateByContentsId.delete(webContentsId);
   });
 
   win.loadFile(path.join(__dirname, '../dist/index.html'));

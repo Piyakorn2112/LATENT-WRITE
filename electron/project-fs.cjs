@@ -25,6 +25,293 @@ const STRUCTURE = {
 let _openProjectPath = null;
 
 const LAST_PROJECT_FILE = 'last-project.json';
+const CLAUDE_PROJECT_BOUNDARY_HOOK_FILE = 'latent-write-project-boundary.cjs';
+const CLAUDE_PROJECT_BOUNDARY_HOOK_ARG = '${CLAUDE_PROJECT_DIR}/.claude/hooks/latent-write-project-boundary.cjs';
+const CLAUDE_PROJECT_BOUNDARY_HOOK_SOURCE = String.raw`const fs = require('fs');
+const path = require('path');
+
+const DIRECT_WRITE_TOOLS = new Set(['Write', 'Edit']);
+const DESTINATION_COMMANDS = new Set(['cp', 'mv', 'install', 'ln', 'rsync']);
+const TARGET_COMMANDS = new Set(['mkdir', 'touch', 'rm', 'chmod', 'chown', 'chgrp', 'truncate', 'tee']);
+
+function canonicalizePath(targetPath) {
+  const absolutePath = path.resolve(targetPath);
+  try {
+    return fs.realpathSync(absolutePath);
+  } catch {
+    const parentDir = path.dirname(absolutePath);
+    try {
+      return path.join(fs.realpathSync(parentDir), path.basename(absolutePath));
+    } catch {
+      return absolutePath;
+    }
+  }
+}
+
+function isInsideProject(targetPath, projectDir) {
+  return targetPath === projectDir || targetPath.startsWith(projectDir + path.sep);
+}
+
+function splitCommandSegments(command) {
+  const segments = [];
+  let current = '';
+  let quote = null;
+  let escaping = false;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+        continue;
+      }
+      if (quote === '"' && char === '\\' && index + 1 < command.length) {
+        index += 1;
+        current += command[index];
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaping = true;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    const pair = command.slice(index, index + 2);
+    if (pair === '&&' || pair === '||') {
+      if (current.trim()) segments.push(current.trim());
+      current = '';
+      index += 1;
+      continue;
+    }
+
+    if (char === ';' || char === '\n' || char === '|') {
+      if (current.trim()) segments.push(current.trim());
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.trim()) segments.push(current.trim());
+  return segments;
+}
+
+function tokenizeShell(command) {
+  const tokens = [];
+  let current = '';
+  let quote = null;
+  let escaping = false;
+
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+
+    if (escaping) {
+      current += char;
+      escaping = false;
+      continue;
+    }
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+        continue;
+      }
+      if (quote === '"' && char === '\\' && index + 1 < command.length) {
+        index += 1;
+        current += command[index];
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaping = true;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) tokens.push(current);
+      current = '';
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function isAssignmentToken(token) {
+  return /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token);
+}
+
+function isPathLikeToken(token) {
+  if (!token || token === '-' || token.startsWith('--')) return false;
+  return token.startsWith('/')
+    || token.startsWith('./')
+    || token.startsWith('../')
+    || token.startsWith('~/')
+    || token.includes('/');
+}
+
+function sanitizeCandidatePath(rawPath) {
+  let candidate = String(rawPath || '').trim();
+  if (!candidate || candidate === '-') return null;
+
+  if ((candidate.startsWith('"') && candidate.endsWith('"')) || (candidate.startsWith("'") && candidate.endsWith("'"))) {
+    candidate = candidate.slice(1, -1);
+  }
+
+  candidate = candidate.replace(/^[({[]+/, '').replace(/[)\]},;]+$/, '');
+  if (!candidate || candidate.startsWith('$')) return null;
+  return candidate;
+}
+
+function resolveCandidatePath(rawPath, cwdSource) {
+  const candidate = sanitizeCandidatePath(rawPath);
+  if (!candidate) return null;
+
+  if (candidate === '~') {
+    return process.env.HOME ? canonicalizePath(process.env.HOME) : null;
+  }
+
+  if (candidate.startsWith('~/')) {
+    if (!process.env.HOME) return null;
+    return canonicalizePath(path.join(process.env.HOME, candidate.slice(2)));
+  }
+
+  return canonicalizePath(path.isAbsolute(candidate)
+    ? candidate
+    : path.resolve(cwdSource, candidate));
+}
+
+function addOutsideTarget(rawPath, projectDir, cwdSource, outsideTargets) {
+  const resolvedPath = resolveCandidatePath(rawPath, cwdSource);
+  if (!resolvedPath || isInsideProject(resolvedPath, projectDir) || outsideTargets.includes(resolvedPath)) {
+    return;
+  }
+  outsideTargets.push(resolvedPath);
+}
+
+function collectRedirectionTargets(command, projectDir, cwdSource, outsideTargets) {
+  const redirectionPattern = /(?:^|[\s;|&])(?:\d*>>?|\d*>\||&>>?|&>|>>?)\s*(?:"([^"]+)"|'([^']+)'|([^\s|;&]+))/g;
+  let match;
+  while ((match = redirectionPattern.exec(command)) !== null) {
+    addOutsideTarget(match[1] || match[2] || match[3], projectDir, cwdSource, outsideTargets);
+  }
+}
+
+function collectCommandTargets(tokens, projectDir, cwdSource, outsideTargets) {
+  let index = 0;
+  while (index < tokens.length && isAssignmentToken(tokens[index])) index += 1;
+  if (index >= tokens.length) return;
+
+  const commandName = path.basename(tokens[index]);
+  const args = tokens.slice(index + 1);
+  const pathArgs = args.filter((token) => isPathLikeToken(token) && !token.startsWith('-'));
+  if (!pathArgs.length) return;
+
+  if (DESTINATION_COMMANDS.has(commandName)) {
+    addOutsideTarget(pathArgs[pathArgs.length - 1], projectDir, cwdSource, outsideTargets);
+    return;
+  }
+
+  if (TARGET_COMMANDS.has(commandName)) {
+    pathArgs.forEach((target) => addOutsideTarget(target, projectDir, cwdSource, outsideTargets));
+    return;
+  }
+
+  const usesInPlaceEdit = ['sed', 'perl', 'ruby'].includes(commandName)
+    && args.some((token) => token === '-i' || /^-i/.test(token) || /^-[A-Za-z]*i[A-Za-z]*$/.test(token));
+  if (usesInPlaceEdit) {
+    pathArgs.forEach((target) => addOutsideTarget(target, projectDir, cwdSource, outsideTargets));
+  }
+}
+
+function findOutsideBashWriteTargets(command, projectDir, cwdSource) {
+  const outsideTargets = [];
+  const segments = splitCommandSegments(command);
+
+  for (const segment of segments) {
+    collectRedirectionTargets(segment, projectDir, cwdSource, outsideTargets);
+    collectCommandTargets(tokenizeShell(segment), projectDir, cwdSource, outsideTargets);
+  }
+
+  return outsideTargets;
+}
+
+function findOutsideWriteTargets(payload, projectDir, cwdSource) {
+  const toolName = payload?.tool_name;
+  const toolInput = payload?.tool_input ?? {};
+
+  if (DIRECT_WRITE_TOOLS.has(toolName)) {
+    const rawPath = toolInput.file_path || toolInput.path;
+    const resolvedPath = resolveCandidatePath(rawPath, cwdSource);
+    return resolvedPath && !isInsideProject(resolvedPath, projectDir) ? [resolvedPath] : [];
+  }
+
+  if (toolName === 'Bash') {
+    return findOutsideBashWriteTargets(String(toolInput.command || ''), projectDir, cwdSource);
+  }
+
+  return [];
+}
+
+let raw = '';
+try {
+  raw = fs.readFileSync(0, 'utf8');
+} catch {
+  process.exit(0);
+}
+
+if (!raw.trim()) process.exit(0);
+
+let payload;
+try {
+  payload = JSON.parse(raw);
+} catch {
+  process.exit(0);
+}
+
+const projectDirSource = process.env.CLAUDE_PROJECT_DIR || payload?.cwd;
+const cwdSource = payload?.cwd || projectDirSource;
+if (!projectDirSource || !cwdSource) process.exit(0);
+
+const projectDir = canonicalizePath(projectDirSource);
+const outsideTargets = findOutsideWriteTargets(payload, projectDir, cwdSource);
+if (!outsideTargets.length) process.exit(0);
+
+process.stdout.write(JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: 'PreToolUse',
+    permissionDecision: 'deny',
+    permissionDecisionReason: 'Blocked outside-project write via ' + String(payload.tool_name || 'tool') + ': ' + outsideTargets[0],
+  },
+}));
+`;
 
 // ── Bundled novel-writing-system resolution ─────────────────────────────────
 // In dev: sibling directory next to glass-editor (../../novel-writing-system)
@@ -108,6 +395,17 @@ function saveProjectMeta(projectPath, meta) {
     JSON.stringify(meta, null, 2),
     'utf8'
   );
+}
+
+function readJsonObject(filePath) {
+  if (!fs.existsSync(filePath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (err) {
+    console.warn(`[project-fs] Failed to parse ${filePath}:`, err.message);
+    return null;
+  }
 }
 
 function sanitizeStoryPrimaryBase(name) {
@@ -204,15 +502,66 @@ function ensureClaudeConfig(projectPath) {
   const claudeDir = path.join(projectPath, '.claude');
   if (!fs.existsSync(claudeDir)) fs.mkdirSync(claudeDir, { recursive: true });
 
+  const hooksDir = path.join(claudeDir, 'hooks');
+  if (!fs.existsSync(hooksDir)) fs.mkdirSync(hooksDir, { recursive: true });
+
+  const hookScriptPath = path.join(hooksDir, CLAUDE_PROJECT_BOUNDARY_HOOK_FILE);
+  if (!fs.existsSync(hookScriptPath) || fs.readFileSync(hookScriptPath, 'utf8') !== CLAUDE_PROJECT_BOUNDARY_HOOK_SOURCE) {
+    fs.writeFileSync(hookScriptPath, CLAUDE_PROJECT_BOUNDARY_HOOK_SOURCE, 'utf8');
+  }
+
   const settingsPath = path.join(claudeDir, 'settings.local.json');
-  if (!fs.existsSync(settingsPath)) {
-    fs.writeFileSync(settingsPath, JSON.stringify({
+  const settings = readJsonObject(settingsPath);
+  if (settings === null) return;
+
+  if (!settings.permissions) {
+    settings.permissions = {
       permissions: {
         allow: ['Read', 'Write', 'Edit', 'Bash(*)'],
         deny: [],
       },
-    }, null, 2), 'utf8');
+    }.permissions;
   }
+
+  const preToolUse = Array.isArray(settings.hooks?.PreToolUse)
+    ? [...settings.hooks.PreToolUse]
+    : [];
+  const isBoundaryHook = (hook) => (
+    hook?.type === 'command'
+    && hook.command === 'node'
+    && Array.isArray(hook.args)
+    && hook.args[0] === CLAUDE_PROJECT_BOUNDARY_HOOK_ARG
+  );
+  const boundaryHook = {
+    type: 'command',
+    command: 'node',
+    args: [CLAUDE_PROJECT_BOUNDARY_HOOK_ARG],
+    timeout: 5,
+  };
+  const boundaryGroupIndex = preToolUse.findIndex((group) => (
+    Array.isArray(group?.hooks) && group.hooks.some(isBoundaryHook)
+  ));
+
+  if (boundaryGroupIndex >= 0) {
+    const existingGroup = preToolUse[boundaryGroupIndex];
+    preToolUse[boundaryGroupIndex] = {
+      ...existingGroup,
+      matcher: 'Write|Edit|Bash',
+      hooks: existingGroup.hooks.map((hook) => (isBoundaryHook(hook) ? boundaryHook : hook)),
+    };
+  } else {
+    preToolUse.unshift({
+      matcher: 'Write|Edit|Bash',
+      hooks: [boundaryHook],
+    });
+  }
+
+  settings.hooks = {
+    ...(settings.hooks || {}),
+    PreToolUse: preToolUse,
+  };
+
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
 
   const claudeMdPath = path.join(projectPath, 'CLAUDE.md');
   if (!fs.existsSync(claudeMdPath)) {
@@ -363,6 +712,7 @@ function registerProjectFS() {
         lastOpened: Date.now(),
       });
     } else {
+      ensureClaudeConfig(dirPath);
       const meta = getProjectMeta(dirPath) || {};
       meta.lastOpened = Date.now();
       saveProjectMeta(dirPath, meta);
@@ -503,6 +853,7 @@ function registerProjectFS() {
     if (!lastPath) return null;
     _openProjectPath = lastPath;
     ensureSystemDir(lastPath);
+    ensureClaudeConfig(lastPath);
     const meta = getProjectMeta(lastPath);
     if (meta) { meta.lastOpened = Date.now(); saveProjectMeta(lastPath, meta); }
     return {
