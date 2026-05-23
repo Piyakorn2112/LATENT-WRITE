@@ -72,6 +72,40 @@ export interface StreamEvent {
   lane?: "assistant" | "thinking" | "system" | "tool";
 }
 
+// ── Tool import types ───────────────────────────────────────────────────────
+
+export interface ToolScanEntry {
+  dirName: string;
+  manifest: {
+    name: string;
+    display: string;
+    version: string;
+    description: string;
+    command: string;
+    surfaces: string[];
+    requiresClaude: boolean;
+    edited: boolean;
+  };
+  files: string[];
+  hasLogic: boolean;
+  hasWidget: boolean;
+  hasPrompt: boolean;
+}
+
+export interface ToolScanResult {
+  ok: boolean;
+  canceled?: boolean;
+  error?: string;
+  sourcePath?: string;
+  tools?: ToolScanEntry[];
+}
+
+export interface ToolImportResult {
+  ok: boolean;
+  error?: string;
+  results?: Array<{ dirName: string; ok: boolean; error?: string }>;
+}
+
 // ── Electron API type augmentation ───────────────────────────────────────────
 
 interface ElectronAPI {
@@ -128,6 +162,10 @@ interface ElectronAPI {
   onClaudeStreamError: (cb: (data: StreamEvent) => void) => () => void;
   onClaudeStreamStderr: (cb: (data: StreamEvent) => void) => () => void;
   onClaudeFileChanged: (cb: (data: { filePath: string }) => void) => () => void;
+  // Tool system
+  toolCompile: (opts: { code: string; format: "ts" | "tsx" }) => Promise<{ ok: boolean; code?: string; error?: string }>;
+  toolScanProject: () => Promise<ToolScanResult>;
+  toolImportTools: (opts: { sourcePath: string; imports: Array<{ dirName: string; targetName?: string }> }) => Promise<ToolImportResult>;
 }
 
 declare global {
@@ -196,6 +234,12 @@ export async function listAnchors(): Promise<FileEntry[]> {
   return a.projectListAnchors();
 }
 
+export async function listCanon(): Promise<FileEntry[]> {
+  const a = api();
+  if (!a) return [];
+  return a.projectListCanon();
+}
+
 export async function listProjectTree(): Promise<ProjectTreeNode[]> {
   const a = api();
   if (!a) return [];
@@ -261,6 +305,23 @@ export async function reopenLastProject(): Promise<ProjectStatus | null> {
   const a = api();
   if (!a) return null;
   return a.projectReopenLast();
+}
+
+// ── Tool import helpers ─────────────────────────────────────────────────────
+
+export async function scanExternalProject(): Promise<ToolScanResult> {
+  const a = api();
+  if (!a) return { ok: false };
+  return a.toolScanProject();
+}
+
+export async function importTools(
+  sourcePath: string,
+  imports: Array<{ dirName: string; targetName?: string }>,
+): Promise<ToolImportResult> {
+  const a = api();
+  if (!a) return { ok: false };
+  return a.toolImportTools({ sourcePath, imports });
 }
 
 export function subscribeStream(callbacks: {

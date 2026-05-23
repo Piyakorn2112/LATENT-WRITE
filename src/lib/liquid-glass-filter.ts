@@ -26,6 +26,8 @@
 const SVG_ID = "lg-filter-svg";
 const NS = "http://www.w3.org/2000/svg";
 const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group";
+const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freeze"];
+const FAST_SCROLL_ADAPTIVE_ATTR = "data-liquid-glass-scroll-adaptive";
 
 // ── Tunables ─────────────────────────────────────────────────────────────
 //
@@ -36,14 +38,14 @@ const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group";
 
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
-const DISP_PX = 30;        // max refraction shift, pixels
+const DISP_PX = 40;        // max refraction shift, pixels
 const BLUR_PX = 4;         // backdrop blur stdDeviation, pixels
 const SATURATE = "1.8";
 
 // Round (W, H, R) to this for cache key — sub-pixel differences do not
 // produce a visually different filter and otherwise we'd build a new map
 // on every resize-observer tick during animations.
-const CACHE_GRID = 16;
+const CACHE_GRID = 24;
 
 // Internal rasterization resolution of the filter chain, as a fraction of
 // element size. The GPU computes all 7 filter primitives at this reduced
@@ -56,6 +58,8 @@ const CACHE_GRID = 16;
 const FILTER_RES_SCALE = 0.35;
 const FILTER_RES_MIN   = 48;
 const FILTER_RES_MAX   = 280;
+const FAST_SCROLL_DELTA_THRESHOLD_PX = 24;
+const FAST_SCROLL_HOLD_MS = 200;
 
 // LRU cap so long-running sessions with varied panel sizes don't accrete
 // hundreds of <filter> nodes in the DOM. Eviction also skips any filter
@@ -65,6 +69,16 @@ const FILTER_RES_MAX   = 280;
 // add resize jitter and the cap needs to be generous or the toolbar's
 // in-use filter is evicted while the user resizes a popover textbox.
 const FILTER_CACHE_LIMIT = 32;
+
+// ── Smooth crossfade tunables ────────────────────────────────────────
+// When fast-scrolling, panels crossfade from SVG filter to CSS blur via
+// a brief opacity dip so the swap is masked by reduced visibility.
+// Asymmetric timing: fast freeze (user wants to scroll NOW), slow thaw
+// (luxurious return to full glass when scroll settles).
+const CROSSFADE_DIM_MS          = 60;       // dim phase duration
+const CROSSFADE_DIM_OPACITY     = 0.55;     // opacity at swap point
+const CROSSFADE_REVEAL_MS       = 100;      // freeze reveal duration
+const CROSSFADE_THAW_REVEAL_MS  = 200;      // thaw reveal (slower, elegant)
 
 // ── Worker dispatch ──────────────────────────────────────────────────────
 
@@ -126,6 +140,8 @@ interface CacheEntry {
   refCount: number;
 }
 
+type FilterResolutionVariant = "base";
+
 let svgRoot: SVGSVGElement | null = null;
 let defs: SVGDefsElement | null = null;
 const filterCache = new Map<string, CacheEntry>();
@@ -162,12 +178,17 @@ function clampRes(v: number): number {
   return Math.max(FILTER_RES_MIN, Math.min(FILTER_RES_MAX, Math.round(v)));
 }
 
+function filterResScale(_variant: FilterResolutionVariant): number {
+  return FILTER_RES_SCALE;
+}
+
 function buildFilterEl(
   id: string,
   w: number,
   h: number,
   overflow: number,
   mapUrl: string,
+  variant: FilterResolutionVariant,
 ): SVGFilterElement {
   const totalW = w + 2 * overflow;
   const totalH = h + 2 * overflow;
@@ -180,7 +201,7 @@ function buildFilterEl(
     width: String(totalW),
     height: String(totalH),
     "color-interpolation-filters": "sRGB",
-    filterRes: `${clampRes(totalW * FILTER_RES_SCALE)} ${clampRes(totalH * FILTER_RES_SCALE)}`,
+    filterRes: `${clampRes(totalW * filterResScale(variant))} ${clampRes(totalH * filterResScale(variant))}`,
   }) as SVGFilterElement;
 
   filter.append(
@@ -288,12 +309,13 @@ async function ensureFilter(
   elemW: number,
   elemH: number,
   radius: number,
+  variant: FilterResolutionVariant,
 ): Promise<string | null> {
   ensureSvgRoot();
   const w = snap(elemW);
   const h = snap(elemH);
   const r = snap(radius);
-  const id = `lg-${w}-${h}-${r}`;
+  const id = `lg-${w}-${h}-${r}-${variant}`;
 
   const cached = filterCache.get(id);
   if (cached) {
@@ -311,7 +333,7 @@ async function ensureFilter(
     const mapUrl = await buildMapInWorker(w, h, r, overflow);
     if (!mapUrl) return null;
 
-    const filter = buildFilterEl(id, w, h, overflow, mapUrl);
+    const filter = buildFilterEl(id, w, h, overflow, mapUrl, variant);
     defs!.append(filter);
     filterCache.set(id, { filter, blobUrl: mapUrl, refCount: 0 });
     evictLRU();
@@ -327,10 +349,85 @@ async function ensureFilter(
 
 const observed = new WeakMap<Element, ResizeObserver>();
 const lastSize = new WeakMap<Element, string>();
+const elementSchedule = new WeakMap<HTMLElement, () => void>();
+const trackedElements = new Set<HTMLElement>();
 // Tracks which filter id each live element is currently pointing at, so we
 // can decrement the previous filter's refcount when an element re-binds to
 // a new size's filter (and on detach).
 const elementFilterId = new WeakMap<Element, string>();
+let glassPaused = false;
+let fastScrollActive = false;
+let fastScrollResetHandle: number | null = null;
+
+const frozenElements = new Set<HTMLElement>();
+const CSS_BLUR_FALLBACK = `blur(${BLUR_PX}px) saturate(${SATURATE})`;
+const crossfadeTimers = new WeakMap<HTMLElement, number>();
+
+function shouldPauseLiquidGlass(): boolean {
+  const body = document.body;
+  return !!body && PAUSE_BODY_CLASSES.some((className) => body.classList.contains(className));
+}
+
+function isFastScrollAdaptiveElement(element: Element): boolean {
+  return element.hasAttribute(FAST_SCROLL_ADAPTIVE_ATTR);
+}
+
+function normalizedWheelDelta(event: WheelEvent): number {
+  const scale = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
+      ? Math.max(window.innerHeight * 0.85, 320)
+      : 1;
+  return (Math.abs(event.deltaX) + Math.abs(event.deltaY)) * scale;
+}
+
+const PANEL_CROSSFADE_ENABLED = false;
+
+function setFastScrollActive(nextActive: boolean) {
+  if (fastScrollActive === nextActive) return;
+  fastScrollActive = nextActive;
+  document.body.classList.toggle("glass-fast-scroll", nextActive);
+  if (PANEL_CROSSFADE_ENABLED) {
+    for (const element of trackedElements) {
+      if (!isFastScrollAdaptiveElement(element)) continue;
+      if (nextActive) smoothFreeze(element);
+      else smoothThaw(element);
+    }
+  }
+}
+
+function observeElement(element: HTMLElement, schedule: () => void) {
+  if (observed.has(element)) return;
+  const ro = new ResizeObserver(schedule);
+  ro.observe(element);
+  observed.set(element, ro);
+}
+
+function pauseAllGlassWork() {
+  for (const element of trackedElements) {
+    const ro = observed.get(element);
+    if (!ro) continue;
+    ro.disconnect();
+    observed.delete(element);
+  }
+}
+
+function resumeAllGlassWork() {
+  for (const element of trackedElements) {
+    const schedule = elementSchedule.get(element);
+    if (!schedule) continue;
+    observeElement(element, schedule);
+    schedule();
+  }
+}
+
+function syncLiquidGlassPauseState() {
+  const nextPaused = shouldPauseLiquidGlass();
+  if (nextPaused === glassPaused) return;
+  glassPaused = nextPaused;
+  if (glassPaused) pauseAllGlassWork();
+  else resumeAllGlassWork();
+}
 
 function bindFilter(element: Element, newId: string) {
   const prevId = elementFilterId.get(element);
@@ -359,8 +456,72 @@ function readRadius(el: Element): number {
   return isFinite(tl) ? tl : 0;
 }
 
-// Idle scheduling — kicks off the worker request during browser idle time
-// so filter generation is doubly non-blocking (idle dispatch + worker compute).
+// ── Smooth crossfade ─────────────────────────────────────────────────
+// Opacity-dip technique: briefly dim the panel (compositor-only, free),
+// swap the backdrop-filter while dimmed so the visual jump is masked,
+// then brighten back. No dual-filter overlap, no extra DOM layers.
+
+function cancelCrossfade(element: HTMLElement) {
+  const t = crossfadeTimers.get(element);
+  if (t !== undefined) window.clearTimeout(t);
+  crossfadeTimers.delete(element);
+  element.style.transition = "";
+  element.style.opacity = "";
+}
+
+function smoothFreeze(element: HTMLElement) {
+  cancelCrossfade(element);
+  if (frozenElements.has(element)) return;
+  frozenElements.add(element);
+  const ro = observed.get(element);
+  if (ro) { ro.disconnect(); observed.delete(element); }
+
+  element.style.transition = `opacity ${CROSSFADE_DIM_MS}ms ease-out`;
+  requestAnimationFrame(() => {
+    element.style.opacity = String(CROSSFADE_DIM_OPACITY);
+    crossfadeTimers.set(element, window.setTimeout(() => {
+      element.style.setProperty("backdrop-filter", CSS_BLUR_FALLBACK);
+      element.style.setProperty("-webkit-backdrop-filter", CSS_BLUR_FALLBACK);
+      element.style.transition = `opacity ${CROSSFADE_REVEAL_MS}ms ease-in`;
+      element.style.opacity = "1";
+      crossfadeTimers.set(element, window.setTimeout(() => {
+        element.style.transition = "";
+        crossfadeTimers.delete(element);
+      }, CROSSFADE_REVEAL_MS));
+    }, CROSSFADE_DIM_MS));
+  });
+}
+
+function smoothThaw(element: HTMLElement) {
+  cancelCrossfade(element);
+  if (!frozenElements.has(element)) return;
+
+  element.style.transition = `opacity ${CROSSFADE_DIM_MS}ms ease-out`;
+  requestAnimationFrame(() => {
+    element.style.opacity = String(CROSSFADE_DIM_OPACITY);
+    crossfadeTimers.set(element, window.setTimeout(() => {
+      frozenElements.delete(element);
+      const filterId = elementFilterId.get(element);
+      if (filterId) {
+        const ref = `url(#${filterId})`;
+        element.style.setProperty("backdrop-filter", ref);
+        element.style.setProperty("-webkit-backdrop-filter", ref);
+      }
+      const schedule = elementSchedule.get(element);
+      if (schedule) observeElement(element, schedule);
+      element.style.transition = `opacity ${CROSSFADE_THAW_REVEAL_MS}ms ease-in`;
+      element.style.opacity = "1";
+      crossfadeTimers.set(element, window.setTimeout(() => {
+        element.style.transition = "";
+        crossfadeTimers.delete(element);
+      }, CROSSFADE_THAW_REVEAL_MS));
+    }, CROSSFADE_DIM_MS));
+  });
+}
+
+// ── Idle scheduling ──────────────────────────────────────────────────────
+// Kicks off the worker request during browser idle time so filter generation
+// is doubly non-blocking (idle dispatch + worker compute).
 type IdleHandle = number;
 const idleSchedule: (cb: () => void) => IdleHandle =
   typeof (globalThis as any).requestIdleCallback === "function"
@@ -369,42 +530,51 @@ const idleSchedule: (cb: () => void) => IdleHandle =
     : ((cb) => requestAnimationFrame(cb) as IdleHandle);
 
 function applyTo(element: HTMLElement) {
-  if (observed.has(element)) return;
+  if (elementSchedule.has(element)) return;
+
+  trackedElements.add(element);
 
   let scheduled = false;
   const update = async () => {
     scheduled = false;
+    if (glassPaused) return;
+    if (frozenElements.has(element)) return;
     // offsetWidth/Height return layout size, ignoring CSS transforms — so
     // scale animations don't trigger filter rebuilds.
     const w = element.offsetWidth;
     const h = element.offsetHeight;
     if (w < 4 || h < 4) return;
     const r = readRadius(element);
-    const key = `${snap(w)}-${snap(h)}-${snap(r)}`;
+    const key = `${snap(w)}-${snap(h)}-${snap(r)}-base`;
     if (lastSize.get(element) === key) return;
     lastSize.set(element, key);
-    const id = await ensureFilter(w, h, r);
+    const id = await ensureFilter(w, h, r, "base");
     if (!id) return; // worker dead → CSS fallback stays
-    // Verify the element still wants this filter (size may have changed
-    // while the worker was busy). If so, the next update tick will set the
-    // correct filter.
+    if (glassPaused) return;
     if (lastSize.get(element) !== key) return;
     bindFilter(element, id);
-    const ref = `url(#${id})`;
-    element.style.setProperty("backdrop-filter", ref);
-    element.style.setProperty("-webkit-backdrop-filter", ref);
+    if (!frozenElements.has(element)) {
+      const ref = `url(#${id})`;
+      element.style.setProperty("backdrop-filter", ref);
+      element.style.setProperty("-webkit-backdrop-filter", ref);
+    }
   };
 
   const schedule = () => {
+    if (glassPaused) {
+      scheduled = false;
+      return;
+    }
     if (scheduled) return;
     scheduled = true;
     idleSchedule(update);
   };
 
+  elementSchedule.set(element, schedule);
+  if (glassPaused) return;
+
   schedule();
-  const ro = new ResizeObserver(schedule);
-  ro.observe(element);
-  observed.set(element, ro);
+  observeElement(element, schedule);
 }
 
 function unobserve(el: Element) {
@@ -414,6 +584,10 @@ function unobserve(el: Element) {
     observed.delete(el);
     lastSize.delete(el);
   }
+  cancelCrossfade(el as HTMLElement);
+  frozenElements.delete(el as HTMLElement);
+  trackedElements.delete(el as HTMLElement);
+  elementSchedule.delete(el as HTMLElement);
   unbindFilter(el);
 }
 
@@ -432,21 +606,47 @@ export function initLiquidGlassFilter(): void {
   const startup = () => {
     ensureSvgRoot();
     scan(document.body);
+    syncLiquidGlassPauseState();
 
     const mo = new MutationObserver((muts) => {
       for (const mut of muts) {
-        mut.addedNodes.forEach((n) => {
-          if (n.nodeType === 1) scan(n as Element);
-        });
-        mut.removedNodes.forEach((n) => {
-          if (n.nodeType !== 1) return;
-          const el = n as Element;
-          if (isGlassEl(el)) unobserve(el);
-          el.querySelectorAll?.(SELECTOR).forEach(unobserve);
-        });
+        if (mut.type === "childList") {
+          mut.addedNodes.forEach((n) => {
+            if (n.nodeType === 1) scan(n as Element);
+          });
+          mut.removedNodes.forEach((n) => {
+            if (n.nodeType !== 1) return;
+            const el = n as Element;
+            if (isGlassEl(el)) unobserve(el);
+            el.querySelectorAll?.(SELECTOR).forEach(unobserve);
+          });
+        } else if (mut.type === "attributes" && mut.target instanceof Element) {
+          const el = mut.target;
+          if (isGlassEl(el)) {
+            if (!trackedElements.has(el as HTMLElement)) applyTo(el as HTMLElement);
+          } else if (trackedElements.has(el as HTMLElement)) {
+            unobserve(el);
+          }
+        }
       }
     });
-    mo.observe(document.body, { childList: true, subtree: true });
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+
+    const bodyClassObserver = new MutationObserver(() => {
+      syncLiquidGlassPauseState();
+    });
+    bodyClassObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
+
+    window.addEventListener("wheel", (event) => {
+      if (glassPaused) return;
+      if (normalizedWheelDelta(event) < FAST_SCROLL_DELTA_THRESHOLD_PX) return;
+      setFastScrollActive(true);
+      if (fastScrollResetHandle !== null) window.clearTimeout(fastScrollResetHandle);
+      fastScrollResetHandle = window.setTimeout(() => {
+        fastScrollResetHandle = null;
+        setFastScrollActive(false);
+      }, FAST_SCROLL_HOLD_MS);
+    }, { passive: true });
   };
 
   if (document.readyState === "loading") {

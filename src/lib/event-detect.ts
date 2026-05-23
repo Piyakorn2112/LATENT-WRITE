@@ -210,9 +210,18 @@ interface ParaScore {
   transitionScore: number;
 }
 
-function scoreVocab(lower: string, dict: Record<string, number>): number {
+type VocabEntries = ReadonlyArray<readonly [string, number]>;
+
+const CONFRONTATION_ENTRIES: VocabEntries = Object.entries(CONFRONTATION);
+const REVELATION_ENTRIES: VocabEntries = Object.entries(REVELATION);
+const INTELLECTUAL_ENTRIES: VocabEntries = Object.entries(INTELLECTUAL_DISCOURSE);
+const EMOTIONAL_ENTRIES: VocabEntries = Object.entries(EMOTIONAL_PEAK);
+const INTIMACY_ENTRIES: VocabEntries = Object.entries(INTIMACY);
+const LOSS_ENTRIES: VocabEntries = Object.entries(LOSS_ENDING);
+
+function scoreVocab(lower: string, entries: VocabEntries): number {
   let score = 0;
-  for (const [phrase, weight] of Object.entries(dict)) {
+  for (const [phrase, weight] of entries) {
     if (lower.includes(phrase)) score += weight;
   }
   return Math.min(1, score);
@@ -228,12 +237,12 @@ function scoreParagraph(
   const lower = text.toLowerCase();
 
   // Semantic fields
-  const confrontScore  = scoreVocab(lower, CONFRONTATION);
-  const revelScore     = scoreVocab(lower, REVELATION);
-  const emoScore       = scoreVocab(lower, EMOTIONAL_PEAK);
-  const intimScore     = scoreVocab(lower, INTIMACY);
-  const lossScore      = scoreVocab(lower, LOSS_ENDING);
-  const intellectScore = scoreVocab(lower, INTELLECTUAL_DISCOURSE);
+  const confrontScore  = scoreVocab(lower, CONFRONTATION_ENTRIES);
+  const revelScore     = scoreVocab(lower, REVELATION_ENTRIES);
+  const emoScore       = scoreVocab(lower, EMOTIONAL_ENTRIES);
+  const intimScore     = scoreVocab(lower, INTIMACY_ENTRIES);
+  const lossScore      = scoreVocab(lower, LOSS_ENTRIES);
+  const intellectScore = scoreVocab(lower, INTELLECTUAL_ENTRIES);
 
   // Named entity density
   const nameMatches  = nameRe ? (text.match(nameRe) ?? []) : [];

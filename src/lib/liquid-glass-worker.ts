@@ -10,34 +10,21 @@
  * deliberately duplicate rather than import from main, because Workers
  * pull in only their own module graph (no DOM, no `document`).
  *
- * ── Corner refraction fix ────────────────────────────────────────────────
+ * ── Corner refraction ────────────────────────────────────────────────────
  *
- * Previous approach: a single radial Snell computation driven by the SDF
- * outward-normal direction. At a 45° corner that direction is diagonal, so
- * each axis got only 1/√2 of the displacement a straight edge gets at the
- * same SDF distance. Background content was pulled *toward* the corner
- * centre (convergent / "squish").
+ * Single-computation Snell with directional projection. One scalar
+ * displacement is computed from the bezel profile at the pixel's SDF
+ * distance, then projected onto X/Y via the SDF's outward-normal gradient.
+ * On edges only one axis is active; at corners both axes share the same
+ * magnitude rotated by the gradient direction — giving uniform refraction
+ * strength around the entire perimeter at any given SDF distance.
  *
- * Current approach: *separable* displacement. The SDF outward-normal
- * direction (dirX, dirY) is used to project the bezel depth onto each axis
- * independently:
+ * The SDF gradient is computed via finite differences of the rounded-rect
+ * SDF (matching the WebGL reference approach), which naturally handles the
+ * edge-to-corner transition without any smoothstep blending.
  *
- *   tX = distToEdge × |dirX| / bezel
- *   tY = distToEdge × |dirY| / bezel
- *
- * Snell's law is then run separately for X and Y. On straight edges one
- * component dominates (dirX≈1 or dirY≈1) and the result is identical to
- * the old code. At a 45° corner dirX = dirY = 0.707, so tX = tY =
- * 0.707 × t_sdf. Because 0.707 × t < t and dh is a decreasing function,
- * the slope *at the corner* is evaluated at a smaller t → it is larger,
- * not smaller, than the straight-edge slope at the same SDF distance. Both
- * dx and dy are now full-strength and applied simultaneously, producing the
- * divergent "bending-around" field that matches Apple's liquid glass look.
- *
- * Normalization is per-axis (separate maxMagX / maxMagY) so each channel
- * uses the full ±127 range independently, preserving the relative scale
- * between the two axes while letting corners reach maximum displacement in
- * both directions.
+ * Magnitude normalisation: a single maxMag value normalises both channels
+ * so displacement strength is identical on edges and corners.
  */
 
 // Air → glass.
@@ -55,12 +42,18 @@ const BEZEL_PX = 120;
 //   BLUR_TRANSITION_PCT — distance (% of half-shorter-side) over which the
 //                         mask ramps from BLUR_EDGE_MIN up to fully blurred.
 //   BLUR_EXP            — easing exponent on the ramp.
-const BLUR_EDGE_MIN = 0.9;
-const BLUR_TRANSITION_PCT = 0.3;
+const BLUR_EDGE_MIN = 0.85;
+const BLUR_TRANSITION_PCT = 0.25;
 const BLUR_EXP = 2;
 
 // Map resolution.
-const MAP_DIVISOR = 7;
+// Small elements (shorter side ≤ MAP_DIVISOR_BREAK) keep divisor=7 for full
+// bezel fidelity. Large elements raise to 9 — the SDF gradient is smooth
+// enough at that scale that the coarser map is imperceptible (~23% fewer
+// worker pixels).
+const MAP_DIVISOR       = 7;
+const MAP_DIVISOR_LARGE = 9;
+const MAP_DIVISOR_BREAK = 320;
 const MAP_MAX = 170;
 
 const RADIUS_FLOOR = 1;
@@ -80,56 +73,33 @@ function sdRoundedBox(px: number, py: number, bx: number, by: number, r: number)
   return outside + inside - r;
 }
 
-// Analytical outward unit normal of the rounded-box SDF at (px, py).
-//   • Corner arc (qx > 0, qy > 0): radial unit vector from the corner-arc
-//     centre — exact for the curved corners. Finite-difference gradients
-//     alias here because at MAP_DIVISOR=4 the corner only spans 1–2 pixels.
-//   • Straight-edge zone or interior: gradient aligns with the closer axis,
-//     producing a pure horizontal/vertical normal with no subpixel noise.
-const smootherstep = (edge0: number, edge1: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-  return t * t * t * (t * (t * 6 - 15) + 10);
-};
-
-function sdRoundedBoxGrad(
+// Finite-difference outward unit normal of the rounded-box SDF.
+// Naturally smooth at the edge-to-corner transition — no blending needed.
+function sdfGrad(
   px: number, py: number, bx: number, by: number, r: number,
 ): [number, number] {
-  const sx = px >= 0 ? 1 : -1;
-  const sy = py >= 0 ? 1 : -1;
-
-  const qx = Math.abs(px) - (bx - r);
-  const qy = Math.abs(py) - (by - r);
-
-  const blend = Math.max(1, r * 1);
-
-  const cx = qx <= 0 ? 0 : qx >= blend ? qx : blend * smootherstep(0, blend, qx);
-  const cy = qy <= 0 ? 0 : qy >= blend ? qy : blend * smootherstep(0, blend, qy);
-
-  const len = Math.hypot(cx, cy);
-
-  if (len < 1e-6) {
-    return qx > qy ? [sx, 0] : [0, sy];
-  }
-
-  return [(sx * cx) / len, (sy * cy) / len];
+  const eps = 0.5;
+  const d = sdRoundedBox(px, py, bx, by, r);
+  const gx = sdRoundedBox(px + eps, py, bx, by, r) - d;
+  const gy = sdRoundedBox(px, py + eps, bx, by, r) - d;
+  const len = Math.hypot(gx, gy);
+  if (len < 1e-6) return [0, 0];
+  return [gx / len, gy / len];
 }
 
 /**
- * Run one axis of Snell's law for a surface whose outward normal is
- * (−slope × sign, 0, 1)/‖…‖ where sign is ±1 (the side of the element).
- *
- * Returns the displacement scalar dx (or dy). Zero if total internal
- * reflection would occur (shouldn't happen with N2 > N1 and slope ≤ 5).
+ * Snell's law lateral displacement for a convex surface profile.
+ * Returns a positive scalar — the caller projects it onto X/Y
+ * via the SDF gradient direction.
  */
-function snellAxis(slope: number, sign: number, eta: number): number {
+function snellDisp(slope: number, eta: number): number {
   if (slope < 1e-3) return 0;
   const nLen = Math.hypot(slope, 1);
-  const n_axis = (-slope * sign) / nLen; // outward-normal component along this axis
-  const nZ    = 1 / nLen;
+  const nZ = 1 / nLen;
   const sinSq = eta * eta * (1 - nZ * nZ);
-  if (sinSq >= 1) return 0; // total internal reflection — skip
-  const k = eta * nZ - Math.sqrt(1 - sinSq);
-  return k * n_axis;
+  if (sinSq >= 1) return 0;
+  const nSurface = slope / nLen;
+  return (Math.sqrt(1 - sinSq) - eta * nZ) * nSurface;
 }
 
 interface MapRequest {
@@ -148,8 +118,9 @@ interface MapResponse {
 async function buildMapBlob(req: MapRequest): Promise<Blob> {
   const { elemW, elemH, radius, overflow } = req;
 
-  const mwElem = Math.max(8, Math.min(MAP_MAX, Math.round(elemW / MAP_DIVISOR)));
-  const mhElem = Math.max(8, Math.min(MAP_MAX, Math.round(elemH / MAP_DIVISOR)));
+  const divisor = Math.min(elemW, elemH) > MAP_DIVISOR_BREAK ? MAP_DIVISOR_LARGE : MAP_DIVISOR;
+  const mwElem = Math.max(8, Math.min(MAP_MAX, Math.round(elemW / divisor)));
+  const mhElem = Math.max(8, Math.min(MAP_MAX, Math.round(elemH / divisor)));
   const ovX = Math.max(1, Math.round((overflow * mwElem) / elemW));
   const ovY = Math.max(1, Math.round((overflow * mhElem) / elemH));
   const mw = mwElem + 2 * ovX;
@@ -197,14 +168,7 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
   // the rounded rect (bounding-box corners) hit `continue` and inherit it.
   maskBuf.fill(baselineMask);
 
-  // ── Per-axis max tracking for independent normalisation ──────────────────
-  // Normalising each channel separately means both R and G use the full
-  // ±127 range regardless of element aspect ratio. On straight edges this is
-  // identical to magnitude normalisation (only one axis is nonzero). At
-  // corners both axes are active and each reaches the same peak as a straight
-  // edge → corners get full-strength displacement in X *and* Y simultaneously.
-  let maxMagX = 0;
-  let maxMagY = 0;
+  let maxMag = 0;
 
   for (let py = 0; py < mhElem; py++) {
     const ey = (py + 0.5) * syInv;
@@ -220,7 +184,7 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
 
       if (distToEdge <= 0) continue;
 
-      // ── Progressive blur mask (unchanged) ────────────────────────────────
+      // ── Progressive blur mask ────────────────────────────────────────────
       if (distToEdge >= blurRimEnd) {
         maskBuf[i] = 255;
       } else {
@@ -231,75 +195,32 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
 
       if (distToEdge >= bezel) continue;
 
-      // ── Analytical SDF gradient ──────────────────────────────────────────
-      // dirX, dirY: outward unit normal of the rounded-rect SDF at this pixel.
-      //   Straight right edge  → dirX = 1,    dirY = 0
-      //   Top-right corner arc → dirX = 0.707, dirY = −0.707  (up-right)
-      //   Straight top edge    → dirX = 0,    dirY = −1
-      const [dirX, dirY] = sdRoundedBoxGrad(px_rel, py_rel, halfW, halfH, r);
+      // ── Single-computation Snell + directional projection ────────────────
+      // One scalar displacement from the bezel profile at the SDF distance,
+      // projected onto X/Y via the finite-difference SDF gradient. Gives
+      // uniform refraction strength at any given distance from the edge —
+      // identical on straight edges and corners.
+      const t = distToEdge / bezel;
+      const slope = Math.min(dh(t), 5.0);
+      const disp = snellDisp(slope, eta);
 
-      // ── Separable Snell displacement ─────────────────────────────────────
-      //
-      // Project distToEdge onto each axis via the outward-normal direction:
-      //
-      //   tX = distToEdge × |dirX| / bezel
-      //   tY = distToEdge × |dirY| / bezel
-      //
-      // On a straight edge one projection is 1 and the other 0, recovering
-      // the original single-axis behaviour.
-      //
-      // At a 45° corner dirX = dirY = 0.707, so both projections equal
-      // distToEdge × 0.707 / bezel. Since 0.707 × t < t and dh(t) decreases
-      // with t, the slope *at the corner projection* is evaluated higher on
-      // the curve — larger than on a straight edge at the same SDF distance.
-      // Combined with both axes being active at once, this produces the
-      // divergent "bending-around" displacement field seen in Apple's glass.
-      //
-      // sign(px_rel) / sign(py_rel) gives the side of the element (±1) so
-      // Snell bends content inward from outside on all four sides.
+      if (disp < 1e-6) continue;
 
-      const signX = px_rel >= 0 ? 1 : -1;
-      const signY = py_rel >= 0 ? 1 : -1;
-
-      const absDirX = Math.abs(dirX);
-      const absDirY = Math.abs(dirY);
-
-      let dx = 0;
-      let dy = 0;
-
-      // X component — driven by proximity to the vertical (left/right) edge.
-      if (absDirX > 1e-6) {
-        const tX = distToEdge * absDirX / bezel;
-        if (tX < 1) {
-          const sX = Math.min(dh(tX), 5.0);
-          dx = snellAxis(sX, signX, eta);
-        }
-      }
-
-      // Y component — driven by proximity to the horizontal (top/bottom) edge.
-      if (absDirY > 1e-6) {
-        const tY = distToEdge * absDirY / bezel;
-        if (tY < 1) {
-          const sY = Math.min(dh(tY), 5.0);
-          dy = snellAxis(sY, signY, eta);
-        }
-      }
+      const [gx, gy] = sdfGrad(px_rel, py_rel, halfW, halfH, r);
+      const dx = -gx * disp;
+      const dy = -gy * disp;
 
       raw[idx]     = dx;
       raw[idx + 1] = dy;
 
-      if (Math.abs(dx) > maxMagX) maxMagX = Math.abs(dx);
-      if (Math.abs(dy) > maxMagY) maxMagY = Math.abs(dy);
+      const mag = Math.hypot(dx, dy);
+      if (mag > maxMag) maxMag = mag;
     }
   }
 
-  // Per-axis normalisation: each channel independently fills ±127.
-  // For symmetric pill shapes maxMagX ≈ maxMagY, so the scale is the same on
-  // both axes. For asymmetric shapes (landscape pill) the bezel width is the
-  // same on all sides (= min(halfW, halfH) × 0.8), so the peaks are also
-  // equal and per-axis = magnitude normalisation in practice.
-  const normX = maxMagX > 0 ? maxMagX : 1;
-  const normY = maxMagY > 0 ? maxMagY : 1;
+  // Magnitude normalisation: both channels share the same scale so
+  // displacement strength is uniform around the entire perimeter.
+  const norm = maxMag > 0 ? maxMag : 1;
 
   for (let py = 0; py < mhElem; py++) {
     for (let px = 0; px < mwElem; px++) {
@@ -307,15 +228,15 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
       const cx = px + ovX;
       const cy = py + ovY;
       const b = (cy * mw + cx) * 4;
-      data[b]     = (128 + (raw[i * 2]     / normX) * 127 + 0.5) | 0;
-      data[b + 1] = (128 + (raw[i * 2 + 1] / normY) * 127 + 0.5) | 0;
+      data[b]     = (128 + (raw[i * 2]     / norm) * 127 + 0.5) | 0;
+      data[b + 1] = (128 + (raw[i * 2 + 1] / norm) * 127 + 0.5) | 0;
       data[b + 2] = maskBuf[i];
       data[b + 3] = 255;
     }
   }
 
   ctx.putImageData(img, 0, 0);
-  return await canvas.convertToBlob({ type: "image/png" });
+  return await canvas.convertToBlob({ type: "image/webp", quality: 1.0 });
 }
 
 self.onmessage = async (e: MessageEvent<MapRequest>) => {

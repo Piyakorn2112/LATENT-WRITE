@@ -735,32 +735,66 @@ interface ParaProseSignal {
   actionHits: number;
 }
 
+interface CompiledLexicon {
+  singleWordRe: RegExp | null;
+  multiWordPhrases: readonly string[];
+}
+
+function compileLexicon(words: readonly string[]): CompiledLexicon {
+  const singles: string[] = [];
+  const multi: string[] = [];
+  for (const w of words) {
+    if (w.includes(' ')) multi.push(w);
+    else singles.push(w);
+  }
+  return {
+    singleWordRe: singles.length > 0
+      ? new RegExp(`\\b(?:${singles.join('|')})\\b`, 'gi')
+      : null,
+    multiWordPhrases: multi,
+  };
+}
+
+const COMPILED_SENSORY: Record<SensoryChannel, CompiledLexicon> = {
+  sight: compileLexicon(SENSORY_LEXICON.sight),
+  sound: compileLexicon(SENSORY_LEXICON.sound),
+  touch: compileLexicon(SENSORY_LEXICON.touch),
+  smell: compileLexicon(SENSORY_LEXICON.smell),
+  taste: compileLexicon(SENSORY_LEXICON.taste),
+  interoception: compileLexicon(SENSORY_LEXICON.interoception),
+  kinesthetic: compileLexicon(SENSORY_LEXICON.kinesthetic),
+};
+
+const COMPILED_ACTION = compileLexicon(ACTION_LEXICON);
+
 /** Per-paragraph signal extraction. Pure, no shared state. */
 function scoreProseParagraph(para: string): ParaProseSignal {
   const lower = para.toLowerCase();
   const channels: SensoryChannel[] = [];
   let sensoryHits = 0;
-  for (const ch of Object.keys(SENSORY_LEXICON) as SensoryChannel[]) {
+  for (const ch of Object.keys(COMPILED_SENSORY) as SensoryChannel[]) {
     let hits = 0;
-    for (const w of SENSORY_LEXICON[ch]) {
-      // Single-word tokens use word boundaries; multi-word use plain includes.
-      if (w.includes(' ')) {
-        if (lower.includes(w)) hits++;
-      } else {
-        if (new RegExp(`\\b${w}\\b`, 'i').test(lower)) hits++;
-      }
+    const compiled = COMPILED_SENSORY[ch];
+    if (compiled.singleWordRe) {
+      compiled.singleWordRe.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = compiled.singleWordRe.exec(lower)) !== null) hits++;
+    }
+    for (const phrase of compiled.multiWordPhrases) {
+      if (lower.includes(phrase)) hits++;
     }
     if (hits > 0) channels.push(ch);
     sensoryHits += hits;
   }
 
   let actionHits = 0;
-  for (const w of ACTION_LEXICON) {
-    if (w.includes(' ')) {
-      if (lower.includes(w)) actionHits++;
-    } else {
-      if (new RegExp(`\\b${w}\\b`, 'i').test(lower)) actionHits++;
-    }
+  if (COMPILED_ACTION.singleWordRe) {
+    COMPILED_ACTION.singleWordRe.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = COMPILED_ACTION.singleWordRe.exec(lower)) !== null) actionHits++;
+  }
+  for (const phrase of COMPILED_ACTION.multiWordPhrases) {
+    if (lower.includes(phrase)) actionHits++;
   }
 
   // Short-sentence ratio — kinetic prose tends to fragment.

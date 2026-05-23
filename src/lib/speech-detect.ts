@@ -216,9 +216,53 @@ function normKey(s: string): string {
   return s.toLowerCase().trim();
 }
 
-function countNameMentions(text: string, name: string): number {
+class NameRegexCache {
+  private wordBoundary = new Map<string, RegExp>();
+  private wordBoundaryNoPoss = new Map<string, RegExp>();
+  private mentionGi = new Map<string, RegExp>();
+
+  getWordBoundary(name: string): RegExp {
+    let re = this.wordBoundary.get(name);
+    if (!re) {
+      re = new RegExp(`\\b${esc(name)}\\b`, 'i');
+      this.wordBoundary.set(name, re);
+    }
+    return re;
+  }
+
+  getWordBoundaryNoPoss(name: string): RegExp {
+    let re = this.wordBoundaryNoPoss.get(name);
+    if (!re) {
+      re = new RegExp(`\\b${esc(name)}\\b(?!['\\u2018\\u2019]s)`, 'i');
+      this.wordBoundaryNoPoss.set(name, re);
+    }
+    return re;
+  }
+
+  getMentionGi(name: string): RegExp {
+    let re = this.mentionGi.get(name);
+    if (!re) {
+      re = new RegExp(`\\b${esc(name)}\\b`, 'gi');
+      this.mentionGi.set(name, re);
+    }
+    return re;
+  }
+}
+
+let _cachedNames: string[] | undefined;
+let _nameRegexCache: NameRegexCache | undefined;
+
+function getNameRegexCache(knownNames: string[]): NameRegexCache {
+  if (_cachedNames === knownNames && _nameRegexCache) return _nameRegexCache;
+  _nameRegexCache = new NameRegexCache();
+  _cachedNames = knownNames;
+  return _nameRegexCache;
+}
+
+function countNameMentions(text: string, name: string, cache?: NameRegexCache): number {
   if (!text || !name) return 0;
-  const re = new RegExp(`\\b${esc(name)}\\b`, 'gi');
+  const re = cache ? cache.getMentionGi(name) : new RegExp(`\\b${esc(name)}\\b`, 'gi');
+  re.lastIndex = 0;
   return (text.match(re) ?? []).length;
 }
 
@@ -338,9 +382,7 @@ function leadingClause(before: string): string {
  * Safety: returns undefined if no known name appears in the first 55% of
  * the clause (too deep in a subordinate phrase to be the subject).
  */
-function findActionSubject(clause: string, knownNames: string[]): string | undefined {
-  // Build quoted regions to exclude names inside dialogue content
-  // e.g. "Thayne understands X," Iris said → Thayne is inside quotes, skip it
+function findActionSubject(clause: string, knownNames: string[], cache?: NameRegexCache): string | undefined {
   const quotedRegions: Array<{ start: number; end: number }> = [];
   const quoteMarks = [
     { open: OPEN_DOUBLE, close: CLOSE_DOUBLE },
@@ -362,10 +404,23 @@ function findActionSubject(clause: string, knownNames: string[]): string | undef
 
   let firstMatch: { name: string; pos: number } | undefined;
   for (const name of knownNames) {
-    // Exclude possessives — "Iris's" is ownership, not agency
-    const m = new RegExp(`\\b${esc(name)}\\b(?!['’]s)`, 'i').exec(clause);
+    const re = cache ? cache.getWordBoundaryNoPoss(name) : new RegExp(`\\b${esc(name)}\\b(?!['\\u2018\\u2019]s)`, "i");
+    const m = re.exec(clause);
     if (m && !isInsideQuote(m.index) && (!firstMatch || m.index < firstMatch.pos)) {
       firstMatch = { name, pos: m.index };
+    }
+  }
+  // Possessive-subject fallback: "Name's [action]" at the very start of a
+  // clause is a literary pattern implying the character is the implied speaker
+  // (e.g. "Iris's pause was the lattice processing…"). Only applies when no
+  // non-possessive match was found and the possessive appears at position 0.
+  if (!firstMatch) {
+    for (const name of knownNames) {
+      if (new RegExp(`^\\s*\\b${esc(name)}\\b['\\u2018\\u2019]s?\\s`, 'i').test(clause)
+          && !isInsideQuote(0)) {
+        firstMatch = { name, pos: 0 };
+        break;
+      }
     }
   }
   if (!firstMatch) return undefined;
@@ -454,13 +509,13 @@ function findDirectName(
  * Finds the first named character in the paragraph's opening clause.
  * Used to track the "active subject" for pronoun resolution across paragraphs.
  */
-export function detectParagraphSubject(para: string, knownNames: string[]): string | undefined {
+export function detectParagraphSubject(para: string, knownNames: string[], cache?: NameRegexCache): string | undefined {
   const match = para.match(/^(?:[^.!?]+[.!?]\s*){0,1}[^.!?]+/);
   const windowStr = match ? match[0] : para.slice(0, 250);
   let firstMatch: { name: string; pos: number } | undefined;
   for (const name of knownNames) {
-    // Exclude possessives — "Nora's" / "Nora’s" in the opening context is not the subject
-    const found = new RegExp(`\\b${esc(name)}\\b(?!['’]s)`, 'i').exec(windowStr);
+    const re = cache ? cache.getWordBoundaryNoPoss(name) : new RegExp(`\\b${esc(name)}\\b(?!['\\u2018\\u2019]s)`, "i");
+    const found = re.exec(windowStr);
     if (found && (!firstMatch || found.index < firstMatch.pos)) {
       firstMatch = { name, pos: found.index };
     }
@@ -536,6 +591,7 @@ export type GenderHint = 'M' | 'F' | 'N';
 function buildGenderMap(
   paragraphs: string[],
   knownNames: string[],
+  cache?: NameRegexCache,
 ): Map<string, GenderHint> {
   const mScore = new Map<string, number>(); // masculine hits
   const fScore = new Map<string, number>(); // feminine hits
@@ -547,7 +603,8 @@ function buildGenderMap(
     const lower = para.toLowerCase();
     for (const name of knownNames) {
       const k = normKey(name);
-      const nameRe = new RegExp(`\\b${esc(name)}\\b(?!'s)`, 'gi');
+      const nameRe = cache ? cache.getMentionGi(name) : new RegExp(`\\b${esc(name)}\\b`, 'gi');
+      nameRe.lastIndex = 0;
       let m: RegExpExecArray | null;
       while ((m = nameRe.exec(lower)) !== null) {
         const winBefore = lower.slice(Math.max(0, m.index - 60), m.index);
@@ -572,7 +629,10 @@ function buildGenderMap(
       const isMasc = pronoun === 'he' || pronoun === 'him';
       const isFem  = pronoun === 'she' || pronoun === 'her';
       const attrWin = lower.slice(Math.max(0, attrMatch.index - 50), attrMatch.index + 150);
-      const nearbyNames = knownNames.filter(n => new RegExp(`\\b${esc(n)}\\b`, 'i').test(attrWin));
+      const nearbyNames = knownNames.filter(n => {
+        const re = cache ? cache.getWordBoundary(n) : new RegExp(`\\b${esc(n)}\\b`, 'i');
+        return re.test(attrWin);
+      });
       
       if (nearbyNames.length === 1) {
         const k = normKey(nearbyNames[0]);
@@ -625,12 +685,14 @@ function buildGenderMap(
 function findParagraphFocusWithRatio(
   para: string,
   knownNames: string[],
+  cache?: NameRegexCache,
 ): { name: string; ratio: number } | undefined {
   let bestName: string | undefined;
   let bestCount = 0;
   let totalMentions = 0;
   for (const name of knownNames) {
-    const re = new RegExp(`\\b${esc(name)}\\b(?!'s)`, 'gi');
+    const re = cache ? cache.getMentionGi(name) : new RegExp(`\\b${esc(name)}\\b`, 'gi');
+    re.lastIndex = 0;
     const count = (para.match(re) ?? []).length;
     totalMentions += count;
     if (count > bestCount) { bestCount = count; bestName = name; }
@@ -770,10 +832,12 @@ function detectTurnPattern(
 // ── buildExtCtxDensity (High mode) ────────────────────────────────────────
 
 /** Count raw (undecayed) name occurrences in the extCtx window. */
-function buildExtCtxDensity(extCtx: string, knownNames: string[]): Map<string, number> {
+function buildExtCtxDensity(extCtx: string, knownNames: string[], cache?: NameRegexCache): Map<string, number> {
   const density = new Map<string, number>();
   for (const name of knownNames) {
-    const hits = (extCtx.match(new RegExp(`\\b${esc(name)}\\b`, 'gi')) ?? []).length;
+    const re = cache ? cache.getMentionGi(name) : new RegExp(`\\b${esc(name)}\\b`, 'gi');
+    re.lastIndex = 0;
+    const hits = (extCtx.match(re) ?? []).length;
     if (hits > 0) density.set(normKey(name), hits);
   }
   return density;
@@ -892,11 +956,12 @@ function findAttribution(
         }
         // A2: Thread has 1 participant, but cast is exactly 2 known names →
         //     infer the other as alternation partner (early conversation).
-        //     Confidence 0.65 ensures it survives the HIGH-mode demotion pass
-        //     (which strips speakers with conf < 0.65 and low ctx score) and
-        //     gets pushed to recentSpeakers for subsequent alternation.
+        //     Use thread.participants.last as the "who just spoke" reference
+        //     (more reliable than activeSubject which may be a narrative carry).
+        //     Confidence 0.65 ensures it survives the HIGH-mode demotion pass.
         if (thread.participants.length >= 1 && knownNames.length === 2) {
-          const otherName = knownNames.find(n => normKey(n) !== lastK);
+          const lastThreadSpeakerK = normKey(thread.participants[thread.participants.length - 1]);
+          const otherName = knownNames.find(n => normKey(n) !== lastThreadSpeakerK);
           if (otherName) return { speaker: otherName, type: 'speech', confidence: 0.65 };
         }
       }
@@ -919,10 +984,16 @@ function findAttribution(
     //    empty), no action beat establishes the speaker. Alternate to the most
     //    recently active OTHER participant in this conversation.
     //    e.g. Iris just spoke → next untagged standalone quote → Nora → Iris → …
-    //    Uses activeSubject (updated on every attribution) to determine the
-    //    "last speaker", not just recentSpeakers (which requires ≥0.65 confidence).
+    //    Uses activeSubject only when they have speak weight (i.e. actually spoke),
+    //    otherwise uses recentSpeakers.last to avoid carrying narrative action
+    //    subjects (who never spoke) as the "most recent speaker" reference.
     if (before.trim().length === 0 && recentSpeakers && recentSpeakers.length >= 1) {
-      const mostRecent = activeSubject ?? recentSpeakers[recentSpeakers.length - 1];
+      const activeHasSpeakWeight = activeSubject
+        ? (speakWeights.get(normKey(activeSubject)) ?? 0) >= 0.05
+        : false;
+      const mostRecent = activeHasSpeakWeight
+        ? activeSubject!
+        : recentSpeakers[recentSpeakers.length - 1];
       const kLast = normKey(mostRecent);
       // 1) Scan recentSpeakers backwards for the most recently seen other participant
       for (let _j = recentSpeakers.length - 1; _j >= 0; _j--) {
@@ -1526,6 +1597,145 @@ function processParagraph(
   return { segments, endsOpen };
 }
 
+// ── Hoisted term arrays for computeParagraphMeta (allocated once) ────────
+
+const META_CONFRONTATION_VERBS: readonly string[] = [
+  'demanded', 'challenged', 'confronted', 'pressed', 'insisted',
+  'refused', 'snapped', 'accused', 'pleaded', 'confessed', 'denied',
+  'seized', 'yanked', 'shoved', 'slammed', 'grabbed',
+  'screamed', 'shouted', 'yelled', 'barked', 'hissed', 'snarled',
+  'cornered', 'blocked', 'restrained', 'threatened', 'warned',
+  'begged', 'lunged', 'struck',
+  'slashed', 'parried', 'deflected', 'dodged', 'charged', 'impaled',
+  'cut down', 'cut through', 'pierced', 'overwhelmed', 'overpowered',
+  'drove back', 'knocked back', 'sent flying', 'disarmed',
+  'defeated', 'destroyed',
+];
+
+const META_PHYS_TERMS: readonly string[] = [
+  'trembling', 'trembled', 'tremor', 'shaking', 'shook',
+  'gripped', 'clutched', 'clenched', 'tightened', 'tensed',
+  'burning', 'strained', 'flinched', 'winced', 'braced',
+  'stumbled', 'staggered', 'doubled over',
+  'breath caught', 'held her breath', 'held his breath', 'their breath',
+  'heart pounded', 'heart raced', 'pulse quickened',
+  'white knuckles', 'jaw tightened', 'shoulders tensed',
+];
+
+const META_FEAR_TERMS: readonly string[] = [
+  'afraid', 'frightened', 'terrified', 'dread',
+  'desperate', 'panic', 'alarmed', 'horrified',
+  'vulnerable', 'exposed', 'helpless', 'powerless',
+  'grief', 'despair', 'anguish', 'shattered', 'devastated',
+  'ached', 'aching', 'unbearable',
+  'rage', 'fury', 'wrath', 'hatred', 'overwhelming',
+  'desperation', 'bloodlust', 'killing intent',
+];
+
+const META_SILENCE_TERMS: readonly string[] = [
+  'silence', 'silent', 'motionless', 'without a word',
+  'said nothing', 'no words', "couldn't speak",
+  'not allowed', 'forbidden', 'refused to answer', 'refused to look',
+  'looked away', 'turned away',
+];
+
+const META_SUPPRESSION_TERMS: readonly string[] = [
+  'bit back', 'swallowed hard', 'fought the urge',
+  'kept her voice', 'kept his voice', 'steady voice',
+  'held herself', 'held himself', 'held back',
+  'forced herself', 'forced himself', 'made herself', 'made himself',
+  'did not react', 'did not move', 'did not speak', 'did not answer',
+  'carefully controlled', 'struggled to keep',
+];
+
+const META_DISASTER_TERMS: readonly string[] = [
+  'explosion', 'exploded', 'detonated', 'blast', 'detonation',
+  'debris', 'rubble', 'smoke', 'flames', 'fire spread',
+  'shockwave', 'concussion',
+  'bleeding', 'wounded', 'injuries',
+  'shattered glass', 'chaos', 'screaming',
+];
+
+const META_REVELATION_TERMS: readonly string[] = [
+  'admitted', 'confessed', 'broke the silence',
+  'who are you', 'what are you', 'what you are', 'who you are',
+  'the truth', 'truth is', 'had to know', 'needed to know',
+  'all along', 'finally said', 'finally admitted', 'always knew',
+];
+
+const META_ABSTRACT_TERMS: readonly string[] = [
+  'threshold', 'limit', 'margin', 'capacity', 'failure',
+  'collapse', 'degradation', 'fragment', 'separation', 'fracture',
+  'the cost', 'weight of', 'burden', 'erosion',
+  'void', 'absence', 'the boundary', 'the gap', 'the distance',
+  'consumed', 'projection',
+  'parameters', 'tolerance', 'protocol', 'directive', 'procedure',
+  'classification', 'designation', 'assigned', 'clearance', 'restricted',
+  'compliant', 'non-compliant', 'deviation', 'variance', 'anomaly',
+  'the system', 'the facility', 'the program', 'the record', 'the file',
+  'scheduled', 'pending', 'delayed', 'suspended', 'terminated',
+  'monitoring', 'assessment', 'evaluation', 'performance', 'output',
+  'the weight', 'the silence', 'the space between', 'the interval',
+  'accumulation', 'residue', 'implication', 'undercurrent', 'signal',
+  'the pattern', 'the structure', 'the arrangement', 'the logic of',
+];
+
+const META_FANTASY_TERMS: readonly string[] = [
+  'mana', 'magic power', 'cast a spell', 'spellcraft',
+  'skill activated', 'skill:', 'ability activated', 'level up',
+  'status screen', 'system message', 'notification',
+  'killing aura', 'murderous aura', 'pressure emanated',
+  'power level', 'overwhelmed by power', 'surpassed', 'overpowered by',
+  'flames erupted', 'lightning crackled', 'ice spread',
+  'the ground shook', 'the air crackled', 'mana exploded',
+];
+
+const META_QUIET_PIVOT_TERMS: readonly string[] = [
+  'for the first time', 'the last time', 'never before', 'never again',
+  'something changed', 'the moment', 'in that moment', 'only then',
+  'it was then', 'she understood', 'he understood', 'it became clear',
+  'the realization', 'the truth was', 'finally knew', 'already knew',
+  'she found', 'he found', 'discovered',
+];
+
+const META_CELEB_HINTS: readonly string[] = [
+  'festival', 'celebration', 'music', 'laughter', 'dancing',
+  'golden light', 'warm light', 'gathered', 'joy', 'singing',
+  'at the inn', 'the tavern', 'the guild', 'the village', 'at the feast',
+  'sat down to eat', 'cooked', 'prepared a meal', 'shared a meal',
+];
+
+const META_INTIMATE_HINTS: readonly string[] = [
+  'warmth', 'smiled', 'laughed', 'between them', 'beside her',
+  'beside him', 'her hand', 'his hand', 'their hands',
+  'familiar', 'close to', 'at ease', 'comfortable', 'gentle',
+  'the warmth of',
+  'across from her', 'across from him', 'sat together',
+  'looked at each other', 'met his eyes', 'met her eyes',
+  'the party', 'his companion', 'her companion',
+];
+
+const META_REFLECTIVE_HINTS: readonly string[] = [
+  'remembered', 'thinking', 'thought about', 'wondered',
+  'watching', 'listening', 'waiting', 'observed', 'noticed',
+  'memory', 'for years', 'for so long', 'had always',
+  'meaning', 'understood', 'realized', 'as though', 'felt like',
+  'i thought', 'my mind', 'i realized', 'it occurred to me', 'in my head',
+  'i had been', 'i wondered', 'i considered',
+];
+
+const META_WEIGHTED_HINTS: readonly string[] = [
+  'carried for', 'borne for', 'held for', 'for decades',
+  'for centuries', 'for longer than', 'across the years',
+  'the weight of', 'the cost of', 'no one alive',
+];
+
+const META_SIGNIFICANT_HINTS: readonly string[] = [
+  'for the first time', 'the last time', 'never before', 'never again',
+  'would remember', 'would not forget', 'something changed',
+  'the moment', 'in that moment',
+];
+
 // ── Paragraph tension metadata ───────────────────────────────────────────
 
 /**
@@ -1579,99 +1789,38 @@ function computeParagraphMeta(
   let score = 0;
 
   // ── Signal 1: Confrontation / action verbs (+2 each, cap 10) ─────────
-  // Extended with combat/action vocabulary for isekai and genre fiction.
-  const confrontationVerbs = [
-    // Literary / psychological
-    'demanded', 'challenged', 'confronted', 'pressed', 'insisted',
-    'refused', 'snapped', 'accused', 'pleaded', 'confessed', 'denied',
-    'seized', 'yanked', 'shoved', 'slammed', 'grabbed',
-    'screamed', 'shouted', 'yelled', 'barked', 'hissed', 'snarled',
-    'cornered', 'blocked', 'restrained', 'threatened', 'warned',
-    'begged', 'lunged', 'struck',
-    // Combat / action (isekai, genre fiction)
-    'slashed', 'parried', 'deflected', 'dodged', 'charged', 'impaled',
-    'cut down', 'cut through', 'pierced', 'overwhelmed', 'overpowered',
-    'drove back', 'knocked back', 'sent flying', 'disarmed',
-    'defeated', 'destroyed',
-  ];
   let confrontationCount = 0;
-  for (const v of confrontationVerbs) if (has(v)) confrontationCount++;
+  for (const v of META_CONFRONTATION_VERBS) if (has(v)) confrontationCount++;
   score += Math.min(confrontationCount * 2, 10);
 
   // ── Signal 2: Physical tension signals (+2 each, cap 8) ──────────────
-  const physTerms = [
-    'trembling', 'trembled', 'tremor', 'shaking', 'shook',
-    'gripped', 'clutched', 'clenched', 'tightened', 'tensed',
-    'burning', 'strained', 'flinched', 'winced', 'braced',
-    'stumbled', 'staggered', 'doubled over',
-    'breath caught', 'held her breath', 'held his breath', 'their breath',
-    'heart pounded', 'heart raced', 'pulse quickened',
-    'white knuckles', 'jaw tightened', 'shoulders tensed',
-  ];
   let physicalCount = 0;
-  for (const w of physTerms) if (has(w)) physicalCount++;
+  for (const w of META_PHYS_TERMS) if (has(w)) physicalCount++;
   score += Math.min(physicalCount * 2, 8);
 
   // ── Signal 3: Fear / emotional-exposure vocabulary (+1.5 each, cap 6) ─
-  const fearTerms = [
-    'afraid', 'frightened', 'terrified', 'dread',
-    'desperate', 'panic', 'alarmed', 'horrified',
-    'vulnerable', 'exposed', 'helpless', 'powerless',
-    'grief', 'despair', 'anguish', 'shattered', 'devastated',
-    'ached', 'aching', 'unbearable',
-    // Genre-fiction emotional extremes
-    'rage', 'fury', 'wrath', 'hatred', 'overwhelming',
-    'desperation', 'bloodlust', 'killing intent',
-  ];
   let fearCount = 0;
-  for (const w of fearTerms) if (has(w)) fearCount++;
+  for (const w of META_FEAR_TERMS) if (has(w)) fearCount++;
   score += Math.min(fearCount * 1.5, 6);
 
   // ── Signal 4: Silence / constraint vocabulary (+1 each, cap 5) ────────
-  const silenceTerms = [
-    'silence', 'silent', 'motionless', 'without a word',
-    'said nothing', 'no words', "couldn't speak",
-    'not allowed', 'forbidden', 'refused to answer', 'refused to look',
-    'looked away', 'turned away',
-  ];
   let silenceCount = 0;
-  for (const w of silenceTerms) if (has(w)) silenceCount++;
+  for (const w of META_SILENCE_TERMS) if (has(w)) silenceCount++;
   score += Math.min(silenceCount * 1, 5);
 
   // ── Signal 5: Restraint / suppression phrases (+1.5 each, cap 4.5) ───
-  const suppressionTerms = [
-    'bit back', 'swallowed hard', 'fought the urge',
-    'kept her voice', 'kept his voice', 'steady voice',
-    'held herself', 'held himself', 'held back',
-    'forced herself', 'forced himself', 'made herself', 'made himself',
-    'did not react', 'did not move', 'did not speak', 'did not answer',
-    'carefully controlled', 'struggled to keep',
-  ];
   let suppressionCount = 0;
-  for (const w of suppressionTerms) if (has(w)) suppressionCount++;
+  for (const w of META_SUPPRESSION_TERMS) if (has(w)) suppressionCount++;
   score += Math.min(suppressionCount * 1.5, 4.5);
 
   // ── Signal 6: Disaster / physical-damage vocabulary (+2.5 each, cap 7.5)
-  const disasterTerms = [
-    'explosion', 'exploded', 'detonated', 'blast', 'detonation',
-    'debris', 'rubble', 'smoke', 'flames', 'fire spread',
-    'shockwave', 'concussion',
-    'bleeding', 'wounded', 'injuries',
-    'shattered glass', 'chaos', 'screaming',
-  ];
   let disasterCount = 0;
-  for (const w of disasterTerms) if (has(w)) disasterCount++;
+  for (const w of META_DISASTER_TERMS) if (has(w)) disasterCount++;
   score += Math.min(disasterCount * 2.5, 7.5);
 
   // ── Signal 7: Revelation / truth vocabulary (+1.5 each, cap 4.5) ──────
-  const revelationTerms = [
-    'admitted', 'confessed', 'broke the silence',
-    'who are you', 'what are you', 'what you are', 'who you are',
-    'the truth', 'truth is', 'had to know', 'needed to know',
-    'all along', 'finally said', 'finally admitted', 'always knew',
-  ];
   let revelationCount = 0;
-  for (const w of revelationTerms) if (has(w)) revelationCount++;
+  for (const w of META_REVELATION_TERMS) if (has(w)) revelationCount++;
   score += Math.min(revelationCount * 1.5, 4.5);
 
   // ── Signal 8: Sentence rhythm — fragmentation signals urgency ─────────
@@ -1730,28 +1879,8 @@ function computeParagraphMeta(
   score += Math.min(repeatedLines * 2.5, 5);
 
   // ── Signal 15: Abstract concept density (+1.2 each, cap 5) ────────────
-  // System-pressure / weight vocabulary (Fix D: expanded for sci-fi institutional prose).
-  const abstractTerms = [
-    // Original core set
-    'threshold', 'limit', 'margin', 'capacity', 'failure',
-    'collapse', 'degradation', 'fragment', 'separation', 'fracture',
-    'the cost', 'weight of', 'burden', 'erosion',
-    'void', 'absence', 'the boundary', 'the gap', 'the distance',
-    'consumed', 'projection',
-    // Expanded: institutional/systemic pressure (Hollow Iris register)
-    'parameters', 'tolerance', 'protocol', 'directive', 'procedure',
-    'classification', 'designation', 'assigned', 'clearance', 'restricted',
-    'compliant', 'non-compliant', 'deviation', 'variance', 'anomaly',
-    'the system', 'the facility', 'the program', 'the record', 'the file',
-    'scheduled', 'pending', 'delayed', 'suspended', 'terminated',
-    'monitoring', 'assessment', 'evaluation', 'performance', 'output',
-    // Abstract pressure vocabulary (literary sci-fi)
-    'the weight', 'the silence', 'the space between', 'the interval',
-    'accumulation', 'residue', 'implication', 'undercurrent', 'signal',
-    'the pattern', 'the structure', 'the arrangement', 'the logic of',
-  ];
   let abstractCount = 0;
-  for (const w of abstractTerms) if (has(w)) abstractCount++;
+  for (const w of META_ABSTRACT_TERMS) if (has(w)) abstractCount++;
   score += Math.min(abstractCount * 1.2, 5);
 
   // ── Signal 16: Low-entropy controlled prose (+2.5) ────────────────────
@@ -1763,19 +1892,8 @@ function computeParagraphMeta(
   }
 
   // ── Signal 18: Fantasy / power-system vocabulary (+1.5 each, cap 6) ──
-  // Detects isekai / genre-fiction pressure points: skill activations,
-  // mana bursts, power scaling, and aura-based confrontations.
-  const fantasyTerms = [
-    'mana', 'magic power', 'cast a spell', 'spellcraft',
-    'skill activated', 'skill:', 'ability activated', 'level up',
-    'status screen', 'system message', 'notification',
-    'killing aura', 'murderous aura', 'pressure emanated',
-    'power level', 'overwhelmed by power', 'surpassed', 'overpowered by',
-    'flames erupted', 'lightning crackled', 'ice spread',
-    'the ground shook', 'the air crackled', 'mana exploded',
-  ];
   let fantasyCount = 0;
-  for (const w of fantasyTerms) if (has(w)) fantasyCount++;
+  for (const w of META_FANTASY_TERMS) if (has(w)) fantasyCount++;
   score += Math.min(fantasyCount * 1.5, 6);
 
   // ── Signal 17: Contrast spike — calm → intense jump (+2) ─────────────
@@ -1840,14 +1958,7 @@ function computeParagraphMeta(
     tension = 'calm';
     // H4 — Quiet pivot detection: a calm paragraph with narrative pivot
     // vocabulary is marked as a noteworthy event even without tension.
-    const quietPivotTerms = [
-      'for the first time', 'the last time', 'never before', 'never again',
-      'something changed', 'the moment', 'in that moment', 'only then',
-      'it was then', 'she understood', 'he understood', 'it became clear',
-      'the realization', 'the truth was', 'finally knew', 'already knew',
-      'she found', 'he found', 'discovered',
-    ];
-    if (quietPivotTerms.some(w => lower.includes(w))) {
+    if (META_QUIET_PIVOT_TERMS.some(w => lower.includes(w))) {
       label = 'quiet pivot';
     }
   }
@@ -1855,50 +1966,13 @@ function computeParagraphMeta(
   // ── Paragraph quality hint (aggregated by groupIntoScenes) ────────────
   // Computed regardless of tension level so the scene grouper has signals
   // for labelling calm scenes (celebration, connection, reflection, etc.).
-  const celebHints = [
-    'festival', 'celebration', 'music', 'laughter', 'dancing',
-    'golden light', 'warm light', 'gathered', 'joy', 'singing',
-    // Isekai slice-of-life
-    'at the inn', 'the tavern', 'the guild', 'the village', 'at the feast',
-    'sat down to eat', 'cooked', 'prepared a meal', 'shared a meal',
-  ];
-  const intimateHints = [
-    'warmth', 'smiled', 'laughed', 'between them', 'beside her',
-    'beside him', 'her hand', 'his hand', 'their hands',
-    'familiar', 'close to', 'at ease', 'comfortable', 'gentle',
-    'the warmth of',
-    // Isekai social / party dynamics
-    'across from her', 'across from him', 'sat together',
-    'looked at each other', 'met his eyes', 'met her eyes',
-    'the party', 'his companion', 'her companion',
-  ];
-  const reflectiveHints = [
-    'remembered', 'thinking', 'thought about', 'wondered',
-    'watching', 'listening', 'waiting', 'observed', 'noticed',
-    'memory', 'for years', 'for so long', 'had always',
-    'meaning', 'understood', 'realized', 'as though', 'felt like',
-    // Isekai internal monologue patterns
-    'i thought', 'my mind', 'i realized', 'it occurred to me', 'in my head',
-    'i had been', 'i wondered', 'i considered',
-  ];
-  const weightedHints = [
-    'carried for', 'borne for', 'held for', 'for decades',
-    'for centuries', 'for longer than', 'across the years',
-    'the weight of', 'the cost of', 'no one alive',
-  ];
-  const significantHints = [
-    'for the first time', 'the last time', 'never before', 'never again',
-    'would remember', 'would not forget', 'something changed',
-    'the moment', 'in that moment',
-  ];
-
   let celebCount = 0, intimateCount = 0, reflectCount = 0;
   let weightedHintCount = 0, significantCount = 0;
-  for (const w of celebHints)       if (has(w)) celebCount++;
-  for (const w of intimateHints)    if (has(w)) intimateCount++;
-  for (const w of reflectiveHints)  if (has(w)) reflectCount++;
-  for (const w of weightedHints)    if (has(w)) weightedHintCount++;
-  for (const w of significantHints) if (has(w)) significantCount++;
+  for (const w of META_CELEB_HINTS)       if (has(w)) celebCount++;
+  for (const w of META_INTIMATE_HINTS)    if (has(w)) intimateCount++;
+  for (const w of META_REFLECTIVE_HINTS)  if (has(w)) reflectCount++;
+  for (const w of META_WEIGHTED_HINTS)    if (has(w)) weightedHintCount++;
+  for (const w of META_SIGNIFICANT_HINTS) if (has(w)) significantCount++;
 
   let paragraphHint: ParagraphMeta['paragraphHint'];
   if      (celebCount >= 2)                               paragraphHint = 'celebratory';
@@ -2121,7 +2195,8 @@ export function detectSpeechInChapter(
   // This pre-pass is O(N·M) but runs once; it lets pronoun resolution exclude
   // gender-mismatched candidates (e.g. 'he said' can never resolve to Nora).
   // Skipped on 'low' intelligence level to reduce overhead.
-  const genderMap = useGenderMap ? buildGenderMap(paragraphs, knownNames) : undefined;
+  const nameCache = getNameRegexCache(knownNames);
+  const genderMap = useGenderMap ? buildGenderMap(paragraphs, knownNames, nameCache) : undefined;
 
   for (let i = 0; i < paragraphs.length; i++) {
     const para = paragraphs[i];
@@ -2141,7 +2216,7 @@ export function detectSpeechInChapter(
     // ── Mention boosts (before processing quotes) ──
 
     // Subject of this paragraph boosts its mention weight
-    const paraSubject = detectParagraphSubject(para, knownNames);
+    const paraSubject = detectParagraphSubject(para, knownNames, nameCache);
     const carriedParagraphSubject = !paraSubject
       && carryParagraphSubjectToNextOpeningQuote
       && /^\s*["“]/.test(para)
@@ -2193,20 +2268,19 @@ export function detectSpeechInChapter(
     // Mention boosts — direct (non-possessive) mentions count more than possessive.
     // First mention in the chapter gets an elevated boost (character debut signal).
     for (const name of knownNames) {
-      const e = esc(name);
       const k = normKey(name);
-      if (new RegExp(`\b${e}\b(?!['’]s)`, 'i').test(para)) {
+      if (nameCache.getWordBoundaryNoPoss(name).test(para)) {
         const isFirstMention = !everMentioned.has(k);
         if (isFirstMention) everMentioned.add(k);
         mentionWeights.set(k, Math.min(1.0, (mentionWeights.get(k) ?? 0) + (isFirstMention ? 0.45 : 0.20)));
-      } else if (new RegExp(`\b${e}['’]s\b`, 'i').test(para)) {
+      } else if (nameCache.getWordBoundary(name).test(para)) {
         mentionWeights.set(k, Math.min(1.0, (mentionWeights.get(k) ?? 0) + 0.05));
       }
     }
 
     // ── High mode: build dialogue thread + extCtx density for this paragraph ──
     const thread      = level === 'high' && extCtx ? extractDialogueThread(extCtx, knownNames, genderMap) : undefined;
-    const extCtxDens  = level === 'high' && extCtx ? buildExtCtxDensity(extCtx, knownNames) : undefined;
+    const extCtxDens  = level === 'high' && extCtx ? buildExtCtxDensity(extCtx, knownNames, nameCache) : undefined;
 
     // Track continuation depth for confidence decay on long multi-para quotes.
     if (openContinuation) continuationDepth++;
@@ -2259,7 +2333,7 @@ export function detectSpeechInChapter(
 
     // A1: prevParaFocus with dominance ratio for proportional focus bonus.
     // If no named characters found, keep previous value (transitional prose).
-    const thisFocus = findParagraphFocusWithRatio(para, knownNames);
+    const thisFocus = findParagraphFocusWithRatio(para, knownNames, nameCache);
     if (thisFocus) prevParaFocus = thisFocus;
 
     if (paraSubject && !/^\s*["“]/.test(para)) {

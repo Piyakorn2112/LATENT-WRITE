@@ -3,6 +3,7 @@ import type { Chapter } from "../types";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import type { ActionPrediction } from "../lib/action-detect";
+import type { ToolHighlight } from "../lib/tool-runner";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { measurePerfSync } from "../lib/perf-trace";
 import { resolveLiveKnownNames } from "../lib/world-data";
@@ -23,6 +24,7 @@ interface Props {
   annotationOverrides?: Map<string, string | null>;
   speechPredictions?: AdaptivePredictionTrace[];
   actionPredictions?: ActionPrediction[][];
+  toolHighlights?: ToolHighlight[];
   typingSettleMs?: number;
   sidePanelOpen?: boolean;
   sidePanelCompensation?: boolean;
@@ -59,7 +61,7 @@ function resolveParagraphSlice(content: string, caret: number): ParagraphSlice {
 export function Editor({
   chapter, onContentChange, analysisResult, knownNames, onEntityClick,
   annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides,
-  speechPredictions, actionPredictions, typingSettleMs = 1000,
+  speechPredictions, actionPredictions, toolHighlights, typingSettleMs = 1000,
   sidePanelOpen = false,
   sidePanelCompensation = false,
   layoutWidthKey,
@@ -252,6 +254,7 @@ export function Editor({
               ? { start: activeParagraph.start, end: activeParagraph.end }
               : null}
             grammarSuggestions={grammarSuggestions}
+            toolHighlights={toolHighlights}
             visible={hasHighlight}
             onEntityClick={onEntityClick}
             annotationMode={annotationMode}

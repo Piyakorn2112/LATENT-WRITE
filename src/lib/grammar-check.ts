@@ -831,36 +831,29 @@ const CONFUSABLE_RULES: Rule[] = [
   },
 ];
 
+const CORE_RULES: Rule[] = [
+  ...makeSpellRules(),
+  ...TENSE_RULES,
+  ...SVA_RULES,
+  ARTICLE_RULE,
+  ...CAPITAL_RULES,
+  ...PUNCT_RULES,
+  DOUBLE_RULE,
+  ...CONFUSABLE_RULES,
+];
+
+const STYLE_RULES: Rule[] = [
+  FILTER_RULE,
+  PASSIVE_RULE,
+  ADVERB_RULE,
+  ...WORDY_RULES,
+  ...CLICHE_RULES,
+];
+
+const ALL_RULES: Rule[] = [...CORE_RULES, ...STYLE_RULES];
+
 function buildRules(options: CheckOptions): Rule[] {
-  // High-importance (always shown): spelling, agreement, article, capital,
-  // spacing, punctuation, doubled word, confusables. These render with the
-  // ghost-text suggestion floating above the underlined word.
-  const rules: Rule[] = [
-    ...makeSpellRules(),
-    ...TENSE_RULES,
-    ...SVA_RULES,
-    ARTICLE_RULE,
-    ...CAPITAL_RULES,
-    ...PUNCT_RULES,
-    DOUBLE_RULE,
-    ...CONFUSABLE_RULES,
-  ];
-
-  // Low-importance (style hints, only shown on hover via the paragraph
-  // renderer): filter words, passive voice, attribution adverbs, wordy
-  // phrases, clichés. Default ON — the paragraph renderer relies on these
-  // being present to render the dim secondary tier described in styles.css.
-  if (options.style !== false) {
-    rules.push(
-      FILTER_RULE,
-      PASSIVE_RULE,
-      ADVERB_RULE,
-      ...WORDY_RULES,
-      ...CLICHE_RULES,
-    );
-  }
-
-  return rules;
+  return options.style !== false ? ALL_RULES : CORE_RULES;
 }
 
 const STYLE_KINDS_SET: ReadonlySet<GrammarSuggestion["kind"]> = new Set([

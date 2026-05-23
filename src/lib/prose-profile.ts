@@ -63,8 +63,9 @@ function syllableCount(word: string): number {
 
 // ─── POV detection ───────────────────────────────────────────────────────
 
-const FIRST_RE  = /\b(I|me|my|mine|we|us|our|ours|myself|ourselves)\b/g;
-const SECOND_RE = /\b(you|your|yours|yourself|yourselves)\b/g;
+// gi flags so sentence-initial capitalized forms ("My", "We", "You") are counted
+const FIRST_RE  = /\b(I|me|my|mine|we|us|our|ours|myself|ourselves)\b/gi;
+const SECOND_RE = /\b(you|your|yours|yourself|yourselves)\b/gi;
 const THIRD_RE  = /\b(he|him|his|himself|she|her|hers|herself|they|them|their|theirs|themselves)\b/gi;
 
 function detectPov(text: string): { pov: Pov; r: { first: number; second: number; third: number } } {
@@ -75,7 +76,9 @@ function detectPov(text: string): { pov: Pov; r: { first: number; second: number
   const s = countMatches(narration, SECOND_RE);
   const t = countMatches(narration, THIRD_RE);
   const total = f + s + t;
-  if (total < 20) return { pov: "third", r: { first: 0, second: 0, third: 0 } };
+  // Lowered from 20 → 8: short prose samples (100–150 words) can have fewer than
+  // 20 pronouns yet still be clearly first-person or third-person.
+  if (total < 8) return { pov: "third", r: { first: 0, second: 0, third: 0 } };
   const fr = f / total, sr = s / total, tr = t / total;
   // Strong dominance threshold; otherwise mixed (e.g., epistolary, head-hop).
   let pov: Pov = "third";
@@ -104,7 +107,8 @@ function detectTense(text: string): { tense: Tense; r: { past: number; present: 
   const past = countMatches(narration, PAST_MARKERS_RE);
   const pres = countMatches(narration, PRESENT_MARKERS_RE);
   const total = past + pres;
-  if (total < 12) return { tense: "past", r: { past: 0, present: 0 } };
+  // Lowered from 12 → 6: short prose (100 words) has fewer verbs, still detectable.
+  if (total < 6) return { tense: "past", r: { past: 0, present: 0 } };
   const pr = past / total;
   const pp = pres / total;
   let t: Tense = "past";

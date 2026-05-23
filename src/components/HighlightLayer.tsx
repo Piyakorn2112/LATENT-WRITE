@@ -5,6 +5,7 @@ import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from
 import { measurePerfSync } from "../lib/perf-trace";
 import { findActionSentences, attributeActor, type ActionPrediction, type ActionSpan } from "../lib/action-detect";
 import type { GrammarSuggestion } from "../lib/grammar-check";
+import type { ToolHighlight } from "../lib/tool-runner";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 
 const NARRATIVE_COLOR = "#888888";
@@ -98,11 +99,13 @@ function renderInline(
   keyPrefix: string,
   onEntityClick?: (name: string, anchor: DOMRect) => void,
   annotationMode?: boolean,
+  toolLocal?: ToolHighlight[],
 ): ReactNode[] {
   // Build a unified list of decoration ranges sorted by start.
   type Deco =
     | { kind: "entity"; start: number; end: number; matched: string }
-    | { kind: "grammar"; start: number; end: number; suggestion: string; gkind: GrammarSuggestion["kind"] };
+    | { kind: "grammar"; start: number; end: number; suggestion: string; gkind: GrammarSuggestion["kind"] }
+    | { kind: "tool"; start: number; end: number; label: string; severity: ToolHighlight["severity"] };
 
   const decos: Deco[] = [];
 
@@ -116,9 +119,13 @@ function renderInline(
   for (const g of grammarLocal) {
     decos.push({ kind: "grammar", start: g.start, end: g.end, suggestion: g.suggestion, gkind: g.kind });
   }
+  for (const t of toolLocal ?? []) {
+    decos.push({ kind: "tool", start: t.start, end: t.end, label: t.label, severity: t.severity });
+  }
 
-  // Sort by start; grammar wins ties so it sits in the layered order first.
-  decos.sort((a, b) => a.start - b.start || (a.kind === "grammar" ? -1 : 1));
+  // Sort by start; priority on ties: grammar > tool > entity.
+  const DECO_PRIORITY: Record<string, number> = { grammar: 0, tool: 1, entity: 2 };
+  decos.sort((a, b) => a.start - b.start || (DECO_PRIORITY[a.kind] ?? 9) - (DECO_PRIORITY[b.kind] ?? 9));
 
   // Drop any deco that overlaps an earlier one (grammar takes priority).
   const accepted: Deco[] = [];
@@ -161,8 +168,7 @@ function renderInline(
           {matched}
         </span>,
       );
-    } else {
-      // grammar
+    } else if (d.kind === "grammar") {
       // Style-kind spans (filter/passive/adverb/wordy/cliche) need pointer-events
       // so CSS :hover fires to reveal their ghost text. mousedown is cancelled to
       // keep textarea focus; click refocuses in case the browser moved it anyway.
@@ -183,6 +189,18 @@ function renderInline(
               ?.querySelector<HTMLTextAreaElement>("textarea")
               ?.focus();
           } : undefined}
+        >
+          {text.slice(d.start, d.end)}
+        </span>,
+      );
+    } else {
+      // tool highlight
+      parts.push(
+        <span
+          key={`${keyPrefix}-th${i++}`}
+          className={`hl-tool hl-tool--${d.severity}`}
+          data-label={d.label}
+          style={baseStyle}
         >
           {text.slice(d.start, d.end)}
         </span>,
@@ -225,9 +243,10 @@ function renderActionable(
   onEntityClick?: (name: string, anchor: DOMRect) => void,
   onActionClick?: (localActionIndex: number, text: string, actor: string | null, anchor: DOMRect) => void,
   annotationMode?: boolean,
+  toolLocal?: ToolHighlight[],
 ): ReactNode[] {
   if (actionsLocal.length === 0) {
-    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode);
+    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode, toolLocal);
   }
 
   const parts: ReactNode[] = [];
@@ -238,9 +257,10 @@ function renderActionable(
     if (a.start > cursor) {
       const chunk = text.slice(cursor, a.start);
       const grammarChunk = sliceGrammar(grammarLocal, cursor, a.start);
+      const toolChunk = clipToolHighlights(toolLocal, cursor, a.start);
       parts.push(
         <span key={`${keyPrefix}-pre${i}`}>
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode)}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode, toolChunk)}
         </span>,
       );
     }
@@ -267,7 +287,7 @@ function renderActionable(
             onActionClick(actionIdx, chunk, actor, (e.currentTarget as HTMLElement).getBoundingClientRect());
           } : undefined}
         >
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode)}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode, clipToolHighlights(toolLocal, a.start, a.end))}
         </span>
         {hasOvr && renderAnnotationPill(`${keyPrefix}-act${i}`, actor, colorVal || "var(--text-secondary)", "action")}
         {annotationMode && needsReview && !hasOvr && renderReviewPill(`${keyPrefix}-act${i}`, colorVal || ACTION_TEXT, "action")}
@@ -279,9 +299,10 @@ function renderActionable(
   if (cursor < text.length) {
     const chunk = text.slice(cursor);
     const grammarChunk = sliceGrammar(grammarLocal, cursor, text.length);
+    const toolChunk = clipToolHighlights(toolLocal, cursor, text.length);
     parts.push(
       <span key={`${keyPrefix}-post${actionsLocal.length}`}>
-        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode)}
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode, toolChunk)}
       </span>,
     );
   }
@@ -384,6 +405,8 @@ interface Props {
   liveParagraphRange?: { start: number; end: number } | null;
   /** Grammar suggestions over the FULL `content` (absolute offsets). */
   grammarSuggestions?: GrammarSuggestion[];
+  /** Tool highlight annotations over the FULL `content` (absolute offsets). */
+  toolHighlights?: ToolHighlight[];
   onEntityClick?: (name: string, anchor: DOMRect) => void;
   /** When true, speech and action spans are clickable to open the annotation popover. */
   annotationMode?: boolean;
@@ -398,7 +421,7 @@ interface Props {
 
 function HighlightLayerImpl({
   content, snapshotContent, paragraphs, speechResults, knownNames, liveKnownNames, liveParagraphRange, visible = true,
-  grammarSuggestions = [], onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
+  grammarSuggestions = [], toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
   annotationOverrides, speechPredictions, actionPredictions,
 }: Props) {
   const snapshotPlan = useMemo(() => {
@@ -481,6 +504,7 @@ function HighlightLayerImpl({
       const paraActions = findActionSentences(para);
       // Grammar for THIS paragraph, shifted to para-relative.
       const paraGrammar = pos.matched ? sliceGrammar(grammarSuggestions, paraStart, paraEnd) : [];
+      const paraToolHL = pos.matched ? sliceToolHighlights(toolHighlights, paraStart, paraEnd) : [];
 
       const paraNodes: ReactNode[] = [];
 
@@ -519,6 +543,7 @@ function HighlightLayerImpl({
             const paraRelStart = a.start + pc;
             return actionPredictionMap.get(`${pi}-${paraRelStart}`)?.needsReview ?? false;
           });
+          const gapToolHL = clipToolHighlights(paraToolHL, pc, seg.start);
           paraNodes.push(
             <span key={`bp${seg.start}`}>
               {renderActionable(gapText, gapActions, gapColors, gapActors, gapOverrideFlags, gapReviewFlags, speakerNames, palette,
@@ -538,6 +563,7 @@ function HighlightLayerImpl({
                     }
                   : undefined,
                 annotationMode,
+                gapToolHL,
               )}
             </span>,
           );
@@ -608,6 +634,7 @@ function HighlightLayerImpl({
         const tailText = para.slice(pc);
         const tailActions = clipSpans(paraActions, pc, para.length);
         const tailGrammar = clipGrammar(paraGrammar, pc, para.length);
+        const tailToolHL = clipToolHighlights(paraToolHL, pc, para.length);
         const tailColors = tailActions.map((a: ActionSpan) => {
           const paraRelStart = a.start + pc;
           const overrideKey = `${pi}-${paraRelStart}-action`;
@@ -652,6 +679,7 @@ function HighlightLayerImpl({
                   }
                 : undefined,
               annotationMode,
+              tailToolHL,
             )}
           </span>,
         );
@@ -662,7 +690,7 @@ function HighlightLayerImpl({
     }
 
     return { speakerNames, palette, paragraphNodes, paragraphMeta };
-  }, [snapshotContent, paragraphs, speechResults, knownNames, grammarSuggestions, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
+  }, [snapshotContent, paragraphs, speechResults, knownNames, grammarSuggestions, toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
 
   const livePlan = useMemo(() => {
     const names = [...new Set([...(liveKnownNames ?? []), ...snapshotPlan.speakerNames])];
@@ -825,4 +853,24 @@ function clipGrammar(list: GrammarSuggestion[], from: number, to: number): Gramm
     out.push({ ...g, start: g.start - from, end: g.end - from });
   }
   return out;
+}
+function sliceToolHighlights(list: ToolHighlight[] | undefined, from: number, to: number): ToolHighlight[] {
+  if (!list?.length) return [];
+  const out: ToolHighlight[] = [];
+  for (const t of list) {
+    if (t.end <= from || t.start >= to) continue;
+    if (t.start < from || t.end > to) continue;
+    out.push({ ...t, start: t.start - from, end: t.end - from });
+  }
+  return out;
+}
+function clipToolHighlights(list: ToolHighlight[] | undefined, from: number, to: number): ToolHighlight[] | undefined {
+  if (!list?.length) return undefined;
+  const out: ToolHighlight[] = [];
+  for (const t of list) {
+    if (t.end <= from || t.start >= to) continue;
+    if (t.start < from || t.end > to) continue;
+    out.push({ ...t, start: t.start - from, end: t.end - from });
+  }
+  return out.length ? out : undefined;
 }

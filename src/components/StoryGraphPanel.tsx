@@ -121,7 +121,7 @@ function StoryGraphPanelImpl({
   }
 
   return (
-    <div className="settings-panel liquid-glass" style={{ display: "flex", flexDirection: "column" }}>
+    <div className="settings-panel liquid-glass" data-liquid-glass-scroll-adaptive="panel" style={{ display: "flex", flexDirection: "column" }}>
 
       {/* ── Scrollable region — mask fades bottom edge, button sits below ── */}
       <div

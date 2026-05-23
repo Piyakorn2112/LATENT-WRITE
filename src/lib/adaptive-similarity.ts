@@ -31,8 +31,11 @@ export function embedAdaptiveText(text: string): number[] {
     const sign = (hash & 1) === 0 ? 1 : -1;
     vec[index] += sign;
   }
-  const norm = Math.hypot(...vec) || 1;
-  return vec.map((value) => value / norm);
+  let sumSq = 0;
+  for (let i = 0; i < DIMENSIONS; i++) sumSq += vec[i] * vec[i];
+  const norm = Math.sqrt(sumSq) || 1;
+  for (let i = 0; i < DIMENSIONS; i++) vec[i] /= norm;
+  return vec;
 }
 
 export function cosineSimilarity(left: number[], right: number[]): number {
@@ -41,6 +44,8 @@ export function cosineSimilarity(left: number[], right: number[]): number {
   for (let i = 0; i < len; i++) sum += left[i] * right[i];
   return sum;
 }
+
+const embeddingCache = new Map<string, number[]>();
 
 export function retrieveSimilarAdaptivePredictions(
   task: AdaptiveTask,
@@ -56,7 +61,12 @@ export function retrieveSimilarAdaptivePredictions(
     if (prediction.task !== task || prediction.correctedLabel === undefined) continue;
     const text = `${prediction.contextBefore} ${prediction.spanText} ${prediction.contextAfter}`.trim();
     if (!text) continue;
-    const score = cosineSimilarity(queryEmbedding, embedAdaptiveText(text));
+    let embedding = embeddingCache.get(prediction.id);
+    if (!embedding) {
+      embedding = embedAdaptiveText(text);
+      embeddingCache.set(prediction.id, embedding);
+    }
+    const score = cosineSimilarity(queryEmbedding, embedding);
     if (score < minScore) continue;
     matches.push({
       predictionId: prediction.id,

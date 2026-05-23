@@ -32,6 +32,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   projectLoadState:   (key)                => ipcRenderer.invoke('project:loadState', key),
   projectReopenLast:  ()                   => ipcRenderer.invoke('project:reopenLast'),
 
+  // ── Tool system ──
+  toolCompile:        (opts)       => ipcRenderer.invoke('tool:compile', opts),
+  toolScanProject:    ()           => ipcRenderer.invoke('tool:scanProject'),
+  toolImportTools:    (opts)       => ipcRenderer.invoke('tool:importTools', opts),
+
   // ── Claude Code ──
   claudeStatus:   ()       => ipcRenderer.invoke('claude:status'),
   claudeRun:      (opts)   => ipcRenderer.invoke('claude:run', opts),

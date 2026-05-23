@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import type { Chapter, ReviewFlag } from "../src/types";
-import { runLocalReview } from "../src/lib/local-review";
+import { LOCAL_REVIEW_TYPES, runLocalReview } from "../src/lib/local-review";
 import { parseNovel } from "../src/lib/parser";
 
 type SourceKey = "Hollow Iris" | "Root Crown" | "Last Wanderer";
@@ -91,7 +91,7 @@ async function main() {
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
-    types: new Set(["over-explanation", "nia"]),
+    types: new Set(LOCAL_REVIEW_TYPES),
     allChapters: false,
     summaryOnly: false,
   };

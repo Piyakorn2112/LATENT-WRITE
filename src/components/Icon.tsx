@@ -33,6 +33,20 @@ import {
   EyeOff as _Eo,
   FolderOpen as _Fo,
   ArrowUp as _Au,
+  Target as _Tg,
+  Search as _Se,
+  Clock as _Ck,
+  AlertTriangle as _AT,
+  Hash as _Ha,
+  Tag as _Ta,
+  Zap as _Zp,
+  BarChart2 as _BC,
+  Globe as _Gl,
+  Heart as _Ht,
+  Star as _Sr,
+  Filter as _Fi,
+  Link as _Lk,
+  Puzzle as _Pz,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -70,3 +84,32 @@ export const EyeIcon           = wrap(_Ey);
 export const EyeOffIcon        = wrap(_Eo);
 export const FolderIcon        = wrap(_Fo);
 export const ArrowUpIcon       = wrap(_Au);
+export const TargetIcon        = wrap(_Tg);
+export const SearchIcon        = wrap(_Se);
+export const ClockIcon         = wrap(_Ck);
+export const AlertTriangleIcon = wrap(_AT);
+export const HashIcon          = wrap(_Ha);
+export const TagIcon           = wrap(_Ta);
+export const ZapIcon           = wrap(_Zp);
+export const BarChart2Icon     = wrap(_BC);
+export const GlobeIcon         = wrap(_Gl);
+export const HeartIcon         = wrap(_Ht);
+export const StarIcon          = wrap(_Sr);
+export const FilterIcon        = wrap(_Fi);
+export const LinkIcon          = wrap(_Lk);
+export const PuzzleIcon        = wrap(_Pz);
+
+const TOOL_ICON_MAP: Record<string, React.FC<P>> = {
+  Target: TargetIcon, Search: SearchIcon, BookOpen: BookOpenIcon,
+  Brain: BrainIcon, Clock: ClockIcon, AlertTriangle: AlertTriangleIcon,
+  Hash: HashIcon, Tag: TagIcon, Zap: ZapIcon, BarChart2: BarChart2Icon,
+  Globe: GlobeIcon, Heart: HeartIcon, Star: StarIcon, Filter: FilterIcon,
+  Link: LinkIcon, Flag: FlagIcon, Eye: EyeIcon, Users: UsersIcon,
+  MapPin: MapPinIcon, Sparkles: SparklesIcon, FileText: FileTextIcon,
+  Layers: LayersIcon, Wand2: Wand2Icon, Settings: SettingsIcon,
+  User: UserIcon, Image: ImageIcon, List: ListIcon,
+};
+
+export function resolveToolIcon(name: string): React.FC<P> {
+  return TOOL_ICON_MAP[name] ?? PuzzleIcon;
+}

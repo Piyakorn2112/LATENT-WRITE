@@ -65,6 +65,7 @@ export function ProjectSearch({ chapters, onJump, onClose }: Props) {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const keyboardNavRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -101,9 +102,11 @@ export function ProjectSearch({ chapters, onJump, onClose }: Props) {
   const onListKey = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") {
       e.preventDefault();
+      keyboardNavRef.current = true;
       setActive((i) => Math.min(hits.length - 1, i + 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
+      keyboardNavRef.current = true;
       setActive((i) => Math.max(0, i - 1));
     } else if (e.key === "Enter" && hits[active]) {
       e.preventDefault();
@@ -115,6 +118,8 @@ export function ProjectSearch({ chapters, onJump, onClose }: Props) {
 
   // Scroll active item into view.
   useEffect(() => {
+    if (!keyboardNavRef.current) return;
+    keyboardNavRef.current = false;
     const el = listRef.current?.querySelector<HTMLElement>(`[data-hit-index="${active}"]`);
     el?.scrollIntoView({ block: "nearest" });
   }, [active]);
@@ -185,7 +190,6 @@ export function ProjectSearch({ chapters, onJump, onClose }: Props) {
                       onJump(h.chapterId, h.offset, query.length);
                       onClose();
                     }}
-                    onMouseEnter={() => setActive(idx)}
                   >
                     <span className="project-search-snippet">
                       {before}

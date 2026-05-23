@@ -27,6 +27,8 @@ export interface Preferences {
   reviewModel?: string;
   /** Enable background NLP story graph analysis. Default true. */
   storyNlpEnabled?: boolean;
+  /** Enable custom tool plugins from project's tools/ directory. Default false. */
+  customToolsEnabled?: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -42,6 +44,7 @@ const DEFAULTS: Preferences = {
   funMode: false,
   debugPanel: false,
   sidePanelCompensation: false,
+  customToolsEnabled: false,
 };
 
 const KEY = "latentwrite:prefs-v1";
@@ -61,6 +64,7 @@ export function loadPrefs(): Preferences {
       apiKey: p.apiKey,
       reviewModel: p.reviewModel,
       storyNlpEnabled: p.storyNlpEnabled ?? true,
+      customToolsEnabled: p.customToolsEnabled ?? false,
     };
   } catch {
     return { ...DEFAULTS };

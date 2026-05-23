@@ -28,6 +28,19 @@ const DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV ?? false;
 // this task because the model measures semantic TOPIC overlap, not prose QUALITY.
 // Pure heuristic thresholds (0.60–0.72 per pattern) are more precise and instant.
 const MAX_CANDIDATES = 22;
+const MIN_PARAGRAPH_LENGTH = 24;
+const MAX_QUOTE_LENGTH = 110;
+
+export const LOCAL_REVIEW_TYPES = [
+  "over-explanation",
+  "ai-register",
+  "acquisition-backstory",
+  "belief-elaboration",
+  "crowd-quantification",
+  "emotion-label",
+  "annotation",
+  "nia",
+] as const;
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -36,6 +49,7 @@ interface Candidate {
   sentence: string;
   heuristicConf: number;
   fix: string;
+  minConfidence?: number;
 }
 
 function sentences(text: string): string[] {
@@ -43,6 +57,20 @@ function sentences(text: string): string[] {
     .split(/(?<=[.!?…])\s+/)
     .map(s => s.trim())
     .filter(s => s.length > 15 && s.length < 400);
+}
+
+function reviewParagraphs(chapterText: string): string[] {
+  return chapterText
+    .replace(/\r\n?/g, "\n")
+    .split(/\n\s*\* \* \*\s*\n|\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length >= MIN_PARAGRAPH_LENGTH);
+}
+
+function trimQuote(sentence: string): string {
+  const trimmed = sentence.trim();
+  if (trimmed.length <= MAX_QUOTE_LENGTH) return trimmed;
+  return `${trimmed.slice(0, MAX_QUOTE_LENGTH - 1).trimEnd()}…`;
 }
 
 // ─── 1: Over-explanation ──────────────────────────────────────────────────────
@@ -84,17 +112,17 @@ function detectOverExplanation(paras: string[]): Candidate[] {
 // ─── 2: AI register ───────────────────────────────────────────────────────────
 
 const AI_REGISTER_PATTERNS: RegExp[] = [
-  /couldn't help but\b/i,
-  /something (?:she|he|they) couldn't quite (?:name|describe|explain|put into words|articulate)\b/i,
-  /(?:a feeling|a sense|a weight|a pang|an ache) (?:she|he|they) couldn't (?:quite |fully )?(?:name|place|describe|explain)\b/i,
+  /could(?:n't| not) help but\b/i,
+  /something (?:she|he|they) could(?:n't| not) quite (?:name|describe|explain|put into words|articulate)\b/i,
+  /(?:a feeling|a sense|a weight|a pang|an ache) (?:she|he|they) could(?:n't| not) (?:quite |fully )?(?:name|place|describe|explain)\b/i,
   /made (?:her|him|them) realize\b/i,
   /was the kind of (?:person|woman|man|girl|boy) who\b/i,
   /there was something (?:about the way|in the way)\b/i,
   /for the first time in (?:years|months|a long time|as long as)\b/i,
-  /part of (?:her|him|them) (?:wanted|knew|felt|understood|wondered)\b/i,
+  /part of (?:her|him|them) (?:(?:had (?:always|never) )?(?:wanted|knew|felt|understood|wondered|suspected|believed|thought|feared)|(?:always |never )?(?:wanted|knew|felt|understood|wondered))\b/i,
   /she (?:had always|had never) quite\b/i,
   /he (?:had always|had never) quite\b/i,
-  /(?:she|he|they) wasn't sure (?:when|why|how|what) exactly\b/i,
+  /(?:she|he|they) (?:wasn't|was not|weren't|were not) sure (?:exactly\s+)?(?:when|why|how|what)\b/i,
   /(?:she|he|they) filed it under\b/i,
   // Modern analytical register in non-analytical context
   /\b(?:processing|categorizing|cataloguing|archiving) (?:the|her|his|their)\b(?!.*lattice)/i,
@@ -152,7 +180,8 @@ function detectBackstory(paras: string[]): Candidate[] {
 
 // ─── 4: Belief-elaboration ────────────────────────────────────────────────────
 
-const BELIEF_STMT   = /\b(?:she|he|they)\s+(?:believed|thought|knew|understood|had always known|had always believed|had never thought|had always felt)\s+that\b/i;
+// "had always/never" is optional so "she believed that" and "she had always believed that" both match
+const BELIEF_STMT   = /\b(?:she|he|they)\s+(?:had\s+(?:always|never)\s+)?(?:believed|thought|knew|known|understood|felt)\s+that\b/i;
 const BELIEF_FOLLOW = /\b(?:because|since|for|which was why|the reason|this (?:was|meant)|it (?:was|meant))\b/i;
 
 function detectBeliefElaboration(paras: string[]): Candidate[] {
@@ -176,7 +205,10 @@ function detectBeliefElaboration(paras: string[]): Candidate[] {
 
 // ─── 5: Crowd-quantification ──────────────────────────────────────────────────
 
-const CROWD_NUM_RE = /\b(\d+|dozens?|hundreds?|thousands?|scores?|several|(?:a |the )?(?:few|many|number of))\s+(?:people|persons?|students?|soldiers?|guards?|figures?|men|women|children|voices?|faces?|bodies|civilians?|citizens?|individuals?|members?)\b/i;
+// "of" is optional so "hundreds of people" and "hundreds people" both match
+// "of" is optional so "hundreds of people" and "hundreds people" both match
+// Added fantasy/LN genre nouns: adventurers, villagers, servants, knights, mages
+const CROWD_NUM_RE = /\b(\d+|dozens?|hundreds?|thousands?|scores?|several|(?:a |the )?(?:few|many|number of))\s+(?:of\s+)?(?:people|persons?|students?|soldiers?|guards?|figures?|men|women|children|voices?|faces?|bodies|civilians?|citizens?|individuals?|members?|adventurers?|villagers?|servants?|knights?|mages?|travelers?|delegates?|attendants?)\b/i;
 const CROWD_DRAMATIC_EXEMPT = /\b(?:killed|dead|wounded|executed|arrested|missing|survived|escaped)\b/i;
 
 function detectCrowdQuantification(paras: string[]): Candidate[] {
@@ -188,6 +220,7 @@ function detectCrowdQuantification(paras: string[]): Candidate[] {
           type: "crowd-quantification",
           sentence: sent,
           heuristicConf: 0.55,
+          minConfidence: 0.55,
           fix: "Replace the count with a sensory detail — what the crowd looked, sounded, or felt like.",
         });
       }
@@ -198,7 +231,7 @@ function detectCrowdQuantification(paras: string[]): Candidate[] {
 
 // ─── 6: Emotion-label ────────────────────────────────────────────────────────
 
-const EMOTION_WORDS = "sad|sorrow|grief|despair|happy|joy|joyful|angry|anger|rage|fear|scared|terrified|lonely|loneliness|guilt|shame|ashamed|anxious|anxiety|nervous|confused|confusion|devastated|heartbroken|relieved|relief|hopeful|hope|disappointed|disappointment|bitter|bitterness|resentment|jealousy|jealous|envious|envy|content|contentment|dread|horror|horrified|melancholy|regret|remorse";
+const EMOTION_WORDS = "sad|sadness|sorrow|grief|despair|happy|happiness|joy|joyful|angry|anger|rage|fear|scared|terrified|lonely|loneliness|guilt|shame|ashamed|anxious|anxiety|nervous|confused|confusion|devastated|heartbroken|relieved|relief|hopeful|hope|disappointed|disappointment|bitter|bitterness|resentment|jealousy|jealous|envious|envy|content|contentment|dread|horror|horrified|melancholy|regret|remorse";
 const EMOTION_LABEL_RE = new RegExp(
   `\\b(?:she|he|they|[A-Z][a-z]+)\\s+(?:felt|was|were|felt a wave of|felt the weight of|experienced|was filled with)\\s+(?:a wave of\\s+)?(?:${EMOTION_WORDS})\\b`,
   "i",
@@ -266,7 +299,8 @@ function detectAnnotation(paras: string[]): Candidate[] {
 const NIA_RE = /\b(?:somehow|a certain\s+\w+|a kind of\s+\w+|something about the way|something in the (?:room|air|silence|light|pause|space|between)|a sense of\s+\w+|in some way|in a way she|in a way he|certain kind of)\b/i;
 const NIA_QUALITY_RE = /\b(?:the|a)\s+quality of\s+(?:presence|attention|absence|distance|wrongness|otherness|connection|feeling|sensation|emotion|meaning|silence|space)\b/i;
 const NIA_SOFTENER_RE = /\b(?:slightly|subtly)\s+(?:off|wrong|different|odd|strange|uncertain|unclear|unreal|abstract|distant|detached|removed|blurred|hollow|empty|altered|changed|askew)\b/i;
-const NIA_SOFTENER_EXEMPT = /\b(?:slightly|subtly)\s+different\s+(?:pressure|humidity|temperature|angle|pace|speed|register)\b/i;
+// "from" added: "slightly different from X" is a comparison, not a vague quality-naming
+const NIA_SOFTENER_EXEMPT = /\b(?:slightly|subtly)\s+different\s+(?:from|pressure|humidity|temperature|angle|pace|speed|register)\b/i;
 // Exempt: "a kind of" used for specific material/object descriptions
 const NIA_EXEMPT = /\b(?:a kind of (?:wood|stone|metal|cloth|plant|tree|grain|bread|rope|cloth|fabric|tool|container|building|instrument))\b/i;
 
@@ -293,10 +327,7 @@ export async function runLocalReview(
   chapterId: string,
   chapterText: string,
 ): Promise<ReviewResult> {
-  const paras = chapterText
-    .split(/\n{2,}/)
-    .map(p => p.trim())
-    .filter(p => p.length > 40);
+  const paras = reviewParagraphs(chapterText);
 
   // Pass 1: heuristic scan
   const all: Candidate[] = [
@@ -335,8 +366,8 @@ export async function runLocalReview(
   const flags: ReviewFlag[] = [];
   for (const c of candidates) {
     // Only flag at or above the heuristic confidence set per-pattern
-    if (c.heuristicConf >= 0.60) {
-      flags.push({ type: c.type, quote: c.sentence.slice(0, 70), fix: c.fix });
+    if (c.heuristicConf >= (c.minConfidence ?? 0.60)) {
+      flags.push({ type: c.type, quote: trimQuote(c.sentence), fix: c.fix });
     }
   }
 

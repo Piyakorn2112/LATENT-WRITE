@@ -29,6 +29,7 @@ import {
   saveNovel,
   loadCurrentChapterId,
   loadCurrentChapterIdFromProject,
+  resolvePersistedCurrentChapterId,
   saveCurrentChapterId,
   clearProjectLocalStorage,
 } from "./lib/storage";
@@ -38,7 +39,10 @@ import {
   saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
 } from "./lib/story-graph";
 import { loadReviewResults, loadReviewResultsFromProject, saveReviewResults } from "./lib/renderer-review";
-import { getCurrentProject, reopenLastProject, openProject } from "./lib/project-manager";
+import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools } from "./lib/project-manager";
+import type { ToolScanEntry } from "./lib/project-manager";
+import { ToolImportOverlay } from "./components/ToolImportOverlay";
+import type { ToolHighlight } from "./lib/tool-runner";
 import type { StoryGraph, ReviewResult } from "./types";
 import { useAnalysis } from "./lib/use-analysis";
 import { lightweightPrescan } from "./lib/auto-intel";
@@ -77,11 +81,22 @@ import type {
 
 // Window.electronAPI type is declared in src/lib/project-manager.ts
 
+function countWords(text: string): number {
+  let count = 0;
+  let inWord = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text.charCodeAt(i);
+    const ws = ch === 32 || ch === 10 || ch === 13 || ch === 9 || ch === 12;
+    if (ws) { inWord = false; }
+    else if (!inWord) { count++; inWord = true; }
+  }
+  return count;
+}
+
 function totalWordsInNovel(novel: Novel): number {
   let n = 0;
   for (const c of novel.chapters) {
-    const t = c.content.trim();
-    if (t) n += t.split(/\s+/).length;
+    n += countWords(c.content);
   }
   return n;
 }
@@ -115,13 +130,13 @@ export default function App() {
     if (saved && initial.chapters.some((c) => c.id === saved)) return saved;
     return initial.chapters[0]?.id ?? null;
   });
-
-  useEffect(() => {
-    saveCurrentChapterId(currentId);
-  }, [currentId]);
+  const currentChapterForPersist = useMemo(() => {
+    const chapter = novel.chapters.find((candidate) => candidate.id === currentId);
+    return chapter ? { number: chapter.number, title: chapter.title } : null;
+  }, [novel.chapters, currentId]);
 
   const hydrateProjectState = useCallback(async () => {
-    const [pNovel, pChapterId, pStoryGraph, pReviews, pAnnotations, pAdaptive] = await Promise.all([
+    const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive] = await Promise.all([
       loadNovelFromProject(),
       loadCurrentChapterIdFromProject(),
       loadStoryGraphFromProject(),
@@ -131,9 +146,8 @@ export default function App() {
     ]);
 
     const nextNovel = pNovel ?? emptyNovel();
-    const nextChapterId = pChapterId && nextNovel.chapters.some((chapter) => chapter.id === pChapterId)
-      ? pChapterId
-      : nextNovel.chapters[0]?.id ?? null;
+    const restoredChapterId = resolvePersistedCurrentChapterId(nextNovel.chapters, pCurrentChapter);
+    const nextChapterId = restoredChapterId ?? nextNovel.chapters[0]?.id ?? null;
     const nextStoryGraph = pStoryGraph ?? emptyStoryGraph();
     const nextReviewResults = pReviews ?? {};
     const nextAnnotationStore = pAnnotations ?? { version: 1, corrections: [] };
@@ -148,11 +162,17 @@ export default function App() {
     setAdaptiveStore(nextAdaptiveStore);
     setAnnotationTarget(null);
     setEntityPopover(null);
+    setToolHighlights([]);
 
     // Empty folders must become explicit blank projects so a renderer refresh
     // cannot fall back to whatever was previously cached before Electron IPC hydrates.
     if (!pNovel) saveNovel(nextNovel);
-    if (!pNovel || pChapterId !== nextChapterId) saveCurrentChapterId(nextChapterId);
+    if (!pNovel || restoredChapterId !== nextChapterId) {
+      saveCurrentChapterId(
+        nextChapterId,
+        nextNovel.chapters.find((chapter) => chapter.id === nextChapterId) ?? null,
+      );
+    }
     if (!pStoryGraph) saveStoryGraph(nextStoryGraph);
     if (!pReviews) saveReviewResults(nextReviewResults);
     if (!pAnnotations) saveAnnotationStore(nextAnnotationStore);
@@ -199,6 +219,11 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (window.electronAPI && projectLoading) return;
+    saveCurrentChapterId(currentId, currentChapterForPersist);
+  }, [currentId, currentChapterForPersist?.number, currentChapterForPersist?.title, projectLoading]);
+
+  useEffect(() => {
     window.electronAPI?.setDraftGuardState?.({ hasUnsavedLocalDraft: needsProjectSaveWarning });
   }, [needsProjectSaveWarning]);
 
@@ -221,6 +246,11 @@ export default function App() {
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [analysisPanelOpen, setAnalysisPanelOpen] = useState(false);
+  const [toolImportState, setToolImportState] = useState<{
+    tools: ToolScanEntry[];
+    sourcePath: string;
+  } | null>(null);
+  const [toolHighlights, setToolHighlights] = useState<ToolHighlight[]>([]);
   const [prefs, setPrefs] = useState<Preferences>(() => loadPrefs());
   const [storyGraph, setStoryGraph] = useState<StoryGraph>(() => loadStoryGraph());
   // Ref so the storyGraph effect can read current entries without stale closure
@@ -556,12 +586,57 @@ export default function App() {
 
   const handleNovelRefresh = useCallback(async (incomingNovel: Novel | null) => {
     if (!incomingNovel || incomingNovel.chapters.length === 0) return;
+    const restoredChapterId = window.electronAPI
+      ? resolvePersistedCurrentChapterId(
+          incomingNovel.chapters,
+          await loadCurrentChapterIdFromProject(),
+        )
+      : null;
     setNovel(incomingNovel);
     setCurrentId((prev) => {
+      if (restoredChapterId && incomingNovel.chapters.some((c) => c.id === restoredChapterId)) {
+        return restoredChapterId;
+      }
       if (prev && incomingNovel.chapters.some((c) => c.id === prev)) return prev;
       return incomingNovel.chapters[0]?.id ?? null;
     });
     baselineRef.current = totalWordsInNovel(incomingNovel);
+  }, []);
+
+  const [existingToolNames, setExistingToolNames] = useState<Set<string>>(new Set());
+
+  const handleImportTools = useCallback(async () => {
+    const result = await scanExternalProject();
+    if (!result.ok || result.canceled || !result.tools?.length || !result.sourcePath) return;
+    // Check what tools already exist in the current project
+    const api = window.electronAPI;
+    const names = new Set<string>();
+    if (api) {
+      const tree = await api.projectListTree();
+      const toolsNode = tree.find((n: { name: string; type: string }) => n.name === "tools" && n.type === "directory");
+      if (toolsNode && Array.isArray((toolsNode as { children?: unknown[] }).children)) {
+        for (const child of (toolsNode as { children: Array<{ name: string; type: string; children?: Array<{ name: string }> }> }).children) {
+          if (child.type === "directory" && child.children?.some((f) => f.name === "tool.json")) {
+            const manifestResult = await api.projectReadFile(`tools/${child.name}/tool.json`);
+            if (manifestResult.ok && manifestResult.content) {
+              try { names.add(JSON.parse(manifestResult.content).name); } catch { /* skip */ }
+            }
+          }
+        }
+      }
+    }
+    setExistingToolNames(names);
+    setToolImportState({ tools: result.tools, sourcePath: result.sourcePath });
+  }, []);
+
+  const handleImportToolsConfirm = useCallback(async (imports: Array<{ dirName: string; targetName?: string }>) => {
+    if (!toolImportState) return;
+    await importTools(toolImportState.sourcePath, imports);
+    setToolImportState(null);
+  }, [toolImportState]);
+
+  const handleToolHighlights = useCallback((highlights: ToolHighlight[]) => {
+    setToolHighlights(highlights);
   }, []);
 
   const handleOpenProject = useCallback(async () => {
@@ -948,7 +1023,7 @@ export default function App() {
     // Reset daily baseline since the document just got swapped wholesale.
     baselineRef.current = totalWordsInNovel(parsed);
     saveNovel(parsed);
-    saveCurrentChapterId(nextChapterId);
+    saveCurrentChapterId(nextChapterId, parsed.chapters[0] ?? null);
     saveAnnotationStore(clearedAnnotations);
     saveAdaptiveStore(clearedAdaptiveStore);
   }, []);
@@ -1123,6 +1198,7 @@ export default function App() {
           analysisResult={intelMode !== "off" ? analysisResult : null}
           speechPredictions={intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
           actionPredictions={intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
+          toolHighlights={toolHighlights.length > 0 ? toolHighlights : undefined}
           knownNames={intelMode !== "off" ? knownNames : []}
           onEntityClick={handleEntityClick}
           annotationMode={annotationMode}
@@ -1284,6 +1360,8 @@ export default function App() {
             : undefined
         }
         sceneBreaking={sceneBreaking}
+        onImportTools={handleImportTools}
+        onToolHighlights={handleToolHighlights}
         onOpenChange={setAnalysisPanelOpen}
       />
 
@@ -1342,6 +1420,16 @@ export default function App() {
 
       {onboardingOpen && (
         <Onboarding onClose={handleOnboardingClose} />
+      )}
+
+      {toolImportState && (
+        <ToolImportOverlay
+          tools={toolImportState.tools}
+          sourcePath={toolImportState.sourcePath}
+          existingToolNames={existingToolNames}
+          onImport={handleImportToolsConfirm}
+          onClose={() => setToolImportState(null)}
+        />
       )}
 
       {pdfExportOpen && (
