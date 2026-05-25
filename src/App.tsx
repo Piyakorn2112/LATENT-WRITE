@@ -81,6 +81,13 @@ import type {
 
 // Window.electronAPI type is declared in src/lib/project-manager.ts
 
+const ELECTRON_WINDOW_UNFOCUSED_CLASS = "electron-window-unfocused";
+const ELECTRON_WINDOW_UNFOCUSED_ORB_PAUSED_CLASS = "electron-window-unfocused-orb-paused";
+const ELECTRON_WINDOW_UNFOCUSED_ORB_PAUSE_MS = 180;
+const SCROLL_EDGE_IDLE_CLASS = "scroll-edge-idle";
+const SCROLL_EDGE_IDLE_MS = 30_000;
+const SCROLL_EDGE_ACTIVITY_THROTTLE_MS = 250;
+
 function countWords(text: string): number {
   let count = 0;
   let inWord = false;
@@ -209,6 +216,7 @@ export default function App() {
       await hydrateProjectState();
       if (cancelled) return;
       setProjectLoading(false);
+      window.dispatchEvent(new CustomEvent("project-ready"));
     })();
     return () => { cancelled = true; };
   }, [hydrateProjectState]);
@@ -241,7 +249,7 @@ export default function App() {
   // can read different labels.
   const [sceneBreaking, setSceneBreaking] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
-  const [intelMode, setIntelMode] = useState<"off" | "low" | "default" | "high" | "auto">("default");
+  const [intelMode, setIntelMode] = useState<"off" | "fast" | "default" | "high" | "auto">("default");
   const [findOpen, setFindOpen] = useState(false);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -402,7 +410,7 @@ export default function App() {
   const [renameTask, setRenameTask] = useState<StatusTask | null>(null);
   const cycleIntel = useCallback(() => {
     setIntelMode((m) => {
-      const order = ["auto", "default", "high", "low", "off"] as const;
+      const order = ["auto", "default", "high", "fast", "off"] as const;
       return order[(order.indexOf(m) + 1) % order.length];
     });
   }, []);
@@ -494,7 +502,7 @@ export default function App() {
   // Persist prefs immediately — they're tiny.
   useEffect(() => { savePrefs(prefs); }, [prefs]);
 
-  const autoResolvedLevel = useMemo<"low" | "default" | "high">(() => {
+  const autoResolvedLevel = useMemo<"fast" | "default" | "high">(() => {
     if (intelMode !== "auto") return "default";
     const chapter = novel.chapters.find((c) => c.id === currentId);
     if (!chapter) return "default";
@@ -502,7 +510,7 @@ export default function App() {
     return lightweightPrescan(paragraphs);
   }, [intelMode, novel.chapters, currentId]);
 
-  const effectiveLevel: "low" | "default" | "high" =
+  const effectiveLevel: "fast" | "default" | "high" =
     intelMode === "auto" ? autoResolvedLevel
     : intelMode === "off" ? "default"
     : intelMode;
@@ -648,6 +656,7 @@ export default function App() {
       clearProjectLocalStorage();
       await hydrateProjectState();
       await syncDesktopProjectOpen();
+      window.dispatchEvent(new CustomEvent("project-ready"));
     } finally {
       setProjectLoading(false);
     }
@@ -1112,6 +1121,142 @@ export default function App() {
     return off;
   }, [handleAddChapter, handleImport, handleExport, handleExportPdf, flushSave, cycleIntel, handlePrev, handleNext, handleOpenProject]);
 
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron) return;
+
+    let orbPauseTimer: number | null = null;
+
+    const clearOrbPauseTimer = () => {
+      if (orbPauseTimer == null) return;
+      window.clearTimeout(orbPauseTimer);
+      orbPauseTimer = null;
+    };
+
+    const setWindowGlassFallback = (unfocused: boolean) => {
+      document.body.classList.toggle(ELECTRON_WINDOW_UNFOCUSED_CLASS, unfocused);
+
+      if (!unfocused) {
+        clearOrbPauseTimer();
+        document.body.classList.remove(ELECTRON_WINDOW_UNFOCUSED_ORB_PAUSED_CLASS);
+        return;
+      }
+
+      clearOrbPauseTimer();
+      orbPauseTimer = window.setTimeout(() => {
+        orbPauseTimer = null;
+        if (document.body.classList.contains(ELECTRON_WINDOW_UNFOCUSED_CLASS)) {
+          document.body.classList.add(ELECTRON_WINDOW_UNFOCUSED_ORB_PAUSED_CLASS);
+        }
+      }, ELECTRON_WINDOW_UNFOCUSED_ORB_PAUSE_MS);
+    };
+
+    const syncWindowFocusGlassState = () => {
+      setWindowGlassFallback(document.hidden || !document.hasFocus());
+    };
+
+    const handleWindowFocus = () => {
+      setWindowGlassFallback(false);
+    };
+
+    const handleWindowBlur = () => {
+      setWindowGlassFallback(true);
+    };
+
+    syncWindowFocusGlassState();
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("visibilitychange", syncWindowFocusGlassState);
+
+    return () => {
+      clearOrbPauseTimer();
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("visibilitychange", syncWindowFocusGlassState);
+      document.body.classList.remove(ELECTRON_WINDOW_UNFOCUSED_CLASS);
+      document.body.classList.remove(ELECTRON_WINDOW_UNFOCUSED_ORB_PAUSED_CLASS);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!window.electronAPI?.isElectron) return;
+
+    let idleTimer: number | null = null;
+    let lastPointerMoveAt = 0;
+
+    const setScrollEdgeIdle = (idle: boolean) => {
+      document.body.classList.toggle(SCROLL_EDGE_IDLE_CLASS, idle);
+    };
+
+    const clearIdleTimer = () => {
+      if (idleTimer !== null) {
+        window.clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+    };
+
+    const scheduleIdle = () => {
+      clearIdleTimer();
+      if (document.hidden || !document.hasFocus()) return;
+      idleTimer = window.setTimeout(() => {
+        if (!document.hidden && document.hasFocus()) {
+          setScrollEdgeIdle(true);
+        }
+      }, SCROLL_EDGE_IDLE_MS);
+    };
+
+    const registerActivity = (event?: Event) => {
+      if (event?.type === "pointermove") {
+        const now = performance.now();
+        if (now - lastPointerMoveAt < SCROLL_EDGE_ACTIVITY_THROTTLE_MS) return;
+        lastPointerMoveAt = now;
+      }
+      setScrollEdgeIdle(false);
+      scheduleIdle();
+    };
+
+    const handleWindowFocus = () => {
+      setScrollEdgeIdle(false);
+      scheduleIdle();
+    };
+
+    const handleWindowBlur = () => {
+      clearIdleTimer();
+      setScrollEdgeIdle(false);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) handleWindowBlur();
+      else handleWindowFocus();
+    };
+
+    const passiveOpts = { passive: true } as AddEventListenerOptions;
+
+    scheduleIdle();
+    window.addEventListener("pointermove", registerActivity, passiveOpts);
+    window.addEventListener("pointerdown", registerActivity, passiveOpts);
+    window.addEventListener("wheel", registerActivity, passiveOpts);
+    window.addEventListener("scroll", registerActivity, passiveOpts);
+    window.addEventListener("touchstart", registerActivity, passiveOpts);
+    window.addEventListener("keydown", registerActivity);
+    window.addEventListener("focus", handleWindowFocus);
+    window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearIdleTimer();
+      window.removeEventListener("pointermove", registerActivity, passiveOpts);
+      window.removeEventListener("pointerdown", registerActivity, passiveOpts);
+      window.removeEventListener("wheel", registerActivity, passiveOpts);
+      window.removeEventListener("scroll", registerActivity, passiveOpts);
+      window.removeEventListener("touchstart", registerActivity, passiveOpts);
+      window.removeEventListener("keydown", registerActivity);
+      window.removeEventListener("focus", handleWindowFocus);
+      window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.body.classList.remove(SCROLL_EDGE_IDLE_CLASS);
+    };
+  }, []);
+
   // Intel-mode tint colour exposed as a single CSS variable on the app
   // root so consumers (editor scan-orb, auto-paragraph status pill,
   // future intelligence-tinted UI) can inherit it without prop drilling.
@@ -1122,7 +1267,7 @@ export default function App() {
     const m = intelMode === "auto" ? autoResolvedLevel : intelMode;
     switch (m) {
       case "off":     return "#888888";
-      case "low":     return "#DC7B19";
+      case "fast":    return "#DC7B19";
       case "high":    return "#A828B8";
       case "default": default: return "#1071D8";
     }
@@ -1176,6 +1321,7 @@ export default function App() {
         onCycleIntel={cycleIntel}
         isAnalyzing={analysisRunning}
         funMode={prefs.funMode}
+        groupTools={!!prefs.groupTools}
         annotationMode={annotationMode}
         onToggleAnnotation={() => setAnnotationMode((v) => !v)}
       />

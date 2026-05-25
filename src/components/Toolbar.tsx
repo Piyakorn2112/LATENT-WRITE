@@ -1,11 +1,12 @@
-import type { CSSProperties } from "react";
-import { useEffect, useRef } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft, ChevronRight, BookOpenIcon,
   PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon, FolderIcon,
+  MoreHorizontalIcon,
 } from "./Icon";
 
-export type IntelMode = "off" | "low" | "default" | "high" | "auto";
+export type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
 // 60 : 30 : 10 feel — a=dominant, b=complement, c=highlight accent.
 //
@@ -19,18 +20,20 @@ export type IntelMode = "off" | "low" | "default" | "high" | "auto";
 //   G' = −0.213R + 1.285G − 0.072B
 //   B' = −0.213R − 0.715G + 1.928B
 const ORB_COLORS: Record<Exclude<IntelMode, "off" | "auto">, { a: string; b: string; c: string }> = {
-  // low — originals: #FFB42E / #F47A2D / #FFE0A0
-  low:     { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
+  // fast — originals: #FFB42E / #F47A2D / #FFE0A0
+  fast:    { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
   // default — originals: #3D68FF / #7dd8ff / #C0D8FF
   default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
   // high — originals: #8B2FF8 / #d880ff / #FFB8F8
   high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
 };
 
+const IDLE_PASSIVE_ORB_BODY_CLASS = "scroll-edge-idle";
+
 interface IntelBtnProps {
   mode: IntelMode;
   /** When mode === "auto", the level the prescan currently resolves to. */
-  resolvedLevel?: "low" | "default" | "high";
+  resolvedLevel?: "fast" | "default" | "high";
   onClick: () => void;
   analyzing: boolean;
   /** When true, overlays the bouncy gooey-eyes easter egg on the orb. */
@@ -38,10 +41,12 @@ interface IntelBtnProps {
 }
 
 function IntelBtn({ mode, resolvedLevel, onClick, analyzing, funMode }: IntelBtnProps) {
+  const [passiveOrbActive, setPassiveOrbActive] = useState(false);
+
   // Same 6-orb geometry for ALL modes — auto cycles colours via CSS @property
   // animation, no extra dots, no scale transitions, no jump frames.
   const isAuto = mode === "auto";
-  const single = mode === "low" || mode === "default" || mode === "high"
+  const single = mode === "fast" || mode === "default" || mode === "high"
     ? ORB_COLORS[mode]
     : null;
 
@@ -59,42 +64,71 @@ function IntelBtn({ mode, resolvedLevel, onClick, analyzing, funMode }: IntelBtn
     ? `Intelligence: auto → ${resolvedLevel ?? "default"} (click to cycle)`
     : `Intelligence: ${mode} (click to cycle)`;
 
+  useEffect(() => {
+    const body = document.body;
+    const applyIdleState = () => {
+      setPassiveOrbActive(body.classList.contains(IDLE_PASSIVE_ORB_BODY_CLASS) && !analyzing);
+    };
+
+    const observer = new MutationObserver(() => {
+      applyIdleState();
+    });
+
+    applyIdleState();
+    observer.observe(body, { attributes: true, attributeFilter: ["class"] });
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [analyzing]);
+
+  const renderOrbs = () => [0, 1, 2, 3, 4, 5].map((index) => (
+    <span key={index} className="intel-mesh-dot-orb" />
+  ));
+
   return (
     <button
-      className={`icon-btn intel-btn ${mode !== "off" ? "icon-btn-active" : ""} ${analyzing ? "intel-btn--analyzing" : ""}`}
+      className={`icon-btn intel-btn ${mode !== "off" ? "icon-btn-active" : ""} ${analyzing ? "intel-btn--analyzing" : ""} ${passiveOrbActive ? "intel-btn--passive-orb-active" : ""}`}
       onClick={onClick}
       aria-label={ariaLabel}
       title={titleText}
     >
       <span className="intel-btn-inner">
-        {/* Two stacked mesh layers — the second one overlays the first
-            exactly, compounding the chroma additively. This is what
-            actually carries the saturated look across both Chromium and
-            WebKit; the `saturate()` filter still runs but no longer has
-            to do all the lifting on its own (which is where the cross-
-            engine green tint was creeping in). */}
-        <span
-          className="intel-mesh-dot"
-          data-mode={mode}
-          data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
-          style={styleVars}
-        >
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} className="intel-mesh-dot-orb" />
-          ))}
+        <span className="intel-orb-live">
+          {/* Two stacked mesh layers — the second one overlays the first
+              exactly, compounding the chroma additively. This is what
+              actually carries the saturated look across both Chromium and
+              WebKit; the `saturate()` filter still runs but no longer has
+              to do all the lifting on its own (which is where the cross-
+              engine green tint was creeping in). */}
+          <span
+            className="intel-mesh-dot"
+            data-mode={mode}
+            data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
+            style={styleVars}
+          >
+            {renderOrbs()}
+          </span>
+          <span
+            className="intel-mesh-dot intel-mesh-dot--ghost"
+            data-mode={mode}
+            data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
+            style={styleVars}
+            aria-hidden="true"
+          >
+            {renderOrbs()}
+          </span>
+          {funMode && <IntelEyes />}
         </span>
         <span
-          className="intel-mesh-dot intel-mesh-dot--ghost"
+          className="intel-mesh-fallback"
           data-mode={mode}
           data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
           style={styleVars}
           aria-hidden="true"
         >
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} className="intel-mesh-dot-orb" />
-          ))}
+          <span className="intel-mesh-fallback-core" />
         </span>
-        {funMode && <IntelEyes />}
       </span>
     </button>
   );
@@ -203,15 +237,29 @@ interface Props {
   hasChapter: boolean;
   intelMode: IntelMode;
   /** When intelMode === "auto", the level the prescan currently resolves to. */
-  intelResolvedLevel?: "low" | "default" | "high";
+  intelResolvedLevel?: "fast" | "default" | "high";
   onCycleIntel: () => void;
   isAnalyzing: boolean;
   /** Fun-mode easter egg — overlays bouncy gooey eyes on the intel orb. */
   funMode?: boolean;
+  /** Split the toolbar into separate glass groups. */
+  groupTools?: boolean;
   /** Annotation mode toggle. */
   annotationMode: boolean;
   onToggleAnnotation: () => void;
 }
+
+interface ToolbarAction {
+  key: string;
+  label: string;
+  title: string;
+  icon: ReactNode;
+  onClick: () => void;
+  active?: boolean;
+  className?: string;
+}
+
+const GROUPED_RIGHT_COLLAPSE_WIDTH = 860;
 
 export function Toolbar({
   chapterTitle, onChapterTitleChange,
@@ -219,9 +267,18 @@ export function Toolbar({
   onPrev, onNext, onOpenIndex, onOpenWorld, onAddChapter,
   onImport, onExport, onExportPdf, onOpenProject, hasChapter,
   intelMode, intelResolvedLevel, onCycleIntel, isAnalyzing, funMode,
+  groupTools = false,
   annotationMode, onToggleAnnotation,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const overflowMenuRef = useRef<HTMLDivElement>(null);
+  const overflowBtnRef = useRef<HTMLButtonElement>(null);
+  const [collapseRightGroup, setCollapseRightGroup] = useState(false);
+  const [showOverflow, setShowOverflow] = useState(false);
+
+  const isElectronApp = typeof window !== "undefined"
+    && !!(window as Window & { electronAPI?: { isElectron?: boolean } }).electronAPI?.isElectron;
 
   useEffect(() => {
     if (hasChapter && chapterTitle === "" && inputRef.current) {
@@ -230,102 +287,327 @@ export function Toolbar({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasChapter, currentIndex]);
 
+  useEffect(() => {
+    if (!groupTools) {
+      setCollapseRightGroup(false);
+      return;
+    }
+    const shell = shellRef.current;
+    if (!shell) return;
+
+    const update = () => {
+      setCollapseRightGroup(shell.clientWidth < GROUPED_RIGHT_COLLAPSE_WIDTH);
+    };
+
+    update();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(update);
+      ro.observe(shell);
+      return () => ro.disconnect();
+    }
+
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [groupTools]);
+
+  useEffect(() => {
+    if (!groupTools || !collapseRightGroup) {
+      setShowOverflow(false);
+    }
+  }, [collapseRightGroup, groupTools]);
+
+  useEffect(() => {
+    if (!showOverflow) return;
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target as Node;
+      if (overflowMenuRef.current?.contains(target)) return;
+      if (overflowBtnRef.current?.contains(target)) return;
+      setShowOverflow(false);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowOverflow(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showOverflow]);
+
+  const rightGroupActions: ToolbarAction[] = [
+    isElectronApp
+      ? {
+          key: "open-project",
+          label: "Open project",
+          title: "Open project folder",
+          icon: <FolderIcon />,
+          onClick: onOpenProject,
+        }
+      : {
+          key: "import-text",
+          label: "Import text",
+          title: "Import .txt",
+          icon: <UploadIcon />,
+          onClick: onImport,
+        },
+    {
+      key: "export-text",
+      label: "Export text",
+      title: "Export .txt",
+      icon: <DownloadIcon />,
+      onClick: onExport,
+    },
+    {
+      key: "annotation-mode",
+      label: "Annotation mode",
+      title: "Annotation mode — click speech or action spans to correct attribution",
+      icon: <AnnotateIcon size={16} />,
+      onClick: onToggleAnnotation,
+      active: annotationMode,
+      className: "toolbar-annotation-btn",
+    },
+    {
+      key: "export-pdf",
+      label: "Export PDF",
+      title: "Export PDF",
+      icon: <FileTextIcon size={16} />,
+      onClick: onExportPdf,
+    },
+  ];
+
+  const renderToolbarButton = (action: ToolbarAction) => (
+    <button
+      key={action.key}
+      className={`icon-btn${action.className ? ` ${action.className}` : ""}${action.active ? " icon-btn-active" : ""}`}
+      onClick={action.onClick}
+      aria-label={action.label}
+      title={action.title}
+    >
+      {action.icon}
+    </button>
+  );
+
+  const renderOverflowMenu = () => (
+    <div
+      ref={overflowMenuRef}
+      className="toolbar-overflow-menu liquid-glass"
+      data-liquid-glass-transient="true"
+    >
+      {rightGroupActions.map((action) => (
+        <button
+          key={action.key}
+          className={`toolbar-overflow-item${action.active ? " toolbar-overflow-item--active" : ""}`}
+          onClick={() => {
+            action.onClick();
+            setShowOverflow(false);
+          }}
+          title={action.title}
+        >
+          <span className="toolbar-overflow-item-icon" aria-hidden="true">{action.icon}</span>
+          <span>{action.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+
   return (
-    <div className="toolbar-shell">
-      <div className="toolbar liquid-glass">
-        {/* Intelligence mode toggle */}
-        <IntelBtn
-          mode={intelMode}
-          resolvedLevel={intelResolvedLevel}
-          onClick={onCycleIntel}
-          analyzing={isAnalyzing}
-          funMode={funMode}
-        />
+    <div ref={shellRef} className={`toolbar-shell${groupTools ? " toolbar-shell--grouped" : ""}`}>
+      {groupTools ? (
+        <div className="toolbar-grouped-layout">
+          <div className="toolbar toolbar-group liquid-glass" data-liquid-glass-transient="true">
+            <IntelBtn
+              mode={intelMode}
+              resolvedLevel={intelResolvedLevel}
+              onClick={onCycleIntel}
+              analyzing={isAnalyzing}
+              funMode={funMode}
+            />
+            <button
+              className="icon-btn"
+              onClick={onOpenIndex}
+              aria-label="Chapter index"
+              title="Chapter index"
+            >
+              <BookOpenIcon size={17} />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={onOpenWorld}
+              aria-label="World data"
+              title="World data"
+            >
+              <UsersIcon size={17} />
+            </button>
+          </div>
 
-        {/* Chapter index */}
-        <button
-          className="icon-btn"
-          onClick={onOpenIndex}
-          aria-label="Chapter index"
-          title="Chapter index"
-        >
-          <BookOpenIcon size={17} />
-        </button>
+          <div className="toolbar-group-spacer" aria-hidden="true" />
 
-        {/* World data — characters, places, factions */}
-        <button
-          className="icon-btn"
-          onClick={onOpenWorld}
-          aria-label="World data"
-          title="World data"
-        >
-          <UsersIcon size={17} />
-        </button>
+          <div className="toolbar toolbar-group toolbar-group--editor liquid-glass" data-liquid-glass-transient="true">
+            <button
+              className="icon-btn"
+              onClick={onPrev}
+              disabled={currentIndex <= 0}
+              aria-label="Previous chapter"
+              title="Previous chapter"
+            >
+              <ChevronLeft />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={onNext}
+              disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
+              aria-label="Next chapter"
+              title="Next chapter"
+            >
+              <ChevronRight />
+            </button>
 
-        <div className="toolbar-divider" />
+            <input
+              ref={inputRef}
+              className="toolbar-title-input"
+              value={chapterTitle}
+              onChange={(e) => onChapterTitleChange(e.target.value)}
+              placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
+              disabled={!hasChapter}
+              spellCheck={false}
+            />
 
-        <button
-          className="icon-btn"
-          onClick={onPrev}
-          disabled={currentIndex <= 0}
-          aria-label="Previous chapter"
-          title="Previous chapter"
-        >
-          <ChevronLeft />
-        </button>
-        <button
-          className="icon-btn"
-          onClick={onNext}
-          disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
-          aria-label="Next chapter"
-          title="Next chapter"
-        >
-          <ChevronRight />
-        </button>
+            <span className="chapter-counter">
+              {totalChapters > 0 ? `${currentIndex + 1} / ${totalChapters}` : "—"}
+            </span>
+          </div>
 
-        <input
-          ref={inputRef}
-          className="toolbar-title-input"
-          value={chapterTitle}
-          onChange={(e) => onChapterTitleChange(e.target.value)}
-          placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
-          disabled={!hasChapter}
-          spellCheck={false}
-        />
+          <div className="toolbar-group-spacer" aria-hidden="true" />
 
-        <span className="chapter-counter">
-          {totalChapters > 0 ? `${currentIndex + 1} / ${totalChapters}` : "—"}
-        </span>
+          <div className="toolbar toolbar-group toolbar-group--single liquid-glass" data-liquid-glass-transient="true">
+            <button className="icon-btn" onClick={onAddChapter} aria-label="New chapter" title="New chapter">
+              <PlusIcon />
+            </button>
+          </div>
 
-        <div className="toolbar-divider" />
+          <div className="toolbar-group-spacer" aria-hidden="true" />
 
-        <button className="icon-btn" onClick={onAddChapter} aria-label="New chapter" title="New chapter">
-          <PlusIcon />
-        </button>
-        {typeof window !== "undefined" && (window as Window & { electronAPI?: { isElectron?: boolean } }).electronAPI?.isElectron ? (
-          <button className="icon-btn" onClick={onOpenProject} aria-label="Open project" title="Open project folder">
-            <FolderIcon />
+          {collapseRightGroup ? (
+            <div className="toolbar-group-overflow">
+              <div className="toolbar toolbar-group toolbar-group--single liquid-glass" data-liquid-glass-transient="true">
+                <button
+                  ref={overflowBtnRef}
+                  className={`icon-btn toolbar-overflow-trigger${showOverflow ? " icon-btn-active" : ""}`}
+                  onClick={() => setShowOverflow((v) => !v)}
+                  aria-label="More tools"
+                  aria-haspopup="menu"
+                  aria-expanded={showOverflow}
+                  title="More tools"
+                >
+                  <MoreHorizontalIcon size={17} />
+                </button>
+              </div>
+              {showOverflow && renderOverflowMenu()}
+            </div>
+          ) : (
+            <div className="toolbar toolbar-group liquid-glass" data-liquid-glass-transient="true">
+              {rightGroupActions.map(renderToolbarButton)}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="toolbar liquid-glass">
+          <IntelBtn
+            mode={intelMode}
+            resolvedLevel={intelResolvedLevel}
+            onClick={onCycleIntel}
+            analyzing={isAnalyzing}
+            funMode={funMode}
+          />
+
+          <button
+            className="icon-btn"
+            onClick={onOpenIndex}
+            aria-label="Chapter index"
+            title="Chapter index"
+          >
+            <BookOpenIcon size={17} />
           </button>
-        ) : (
-          <button className="icon-btn" onClick={onImport} aria-label="Import .txt" title="Import .txt">
-            <UploadIcon />
+
+          <button
+            className="icon-btn"
+            onClick={onOpenWorld}
+            aria-label="World data"
+            title="World data"
+          >
+            <UsersIcon size={17} />
           </button>
-        )}
-        <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
-          <DownloadIcon />
-        </button>
-        <button
-          className={`icon-btn toolbar-annotation-btn${annotationMode ? " icon-btn-active" : ""}`}
-          onClick={onToggleAnnotation}
-          aria-label="Annotation mode"
-          title="Annotation mode — click speech or action spans to correct attribution"
-        >
-          <AnnotateIcon size={16} />
-        </button>
-        <button className="icon-btn" onClick={onExportPdf} aria-label="Export PDF" title="Export PDF">
-          <FileTextIcon size={16} />
-        </button>
-      </div>
+
+          <div className="toolbar-divider" />
+
+          <button
+            className="icon-btn"
+            onClick={onPrev}
+            disabled={currentIndex <= 0}
+            aria-label="Previous chapter"
+            title="Previous chapter"
+          >
+            <ChevronLeft />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={onNext}
+            disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
+            aria-label="Next chapter"
+            title="Next chapter"
+          >
+            <ChevronRight />
+          </button>
+
+          <input
+            ref={inputRef}
+            className="toolbar-title-input"
+            value={chapterTitle}
+            onChange={(e) => onChapterTitleChange(e.target.value)}
+            placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
+            disabled={!hasChapter}
+            spellCheck={false}
+          />
+
+          <span className="chapter-counter">
+            {totalChapters > 0 ? `${currentIndex + 1} / ${totalChapters}` : "—"}
+          </span>
+
+          <div className="toolbar-divider" />
+
+          <button className="icon-btn" onClick={onAddChapter} aria-label="New chapter" title="New chapter">
+            <PlusIcon />
+          </button>
+          {isElectronApp ? (
+            <button className="icon-btn" onClick={onOpenProject} aria-label="Open project" title="Open project folder">
+              <FolderIcon />
+            </button>
+          ) : (
+            <button className="icon-btn" onClick={onImport} aria-label="Import .txt" title="Import .txt">
+              <UploadIcon />
+            </button>
+          )}
+          <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
+            <DownloadIcon />
+          </button>
+          <button
+            className={`icon-btn toolbar-annotation-btn${annotationMode ? " icon-btn-active" : ""}`}
+            onClick={onToggleAnnotation}
+            aria-label="Annotation mode"
+            title="Annotation mode — click speech or action spans to correct attribution"
+          >
+            <AnnotateIcon size={16} />
+          </button>
+          <button className="icon-btn" onClick={onExportPdf} aria-label="Export PDF" title="Export PDF">
+            <FileTextIcon size={16} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

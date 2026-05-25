@@ -30,6 +30,27 @@
 // Air → glass.
 const N1 = 1;
 const N2 = 1.5;
+type MapPreset = "default" | "control-knob" | "toggle-control-knob";
+const CHANNEL_GAIN: Record<MapPreset, number> = {
+  default: 1,
+  "control-knob": 0.35,
+  "toggle-control-knob": 0.24,
+};
+const EDGE_AA_SPAN: Record<MapPreset, number> = {
+  default: 0,
+  "control-knob": 1.25,
+  "toggle-control-knob": 1.1,
+};
+const MAP_OVERSAMPLE: Record<MapPreset, number> = {
+  default: 1,
+  "control-knob": 12,
+  "toggle-control-knob": 12,
+};
+const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
+  default: 1,
+  "control-knob": 16,
+  "toggle-control-knob": 16,
+};
 
 // Visual bezel thickness in element pixels (must match main-thread filter).
 const BEZEL_PX = 120;
@@ -51,10 +72,9 @@ const BLUR_EXP = 2;
 // bezel fidelity. Large elements raise to 9 — the SDF gradient is smooth
 // enough at that scale that the coarser map is imperceptible (~23% fewer
 // worker pixels).
-const MAP_DIVISOR       = 7;
-const MAP_DIVISOR_LARGE = 9;
+const MAP_DIVISOR       = 1;
+const MAP_DIVISOR_LARGE = 10;
 const MAP_DIVISOR_BREAK = 320;
-const MAP_MAX = 170;
 
 const RADIUS_FLOOR = 1;
 
@@ -73,15 +93,31 @@ function sdRoundedBox(px: number, py: number, bx: number, by: number, r: number)
   return outside + inside - r;
 }
 
-// Finite-difference outward unit normal of the rounded-box SDF.
-// Naturally smooth at the edge-to-corner transition — no blending needed.
+// Smooth-max variant — polynomial blend (Inigo Quilez) replaces the
+// hard max(qx, qy) inside the rounded box. The sharp max has a gradient
+// discontinuity along the qx=qy diagonal (45° from each corner center).
+// On pill shapes this line falls outside the bezel; on large rectangles
+// with small corner radii it cuts through, producing a visible diagonal
+// refraction seam. The smooth variant blends the gradient over ±GRAD_K
+// element-pixels around that diagonal, eliminating the seam.
+// Used ONLY for gradient direction — the sharp SDF drives distance.
+const GRAD_K = 40;
+function sdRoundedBoxSmooth(px: number, py: number, bx: number, by: number, r: number): number {
+  const qx = Math.abs(px) - (bx - r);
+  const qy = Math.abs(py) - (by - r);
+  const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
+  const d = Math.max(GRAD_K - Math.abs(qx - qy), 0) / GRAD_K;
+  const inside = Math.min(Math.max(qx, qy) + d * d * GRAD_K * 0.25, 0);
+  return outside + inside - r;
+}
+
 function sdfGrad(
   px: number, py: number, bx: number, by: number, r: number,
 ): [number, number] {
   const eps = 0.5;
-  const d = sdRoundedBox(px, py, bx, by, r);
-  const gx = sdRoundedBox(px + eps, py, bx, by, r) - d;
-  const gy = sdRoundedBox(px, py + eps, bx, by, r) - d;
+  const d = sdRoundedBoxSmooth(px, py, bx, by, r);
+  const gx = sdRoundedBoxSmooth(px + eps, py, bx, by, r) - d;
+  const gy = sdRoundedBoxSmooth(px, py + eps, bx, by, r) - d;
   const len = Math.hypot(gx, gy);
   if (len < 1e-6) return [0, 0];
   return [gx / len, gy / len];
@@ -108,6 +144,7 @@ interface MapRequest {
   elemH: number;
   radius: number;
   overflow: number;
+  preset: MapPreset;
 }
 
 interface MapResponse {
@@ -115,16 +152,57 @@ interface MapResponse {
   blob: Blob;
 }
 
+function computeMapSize(
+  elemW: number,
+  elemH: number,
+  overflow: number,
+  divisor: number,
+  oversample: number,
+) {
+  const elemWidth = Math.max(8, Math.round((elemW * oversample) / divisor));
+  const elemHeight = Math.max(8, Math.round((elemH * oversample) / divisor));
+  const overflowX = Math.max(1, Math.round((overflow * elemWidth) / elemW));
+  const overflowY = Math.max(1, Math.round((overflow * elemHeight) / elemH));
+  return {
+    elemWidth,
+    elemHeight,
+    overflowX,
+    overflowY,
+    width: elemWidth + 2 * overflowX,
+    height: elemHeight + 2 * overflowY,
+  };
+}
+
+async function encodeCanvas(canvas: OffscreenCanvas): Promise<Blob> {
+  return await canvas.convertToBlob({ type: "image/webp", quality: 1.0 });
+}
+
+function clamp01(value: number): number {
+  if (value <= 0) return 0;
+  if (value >= 1) return 1;
+  return value;
+}
+
 async function buildMapBlob(req: MapRequest): Promise<Blob> {
   const { elemW, elemH, radius, overflow } = req;
+  const preset = req.preset === "toggle-control-knob"
+    ? "toggle-control-knob"
+    : req.preset === "control-knob"
+      ? "control-knob"
+      : "default";
+  const channelGain = CHANNEL_GAIN[preset];
+  const mapOversample = MAP_OVERSAMPLE[preset];
+  const renderOversample = Math.max(mapOversample, MAP_RENDER_OVERSAMPLE[preset]);
 
   const divisor = Math.min(elemW, elemH) > MAP_DIVISOR_BREAK ? MAP_DIVISOR_LARGE : MAP_DIVISOR;
-  const mwElem = Math.max(8, Math.min(MAP_MAX, Math.round(elemW / divisor)));
-  const mhElem = Math.max(8, Math.min(MAP_MAX, Math.round(elemH / divisor)));
-  const ovX = Math.max(1, Math.round((overflow * mwElem) / elemW));
-  const ovY = Math.max(1, Math.round((overflow * mhElem) / elemH));
-  const mw = mwElem + 2 * ovX;
-  const mh = mhElem + 2 * ovY;
+  const renderSize = computeMapSize(elemW, elemH, overflow, divisor, renderOversample);
+  const outputSize = computeMapSize(elemW, elemH, overflow, divisor, mapOversample);
+  const mwElem = renderSize.elemWidth;
+  const mhElem = renderSize.elemHeight;
+  const ovX = renderSize.overflowX;
+  const ovY = renderSize.overflowY;
+  const mw = renderSize.width;
+  const mh = renderSize.height;
 
   const halfW = elemW / 2;
   const halfH = elemH / 2;
@@ -140,6 +218,7 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
   const sxInv = elemW / mwElem;
   const syInv = elemH / mhElem;
   const eta = N1 / N2;
+  const edgeAaWidth = EDGE_AA_SPAN[preset] * Math.max(sxInv, syInv);
 
   const canvas = new OffscreenCanvas(mw, mh);
   const ctx = canvas.getContext("2d")!;
@@ -182,33 +261,45 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
       const i = py * mwElem + px;
       const idx = i * 2;
 
-      if (distToEdge <= 0) continue;
+      const edgeCoverage = edgeAaWidth > 0
+        ? clamp01(0.5 + distToEdge / edgeAaWidth)
+        : distToEdge > 0 ? 1 : 0;
+
+      if (edgeCoverage <= 0) continue;
 
       // ── Progressive blur mask ────────────────────────────────────────────
-      if (distToEdge >= blurRimEnd) {
-        maskBuf[i] = 255;
+      const maskDist = Math.max(distToEdge, 0);
+      let targetMask = baselineMask;
+      if (maskDist >= blurRimEnd) {
+        targetMask = 255;
       } else {
-        const t = distToEdge / blurRimEnd;
+        const t = blurRimEnd > 0 ? maskDist / blurRimEnd : 1;
         const eased = (t < 0 ? 0 : t > 1 ? 1 : t) ** BLUR_EXP;
-        maskBuf[i] = (BLUR_EDGE_MIN + (1 - BLUR_EDGE_MIN) * eased) * 255 + 0.5;
+        targetMask = (BLUR_EDGE_MIN + (1 - BLUR_EDGE_MIN) * eased) * 255 + 0.5;
       }
+      maskBuf[i] = baselineMask + (targetMask - baselineMask) * edgeCoverage + 0.5;
 
-      if (distToEdge >= bezel) continue;
+      const bezelCoverage = edgeAaWidth > 0
+        ? clamp01(0.5 + (bezel - distToEdge) / edgeAaWidth)
+        : distToEdge < bezel ? 1 : 0;
+      const dispCoverage = Math.min(edgeCoverage, bezelCoverage);
+
+      if (dispCoverage <= 0) continue;
 
       // ── Single-computation Snell + directional projection ────────────────
       // One scalar displacement from the bezel profile at the SDF distance,
       // projected onto X/Y via the finite-difference SDF gradient. Gives
       // uniform refraction strength at any given distance from the edge —
       // identical on straight edges and corners.
-      const t = distToEdge / bezel;
+      const t = Math.min(Math.max(distToEdge, 0), bezel) / bezel;
       const slope = Math.min(dh(t), 5.0);
       const disp = snellDisp(slope, eta);
 
       if (disp < 1e-6) continue;
 
       const [gx, gy] = sdfGrad(px_rel, py_rel, halfW, halfH, r);
-      const dx = -gx * disp;
-      const dy = -gy * disp;
+      const dx = -gx * disp * dispCoverage;
+      const dy = -gy * disp * dispCoverage;
 
       raw[idx]     = dx;
       raw[idx + 1] = dy;
@@ -228,15 +319,28 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
       const cx = px + ovX;
       const cy = py + ovY;
       const b = (cy * mw + cx) * 4;
-      data[b]     = (128 + (raw[i * 2]     / norm) * 127 + 0.5) | 0;
-      data[b + 1] = (128 + (raw[i * 2 + 1] / norm) * 127 + 0.5) | 0;
+      data[b]     = (128 + (raw[i * 2]     / norm) * 127 * channelGain + 0.5) | 0;
+      data[b + 1] = (128 + (raw[i * 2 + 1] / norm) * 127 * channelGain + 0.5) | 0;
       data[b + 2] = maskBuf[i];
       data[b + 3] = 255;
     }
   }
 
   ctx.putImageData(img, 0, 0);
-  return await canvas.convertToBlob({ type: "image/webp", quality: 1.0 });
+
+  // Knob presets keep their final oversampled map (6x currently), but can
+  // render internally at an even higher raster size and smooth down to that
+  // final oversampled target for actual SSAA edge averaging.
+  if (renderOversample > mapOversample + 0.01) {
+    const finalCanvas = new OffscreenCanvas(outputSize.width, outputSize.height);
+    const finalCtx = finalCanvas.getContext("2d")!;
+    finalCtx.imageSmoothingEnabled = true;
+    finalCtx.imageSmoothingQuality = "high";
+    finalCtx.drawImage(canvas, 0, 0, outputSize.width, outputSize.height);
+    return await encodeCanvas(finalCanvas);
+  }
+
+  return await encodeCanvas(canvas);
 }
 
 self.onmessage = async (e: MessageEvent<MapRequest>) => {

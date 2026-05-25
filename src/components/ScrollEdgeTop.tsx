@@ -20,14 +20,14 @@ const STRIPS: number[] = Array.from({ length: STRIP_COUNT }, (_, i) =>
 export function ScrollEdgeTop() {
   return (
     <div className="scroll-edge-top" aria-hidden="true">
-      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <div className="scroll-edge-top-strips" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         {STRIPS.map((blur, i) => (
           <div
             key={i}
+            className="scroll-edge-top-strip"
             style={{
               flex: 1,
-              backdropFilter: `blur(${blur}px)`,
-              WebkitBackdropFilter: `blur(${blur}px)`,
+              "--ser-blur": `${blur}px`,
               ...(i > 0 && {
                 marginTop: `${OVERLAP}px`,
                 WebkitMaskImage: STRIP_MASK,
@@ -41,13 +41,13 @@ export function ScrollEdgeTop() {
       {/* Gradient overlay anchors the opaque bg-color at the very top so the
           transition reads as page-background → blur → transparent */}
       <div
+        className="scroll-edge-top-overlay"
         style={{
           position: "absolute",
           inset: 0,
           pointerEvents: "none",
           background:
             "linear-gradient(to bottom, var(--bg-scroll-edge) 0%, var(--bg-scroll-edge) 15%, transparent 95%)",
-          opacity: 0.85,
         }}
       />
     </div>

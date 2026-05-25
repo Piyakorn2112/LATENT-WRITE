@@ -951,8 +951,11 @@ export function RendererPanel({
 
   useEffect(() => {
     if (!desktop) return;
-    getCurrentProject().then(setProject);
+    const fetchProject = () => getCurrentProject().then((p) => { if (p) setProject(p); });
+    fetchProject();
     getClaudeStatus().then(setClaude);
+    window.addEventListener("project-ready", fetchProject);
+    return () => window.removeEventListener("project-ready", fetchProject);
   }, [desktop]);
 
   useEffect(() => {

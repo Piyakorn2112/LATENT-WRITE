@@ -967,9 +967,9 @@ const tests: TestCase[] = [
 
 // ─── Runner ───────────────────────────────────────────────────────────────
 
-const modes: IntelligenceLevel[] = ['low', 'default', 'high'];
+const modes: IntelligenceLevel[] = ['fast', 'default', 'high'];
 const modeTargets: Record<IntelligenceLevel, { min: number; max: number }> = {
-  low:     { min: 60, max: 78 },
+  fast:    { min: 60, max: 78 },
   default: { min: 75, max: 92 },
   high:    { min: 90, max: 100 },
 };
@@ -979,7 +979,7 @@ console.log('║  Speech Detection Accuracy Suite (glass-editor)           ║')
 console.log('╚════════════════════════════════════════════════════════════╝\n');
 
 const summaries: Record<IntelligenceLevel, { passed: number; total: number }> = {
-  low: { passed: 0, total: 0 },
+  fast: { passed: 0, total: 0 },
   default: { passed: 0, total: 0 },
   high: { passed: 0, total: 0 },
 };

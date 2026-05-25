@@ -30,7 +30,7 @@ type ScanCategory = "characters" | "places" | "factions" | "entities";
 type ScanLabel = "character" | "place" | "faction" | "entity";
 type ScanPhase = "pick" | "scanning" | "review";
 
-type IntelMode = "off" | "low" | "default" | "high" | "auto";
+type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
 interface Props {
   novel: Novel;
@@ -66,7 +66,7 @@ const SCAN_CATEGORY_META: Record<ScanCategory, { label: string; Icon: typeof Use
 const ORB_COLOR: Record<IntelMode, string> = {
   off:     "#888888",
   auto:    "#2EA84A",
-  low:     "#DC7B19",
+  fast:    "#DC7B19",
   default: "#1071D8",
   high:    "#A828B8",
 };

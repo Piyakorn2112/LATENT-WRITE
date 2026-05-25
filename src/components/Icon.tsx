@@ -47,6 +47,7 @@ import {
   Filter as _Fi,
   Link as _Lk,
   Puzzle as _Pz,
+  MoreHorizontal as _Mh,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -98,6 +99,7 @@ export const StarIcon          = wrap(_Sr);
 export const FilterIcon        = wrap(_Fi);
 export const LinkIcon          = wrap(_Lk);
 export const PuzzleIcon        = wrap(_Pz);
+export const MoreHorizontalIcon = wrap(_Mh);
 
 const TOOL_ICON_MAP: Record<string, React.FC<P>> = {
   Target: TargetIcon, Search: SearchIcon, BookOpen: BookOpenIcon,

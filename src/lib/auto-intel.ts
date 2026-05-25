@@ -2,13 +2,13 @@ import type { IntelligenceLevel } from "./speech-detect";
 
 /**
  * Heuristic prescan to pick an appropriate intelligence level from a chapter's
- * paragraphs. Lighter than 'low' mode — pure pattern-counting, no detection
+ * paragraphs. Lighter than 'fast' mode — pure pattern-counting, no detection
  * pipeline. Typically <1ms for chapters up to 400 paragraphs.
  *
  * Thresholds:
  *   dialogue density ≥ 0.50,  OR  (≥ 0.35 AND ≥ 4 speakers)  →  'high'
  *   dialogue density ≥ 0.20,  OR  ≥ 2 speakers                →  'default'
- *   otherwise                                                  →  'low'
+ *   otherwise                                                  →  'fast'
  */
 export function lightweightPrescan(paragraphs: string[]): IntelligenceLevel {
   if (paragraphs.length === 0) return "default";
@@ -32,5 +32,5 @@ export function lightweightPrescan(paragraphs: string[]): IntelligenceLevel {
 
   if (density >= 0.5 || (density >= 0.35 && speakers >= 4)) return "high";
   if (density >= 0.2 || speakers >= 2) return "default";
-  return "low";
+  return "fast";
 }

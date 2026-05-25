@@ -264,6 +264,7 @@ export function GlassColorPicker({ value, onChange }: Props) {
           step={0.01}
           value={hsv.v}
           onChange={updateBrightness}
+          enableGlass
           className="gcp-slider"
           trackUnderlayStyle={sliderTrackStyle}
           showFill={false}

@@ -1,9 +1,9 @@
 import type { CSSProperties } from "react";
 
-const STRIP_COUNT = 3;
+const STRIP_COUNT = 4;
 const MAX_BLUR    = 3;
 const EXP_BASE    = 1.4;
-const OVERLAP     = -220;
+const OVERLAP     = -140;
 
 const STRIP_MASK =
   "linear-gradient(to left, transparent 0%, black 20%, black 80%, transparent 100%)";

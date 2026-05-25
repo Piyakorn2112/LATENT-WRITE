@@ -37,11 +37,11 @@ type LightBenchRow = {
 type HeavyBenchRow = {
   source: string;
   chapterNumber: number;
-  low: TimingSummary;
+  fast: TimingSummary;
   default: TimingSummary;
   high: TimingSummary;
-  lowVsDefault: number;
-  lowVsHigh: number;
+  fastVsDefault: number;
+  fastVsHigh: number;
 };
 
 type CrossContextRow = {
@@ -114,8 +114,8 @@ async function main() {
       source: source.name,
       chapterNumber: chapter.number,
       ...heavyTimings,
-      lowVsDefault: heavyTimings.default.avgMs / Math.max(heavyTimings.low.avgMs, 0.0001),
-      lowVsHigh: heavyTimings.high.avgMs / Math.max(heavyTimings.low.avgMs, 0.0001),
+      fastVsDefault: heavyTimings.default.avgMs / Math.max(heavyTimings.fast.avgMs, 0.0001),
+      fastVsHigh: heavyTimings.high.avgMs / Math.max(heavyTimings.fast.avgMs, 0.0001),
     });
 
     const prevHigh = runChapterAnalysis({
@@ -154,8 +154,9 @@ async function main() {
   }
 
   printLightReport(lightRows);
-  printHeavyReport(heavyRows);
+  const heavyPassed = printHeavyReport(heavyRows);
   printCrossContextReport(crossRows);
+  if (!heavyPassed) process.exit(1);
 }
 
 async function loadNovel(filePath: string): Promise<Novel> {
@@ -207,7 +208,7 @@ function pickActiveParagraph(chapter: Chapter, knownNames: string[]) {
 function benchmarkHeavyModes(novel: Novel, chapterIndex: number, knownNames: string[]) {
   const chapter = novel.chapters[chapterIndex];
   const prevChapter = novel.chapters[chapterIndex - 1];
-  const levels: IntelligenceLevel[] = ["low", "default", "high"];
+  const levels: IntelligenceLevel[] = ["fast", "default", "high"];
   const summaries = new Map<IntelligenceLevel, TimingSummary>();
 
   for (const level of levels) {
@@ -232,7 +233,7 @@ function benchmarkHeavyModes(novel: Novel, chapterIndex: number, knownNames: str
   }
 
   return {
-    low: summaries.get("low")!,
+    fast: summaries.get("fast")!,
     default: summaries.get("default")!,
     high: summaries.get("high")!,
   };
@@ -276,24 +277,30 @@ function printLightReport(rows: LightBenchRow[]) {
   console.log("");
 }
 
-function printHeavyReport(rows: HeavyBenchRow[]) {
+// Fast mode must run in ≤50% of the original 'low' baseline (41.46ms avg).
+const FAST_MAX_AVG_MS = 21;
+
+function printHeavyReport(rows: HeavyBenchRow[]): boolean {
   console.log("## Heavy Path");
   for (const row of rows) {
     console.log(
-      `${row.source} ch${row.chapterNumber}: low=${formatMs(row.low.avgMs)} avg, ` +
+      `${row.source} ch${row.chapterNumber}: fast=${formatMs(row.fast.avgMs)} avg, ` +
       `default=${formatMs(row.default.avgMs)} avg, high=${formatMs(row.high.avgMs)} avg ` +
-      `(default/low=${row.lowVsDefault.toFixed(2)}x, high/low=${row.lowVsHigh.toFixed(2)}x)`,
+      `(default/fast=${row.fastVsDefault.toFixed(2)}x, high/fast=${row.fastVsHigh.toFixed(2)}x)`,
     );
   }
 
-  const avgLow = average(rows.map((row) => row.low.avgMs));
+  const avgFast = average(rows.map((row) => row.fast.avgMs));
   const avgDefault = average(rows.map((row) => row.default.avgMs));
   const avgHigh = average(rows.map((row) => row.high.avgMs));
   console.log(
-    `Averages: low=${formatMs(avgLow)}, default=${formatMs(avgDefault)}, high=${formatMs(avgHigh)} ` +
-    `(default/low=${(avgDefault / Math.max(avgLow, 0.0001)).toFixed(2)}x, high/low=${(avgHigh / Math.max(avgLow, 0.0001)).toFixed(2)}x)`,
+    `Averages: fast=${formatMs(avgFast)}, default=${formatMs(avgDefault)}, high=${formatMs(avgHigh)} ` +
+    `(default/fast=${(avgDefault / Math.max(avgFast, 0.0001)).toFixed(2)}x, high/fast=${(avgHigh / Math.max(avgFast, 0.0001)).toFixed(2)}x)`,
   );
+  const passed = avgFast <= FAST_MAX_AVG_MS;
+  console.log(`Fast mode latency: ${formatMs(avgFast)} avg — target ≤${FAST_MAX_AVG_MS}ms — ${passed ? "✓ PASS" : "✗ FAIL"}`);
   console.log("");
+  return passed;
 }
 
 function printCrossContextReport(rows: CrossContextRow[]) {

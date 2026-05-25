@@ -51,7 +51,7 @@ const ToolWidgetSlot = lazy(() => import("./widgets/ToolWidgetSlot").then(m => (
 
 const EMPTY_CHAPTERS: Chapter[] = [];
 
-type IntelMode = "off" | "low" | "default" | "high" | "auto";
+type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
 interface Props {
   result: ChapterAnalysisResult | null;
@@ -89,7 +89,7 @@ interface Props {
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
   { value: "off",     label: "Off",     desc: "No highlighting",            color: "#888888" },
   { value: "auto",    label: "Auto",    desc: "Adapts to chapter content",  color: IOS_COLORS.green.text  },
-  { value: "low",     label: "Low",     desc: "Fast, ~85% accuracy",        color: IOS_COLORS.orange.text },
+  { value: "fast",    label: "Fast",    desc: "Fast, ~85% accuracy",        color: IOS_COLORS.orange.text },
   { value: "default", label: "Default", desc: "Balanced analysis",          color: IOS_COLORS.blue.text   },
   { value: "high",    label: "High",    desc: "Max accuracy",               color: IOS_COLORS.purple.text },
 ];
@@ -205,6 +205,19 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
           checked={!!prefs.sidePanelCompensation}
           onChange={(v) => onSetPrefs({ ...prefs, sidePanelCompensation: v })}
           ariaLabel="Toggle side panel compensation"
+        />
+      </div>
+      <div className="settings-toggle-row">
+        <div className="settings-toggle-row-text">
+          <span className="settings-toggle-row-title">Group tools</span>
+          <span className="settings-toggle-row-desc">
+            Split the top toolbar into separate glass tool groups and collapse the right tools into a more menu on smaller windows.
+          </span>
+        </div>
+        <GlassToggle
+          checked={!!prefs.groupTools}
+          onChange={(v) => onSetPrefs({ ...prefs, groupTools: v })}
+          ariaLabel="Toggle grouped toolbar tools"
         />
       </div>
 

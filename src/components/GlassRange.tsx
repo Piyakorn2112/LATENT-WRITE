@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 interface Props {
   min: number;
@@ -6,6 +6,7 @@ interface Props {
   step: number;
   value: number;
   onChange: (v: number) => void;
+  enableGlass?: boolean;
   className?: string;
   trackStyle?: CSSProperties;
   trackUnderlayStyle?: CSSProperties;
@@ -19,7 +20,7 @@ interface Props {
  *
  * The native <input type="range"> is overlaid at full opacity-0 so all
  * keyboard/pointer interaction falls through to it naturally. A positioned
- * div with the .liquid-glass class is the visual knob — it tracks the
+ * div with a dedicated control-glass activation class is the visual knob — it tracks the
  * current value via a CSS custom property fed into calc().
  *
  * backdrop-filter on ::-webkit-slider-thumb is silently ignored by Chromium;
@@ -31,6 +32,7 @@ export function GlassRange({
   step,
   value,
   onChange,
+  enableGlass = false,
   className = "",
   trackStyle,
   trackUnderlayStyle,
@@ -38,8 +40,22 @@ export function GlassRange({
   showFill = true,
   ariaLabel,
 }: Props) {
+  const [glassActive, setGlassActive] = useState(false);
+
+  useEffect(() => {
+    if (!glassActive) return;
+    const reset = () => setGlassActive(false);
+    window.addEventListener("pointerup", reset);
+    window.addEventListener("pointercancel", reset);
+    return () => {
+      window.removeEventListener("pointerup", reset);
+      window.removeEventListener("pointercancel", reset);
+    };
+  }, [glassActive]);
+
   const fraction = max === min ? 0 : Math.min(1, Math.max(0, (value - min) / (max - min)));
   const wrapClassName = className ? `glass-range-wrap ${className}` : "glass-range-wrap";
+  const knobClassName = glassActive ? "glass-range-knob liquid-glass-control-knob" : "glass-range-knob";
 
   return (
     <div className={wrapClassName}>
@@ -47,7 +63,7 @@ export function GlassRange({
         {trackUnderlayStyle && <div className="glass-range-underlay" style={trackUnderlayStyle} />}
         {showFill && <div className="glass-range-fill" style={{ width: `${fraction * 100}%`, ...fillStyle }} />}
         <div
-          className="glass-range-knob"
+          className={knobClassName}
           style={{ "--glass-range-frac": String(fraction) } as CSSProperties}
         />
       </div>
@@ -60,6 +76,12 @@ export function GlassRange({
         onChange={(e) => onChange(Number(e.target.value))}
         className="glass-range-input"
         aria-label={ariaLabel}
+        onPointerDown={(e) => {
+          if (enableGlass || e.currentTarget.closest(".settings-panel")) setGlassActive(true);
+        }}
+        onPointerUp={() => setGlassActive(false)}
+        onPointerCancel={() => setGlassActive(false)}
+        onBlur={() => setGlassActive(false)}
       />
     </div>
   );

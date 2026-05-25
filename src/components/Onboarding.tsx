@@ -10,10 +10,10 @@ import type { Chapter, WorldData } from "../types";
 
 // Each "mode" reuses the production orb's pre-saturated palette. Keeps the
 // welcome experience visually identical to the toolbar orb users see later.
-type IntelMode = "low" | "default" | "high" | "auto";
+type IntelMode = "fast" | "default" | "high" | "auto";
 
 const ORB_COLORS: Record<Exclude<IntelMode, "auto">, { a: string; b: string; c: string }> = {
-  low:     { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
+  fast:    { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
   default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
   high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
 };
@@ -22,7 +22,7 @@ const ORB_COLORS: Record<Exclude<IntelMode, "auto">, { a: string; b: string; c: 
 // crossfade ride a CSS transition on the @property-typed --orb-a/b/c
 // variables, instead of fighting the auto-cycle's @keyframes animation.
 // Page 2 still shows all four modes side-by-side, including auto.
-const MODE_ORDER: Exclude<IntelMode, "auto">[] = ["default", "high", "low"];
+const MODE_ORDER: Exclude<IntelMode, "auto">[] = ["default", "high", "fast"];
 
 // ─── HeroOrb ──────────────────────────────────────────────────────────────
 // Re-renders the toolbar's 6-orb mesh at large scale. Uses transform:scale
@@ -188,7 +188,7 @@ function OnbPage({ active, widthPercent, children }: OnbPageProps) {
 }
 
 const MODE_DESCRIPTIONS: Array<{ mode: IntelMode; title: string; sub: string }> = [
-  { mode: "low",     title: "Low",     sub: "Fast skim · ~85% accuracy" },
+  { mode: "fast",    title: "Fast",    sub: "Fast skim · ~85% accuracy" },
   { mode: "default", title: "Default", sub: "Balanced — most chapters" },
   { mode: "high",    title: "High",    sub: "Cross-arc · prose texture" },
   { mode: "auto",    title: "Auto",    sub: "Adapts per chapter" },

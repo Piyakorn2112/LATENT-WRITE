@@ -3,6 +3,7 @@
   --bg-page: #fafaf9;
   --bg-scroll-edge: #fafaf9bc;
   --overlay-scrim-bg: rgba(20, 20, 22, 0.18);
+  --overlay-scrim-bg-unfocused: rgba(245, 246, 248, 0.68);
   --overlay-scrim-blur: 8px;
   --overlay-scroll-mask-edge-top: 10px;
   --overlay-scroll-mask-edge-bottom: 14px;
@@ -11,6 +12,7 @@
   --bg-glass: rgba(255, 255, 255, 0.621);
   --bg-glass-hover: rgba(255, 255, 255, 0.78);
   --bg-glass-strong: rgba(255, 255, 255, 0.72);
+  --bg-glass-unfocused: rgb(248, 248, 246);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
   --bg-edge-right: #000000;
 
@@ -73,6 +75,8 @@
     --bg-glass: rgba(36, 36, 34, 0.55);
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
+    --bg-glass-unfocused: rgb(24, 24, 22);
+    --overlay-scrim-bg-unfocused: rgba(8, 10, 14, 0.58);
     --border-glass-grad: linear-gradient(
       180deg,
       rgba(255, 255, 255, 0.199) 0%,
@@ -182,14 +186,17 @@ body {
    (z-index 1-11) so content fades in from behind the toolbar as it scrolls
    into view rather than hard-clipping at the toolbar's bottom edge. ── */
 .scroll-edge-top {
+  --scroll-edge-top-overlay-opacity: 0.85;
   position: fixed;
   top: -20px;
   left: 0;
   right: 0;
-  height: 100px;
+  height: 120px;
   z-index: 30;
   pointer-events: none;
   overflow: hidden;
+  opacity: 1;
+  transition: opacity 220ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 /* Right-edge ambient blur — child of .analysis-panel so it shares the
@@ -210,6 +217,7 @@ body {
    leak onto the editor regardless of total width. The translate stays
    at +30/0 as a subtle parallax flair. */
 .scroll-edge-right {
+  --scroll-edge-right-overlay-opacity: 0.96;
   position: absolute;
   top: 0;
   bottom: 0;
@@ -241,7 +249,14 @@ body {
     color-mix(in srgb, var(--bg-edge-right) 16%, transparent) 55%,
     color-mix(in srgb, var(--bg-edge-right) 20%, transparent) 100%
   );
+  opacity: var(--scroll-edge-right-overlay-opacity);
+  transition: opacity 220ms cubic-bezier(0.25, 0.1, 0.25, 1);
   z-index: 2;
+}
+
+.scroll-edge-top-overlay {
+  opacity: var(--scroll-edge-top-overlay-opacity);
+  transition: opacity 220ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 /* ── Scroll-edge blur fade during fast scroll ──
@@ -254,14 +269,56 @@ body {
   inherits: true;
   initial-value: 1;
 }
-.scroll-edge-right-strips {
+.scroll-edge-right-strips,
+.scroll-edge-top-strips {
   --ser-blur-active: 1;
-  transition: --ser-blur-active 300ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  transition: --ser-blur-active 220ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
-body.glass-fast-scroll .scroll-edge-right-strips {
+body.glass-fast-scroll .scroll-edge-right-strips,
+body.glass-fast-scroll .scroll-edge-top-strips {
   --ser-blur-active: 0;
 }
-.scroll-edge-right-strip {
+body.scroll-edge-idle .scroll-edge-right-strips,
+body.scroll-edge-idle .scroll-edge-top-strips {
+  --ser-blur-active: 0;
+  transition-duration: 1400ms;
+}
+
+body.scroll-edge-idle .scroll-edge-top {
+  opacity: 0;
+  transition-duration: 1400ms;
+}
+
+body.scroll-edge-idle .scroll-edge-right {
+  opacity: 0;
+  transition-duration: 1400ms, 1400ms;
+}
+
+/* Idle glass relief — switch liquid-glass surfaces back to the normal CSS
+   backdrop blur fallback while the app is idle. This keeps the visual look
+   close to the focused state while dropping the heavier SVG liquid-glass
+   composite work across the app until the next user interaction. */
+body.scroll-edge-idle .app .liquid-glass,
+body.scroll-edge-idle .app .analysis-tab,
+body.scroll-edge-idle .app .analysis-action-group {
+  background: var(--bg-glass-strong) !important;
+  -webkit-backdrop-filter: blur(3px) !important;
+  backdrop-filter: blur(3px) !important;
+}
+
+body.scroll-edge-idle .app .word-count,
+body.scroll-edge-idle .app .debug-panel {
+  -webkit-backdrop-filter: blur(4px) saturate(160%) !important;
+  backdrop-filter: blur(4px) saturate(160%) !important;
+}
+
+body.scroll-edge-idle .app .liquid-glass-control-knob {
+  -webkit-backdrop-filter: blur(0px) !important;
+  backdrop-filter: blur(0px) !important;
+}
+
+.scroll-edge-right-strip,
+.scroll-edge-top-strip {
   backdrop-filter: blur(calc(var(--ser-blur) * var(--ser-blur-active)));
   -webkit-backdrop-filter: blur(calc(var(--ser-blur) * var(--ser-blur-active)));
 }
@@ -364,6 +421,127 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   letter-spacing: 0.06em;
   padding: 0 6px;
   white-space: nowrap;
+}
+
+.toolbar-shell--grouped {
+  align-items: flex-start;
+}
+
+.toolbar-grouped-layout {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: min(100%, 920px);
+  min-width: 0;
+  pointer-events: auto;
+}
+
+.toolbar-group {
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.toolbar-group--editor {
+  flex: 1 1 auto;
+}
+
+.toolbar-group--single {
+  padding-inline: 6px;
+}
+
+.toolbar-group-spacer {
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.toolbar-group-overflow {
+  position: relative;
+  flex: 0 0 auto;
+  pointer-events: auto;
+}
+
+.toolbar-overflow-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  min-width: 196px;
+  padding: 6px;
+  border-radius: var(--card-radius);
+  background: var(--bg-glass);
+  box-shadow: var(--shadow-glass);
+  pointer-events: auto;
+  animation: entityCardIn 0.18s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.toolbar-overflow-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: calc(var(--card-radius) - 6px);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, transform 0.12s ease;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: manipulation;
+}
+
+.toolbar-overflow-item:hover {
+  background: var(--bg-glass-hover);
+  color: var(--text);
+}
+
+@media (hover: none) {
+  .toolbar-overflow-item:hover {
+    background: transparent;
+    color: var(--text-secondary);
+  }
+}
+
+.toolbar-overflow-item:active {
+  transform: scale(0.98);
+}
+
+.toolbar-overflow-item--active {
+  color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+}
+
+.toolbar-overflow-trigger.icon-btn-active {
+  color: #3b82f6;
+}
+
+.toolbar-overflow-item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .toolbar-overflow-trigger.icon-btn-active,
+  .toolbar-overflow-item--active {
+    color: #3b82f6;
+  }
+
+  .toolbar-overflow-item--active {
+    background: rgba(59, 130, 246, 0.12);
+  }
 }
 
 /* ─── Icon Button ─── */
@@ -3856,6 +4034,20 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   justify-content: center;
 }
 
+.intel-orb-live {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center;
+  filter: none;
+  opacity: 1;
+  transition:
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.24s ease,
+    filter 0.24s ease;
+}
+
 /* Loading state — no spinner ring. Instead, the orb expands and brightens.
    This uses pure transitions (no @keyframes): a CSS animation snaps its
    transform/filter back to baseline when the class is removed (the cascade
@@ -3900,6 +4092,39 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   --orb-c: #00FF00;  /* #68FF3D × saturate(200%) */
 }
 
+.intel-mesh-fallback {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.62);
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease;
+  --orb-a: #FF1167;
+  --orb-b: #1066FF;
+  --orb-c: #00FF00;
+}
+
+.intel-mesh-fallback-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  filter: blur(4px) brightness(1.08);
+  background:
+    radial-gradient(circle at 34% 34%, color-mix(in srgb, var(--orb-c) 94%, transparent) 0 18%, transparent 56%),
+    radial-gradient(circle at 68% 38%, color-mix(in srgb, var(--orb-b) 92%, transparent) 0 19%, transparent 58%),
+    radial-gradient(circle at 48% 74%, color-mix(in srgb, var(--orb-a) 90%, transparent) 0 21%, transparent 60%),
+    radial-gradient(circle at 50% 50%, color-mix(in srgb, var(--orb-b) 24%, var(--orb-a) 24%) 0%, color-mix(in srgb, var(--orb-c) 16%, transparent) 52%, transparent 76%);
+  box-shadow:
+    0 0 12px color-mix(in srgb, var(--orb-b) 30%, transparent),
+    0 0 18px color-mix(in srgb, var(--orb-a) 22%, transparent);
+  transition: filter 0.22s ease;
+}
+
 .intel-mesh-dot--ghost {
   position: absolute;
   inset: 0;
@@ -3911,6 +4136,21 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   filter: blur(3.8px) contrast(142%) brightness(118%);
 }
 
+.intel-btn--passive-orb-active .intel-orb-live {
+  transform: scale(0.84);
+  opacity: 0.12;
+}
+
+.intel-btn--passive-orb-active .intel-mesh-fallback {
+  opacity: 0.96;
+  transform: translate(-50%, -50%) scale(0.96);
+}
+
+.intel-btn--passive-orb-active .intel-mesh-fallback-core {
+  filter: blur(4.2px) brightness(1.16) saturate(1.08);
+  animation: intelPassiveOrbRotate 6.8s linear infinite;
+}
+
 /* Off mode: desaturate the blur layer; colours set per colour scheme */
 .intel-mesh-dot[data-mode="off"] {
   filter: blur(2.5px) saturate(0%) brightness(130%);
@@ -3919,8 +4159,18 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   --orb-b: #ddd;
   --orb-c: #999;
 }
+.intel-mesh-fallback[data-mode="off"] {
+  --orb-a: #bbb;
+  --orb-b: #ddd;
+  --orb-c: #999;
+}
 @media (prefers-color-scheme: dark) {
   .intel-mesh-dot[data-mode="off"] {
+    --orb-a: #555;
+    --orb-b: #777;
+    --orb-c: #444;
+  }
+  .intel-mesh-fallback[data-mode="off"] {
     --orb-a: #555;
     --orb-b: #777;
     --orb-c: #444;
@@ -3966,53 +4216,91 @@ body.glass-fast-scroll .scroll-edge-right-strips {
 /* Default cycle — equal time on each palette (used when resolved level isn't set yet) */
 .intel-mesh-dot[data-mode="auto"] {
   animation: autoCycleEqual 12s ease-in-out infinite;
+  transition:
+    transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
+    filter 0.5s ease,
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease;
 }
 
-/* Resolved-level cycles — same 12s loop, but the resolved palette occupies
-   ~50% of the cycle while the other two share the remaining 50% (~25% each).
-   Smooth keyframes (no hold-then-snap) keep transitions seamless. */
-.intel-mesh-dot[data-mode="auto"][data-resolved="low"] {
+.intel-mesh-fallback[data-mode="auto"] {
+  animation: autoCycleEqual 12s ease-in-out infinite;
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.18s ease,
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease;
+}
+
+/* Resolved-level cycles — each resolved palette drifts toward its
+  intelligence mode's colour region while staying green-anchored.
+  All four animations share jade as their 0%/100% anchor so switching
+  resolved level restarts at a neutral midpoint — the @property
+  transition on --orb-* smooths whatever residual gap remains. */
+.intel-mesh-dot[data-mode="auto"][data-resolved="fast"] {
+  animation: autoCycleLow 14s ease-in-out infinite;
+}
+.intel-mesh-fallback[data-mode="auto"][data-resolved="fast"] {
   animation: autoCycleLow 14s ease-in-out infinite;
 }
 .intel-mesh-dot[data-mode="auto"][data-resolved="default"] {
   animation: autoCycleDefault 14s ease-in-out infinite;
 }
+.intel-mesh-fallback[data-mode="auto"][data-resolved="default"] {
+  animation: autoCycleDefault 14s ease-in-out infinite;
+}
 .intel-mesh-dot[data-mode="auto"][data-resolved="high"] {
   animation: autoCycleHigh 14s ease-in-out infinite;
 }
+.intel-mesh-fallback[data-mode="auto"][data-resolved="high"] {
+  animation: autoCycleHigh 14s ease-in-out infinite;
+}
 
-/* ≥2 mode palettes always visible simultaneously.
-   Equal: round-robin rotation — all 3 modes in view at once.
-   Resolved: A+B locked to dominant; C drifts between the other two. */
-/* Pre-saturated palette (saturate(200%) baked into hex). Originals shown
-   in comments for reference. Keep in sync with Toolbar.tsx ORB_COLORS. */
+/* Green-spectrum chromatic aberration with brightness-locked slots.
+   a ≈ 96 lum (dark), b ≈ 160 (mid), c ≈ 204 (light) — matches
+   single-mode orbs.  All cycles anchor at jade (0%/100%).
+
+   Anchor — jade:      #208840  #5CCC70  #A0E8A0
+   Teal (cool):        #108868  #48C8A0  #90E8C8
+   Chartreuse (warm):  #488010  #90C040  #C0E480
+
+   Resolved tints (mode identity through green):
+   Low  — warm olive:  #3C8420  #80C448  #C0E080  accent #D8D878
+   Def  — cool teal:   #108868  #48C8A0  #90E8C8  accent #90E8E8
+   High — deep teal:   #188078  #50C4B0  #98E4D0  accent #D0C8E4 */
 @keyframes autoCycleEqual {
-  0%   { --orb-a: #FFAE00; --orb-b: #1066FF; --orb-c: #C50DFF; }  /* low + def + high */
-  33%  { --orb-a: #1066FF; --orb-b: #C50DFF; --orb-c: #FFAE00; }  /* def + high + low */
-  66%  { --orb-a: #C50DFF; --orb-b: #FFAE00; --orb-c: #1066FF; }  /* high + low + def */
-  100% { --orb-a: #FFAE00; --orb-b: #1066FF; --orb-c: #C50DFF; }
+  0%   { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+  33%  { --orb-a: #108868; --orb-b: #48C8A0; --orb-c: #90E8C8; }
+  66%  { --orb-a: #488010; --orb-b: #90C040; --orb-c: #C0E480; }
+  100% { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
 }
 
 @keyframes autoCycleLow {
-  0%    { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #1066FF; }  /* low+low+default */
-  35%   { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #1066FF; }
-  65%   { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #C50DFF; }  /* low+low+high */
-  100%  { --orb-a: #FFAE00; --orb-b: #FF6500; --orb-c: #1066FF; }
+  0%    { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+  25%   { --orb-a: #3C8420; --orb-b: #80C448; --orb-c: #C0E080; }
+  60%   { --orb-a: #3C8420; --orb-b: #80C448; --orb-c: #D8D878; }
+  100%  { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
 }
 
 @keyframes autoCycleDefault {
-  0%    { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #FFAE00; }  /* def+def+low */
-  35%   { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #FFAE00; }
-  65%   { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #C50DFF; }  /* def+def+high */
-  100%  { --orb-a: #1066FF; --orb-b: #33E9FF; --orb-c: #FFAE00; }
+  0%    { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+  25%   { --orb-a: #108868; --orb-b: #48C8A0; --orb-c: #90E8C8; }
+  60%   { --orb-a: #108868; --orb-b: #48C8A0; --orb-c: #90E8E8; }
+  100%  { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
 }
 
 @keyframes autoCycleHigh {
-  /* high.b is #C46FE8 → #FE54FF after saturate(200%) */
-  0%    { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #FFAE00; }  /* high+high+low */
-  35%   { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #FFAE00; }
-  65%   { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #1066FF; }  /* high+high+default */
-  100%  { --orb-a: #C50DFF; --orb-b: #FE54FF; --orb-c: #FFAE00; }
+  0%    { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+  25%   { --orb-a: #287068; --orb-b: #68B8A8; --orb-c: #B8D8D0; }
+  60%   { --orb-a: #287068; --orb-b: #68B8A8; --orb-c: #D8B8E8; }
+  100%  { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+}
+
+@keyframes intelPassiveOrbRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @keyframes intelOrbitA {
@@ -4030,6 +4318,33 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   33%  { transform: translate(calc(-50% - 3px), calc(-50% - 1px)); }
   66%  { transform: translate(calc(-50% + 1px), calc(-50% - 3px)); }
   100% { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+}
+
+body.electron-window-unfocused .intel-btn .intel-orb-live {
+  transform: scale(0.72);
+  opacity: 0.18;
+  filter: saturate(0.92);
+}
+
+body.electron-window-unfocused .intel-btn .intel-mesh-dot {
+  opacity: 0.62;
+}
+
+body.electron-window-unfocused .intel-btn .intel-mesh-fallback {
+  opacity: 0.96;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+body.electron-window-unfocused .intel-btn .intel-mesh-fallback-core {
+  filter: blur(5.2px) brightness(1.12) saturate(1.04);
+}
+
+body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-dot-orb,
+body.electron-window-unfocused-orb-paused .intel-btn .intel-eye,
+body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-dot[data-mode="auto"],
+body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback[data-mode="auto"],
+body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
+  animation-play-state: paused;
 }
 
 /* ═══════════════════════════════════════════
@@ -4071,6 +4386,7 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   width: 100%;
   max-height: 100%;
   border-radius: 30px;
+  overflow: hidden;
 }
 
 /* Inner scroll wrapper — this is what actually scrolls when content
@@ -4943,6 +5259,10 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   display: flex;
   justify-content: center;
   pointer-events: none;
+  transition: top 0.28s cubic-bezier(0.22, 0.9, 0.32, 1);
+}
+.app:has(.annotation-panel-shell) .status-pill-shell {
+  top: 104px;
 }
 
 .status-pill {
@@ -5591,7 +5911,7 @@ body.glass-fast-scroll .scroll-edge-right-strips {
 /* ─────────────────────────────────────────────────────────────────────────
    GLASS RANGE — liquid-glass knob slider (replaces .settings-range)
    backdrop-filter on ::-webkit-slider-thumb is silently ignored in
-   Chromium, so we hide the native thumb and position a .liquid-glass div
+  Chromium, so we hide the native thumb and position a dedicated glass knob div
    that tracks the value via a CSS custom property.
    ───────────────────────────────────────────────────────────────────── */
 
@@ -5675,6 +5995,12 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   mask-composite: exclude;
   pointer-events: none;
   z-index: 0;
+}
+
+.glass-range-knob.liquid-glass-control-knob,
+.glass-toggle-knob.liquid-glass-control-knob {
+  backdrop-filter: blur(0px) saturate(1.45);
+  -webkit-backdrop-filter: blur(0px) saturate(1.45);
 }
 
 /* Hover + press states: driven by :has() watching the transparent native input */
@@ -8137,14 +8463,14 @@ body.glass-fast-scroll .scroll-edge-right-strips {
 }
 
 .glass-toggle--on {
-  background: rgba(0, 0, 0, 0.32); 
-  border-color: rgba(0, 0, 0, 0.10);
+  background: rgba(59, 130, 246, 0.88);
+  border-color: rgba(59, 130, 246, 0.42);
 }
 
 @media (prefers-color-scheme: dark) {
   .glass-toggle--on {
-   background: rgba(255, 255, 255, 0.5);
-    border-color: rgba(0, 0, 0, 0.10);
+    background: rgba(59, 130, 246, 0.88);
+    border-color: rgba(59, 130, 246, 0.42);
   }
 }
 
@@ -8209,15 +8535,100 @@ body.glass-fast-scroll .scroll-edge-right-strips {
   transform: translateY(-50%) scale(1.08);
 }
 
+.glass-toggle--press-a .glass-toggle-knob {
+  animation: glass-toggle-knob-press-a 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.glass-toggle--press-b .glass-toggle-knob {
+  animation: glass-toggle-knob-press-b 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.glass-toggle--release-a .glass-toggle-knob {
+  animation: glass-toggle-knob-release-a 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.glass-toggle--release-b .glass-toggle-knob {
+  animation: glass-toggle-knob-release-b 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes glass-toggle-knob-press-a {
+  0% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+  100% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+}
+
+@keyframes glass-toggle-knob-press-b {
+  0% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+  100% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+}
+
+@keyframes glass-toggle-knob-release-a {
+  0% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+  100% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+}
+
+@keyframes glass-toggle-knob-release-b {
+  0% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+  100% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+}
+
 /* Active — bigger scale + semi-transparent fill, same press-feel as
    .glass-range-knob's active state. The transparent fill lets the
    underlying track colour bleed through (track-coloured tint when ON,
    subtle dark tint when OFF), which is what makes the knob feel like
    it's lifting OFF the track on press. Slightly less aggressive scale
-   than the slider (1.35 vs 1.62) because the toggle knob is already
+   than the slider (1.42 vs 1.62) because the toggle knob is already
    bigger at rest (32×24 vs the slider's 20×14). */
-.glass-toggle:active .glass-toggle-knob {
-  transform: translateY(-50%) scale(1.35);
+.glass-toggle:active .glass-toggle-knob,
+.glass-toggle--glass-active .glass-toggle-knob {
+  transform: translateY(-50%) scale(2);
   background: rgba(255, 255, 255, 0.18);
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.22),
@@ -11250,6 +11661,90 @@ body.renderer-workspace-freeze .app .project-search-overlay,
 body.renderer-workspace-freeze .app .onb-overlay {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
+}
+
+body.electron-window-unfocused .app .liquid-glass,
+body.electron-window-unfocused .app .analysis-tab,
+body.electron-window-unfocused .app .analysis-action-group {
+  background: var(--bg-glass-unfocused) !important;
+  border: none !important;
+  box-shadow: inset 0 0 0 1px var(--divider-line) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+body.electron-window-unfocused .app .liquid-glass-control-knob {
+  border: none !important;
+  box-shadow: inset 0 0 0 1px var(--divider-line) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+body.electron-window-unfocused .app .liquid-glass::before,
+body.electron-window-unfocused .app .analysis-tab::before,
+body.electron-window-unfocused .app .analysis-action-group::before,
+body.electron-window-unfocused .app .glass-range-knob::before,
+body.electron-window-unfocused .app .glass-toggle-knob::before {
+  content: none !important;
+}
+
+body.electron-window-unfocused .app .world-panel,
+body.electron-window-unfocused .app .index-panel {
+  background: var(--bg-glass-unfocused) !important;
+  box-shadow: inset 0 0 0 1px var(--divider-line) !important;
+}
+
+body.electron-window-unfocused .app .word-count,
+body.electron-window-unfocused .app .debug-panel {
+  background: var(--bg-glass-unfocused) !important;
+  border: none !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+body.electron-window-unfocused .app .world-panel::before,
+body.electron-window-unfocused .app .widget-card::before {
+  content: none !important;
+}
+
+body.electron-window-unfocused .app .widget-card {
+  box-shadow: none !important;
+}
+
+body.electron-window-unfocused .app .widget-card-bg {
+  box-shadow: inset 0 0 0 1px var(--divider-line) !important;
+}
+
+body.electron-window-unfocused .app .scroll-edge-top,
+body.electron-window-unfocused .app .scroll-edge-right {
+  display: none !important;
+}
+
+body.electron-window-unfocused .app .index-overlay,
+body.electron-window-unfocused .app .project-search-overlay,
+body.electron-window-unfocused .app .onb-overlay,
+body.electron-window-unfocused .app .wc-overlay,
+body.electron-window-unfocused .renderer-full-overlay,
+body.electron-window-unfocused .timeline-full-overlay,
+body.electron-window-unfocused .sg-full-overlay {
+  background: var(--overlay-scrim-bg-unfocused) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+body.electron-window-unfocused .renderer-full-panel,
+body.electron-window-unfocused .timeline-full-panel {
+  background: var(--bg-glass-unfocused) !important;
+  border: none !important;
+  box-shadow: inset 0 0 0 1px var(--divider-line) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+body.electron-window-unfocused .renderer-full-panel::before,
+body.electron-window-unfocused .timeline-full-panel::before {
+  content: none !important;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

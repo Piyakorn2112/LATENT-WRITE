@@ -25,9 +25,8 @@
 
 const SVG_ID = "lg-filter-svg";
 const NS = "http://www.w3.org/2000/svg";
-const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group";
-const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freeze"];
-const FAST_SCROLL_ADAPTIVE_ATTR = "data-liquid-glass-scroll-adaptive";
+const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group, .liquid-glass-control-knob";
+const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freeze", "electron-window-unfocused", "scroll-edge-idle"];
 
 // ── Tunables ─────────────────────────────────────────────────────────────
 //
@@ -38,14 +37,14 @@ const FAST_SCROLL_ADAPTIVE_ATTR = "data-liquid-glass-scroll-adaptive";
 
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
-const DISP_PX = 40;        // max refraction shift, pixels
-const BLUR_PX = 4;         // backdrop blur stdDeviation, pixels
+const DISP_PX = 30;        // max refraction shift, pixels
+const BLUR_DEFAULT = 4;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
 
 // Round (W, H, R) to this for cache key — sub-pixel differences do not
 // produce a visually different filter and otherwise we'd build a new map
 // on every resize-observer tick during animations.
-const CACHE_GRID = 24;
+const CACHE_GRID = 1;
 
 // Internal rasterization resolution of the filter chain, as a fraction of
 // element size. The GPU computes all 7 filter primitives at this reduced
@@ -57,7 +56,6 @@ const CACHE_GRID = 24;
 // is already anti-aliased in the displacement map (MAP_DIVISOR=7).
 const FILTER_RES_SCALE = 0.35;
 const FILTER_RES_MIN   = 48;
-const FILTER_RES_MAX   = 280;
 const FAST_SCROLL_DELTA_THRESHOLD_PX = 24;
 const FAST_SCROLL_HOLD_MS = 200;
 
@@ -70,21 +68,12 @@ const FAST_SCROLL_HOLD_MS = 200;
 // in-use filter is evicted while the user resizes a popover textbox.
 const FILTER_CACHE_LIMIT = 32;
 
-// ── Smooth crossfade tunables ────────────────────────────────────────
-// When fast-scrolling, panels crossfade from SVG filter to CSS blur via
-// a brief opacity dip so the swap is masked by reduced visibility.
-// Asymmetric timing: fast freeze (user wants to scroll NOW), slow thaw
-// (luxurious return to full glass when scroll settles).
-const CROSSFADE_DIM_MS          = 60;       // dim phase duration
-const CROSSFADE_DIM_OPACITY     = 0.55;     // opacity at swap point
-const CROSSFADE_REVEAL_MS       = 100;      // freeze reveal duration
-const CROSSFADE_THAW_REVEAL_MS  = 200;      // thaw reveal (slower, elegant)
-
 // ── Worker dispatch ──────────────────────────────────────────────────────
 
 let worker: Worker | null = null;
 let workerDead = false;
 const pendingBlob = new Map<string, (blob: Blob) => void>();
+type MapPreset = "default" | "control-knob" | "toggle-control-knob";
 
 function ensureWorker(): Worker | null {
   if (workerDead) return null;
@@ -121,13 +110,14 @@ function buildMapInWorker(
   elemH: number,
   radius: number,
   overflow: number,
+  preset: MapPreset,
 ): Promise<string | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
   return new Promise((resolve) => {
     const id = `req-${++reqCounter}`;
     pendingBlob.set(id, (blob) => resolve(URL.createObjectURL(blob)));
-    w.postMessage({ id, elemW, elemH, radius, overflow });
+    w.postMessage({ id, elemW, elemH, radius, overflow, preset });
   });
 }
 
@@ -140,7 +130,7 @@ interface CacheEntry {
   refCount: number;
 }
 
-type FilterResolutionVariant = "base";
+const TRANSIENT_GLASS_ATTR = "data-liquid-glass-transient";
 
 let svgRoot: SVGSVGElement | null = null;
 let defs: SVGDefsElement | null = null;
@@ -174,12 +164,39 @@ function createElNS(tag: string, attrs: Record<string, string>) {
   return e;
 }
 
-function clampRes(v: number): number {
-  return Math.max(FILTER_RES_MIN, Math.min(FILTER_RES_MAX, Math.round(v)));
+function clampRes(v: number, min = FILTER_RES_MIN): number {
+  return Math.max(min, Math.round(v));
 }
 
-function filterResScale(_variant: FilterResolutionVariant): number {
-  return FILTER_RES_SCALE;
+function readBlur(el: Element): number {
+  if (el.classList.contains("liquid-glass-control-knob")) return 0;
+  if (el.matches(".glass-range-knob, .glass-toggle-knob")) return 0;
+  if (el.classList.contains("toolbar")) return 3;
+  if (el.classList.contains("settings-panel")) return 5;
+  if (el.matches(".analysis-tab, .analysis-action-group")) return 2;
+  if (el.classList.contains("status-pill")) return 2;
+  if (el.matches(".annotation-popover, .annotation-panel")) return 3;
+  return BLUR_DEFAULT;
+}
+
+function readMapPreset(el: Element): MapPreset {
+  if (el.classList.contains("glass-toggle-knob") && el.classList.contains("liquid-glass-control-knob")) {
+    return "toggle-control-knob";
+  }
+  return el.classList.contains("liquid-glass-control-knob") ? "control-knob" : "default";
+}
+
+function readDispMapAntialias(preset: MapPreset): number {
+  if (preset === "control-knob") return 0.55;
+  if (preset === "toggle-control-knob") return 0.48;
+  return 0;
+}
+
+function readFilterResConfig(preset: MapPreset): { scale: number; min: number } {
+  if (preset === "control-knob" || preset === "toggle-control-knob") {
+    return { scale: 2, min: 160 };
+  }
+  return { scale: FILTER_RES_SCALE, min: FILTER_RES_MIN };
 }
 
 function buildFilterEl(
@@ -188,10 +205,15 @@ function buildFilterEl(
   h: number,
   overflow: number,
   mapUrl: string,
-  variant: FilterResolutionVariant,
+  blur: number,
+  preset: MapPreset,
 ): SVGFilterElement {
   const totalW = w + 2 * overflow;
   const totalH = h + 2 * overflow;
+  const displacementScale = DISP_PX * 2;
+  const dispMapAntialias = readDispMapAntialias(preset);
+  const dispMapInput = dispMapAntialias > 0 ? "dispMapAA" : "dispMap";
+  const filterRes = readFilterResConfig(preset);
   const filter = createElNS("filter", {
     id,
     filterUnits: "userSpaceOnUse",
@@ -201,14 +223,10 @@ function buildFilterEl(
     width: String(totalW),
     height: String(totalH),
     "color-interpolation-filters": "sRGB",
-    filterRes: `${clampRes(totalW * filterResScale(variant))} ${clampRes(totalH * filterResScale(variant))}`,
+    filterRes: `${clampRes(totalW * filterRes.scale, filterRes.min)} ${clampRes(totalH * filterRes.scale, filterRes.min)}`,
   }) as SVGFilterElement;
 
   filter.append(
-    // Displacement map is sized to the full filter region. The overflow
-    // margin is pre-baked as neutral grey (128,128,128,A=255 with mask=0)
-    // so the previous feFlood + feComposite(over) pair is no longer
-    // needed — saves two primitives per frame.
     createElNS("feImage", {
       href: mapUrl,
       x: String(-overflow),
@@ -218,57 +236,38 @@ function buildFilterEl(
       preserveAspectRatio: "none",
       result: "dispMap",
     }),
+  );
+
+  if (dispMapAntialias > 0) {
+    filter.append(
+      createElNS("feGaussianBlur", {
+        in: "dispMap",
+        stdDeviation: String(dispMapAntialias),
+        edgeMode: "duplicate",
+        result: "dispMapAA",
+      }),
+    );
+  }
+
+  filter.append(
     createElNS("feDisplacementMap", {
       in: "SourceGraphic",
-      in2: "dispMap",
-      // scale × 0.5 = max pixel shift, so scale = DISP_PX × 2.
-      scale: String(DISP_PX * 2),
+      in2: dispMapInput,
+      scale: String(displacementScale),
       xChannelSelector: "R",
       yChannelSelector: "G",
       result: "displaced",
     }),
+  );
+
+  filter.append(
     createElNS("feGaussianBlur", {
       in: "displaced",
-      stdDeviation: String(BLUR_PX),
+      stdDeviation: String(blur),
       result: "blurred",
     }),
-    // Extract the B channel of the displacement-map image as alpha. Matrix
-    // sets RGB to white and copies B → A. Result is a white-on-mask image
-    // whose alpha is the blur mix factor at every pixel.
     createElNS("feColorMatrix", {
-      in: "dispMap",
-      type: "matrix",
-      values: "0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 1 0 0",
-      result: "blurMask",
-    }),
-    // Centre region: blurred * mask  (mask=1 in centre, 0 at rim).
-    createElNS("feComposite", {
       in: "blurred",
-      in2: "blurMask",
-      operator: "in",
-      result: "centerBlur",
-    }),
-    // Rim region: displaced * (1 − mask)  (sharp where mask=0).
-    createElNS("feComposite", {
-      in: "displaced",
-      in2: "blurMask",
-      operator: "out",
-      result: "edgeSharp",
-    }),
-    // Combine: arithmetic add. Both inputs are pre-multiplied by mask /
-    // 1−mask so summing reconstructs lerp(displaced, blurred, mask).
-    createElNS("feComposite", {
-      in: "centerBlur",
-      in2: "edgeSharp",
-      operator: "arithmetic",
-      k1: "0",
-      k2: "1",
-      k3: "1",
-      k4: "0",
-      result: "progressive",
-    }),
-    createElNS("feColorMatrix", {
-      in: "progressive",
       type: "saturate",
       values: SATURATE,
     }),
@@ -301,6 +300,14 @@ function evictLRU() {
   }
 }
 
+function cleanupFilterNow(id: string) {
+  const entry = filterCache.get(id);
+  if (!entry || entry.refCount > 0) return;
+  filterCache.delete(id);
+  entry.filter.remove();
+  if (entry.blobUrl) URL.revokeObjectURL(entry.blobUrl);
+}
+
 // Async because the displacement map is generated in a Web Worker — heavy
 // SDF + Snell math + PNG encode all run off the main thread, so panel-open
 // and chapter-switch animations don't block on filter generation. The CSS
@@ -309,13 +316,14 @@ async function ensureFilter(
   elemW: number,
   elemH: number,
   radius: number,
-  variant: FilterResolutionVariant,
+  blur: number,
+  preset: MapPreset,
 ): Promise<string | null> {
   ensureSvgRoot();
   const w = snap(elemW);
   const h = snap(elemH);
   const r = snap(radius);
-  const id = `lg-${w}-${h}-${r}-${variant}`;
+  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}`;
 
   const cached = filterCache.get(id);
   if (cached) {
@@ -329,11 +337,11 @@ async function ensureFilter(
   if (existing) return existing;
 
   const promise = (async () => {
-    const overflow = DISP_PX + BLUR_PX * 2 + 4;
-    const mapUrl = await buildMapInWorker(w, h, r, overflow);
+    const overflow = DISP_PX + blur * 2 + 4;
+    const mapUrl = await buildMapInWorker(w, h, r, overflow, preset);
     if (!mapUrl) return null;
 
-    const filter = buildFilterEl(id, w, h, overflow, mapUrl, variant);
+    const filter = buildFilterEl(id, w, h, overflow, mapUrl, blur, preset);
     defs!.append(filter);
     filterCache.set(id, { filter, blobUrl: mapUrl, refCount: 0 });
     evictLRU();
@@ -359,17 +367,9 @@ let glassPaused = false;
 let fastScrollActive = false;
 let fastScrollResetHandle: number | null = null;
 
-const frozenElements = new Set<HTMLElement>();
-const CSS_BLUR_FALLBACK = `blur(${BLUR_PX}px) saturate(${SATURATE})`;
-const crossfadeTimers = new WeakMap<HTMLElement, number>();
-
 function shouldPauseLiquidGlass(): boolean {
   const body = document.body;
   return !!body && PAUSE_BODY_CLASSES.some((className) => body.classList.contains(className));
-}
-
-function isFastScrollAdaptiveElement(element: Element): boolean {
-  return element.hasAttribute(FAST_SCROLL_ADAPTIVE_ATTR);
 }
 
 function normalizedWheelDelta(event: WheelEvent): number {
@@ -381,19 +381,10 @@ function normalizedWheelDelta(event: WheelEvent): number {
   return (Math.abs(event.deltaX) + Math.abs(event.deltaY)) * scale;
 }
 
-const PANEL_CROSSFADE_ENABLED = false;
-
 function setFastScrollActive(nextActive: boolean) {
   if (fastScrollActive === nextActive) return;
   fastScrollActive = nextActive;
   document.body.classList.toggle("glass-fast-scroll", nextActive);
-  if (PANEL_CROSSFADE_ENABLED) {
-    for (const element of trackedElements) {
-      if (!isFastScrollAdaptiveElement(element)) continue;
-      if (nextActive) smoothFreeze(element);
-      else smoothThaw(element);
-    }
-  }
 }
 
 function observeElement(element: HTMLElement, schedule: () => void) {
@@ -435,6 +426,9 @@ function bindFilter(element: Element, newId: string) {
   if (prevId) {
     const prev = filterCache.get(prevId);
     if (prev && prev.refCount > 0) prev.refCount--;
+    if (element instanceof HTMLElement && element.getAttribute(TRANSIENT_GLASS_ATTR) === "true") {
+      cleanupFilterNow(prevId);
+    }
   }
   const next = filterCache.get(newId);
   if (next) next.refCount++;
@@ -446,6 +440,9 @@ function unbindFilter(element: Element) {
   if (!prevId) return;
   const prev = filterCache.get(prevId);
   if (prev && prev.refCount > 0) prev.refCount--;
+  if (element instanceof HTMLElement && element.getAttribute(TRANSIENT_GLASS_ATTR) === "true") {
+    cleanupFilterNow(prevId);
+  }
   elementFilterId.delete(element);
 }
 
@@ -454,69 +451,6 @@ function readRadius(el: Element): number {
   // Use top-left as representative; mixed-corner radii are rare here.
   const tl = parseFloat(cs.borderTopLeftRadius || "0");
   return isFinite(tl) ? tl : 0;
-}
-
-// ── Smooth crossfade ─────────────────────────────────────────────────
-// Opacity-dip technique: briefly dim the panel (compositor-only, free),
-// swap the backdrop-filter while dimmed so the visual jump is masked,
-// then brighten back. No dual-filter overlap, no extra DOM layers.
-
-function cancelCrossfade(element: HTMLElement) {
-  const t = crossfadeTimers.get(element);
-  if (t !== undefined) window.clearTimeout(t);
-  crossfadeTimers.delete(element);
-  element.style.transition = "";
-  element.style.opacity = "";
-}
-
-function smoothFreeze(element: HTMLElement) {
-  cancelCrossfade(element);
-  if (frozenElements.has(element)) return;
-  frozenElements.add(element);
-  const ro = observed.get(element);
-  if (ro) { ro.disconnect(); observed.delete(element); }
-
-  element.style.transition = `opacity ${CROSSFADE_DIM_MS}ms ease-out`;
-  requestAnimationFrame(() => {
-    element.style.opacity = String(CROSSFADE_DIM_OPACITY);
-    crossfadeTimers.set(element, window.setTimeout(() => {
-      element.style.setProperty("backdrop-filter", CSS_BLUR_FALLBACK);
-      element.style.setProperty("-webkit-backdrop-filter", CSS_BLUR_FALLBACK);
-      element.style.transition = `opacity ${CROSSFADE_REVEAL_MS}ms ease-in`;
-      element.style.opacity = "1";
-      crossfadeTimers.set(element, window.setTimeout(() => {
-        element.style.transition = "";
-        crossfadeTimers.delete(element);
-      }, CROSSFADE_REVEAL_MS));
-    }, CROSSFADE_DIM_MS));
-  });
-}
-
-function smoothThaw(element: HTMLElement) {
-  cancelCrossfade(element);
-  if (!frozenElements.has(element)) return;
-
-  element.style.transition = `opacity ${CROSSFADE_DIM_MS}ms ease-out`;
-  requestAnimationFrame(() => {
-    element.style.opacity = String(CROSSFADE_DIM_OPACITY);
-    crossfadeTimers.set(element, window.setTimeout(() => {
-      frozenElements.delete(element);
-      const filterId = elementFilterId.get(element);
-      if (filterId) {
-        const ref = `url(#${filterId})`;
-        element.style.setProperty("backdrop-filter", ref);
-        element.style.setProperty("-webkit-backdrop-filter", ref);
-      }
-      const schedule = elementSchedule.get(element);
-      if (schedule) observeElement(element, schedule);
-      element.style.transition = `opacity ${CROSSFADE_THAW_REVEAL_MS}ms ease-in`;
-      element.style.opacity = "1";
-      crossfadeTimers.set(element, window.setTimeout(() => {
-        element.style.transition = "";
-        crossfadeTimers.delete(element);
-      }, CROSSFADE_THAW_REVEAL_MS));
-    }, CROSSFADE_DIM_MS));
-  });
 }
 
 // ── Idle scheduling ──────────────────────────────────────────────────────
@@ -538,26 +472,25 @@ function applyTo(element: HTMLElement) {
   const update = async () => {
     scheduled = false;
     if (glassPaused) return;
-    if (frozenElements.has(element)) return;
     // offsetWidth/Height return layout size, ignoring CSS transforms — so
     // scale animations don't trigger filter rebuilds.
     const w = element.offsetWidth;
     const h = element.offsetHeight;
     if (w < 4 || h < 4) return;
     const r = readRadius(element);
-    const key = `${snap(w)}-${snap(h)}-${snap(r)}-base`;
+    const blur = readBlur(element);
+    const preset = readMapPreset(element);
+    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}`;
     if (lastSize.get(element) === key) return;
     lastSize.set(element, key);
-    const id = await ensureFilter(w, h, r, "base");
+    const id = await ensureFilter(w, h, r, blur, preset);
     if (!id) return; // worker dead → CSS fallback stays
     if (glassPaused) return;
     if (lastSize.get(element) !== key) return;
     bindFilter(element, id);
-    if (!frozenElements.has(element)) {
-      const ref = `url(#${id})`;
-      element.style.setProperty("backdrop-filter", ref);
-      element.style.setProperty("-webkit-backdrop-filter", ref);
-    }
+    const ref = `url(#${id})`;
+    element.style.setProperty("backdrop-filter", ref);
+    element.style.setProperty("-webkit-backdrop-filter", ref);
   };
 
   const schedule = () => {
@@ -584,11 +517,13 @@ function unobserve(el: Element) {
     observed.delete(el);
     lastSize.delete(el);
   }
-  cancelCrossfade(el as HTMLElement);
-  frozenElements.delete(el as HTMLElement);
   trackedElements.delete(el as HTMLElement);
   elementSchedule.delete(el as HTMLElement);
   unbindFilter(el);
+  if (el instanceof HTMLElement) {
+    el.style.removeProperty("backdrop-filter");
+    el.style.removeProperty("-webkit-backdrop-filter");
+  }
 }
 
 function isGlassEl(el: Element): boolean {

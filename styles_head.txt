@@ -1,0 +1,301 @@
+  50%  { transform: translate(calc(-50% - 3px), calc(-50% + 2px)); }
+  100% { transform: translate(calc(-50% + 3px), calc(-50% - 2px)); }
+}
+@keyframes intelOrbitB {
+  0%   { transform: translate(calc(-50% - 2px), calc(-50% - 3px)); }
+  50%  { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+  100% { transform: translate(calc(-50% - 2px), calc(-50% - 3px)); }
+}
+@keyframes intelOrbitC {
+  0%   { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+  33%  { transform: translate(calc(-50% - 3px), calc(-50% - 1px)); }
+  66%  { transform: translate(calc(-50% + 1px), calc(-50% - 3px)); }
+  100% { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+}
+
+/* ═══════════════════════════════════════════
+   SETTINGS PANEL
+   ═══════════════════════════════════════════ */
+
+/* Settings inner — width matches the visual width of the widget grid
+   (480 × 0.77 ≈ 370 px) so toggling between tabs lands on a card of
+   identical footprint. zoom: 1 because the controls are already
+   designed at intended size. Top padding 78 px matches the widget
+   visual top padding (100 × 0.77 ≈ 77 px). */
+/* Settings tab's positioning container — anchored to fixed window margins
+   instead of stretching the full panel height. The scrolling lives inside
+   .settings-panel below; this element just defines the visible window.
+   Top 16px matches the previous padding-top (so the visual top of the
+   glass card is unchanged); bottom 24px gives a symmetric margin from
+   the window's lower edge so the card never runs into the screen bottom
+   regardless of how tall the window is. */
+.analysis-inner--settings {
+  zoom: 1;
+  width: 370px;
+  top: 16px;
+  bottom: 24px;
+  padding: 0;
+  overflow: visible;
+}
+
+/* Settings panel — inherits glass styling from .liquid-glass. The panel
+   itself is a static FRAME (no overflow scrolling on this element) so
+   the .liquid-glass::before specular ring (position: absolute; inset: 0)
+   stays anchored to the panel's edges. Scrolling happens on the inner
+   .settings-panel-scroll wrapper instead — see below.
+   Padding moved off this element onto the inner wrapper so that its
+   scrollable content has consistent inner gutters while the glass
+   border / specular ring keeps clean. */
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-height: 100%;
+  border-radius: 30px;
+}
+
+/* Inner scroll wrapper — this is what actually scrolls when content
+   exceeds the bounded height. flex:1 + min-height:0 is the standard
+   trick that lets a flex child accept overflow inside a max-height
+   parent (without min-height:0 the child refuses to shrink below its
+   intrinsic content height, defeating overflow:auto). */
+.settings-panel-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  padding: 20px 18px 18px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.settings-panel-scroll::-webkit-scrollbar { display: none; }
+
+.settings-section-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--panel-text-3);
+  margin: 0 0 2px;
+}
+
+.settings-intel-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-intel-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--panel-btn-border);
+  background: var(--panel-btn-bg);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.settings-intel-btn:hover {
+  /* Subtle border highlight + barely-tinted bg — no gray wash */
+  border-color: color-mix(in srgb, var(--panel-text) 22%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 4%, var(--panel-btn-bg));
+}
+
+.settings-intel-btn--active {
+  background: color-mix(in srgb, var(--intel-color, #8aabff) 18%, transparent);
+  border-color: color-mix(in srgb, var(--intel-color, #8aabff) 45%, transparent);
+}
+
+.settings-intel-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--panel-text);
+}
+
+.settings-intel-desc {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--panel-text-3);
+  letter-spacing: 0.01em;
+}
+
+.settings-hint {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--panel-text-4);
+  line-height: 1.55;
+  margin: 2px 0 0;
+}
+
+/* ═══════════════════════════════════════════
+   WORLD DATA PANEL — characters, places, factions
+   ═══════════════════════════════════════════ */
+
+.world-panel {
+  position: relative;
+  overflow: hidden;
+  width: min(100%, 760px);
+  border-radius: var(--card-radius);
+  border-radius: 38px;
+  padding: 22px 22px 18px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-glass-strong);
+  border: none;
+  box-shadow: var(--shadow-glass);
+  gap: 14px;
+  max-height: calc(100vh - 120px);
+}
+
+.world-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--border-glass-grad);
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.world-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider-line);
+}
+
+.world-title {
+  font-family: var(--font-body);
+  font-size: 1.25rem;
+  margin: 0;
+  color: var(--text);
+}
+
+/* ─── Tabs ─── */
+.world-tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.world-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: var(--btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.world-tab:hover {
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Active tab: a subtle TINTED pill that contrasts with the panel in both
+   modes. Previously this used --bg-glass-strong, which is *also* the
+   panel's own background — so the active pill rendered as the same rgba
+   as the surface behind it (white on white in light mode; dark on dark
+   in dark mode), and only the dark-mode liquid-glass refraction kept it
+   visible. Switching to an inverse-tone tint (small black wash in light,
+   small white wash in dark) gives both modes the same "lifted pill" feel
+   and matches the hover-state convention used everywhere else. */
+.world-tab--active {
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.06);
+  border-color: var(--divider-line);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab--active {
+    background: rgba(255, 255, 255, 0.10);
+  }
+}
+
+.world-tab-count {
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 6px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab-count {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.world-tab--active .world-tab-count {
+  background: rgba(0, 0, 0, 0.10);
+  color: var(--text-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .world-tab--active .world-tab-count {
+    background: rgba(255, 255, 255, 0.12);
+  }
+}
+
+.world-tab-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: currentColor;
+  opacity: 0.82;
+  flex-shrink: 0;
+}
+
+.world-tab--active .world-tab-status {
+  opacity: 1;
+}
+
+/* ─── Body: list (left) + edit form (right) ─── */
+.world-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 1.5fr);
+  gap: 18px;
+  min-height: 360px;
+  overflow: hidden;
+}
+
+@media (max-width: 640px) {
+  .world-body {

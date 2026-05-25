@@ -29,6 +29,8 @@ export interface Preferences {
   storyNlpEnabled?: boolean;
   /** Enable custom tool plugins from project's tools/ directory. Default false. */
   customToolsEnabled?: boolean;
+  /** Split the top toolbar into separate glass groups. Default false. */
+  groupTools?: boolean;
 }
 
 const DEFAULTS: Preferences = {
@@ -45,6 +47,7 @@ const DEFAULTS: Preferences = {
   debugPanel: false,
   sidePanelCompensation: false,
   customToolsEnabled: false,
+  groupTools: false,
 };
 
 const KEY = "latentwrite:prefs-v1";
@@ -65,6 +68,7 @@ export function loadPrefs(): Preferences {
       reviewModel: p.reviewModel,
       storyNlpEnabled: p.storyNlpEnabled ?? true,
       customToolsEnabled: p.customToolsEnabled ?? false,
+      groupTools: p.groupTools ?? false,
     };
   } catch {
     return { ...DEFAULTS };
