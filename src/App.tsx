@@ -3,6 +3,7 @@ import { Toolbar } from "./components/Toolbar";
 import { Editor } from "./components/Editor";
 import { IndexView } from "./components/IndexView";
 import { WorldDataView } from "./components/WorldDataView";
+import { SplitDivider } from "./components/SplitDivider";
 import { EntityPopover } from "./components/EntityPopover";
 import { AnnotationPopover } from "./components/AnnotationPopover";
 import { DebugPanel } from "./components/DebugPanel";
@@ -15,7 +16,9 @@ import { WordCount } from "./components/WordCount";
 import { ProjectSearch } from "./components/ProjectSearch";
 import { Onboarding } from "./components/Onboarding";
 import { PdfExportOverlay } from "./components/PdfExportOverlay";
+import { novelToMarkdown, novelToDocx, downloadBlob } from "./lib/text-export";
 import { newChapter, parseNovel, serializeNovel, uid, emptyNovel } from "./lib/parser";
+import { useUndoRedo } from "./lib/use-undo-redo";
 import { autoParagraph } from "./lib/auto-paragraph";
 import { autoSceneBreaks } from "./lib/auto-scene-break";
 import {
@@ -51,6 +54,7 @@ import {
   loadPrefs, savePrefs, todayKey, loadDailyTotal, saveDailyTotal,
   FONT_STACKS, type Preferences,
 } from "./lib/preferences";
+import { loadLicense, type Tier } from "./lib/license";
 import {
   loadAnnotationStore,
   loadAnnotationStoreFromProject,
@@ -141,6 +145,50 @@ export default function App() {
     const chapter = novel.chapters.find((candidate) => candidate.id === currentId);
     return chapter ? { number: chapter.number, title: chapter.title } : null;
   }, [novel.chapters, currentId]);
+
+  const undoRedo = useUndoRedo();
+  const undoRedoSkipRef = useRef(false);
+
+  useEffect(() => {
+    if (undoRedoSkipRef.current) {
+      undoRedoSkipRef.current = false;
+      return;
+    }
+    undoRedo.push(novel);
+  }, [novel]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleUndo = useCallback(() => {
+    const prev = undoRedo.undo();
+    if (!prev) return;
+    undoRedoSkipRef.current = true;
+    setNovel(prev);
+    if (!prev.chapters.some((c) => c.id === currentId) && prev.chapters.length > 0) {
+      setCurrentId(prev.chapters[0].id);
+    }
+    setSecondaryId((sid) => {
+      if (!sid) return sid;
+      return prev.chapters.some((c) => c.id === sid) ? sid : null;
+    });
+  }, [undoRedo, currentId]);
+
+  const handleRedo = useCallback(() => {
+    const next = undoRedo.redo();
+    if (!next) return;
+    undoRedoSkipRef.current = true;
+    setNovel(next);
+    if (!next.chapters.some((c) => c.id === currentId) && next.chapters.length > 0) {
+      setCurrentId(next.chapters[0].id);
+    }
+    setSecondaryId((sid) => {
+      if (!sid) return sid;
+      return next.chapters.some((c) => c.id === sid) ? sid : null;
+    });
+  }, [undoRedo, currentId]);
+
+  // ── Split-screen state ──────────────────────────────────────────────────
+  const [secondaryId, setSecondaryId] = useState<string | null>(null);
+  const [activeSide, setActiveSide] = useState<"left" | "right">("left");
+  const [splitRatio, setSplitRatio] = useState(0.5);
 
   const hydrateProjectState = useCallback(async () => {
     const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive] = await Promise.all([
@@ -249,7 +297,7 @@ export default function App() {
   // can read different labels.
   const [sceneBreaking, setSceneBreaking] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
-  const [intelMode, setIntelMode] = useState<"off" | "fast" | "default" | "high" | "auto">("default");
+  const [intelMode, setIntelMode] = useState<"off" | "fast" | "default" | "high" | "auto">(() => loadPrefs().intelMode ?? "auto");
   const [findOpen, setFindOpen] = useState(false);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -260,6 +308,11 @@ export default function App() {
   } | null>(null);
   const [toolHighlights, setToolHighlights] = useState<ToolHighlight[]>([]);
   const [prefs, setPrefs] = useState<Preferences>(() => loadPrefs());
+  const [tier, setTier] = useState<Tier>(() => loadLicense().tier);
+  const handleTierChange = useCallback((t: Tier) => {
+    setTier(t);
+    setIntelMode(t === "pro" ? "default" : "auto");
+  }, []);
   const [storyGraph, setStoryGraph] = useState<StoryGraph>(() => loadStoryGraph());
   // Ref so the storyGraph effect can read current entries without stale closure
   const storyGraphRef = useRef(storyGraph);
@@ -273,6 +326,32 @@ export default function App() {
 
   // Inline entity popover — opened by clicking a highlighted name in the editor.
   const [entityPopover, setEntityPopover] = useState<{ name: string; anchor: DOMRect } | null>(null);
+
+  // ── Chapter derivations ────────────────────────────────────────────────
+  const chapters = novel.chapters;
+  const currentIndex = useMemo(
+    () => chapters.findIndex((c) => c.id === currentId),
+    [chapters, currentId]
+  );
+  const current = currentIndex >= 0 ? chapters[currentIndex] : null;
+
+  const splitView = !!prefs.splitView && chapters.length > 1;
+
+  const activeChapterId = splitView
+    ? (activeSide === "left" ? currentId : secondaryId)
+    : currentId;
+
+  const secondaryIndex = useMemo(
+    () => secondaryId ? chapters.findIndex((c) => c.id === secondaryId) : -1,
+    [chapters, secondaryId],
+  );
+  const secondaryChapter = secondaryIndex >= 0 ? chapters[secondaryIndex] : null;
+
+  const activeChapterIndex = useMemo(
+    () => activeChapterId ? chapters.findIndex((c) => c.id === activeChapterId) : -1,
+    [chapters, activeChapterId],
+  );
+  const activeChapter = activeChapterIndex >= 0 ? chapters[activeChapterIndex] : null;
 
   // ── Annotation mode ────────────────────────────────────────────────────
   const [annotationMode, setAnnotationMode] = useState(false);
@@ -296,11 +375,11 @@ export default function App() {
   // so it stays off the live-typing hot path.
   useEffect(() => {
     const bias = computeLearnedBias(annotationStore, novel.worldData, {
-      currentChapterId: currentId,
+      currentChapterId: activeChapterId,
       chapterIds: chapterOrderIds,
     });
     setLearnedBias(bias);
-  }, [annotationStore, novel.worldData, currentId, chapterOrderIds]);
+  }, [annotationStore, novel.worldData, activeChapterId, chapterOrderIds]);
 
   useEffect(() => {
     saveAdaptiveStore(adaptiveStore);
@@ -332,38 +411,36 @@ export default function App() {
   const analysisDebounceMs = 1000;
 
   const chapterCorrectionCount = useMemo(
-    () => annotationStore.corrections.filter((correction) => correction.chapterId === currentId).length,
-    [annotationStore.corrections, currentId],
+    () => annotationStore.corrections.filter((correction) => correction.chapterId === activeChapterId).length,
+    [annotationStore.corrections, activeChapterId],
   );
 
   const globalCorrectionCount = annotationStore.corrections.length;
 
   const annotationBreakdown = useMemo(
-    () => characterBreakdown(annotationStore, currentId),
-    [annotationStore, currentId],
+    () => characterBreakdown(annotationStore, activeChapterId),
+    [annotationStore, activeChapterId],
   );
 
 
   // Build a lookup map so HighlightLayer can colour corrected spans immediately
   // without waiting for a full re-analysis pass.
   const annotationOverrides = useMemo<Map<string, string | null> | undefined>(() => {
-    if (!currentId) return undefined;
-    const relevant = annotationStore.corrections.filter((c) => c.chapterId === currentId);
+    if (!activeChapterId) return undefined;
+    const relevant = annotationStore.corrections.filter((c) => c.chapterId === activeChapterId);
     if (!relevant.length) return undefined;
     const map = new Map<string, string | null>();
     for (const c of relevant) {
       map.set(`${c.paragraphIndex}-${c.spanIndex}-${c.spanType}`, c.correctedSpeaker);
     }
     return map;
-  }, [annotationStore.corrections, currentId]);
+  }, [annotationStore.corrections, activeChapterId]);
 
   const handleSpeechAnnotate = useCallback((info: AnnotationTarget, anchor: DOMRect) => {
-    // If this span has already been corrected, feed the corrected speaker back
-    // into the popover so it pre-selects the right item.
-    const existing = currentId
+    const existing = activeChapterId
       ? annotationStore.corrections.find(
           (c) =>
-            c.chapterId === currentId &&
+            c.chapterId === activeChapterId &&
             c.paragraphIndex === info.paragraphIndex &&
             c.spanIndex === info.spanIndex &&
             c.spanType === "speech",
@@ -371,13 +448,13 @@ export default function App() {
       : undefined;
     const correctedSpeaker = existing ? existing.correctedSpeaker : undefined;
     setAnnotationTarget({ target: info, anchor, correctedSpeaker });
-  }, [currentId, annotationStore.corrections]);
+  }, [activeChapterId, annotationStore.corrections]);
 
   const handleActionAnnotate = useCallback((info: AnnotationTarget, anchor: DOMRect) => {
-    const existing = currentId
+    const existing = activeChapterId
       ? annotationStore.corrections.find(
           (c) =>
-            c.chapterId === currentId &&
+            c.chapterId === activeChapterId &&
             c.paragraphIndex === info.paragraphIndex &&
             c.spanIndex === info.spanIndex &&
             c.spanType === "action",
@@ -385,7 +462,7 @@ export default function App() {
       : undefined;
     const correctedSpeaker = existing ? existing.correctedSpeaker : undefined;
     setAnnotationTarget({ target: info, anchor, correctedSpeaker });
-  }, [currentId, annotationStore.corrections]);
+  }, [activeChapterId, annotationStore.corrections]);
 
   const handleExportAnnotations = useCallback(() => {
     exportAnnotationsJSON(annotationStore, novel.meta.title);
@@ -410,10 +487,13 @@ export default function App() {
   const [renameTask, setRenameTask] = useState<StatusTask | null>(null);
   const cycleIntel = useCallback(() => {
     setIntelMode((m) => {
+      if (tier === "free") {
+        return m === "off" ? "auto" : "off";
+      }
       const order = ["auto", "default", "high", "fast", "off"] as const;
       return order[(order.indexOf(m) + 1) % order.length];
     });
-  }, []);
+  }, [tier]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const firstRunRef = useRef(true);
   const hideTimerRef = useRef<number | null>(null);
@@ -501,14 +581,15 @@ export default function App() {
 
   // Persist prefs immediately — they're tiny.
   useEffect(() => { savePrefs(prefs); }, [prefs]);
+  useEffect(() => { setPrefs((p) => ({ ...p, intelMode })); }, [intelMode]);
 
   const autoResolvedLevel = useMemo<"fast" | "default" | "high">(() => {
     if (intelMode !== "auto") return "default";
-    const chapter = novel.chapters.find((c) => c.id === currentId);
+    const chapter = novel.chapters.find((c) => c.id === activeChapterId);
     if (!chapter) return "default";
     const paragraphs = chapter.content.split(/\n{2,}|\n/).map((l) => l.trim()).filter(Boolean);
     return lightweightPrescan(paragraphs);
-  }, [intelMode, novel.chapters, currentId]);
+  }, [intelMode, novel.chapters, activeChapterId]);
 
   const effectiveLevel: "fast" | "default" | "high" =
     intelMode === "auto" ? autoResolvedLevel
@@ -519,9 +600,10 @@ export default function App() {
     result: analysisResult,
     isAnalyzing: analysisRunning,
     knownNames,
+    entityNameMap,
     prevResult: prevAnalysisResult,
     nextResult: nextAnalysisResult,
-  } = useAnalysis(novel, currentId, {
+  } = useAnalysis(novel, activeChapterId, {
     debounceMs: analysisDebounceMs,
     level: effectiveLevel,
     learnedBias: learnedBias ?? undefined,
@@ -533,17 +615,17 @@ export default function App() {
   // Deferred with setTimeout so heavy NLP never blocks a keystroke frame.
   // Content hash dedup prevents re-running NLP if the chapter text is unchanged.
   useEffect(() => {
-    if (!analysisResult || !current || !current.content.trim()) return;
+    if (!analysisResult || !activeChapter || !activeChapter.content.trim()) return;
     if (prefs.storyNlpEnabled === false) return; // user disabled background analysis
-    const chapterId = current.id;
-    const content   = current.content;
+    const chapterId = activeChapter.id;
+    const content   = activeChapter.content;
     const hash = `${content.length}|${content.slice(0, 60)}`;
 
     const timer = setTimeout(() => {
       // Skip if content unchanged since last build
       if (storyGraphRef.current.entries[chapterId]?.contentHash === hash) return;
 
-      const entry = buildChapterEntry(current, analysisResult, novel.worldData);
+      const entry = buildChapterEntry(activeChapter, analysisResult, novel.worldData);
       setStoryGraph(prev => ({ ...prev, entries: { ...prev.entries, [chapterId]: entry } }));
 
       enrichChapterEntryWithLM(entry, content).then(enriched => {
@@ -590,6 +672,8 @@ export default function App() {
     setAdaptiveStore(emptyAdaptiveStore());
     setAnnotationTarget(null);
     setEntityPopover(null);
+    setSecondaryId(null);
+    setActiveSide("left");
   }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen]);
 
   const handleNovelRefresh = useCallback(async (incomingNovel: Novel | null) => {
@@ -663,13 +747,13 @@ export default function App() {
   }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen]);
 
   const handleAnnotationConfirm = useCallback((correctedName: string | null) => {
-    if (!annotationTarget || !currentId) { setAnnotationTarget(null); return; }
+    if (!annotationTarget || !activeChapterId) { setAnnotationTarget(null); return; }
     const { target } = annotationTarget;
     const timestamp = Date.now();
     const correction = {
       id: uid(),
       timestamp,
-      chapterId: currentId,
+      chapterId: activeChapterId,
       paragraphIndex: target.paragraphIndex,
       spanIndex: target.spanIndex,
       spanType: target.spanType,
@@ -692,8 +776,8 @@ export default function App() {
         if (prediction) {
           predictionRecord = {
             ...prediction,
-            id: `${currentId}:speech:${prediction.paragraphIndex}:${prediction.spanIndex}`,
-            chapterId: currentId,
+            id: `${activeChapterId}:speech:${prediction.paragraphIndex}:${prediction.spanIndex}`,
+            chapterId: activeChapterId,
             correctedLabel: correctedName,
             timestamp,
             modelVersion: adaptiveContext.store.models.speech.version,
@@ -706,9 +790,9 @@ export default function App() {
         if (prediction) {
           const paragraph = analysisResult.paragraphs[target.paragraphIndex] ?? "";
           predictionRecord = {
-            id: `${currentId}:action:${target.paragraphIndex}:${prediction.start}`,
+            id: `${activeChapterId}:action:${target.paragraphIndex}:${prediction.start}`,
             task: "action",
-            chapterId: currentId,
+            chapterId: activeChapterId,
             paragraphIndex: target.paragraphIndex,
             spanIndex: prediction.start,
             spanText: paragraph.slice(prediction.start, prediction.end),
@@ -732,7 +816,7 @@ export default function App() {
       setAdaptiveStore((store) => {
         const alreadyLabeled = store.predictions.some(
           (prediction) =>
-            prediction.chapterId === currentId &&
+            prediction.chapterId === activeChapterId &&
             prediction.paragraphIndex === target.paragraphIndex &&
             prediction.spanIndex === target.spanIndex &&
             prediction.task === target.spanType &&
@@ -749,7 +833,7 @@ export default function App() {
     }
 
     setAnnotationTarget(null);
-  }, [annotationTarget, currentId, analysisResult, adaptiveContext.store.models.action.version, adaptiveContext.store.models.speech.version]);
+  }, [annotationTarget, activeChapterId, analysisResult, adaptiveContext.store.models.action.version, adaptiveContext.store.models.speech.version]);
 
   const speechReviewCount = useMemo(
     () => analysisResult?.speechPredictions.filter((prediction) => prediction.needsReview).length ?? 0,
@@ -831,12 +915,34 @@ export default function App() {
     ?? (sceneBreaking    ? { kind: "auto-paragraph", label: "Inserting scene breaks…"  } : null)
     ?? (analysisRunning  ? { kind: "analyzing",      label: "Analysing chapter…"      } : null);
 
-  const chapters = novel.chapters;
-  const currentIndex = useMemo(
-    () => chapters.findIndex((c) => c.id === currentId),
-    [chapters, currentId]
+  // Initialize secondaryId when entering split mode
+  useEffect(() => {
+    if (splitView && !secondaryId) {
+      const idx = chapters.findIndex((c) => c.id === currentId);
+      if (idx >= 0 && idx < chapters.length - 1) {
+        setSecondaryId(chapters[idx + 1].id);
+      } else if (idx > 0) {
+        setSecondaryId(chapters[idx - 1].id);
+      }
+    }
+    if (!splitView && secondaryId) {
+      if (activeSide === "right" && secondaryId) {
+        setCurrentId(secondaryId);
+      }
+      setSecondaryId(null);
+      setActiveSide("left");
+    }
+  }, [splitView]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateChapterById = useCallback(
+    (id: string, mut: (c: Novel["chapters"][number]) => Novel["chapters"][number]) => {
+      setNovel((n) => ({
+        ...n,
+        chapters: n.chapters.map((c) => (c.id === id ? mut(c) : c)),
+      }));
+    },
+    [],
   );
-  const current = currentIndex >= 0 ? chapters[currentIndex] : null;
 
   const updateCurrent = useCallback(
     (mut: (c: Novel["chapters"][number]) => Novel["chapters"][number]) => {
@@ -881,10 +987,13 @@ export default function App() {
           const fallback = renumbered[Math.min(currentIndex, renumbered.length - 1)];
           queueMicrotask(() => setCurrentId(fallback?.id ?? null));
         }
+        if (secondaryId === id) {
+          queueMicrotask(() => setSecondaryId(null));
+        }
         return { ...n, chapters: renumbered };
       });
     },
-    [currentId, currentIndex]
+    [currentId, currentIndex, secondaryId]
   );
 
   // Drag-reorder: move chapter `fromId` to be inserted at `toIndex` in the
@@ -904,14 +1013,34 @@ export default function App() {
   }, []);
 
   const handlePrev = useCallback(() => {
+    if (splitView && activeSide === "right") {
+      if (secondaryIndex > 0) setSecondaryId(chapters[secondaryIndex - 1].id);
+      return;
+    }
     if (currentIndex > 0) setCurrentId(chapters[currentIndex - 1].id);
-  }, [chapters, currentIndex]);
+  }, [chapters, currentIndex, splitView, activeSide, secondaryIndex]);
 
   const handleNext = useCallback(() => {
+    if (splitView && activeSide === "right") {
+      if (secondaryIndex >= 0 && secondaryIndex < chapters.length - 1) {
+        setSecondaryId(chapters[secondaryIndex + 1].id);
+      }
+      return;
+    }
     if (currentIndex >= 0 && currentIndex < chapters.length - 1) {
       setCurrentId(chapters[currentIndex + 1].id);
     }
-  }, [chapters, currentIndex]);
+  }, [chapters, currentIndex, splitView, activeSide, secondaryIndex]);
+
+  const handleSecondaryPrev = useCallback(() => {
+    if (secondaryIndex > 0) setSecondaryId(chapters[secondaryIndex - 1].id);
+  }, [chapters, secondaryIndex]);
+
+  const handleSecondaryNext = useCallback(() => {
+    if (secondaryIndex >= 0 && secondaryIndex < chapters.length - 1) {
+      setSecondaryId(chapters[secondaryIndex + 1].id);
+    }
+  }, [chapters, secondaryIndex]);
 
   const flushSave = useCallback(() => {
     saveNovel(novel);
@@ -942,6 +1071,20 @@ export default function App() {
     setPdfExportOpen(true);
   }, []);
 
+  const handleExportMarkdown = useCallback(() => {
+    const safeTitle = (novel.meta.title || "novel").replace(/[^\w\d-]+/g, "-").toLowerCase();
+    downloadBlob(`${safeTitle}.md`, novelToMarkdown(novel), "text/markdown;charset=utf-8");
+  }, [novel]);
+
+  const handleExportDocx = useCallback(() => {
+    const safeTitle = (novel.meta.title || "novel").replace(/[^\w\d-]+/g, "-").toLowerCase();
+    downloadBlob(
+      `${safeTitle}.docx`,
+      novelToDocx(novel),
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    );
+  }, [novel]);
+
   const doExportPdf = useCallback(
     async (options: PdfExportOptions) => {
       setPdfExportOpen(false);
@@ -965,23 +1108,17 @@ export default function App() {
   // breathe-in animation alone is 0.65 s, so the minimum visible window
   // needs to cover at least that for the cue to register.
   const handleAutoParagraph = useCallback(() => {
-    if (!current || autoParagraphing) return;
+    const target = activeChapter;
+    if (!target || autoParagraphing) return;
     setAutoParagraphing(true);
-    // rAF + small idle window: lets the orb's enter animation start before
-    // we mutate content (which would otherwise re-render the editor mid
-    // animation and visually cancel the breath-in).
     window.setTimeout(() => {
-      const next = autoParagraph(current.content, knownNames);
-      // Only commit if something actually changed — avoids noisy undo
-      // history entries when the chapter was already cleanly paragraphed.
-      if (next !== current.content) {
-        updateCurrent((c) => ({ ...c, content: next }));
+      const next = autoParagraph(target.content, knownNames);
+      if (next !== target.content) {
+        updateChapterById(target.id, (c) => ({ ...c, content: next }));
       }
-      // Hold the orb visible for a short tail so the user perceives the
-      // pass landing rather than blinking out as soon as state commits.
       window.setTimeout(() => setAutoParagraphing(false), 700);
     }, 280);
-  }, [current, knownNames, autoParagraphing, updateCurrent]);
+  }, [activeChapter, knownNames, autoParagraphing, updateChapterById]);
 
   // Auto-scene-break — companion pass to auto-paragraph. Reads the
   // existing speech-detect output (already produced for the active
@@ -989,21 +1126,22 @@ export default function App() {
   // scene boundaries. Same UX-window pattern as auto-paragraph so the
   // two buttons feel like a family.
   const handleAutoSceneBreak = useCallback(() => {
-    if (!current || sceneBreaking) return;
+    const target = activeChapter;
+    if (!target || sceneBreaking) return;
     if (!analysisResult || analysisResult.paragraphs.length < 3) return;
     setSceneBreaking(true);
     window.setTimeout(() => {
       const r = autoSceneBreaks(
-        current.content,
+        target.content,
         analysisResult.paragraphs,
         analysisResult.speechResults,
       );
-      if (r.inserted > 0 && r.content !== current.content) {
-        updateCurrent((c) => ({ ...c, content: r.content }));
+      if (r.inserted > 0 && r.content !== target.content) {
+        updateChapterById(target.id, (c) => ({ ...c, content: r.content }));
       }
       window.setTimeout(() => setSceneBreaking(false), 700);
     }, 280);
-  }, [current, sceneBreaking, analysisResult, updateCurrent]);
+  }, [activeChapter, sceneBreaking, analysisResult, updateChapterById]);
 
   // Onboarding dismissal — flip the persistent flag once so we never
   // auto-show it again. Re-opening via the Help menu doesn't update the
@@ -1087,14 +1225,26 @@ export default function App() {
         e.preventDefault();
         setFindOpen(true);
       }
+      else if (mod && e.shiftKey && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        handleRedo();
+      }
+      else if (mod && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        handleUndo();
+      }
       else if (mod && (e.key === "s" || e.key === "S")) { e.preventDefault(); flushSave(); }
       else if (mod && e.key === ".") { e.preventDefault(); setFocusMode((v) => !v); }
+      else if (mod && e.key === "\\") {
+        e.preventDefault();
+        setPrefs((p) => ({ ...p, splitView: !p.splitView }));
+      }
       else if (e.key === "Escape" && findOpen) { e.preventDefault(); setFindOpen(false); }
       else if (e.key === "Escape" && projectSearchOpen) { e.preventDefault(); setProjectSearchOpen(false); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handlePrev, handleNext, handleAddChapter, flushSave, findOpen, projectSearchOpen]);
+  }, [handlePrev, handleNext, handleAddChapter, flushSave, findOpen, projectSearchOpen, handleUndo, handleRedo]);
 
   // Native menu wiring (Electron only). Same actions as the keyboard handler.
   useEffect(() => {
@@ -1108,6 +1258,8 @@ export default function App() {
         case "import-txt":      handleImport(); break;
         case "export-txt":      handleExport(); break;
         case "export-pdf":      handleExportPdf(); break;
+        case "export-markdown": handleExportMarkdown(); break;
+        case "export-docx":     handleExportDocx(); break;
         case "save":            flushSave(); break;
         case "find":            setFindOpen(true); break;
         case "project-search":  setProjectSearchOpen(true); break;
@@ -1116,10 +1268,13 @@ export default function App() {
         case "prev-chapter":    handlePrev(); break;
         case "next-chapter":    handleNext(); break;
         case "show-welcome":    setOnboardingOpen(true); break;
+        case "undo":            handleUndo(); break;
+        case "redo":            handleRedo(); break;
+        case "split-view":      setPrefs((p) => ({ ...p, splitView: !p.splitView })); break;
       }
     });
     return off;
-  }, [handleAddChapter, handleImport, handleExport, handleExportPdf, flushSave, cycleIntel, handlePrev, handleNext, handleOpenProject]);
+  }, [handleAddChapter, handleImport, handleExport, handleExportPdf, handleExportMarkdown, handleExportDocx, flushSave, cycleIntel, handlePrev, handleNext, handleOpenProject, handleUndo, handleRedo]);
 
   useEffect(() => {
     if (!window.electronAPI?.isElectron) return;
@@ -1324,6 +1479,18 @@ export default function App() {
         groupTools={!!prefs.groupTools}
         annotationMode={annotationMode}
         onToggleAnnotation={() => setAnnotationMode((v) => !v)}
+        canUndo={undoRedo.canUndo}
+        canRedo={undoRedo.canRedo}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        splitView={splitView}
+        secondaryTitle={secondaryChapter?.title}
+        onSecondaryTitleChange={secondaryId ? (title) => updateChapterById(secondaryId, (c) => ({ ...c, title })) : undefined}
+        secondaryIndex={secondaryIndex}
+        onSecondaryPrev={handleSecondaryPrev}
+        onSecondaryNext={handleSecondaryNext}
+        activeSide={activeSide}
+        onActiveSideChange={setActiveSide}
       />
 
       <input
@@ -1336,7 +1503,65 @@ export default function App() {
 
       <StatusPill task={statusTask} />
 
-      {current ? (
+      {splitView && current && secondaryChapter ? (
+        <div className={`split-editor-container${analysisPanelOpen && !focusMode && prefs.sidePanelCompensation ? " split-editor-container--panel-open" : ""}`}>
+          <div
+            className={`split-pane split-pane--left${activeSide === "left" ? " split-pane--active" : ""}`}
+            style={{ flex: `0 0 ${splitRatio * 100}%` }}
+            onPointerDown={() => setActiveSide("left")}
+          >
+            <Editor
+              key={current.id}
+              chapter={current}
+              onContentChange={(content) => updateChapterById(current.id, (c) => ({ ...c, content }))}
+              analysisResult={activeSide === "left" && intelMode !== "off" ? analysisResult : null}
+              speechPredictions={activeSide === "left" && intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
+              actionPredictions={activeSide === "left" && intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
+              toolHighlights={activeSide === "left" && toolHighlights.length > 0 ? toolHighlights : undefined}
+              knownNames={intelMode !== "off" ? knownNames : []}
+              entityNameMap={intelMode !== "off" ? entityNameMap : undefined}
+              onEntityClick={handleEntityClick}
+              annotationMode={annotationMode}
+              onSpeechAnnotate={handleSpeechAnnotate}
+              onActionAnnotate={handleActionAnnotate}
+              annotationOverrides={activeSide === "left" ? annotationOverrides : undefined}
+              typingSettleMs={analysisDebounceMs}
+              sidePanelOpen={analysisPanelOpen && !focusMode}
+              sidePanelCompensation={false}
+              layoutWidthKey={editorLayoutKey}
+              splitMode
+            />
+          </div>
+          <SplitDivider ratio={splitRatio} onRatioChange={setSplitRatio} />
+          <div
+            className={`split-pane split-pane--right${activeSide === "right" ? " split-pane--active" : ""}`}
+            style={{ flex: `0 0 ${(1 - splitRatio) * 100}%` }}
+            onPointerDown={() => setActiveSide("right")}
+          >
+            <Editor
+              key={secondaryChapter.id}
+              chapter={secondaryChapter}
+              onContentChange={(content) => updateChapterById(secondaryChapter.id, (c) => ({ ...c, content }))}
+              analysisResult={activeSide === "right" && intelMode !== "off" ? analysisResult : null}
+              speechPredictions={activeSide === "right" && intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
+              actionPredictions={activeSide === "right" && intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
+              toolHighlights={activeSide === "right" && toolHighlights.length > 0 ? toolHighlights : undefined}
+              knownNames={intelMode !== "off" ? knownNames : []}
+              entityNameMap={intelMode !== "off" ? entityNameMap : undefined}
+              onEntityClick={handleEntityClick}
+              annotationMode={annotationMode}
+              onSpeechAnnotate={handleSpeechAnnotate}
+              onActionAnnotate={handleActionAnnotate}
+              annotationOverrides={activeSide === "right" ? annotationOverrides : undefined}
+              typingSettleMs={analysisDebounceMs}
+              sidePanelOpen={analysisPanelOpen && !focusMode}
+              sidePanelCompensation={false}
+              layoutWidthKey={editorLayoutKey}
+              splitMode
+            />
+          </div>
+        </div>
+      ) : current ? (
         <Editor
           key={current.id}
           chapter={current}
@@ -1346,6 +1571,7 @@ export default function App() {
           actionPredictions={intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
           toolHighlights={toolHighlights.length > 0 ? toolHighlights : undefined}
           knownNames={intelMode !== "off" ? knownNames : []}
+          entityNameMap={intelMode !== "off" ? entityNameMap : undefined}
           onEntityClick={handleEntityClick}
           annotationMode={annotationMode}
           onSpeechAnnotate={handleSpeechAnnotate}
@@ -1483,25 +1709,33 @@ export default function App() {
         isAnalyzing={analysisRunning}
         intelMode={intelMode}
         onSetIntelMode={setIntelMode}
+        tier={tier}
+        onTierChange={handleTierChange}
         prefs={prefs}
         onSetPrefs={setPrefs}
-        chapterId={currentId}
-        chapterTitle={current?.title}
-        chapterContent={current?.content}
+        chapterId={activeChapterId}
+        chapterTitle={activeChapter?.title}
+        chapterContent={activeChapter?.content}
         needsProjectSaveWarning={needsProjectSaveWarning}
         allChapters={chapters}
-        chapterIndex={currentIndex}
+        chapterIndex={activeChapterIndex}
         worldData={novel.worldData}
         storyGraph={storyGraph}
-        onSelectChapter={(id) => { setCurrentId(id); }}
-        reviewResult={currentId ? (reviewResults[currentId] ?? null) : null}
+        onSelectChapter={(id) => {
+          if (splitView && activeSide === "right") {
+            setSecondaryId(id);
+          } else {
+            setCurrentId(id);
+          }
+        }}
+        reviewResult={activeChapterId ? (reviewResults[activeChapterId] ?? null) : null}
         onReviewComplete={handleReviewComplete}
         onProjectLoaded={handleProjectLoaded}
         onNovelRefresh={handleNovelRefresh}
-        onAutoParagraph={current ? handleAutoParagraph : undefined}
+        onAutoParagraph={activeChapter ? handleAutoParagraph : undefined}
         autoParagraphing={autoParagraphing}
         onAutoSceneBreak={
-          current && analysisResult && analysisResult.paragraphs.length >= 3
+          activeChapter && analysisResult && analysisResult.paragraphs.length >= 3
             ? handleAutoSceneBreak
             : undefined
         }
@@ -1529,18 +1763,24 @@ export default function App() {
         />
       )}
 
-      {current && (
+      {(splitView ? activeChapter : current) && (
         <WordCount
-          content={current.content}
+          content={(splitView ? activeChapter! : current!).content}
           todayWords={todayWords}
           goal={prefs.goals.dailyWords}
         />
       )}
 
-      {findOpen && current && (
+      {findOpen && (splitView ? activeChapter : current) && (
         <FindReplace
-          content={current.content}
-          onContentChange={(content) => updateCurrent((c) => ({ ...c, content }))}
+          content={(splitView ? activeChapter! : current!).content}
+          onContentChange={(content) => {
+            if (splitView && activeChapterId) {
+              updateChapterById(activeChapterId, (c) => ({ ...c, content }));
+            } else {
+              updateCurrent((c) => ({ ...c, content }));
+            }
+          }}
           onClose={() => setFindOpen(false)}
         />
       )}
@@ -1565,7 +1805,7 @@ export default function App() {
       )}
 
       {onboardingOpen && (
-        <Onboarding onClose={handleOnboardingClose} />
+        <Onboarding onClose={handleOnboardingClose} onTierChange={handleTierChange} />
       )}
 
       {toolImportState && (
@@ -1581,6 +1821,7 @@ export default function App() {
       {pdfExportOpen && (
         <PdfExportOverlay
           meta={novel.meta}
+          novel={novel}
           onConfirm={doExportPdf}
           onClose={() => setPdfExportOpen(false)}
         />

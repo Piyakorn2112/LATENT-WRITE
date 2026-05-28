@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   ChevronLeft, ChevronRight, BookOpenIcon,
   PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon, FolderIcon,
-  MoreHorizontalIcon,
+  MoreHorizontalIcon, UndoIcon, RedoIcon,
 } from "./Icon";
 
 export type IntelMode = "off" | "fast" | "default" | "high" | "auto";
@@ -247,6 +247,19 @@ interface Props {
   /** Annotation mode toggle. */
   annotationMode: boolean;
   onToggleAnnotation: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
+  /** Split-screen mode — two chapter panes side by side. */
+  splitView?: boolean;
+  secondaryTitle?: string;
+  onSecondaryTitleChange?: (title: string) => void;
+  secondaryIndex?: number;
+  onSecondaryPrev?: () => void;
+  onSecondaryNext?: () => void;
+  activeSide?: "left" | "right";
+  onActiveSideChange?: (side: "left" | "right") => void;
 }
 
 interface ToolbarAction {
@@ -269,8 +282,14 @@ export function Toolbar({
   intelMode, intelResolvedLevel, onCycleIntel, isAnalyzing, funMode,
   groupTools = false,
   annotationMode, onToggleAnnotation,
+  canUndo, canRedo, onUndo, onRedo,
+  splitView = false,
+  secondaryTitle, onSecondaryTitleChange,
+  secondaryIndex, onSecondaryPrev, onSecondaryNext,
+  activeSide: _activeSide = "left", onActiveSideChange,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const secondaryInputRef = useRef<HTMLInputElement>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const overflowBtnRef = useRef<HTMLButtonElement>(null);
@@ -447,40 +466,143 @@ export function Toolbar({
 
           <div className="toolbar-group-spacer" aria-hidden="true" />
 
-          <div className="toolbar toolbar-group toolbar-group--editor liquid-glass" data-liquid-glass-transient="true">
+          <div className="toolbar toolbar-group liquid-glass" data-liquid-glass-transient="true">
             <button
               className="icon-btn"
-              onClick={onPrev}
-              disabled={currentIndex <= 0}
-              aria-label="Previous chapter"
-              title="Previous chapter"
+              onClick={onUndo}
+              disabled={!canUndo}
+              aria-label="Undo"
+              title="Undo (⌘Z)"
             >
-              <ChevronLeft />
+              <UndoIcon size={16} />
             </button>
             <button
               className="icon-btn"
-              onClick={onNext}
-              disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
-              aria-label="Next chapter"
-              title="Next chapter"
+              onClick={onRedo}
+              disabled={!canRedo}
+              aria-label="Redo"
+              title="Redo (⇧⌘Z)"
             >
-              <ChevronRight />
+              <RedoIcon size={16} />
             </button>
-
-            <input
-              ref={inputRef}
-              className="toolbar-title-input"
-              value={chapterTitle}
-              onChange={(e) => onChapterTitleChange(e.target.value)}
-              placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
-              disabled={!hasChapter}
-              spellCheck={false}
-            />
-
-            <span className="chapter-counter">
-              {totalChapters > 0 ? `${currentIndex + 1} / ${totalChapters}` : "—"}
-            </span>
           </div>
+
+          <div className="toolbar-group-spacer" aria-hidden="true" />
+
+          {splitView ? (
+            <>
+              <div
+                className="toolbar toolbar-group toolbar-group--editor liquid-glass"
+                data-liquid-glass-transient="true"
+                onPointerDown={() => onActiveSideChange?.("left")}
+              >
+                <button
+                  className="icon-btn"
+                  onClick={onPrev}
+                  disabled={currentIndex <= 0}
+                  aria-label="Previous chapter (left)"
+                  title="Previous chapter (left)"
+                >
+                  <ChevronLeft />
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={onNext}
+                  disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
+                  aria-label="Next chapter (left)"
+                  title="Next chapter (left)"
+                >
+                  <ChevronRight />
+                </button>
+                <input
+                  ref={inputRef}
+                  className="toolbar-title-input"
+                  value={chapterTitle}
+                  onChange={(e) => onChapterTitleChange(e.target.value)}
+                  placeholder={hasChapter ? "Chapter title" : "—"}
+                  disabled={!hasChapter}
+                  spellCheck={false}
+                />
+                <span className="chapter-counter">
+                  {totalChapters > 0 ? `${currentIndex + 1}` : "—"}
+                </span>
+              </div>
+
+              <div className="toolbar-group-spacer" aria-hidden="true" />
+
+              <div
+                className="toolbar toolbar-group toolbar-group--editor liquid-glass"
+                data-liquid-glass-transient="true"
+                onPointerDown={() => onActiveSideChange?.("right")}
+              >
+                <button
+                  className="icon-btn"
+                  onClick={onSecondaryPrev}
+                  disabled={(secondaryIndex ?? 0) <= 0}
+                  aria-label="Previous chapter (right)"
+                  title="Previous chapter (right)"
+                >
+                  <ChevronLeft />
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={onSecondaryNext}
+                  disabled={(secondaryIndex ?? 0) >= totalChapters - 1 || totalChapters === 0}
+                  aria-label="Next chapter (right)"
+                  title="Next chapter (right)"
+                >
+                  <ChevronRight />
+                </button>
+                <input
+                  ref={secondaryInputRef}
+                  className="toolbar-title-input"
+                  value={secondaryTitle ?? ""}
+                  onChange={(e) => onSecondaryTitleChange?.(e.target.value)}
+                  placeholder="Chapter title"
+                  disabled={secondaryIndex === undefined || secondaryIndex < 0}
+                  spellCheck={false}
+                />
+                <span className="chapter-counter">
+                  {secondaryIndex !== undefined && secondaryIndex >= 0
+                    ? `${secondaryIndex + 1}`
+                    : "—"}
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="toolbar toolbar-group toolbar-group--editor liquid-glass" data-liquid-glass-transient="true">
+              <button
+                className="icon-btn"
+                onClick={onPrev}
+                disabled={currentIndex <= 0}
+                aria-label="Previous chapter"
+                title="Previous chapter"
+              >
+                <ChevronLeft />
+              </button>
+              <button
+                className="icon-btn"
+                onClick={onNext}
+                disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
+                aria-label="Next chapter"
+                title="Next chapter"
+              >
+                <ChevronRight />
+              </button>
+              <input
+                ref={inputRef}
+                className="toolbar-title-input"
+                value={chapterTitle}
+                onChange={(e) => onChapterTitleChange(e.target.value)}
+                placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
+                disabled={!hasChapter}
+                spellCheck={false}
+              />
+              <span className="chapter-counter">
+                {totalChapters > 0 ? `${currentIndex + 1} / ${totalChapters}` : "—"}
+              </span>
+            </div>
+          )}
 
           <div className="toolbar-group-spacer" aria-hidden="true" />
 
@@ -547,10 +669,31 @@ export function Toolbar({
 
           <button
             className="icon-btn"
+            onClick={onUndo}
+            disabled={!canUndo}
+            aria-label="Undo"
+            title="Undo (⌘Z)"
+          >
+            <UndoIcon size={16} />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={onRedo}
+            disabled={!canRedo}
+            aria-label="Redo"
+            title="Redo (⇧⌘Z)"
+          >
+            <RedoIcon size={16} />
+          </button>
+
+          <div className="toolbar-divider" />
+
+          <button
+            className="icon-btn"
             onClick={onPrev}
             disabled={currentIndex <= 0}
-            aria-label="Previous chapter"
-            title="Previous chapter"
+            aria-label={splitView ? "Previous chapter (left)" : "Previous chapter"}
+            title={splitView ? "Previous chapter (left)" : "Previous chapter"}
           >
             <ChevronLeft />
           </button>
@@ -558,8 +701,8 @@ export function Toolbar({
             className="icon-btn"
             onClick={onNext}
             disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
-            aria-label="Next chapter"
-            title="Next chapter"
+            aria-label={splitView ? "Next chapter (left)" : "Next chapter"}
+            title={splitView ? "Next chapter (left)" : "Next chapter"}
           >
             <ChevronRight />
           </button>
@@ -572,11 +715,53 @@ export function Toolbar({
             placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
             disabled={!hasChapter}
             spellCheck={false}
+            onFocus={() => splitView && onActiveSideChange?.("left")}
           />
 
           <span className="chapter-counter">
-            {totalChapters > 0 ? `${currentIndex + 1} / ${totalChapters}` : "—"}
+            {totalChapters > 0
+              ? splitView ? `${currentIndex + 1}` : `${currentIndex + 1} / ${totalChapters}`
+              : "—"}
           </span>
+
+          {splitView && (
+            <>
+              <div className="toolbar-divider" />
+              <button
+                className="icon-btn"
+                onClick={onSecondaryPrev}
+                disabled={(secondaryIndex ?? 0) <= 0}
+                aria-label="Previous chapter (right)"
+                title="Previous chapter (right)"
+              >
+                <ChevronLeft />
+              </button>
+              <button
+                className="icon-btn"
+                onClick={onSecondaryNext}
+                disabled={(secondaryIndex ?? 0) >= totalChapters - 1 || totalChapters === 0}
+                aria-label="Next chapter (right)"
+                title="Next chapter (right)"
+              >
+                <ChevronRight />
+              </button>
+              <input
+                ref={secondaryInputRef}
+                className="toolbar-title-input"
+                value={secondaryTitle ?? ""}
+                onChange={(e) => onSecondaryTitleChange?.(e.target.value)}
+                placeholder="Chapter title"
+                disabled={secondaryIndex === undefined || secondaryIndex < 0}
+                spellCheck={false}
+                onFocus={() => onActiveSideChange?.("right")}
+              />
+              <span className="chapter-counter">
+                {secondaryIndex !== undefined && secondaryIndex >= 0
+                  ? `${secondaryIndex + 1}`
+                  : "—"}
+              </span>
+            </>
+          )}
 
           <div className="toolbar-divider" />
 

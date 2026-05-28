@@ -24,6 +24,83 @@ const STRUCTURE = {
 };
 
 let _openProjectPath = null;
+let _toolCompilerModule = null;
+let _packagedNodeShimDir = null;
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'"'"'`)}'`;
+}
+
+function ensurePackagedNodeShim() {
+  if (!app.isPackaged) return;
+
+  const shimDir = _packagedNodeShimDir || path.join(getAppDataPath(), '.runtime-bin');
+  const existingPath = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+
+  if (!_packagedNodeShimDir) {
+    fs.mkdirSync(shimDir, { recursive: true });
+
+    if (process.platform === 'win32') {
+      const shimPath = path.join(shimDir, 'node.cmd');
+      const shimSource = [
+        '@echo off',
+        'set ELECTRON_RUN_AS_NODE=1',
+        `"${process.execPath}" %*`,
+        '',
+      ].join('\r\n');
+
+      if (!fs.existsSync(shimPath) || fs.readFileSync(shimPath, 'utf8') !== shimSource) {
+        fs.writeFileSync(shimPath, shimSource, 'utf8');
+      }
+    } else {
+      const shimPath = path.join(shimDir, 'node');
+      const shimSource = [
+        '#!/bin/sh',
+        'export ELECTRON_RUN_AS_NODE=1',
+        `exec ${shellQuote(process.execPath)} "$@"`,
+        '',
+      ].join('\n');
+
+      if (!fs.existsSync(shimPath) || fs.readFileSync(shimPath, 'utf8') !== shimSource) {
+        fs.writeFileSync(shimPath, shimSource, 'utf8');
+      }
+      fs.chmodSync(shimPath, 0o755);
+    }
+
+    _packagedNodeShimDir = shimDir;
+  }
+
+  if (!existingPath.includes(shimDir)) {
+    process.env.PATH = [shimDir, ...existingPath].join(path.delimiter);
+  }
+}
+
+function getToolCompilerModule() {
+  if (_toolCompilerModule) return _toolCompilerModule;
+
+  if (app.isPackaged) {
+    // Finder launches do not provide a user-installed `node` on PATH, but
+    // esbuild-wasm hard-spawns `node` for its transform service.
+    ensurePackagedNodeShim();
+
+    const unpackedMain = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      'esbuild-wasm',
+      'lib',
+      'main.js',
+    );
+
+    if (fs.existsSync(unpackedMain)) {
+      _toolCompilerModule = require(unpackedMain);
+      return _toolCompilerModule;
+    }
+  }
+
+  _toolCompilerModule = require('esbuild-wasm');
+  return _toolCompilerModule;
+}
 
 const LAST_PROJECT_FILE = 'last-project.json';
 const CLAUDE_PROJECT_BOUNDARY_HOOK_FILE = 'latent-write-project-boundary.cjs';
@@ -2358,7 +2435,7 @@ function registerProjectFS() {
 
   ipcMain.handle('tool:compile', async (_event, { code, format }) => {
     try {
-      const { transform } = require('esbuild-wasm');
+      const { transform } = getToolCompilerModule();
       const result = await transform(code, {
         loader: format === 'tsx' ? 'tsx' : 'ts',
         format: 'cjs',

@@ -219,7 +219,7 @@ const ENGLISH_WORD_FREQ: ReadonlyMap<string, number> = new Map<string, number>([
 const RARE_WORD_FREQ           = 0.02;
 const MIN_IDF_SOLO             = 1.61; // log(1 + 1/0.27)
 const MIN_IDF_WITH_CONTEXT     = 0.72; // log(1 + 1/0.55)
-const CONTEXT_SIGNAL_THRESHOLD = 3;    // min accumulated context points to unlock relaxed gate
+const CONTEXT_SIGNAL_THRESHOLD = 4;    // min accumulated context points to unlock relaxed gate
 
 const TITLE_TOKEN_PATTERN = `[A-Z][a-z]{1,}(?:['’-][A-Z][a-z]{1,})*`;
 const TITLE_JOINER_PATTERN = `(?:of|the|for|de|du|del|da|di|la|le)`;
@@ -286,7 +286,7 @@ const PLACE_OF_RE = /\b(city|town|village|hamlet|kingdom|empire|realm|province|d
 const FACTION_PREFIX_RE = /\b(the|house|order|guild|clan|legion|council|academy|guard|watch|union|alliance|ministry|court|brotherhood|sisterhood|syndicate|collective|committee|board)\s*$/i;
 const ENTITY_PREFIX_RE = /\b(the|directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative)\s*$/i;
 const ENTITY_OF_RE = /\b(directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative|unit|processing)\s+(?:of|for)\s*$/i;
-const ENTITY_PREP_RE = /\b(under|within|through|via|per|according\s+to|pursuant\s+to)\s*$/i;
+const ENTITY_PREP_RE = /\b(under|via|per|according\s+to|pursuant\s+to)\s*$/i;
 const ENTITY_AFTER_RE = /^\s*(requires|mandates|governs|defines|permits|forbids|authorizes|regulates|maintains|tracks|allocates|routes|weights|classifies|stabilizes|monitors|enforces|codifies)\b/i;
 
 function computeEntityContextSignals(text: string, name: string): EntityContextSignals {
@@ -533,7 +533,7 @@ function autoExtractKnownNamesFast(novel: Novel, minFreq = 2, max = 30): string[
 
 // ── Contextual entity classifier ──────────────────────────────────────────
 
-const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|valley|plains|plain|desert|island|islands|lake|river|sea|ocean|bay|gulf|cove|creek|brook|stream|falls|harbor|harbour|port|city|town|village|hamlet|castle|keep|tower|gate|bridge|road|street|avenue|square|market|hall|inn|tavern|temple|shrine|palace|manor|estate|fortress|citadel|dungeon|ruins|cave|cavern|mine|district|quarter|ward|sector|region|territory|province|country|land|field|fields|garden|gardens|cliff|pass|hills|hill|marsh|swamp|bog|inlet|basin)\b/i;
+const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|valley|plains|plain|desert|island|islands|lake|river|sea|ocean|bay|gulf|cove|creek|brook|stream|falls|harbor|harbour|port|city|town|village|hamlet|castle|keep|tower|gate|bridge|road|street|avenue|square|market|hall|inn|tavern|temple|shrine|palace|manor|estate|fortress|citadel|dungeon|ruins|cave|cavern|mine|district|quarter|ward|sector|ring|zone|corridor|region|territory|province|country|land|field|fields|garden|gardens|cliff|pass|hills|hill|marsh|swamp|bog|inlet|basin|station|hub|outpost|terminal|platform|crossing|junction|checkpoint|settlement|colony|depot|compound|encampment|sanctuary|lookout)\b/i;
 
 const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|wing|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant)\b/i;
 
@@ -991,24 +991,77 @@ export async function scanAndClassify(
 // ── Combined known-names resolver ─────────────────────────────────────────
 
 /**
- * Returns the deduplicated list of entity names to feed into speech-detect
- * and the highlight layer. Prefers world data when present, falls back to
- * heuristic extraction otherwise. World data names always come first so they
- * win equal-length ties during longest-first sorting.
+ * Type-structured entity name map — preserves the character/place/faction/entity
+ * distinction so callers can route names appropriately (e.g. speech-detect only
+ * receives character names; the highlight layer uses all four with type info).
+ */
+export interface EntityNameMap {
+  /** Names + aliases of characters — the ONLY type eligible to speak dialogue. */
+  characters: string[];
+  /** Names + aliases of places — can be highlighted but never speak. */
+  places: string[];
+  /** Names + aliases of factions — can take collective action but not speak. */
+  factions: string[];
+  /** Names + aliases of doctrines / protocols / entities — neither speak nor act physically. */
+  entities: string[];
+  /** Flat union of all four lists, deduplicated, longest-first for regex building. */
+  all: string[];
+}
+
+function dedup(names: string[]): string[] {
+  const seen = new Set<string>();
+  return names.filter((n) => {
+    const k = n.toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+}
+
+function collectNames(items: Array<{ name: string; aliases?: string[] }>): string[] {
+  const out: string[] = [];
+  for (const item of items) {
+    if (item.name) out.push(item.name);
+    for (const a of item.aliases ?? []) if (a) out.push(a);
+  }
+  return out;
+}
+
+/**
+ * Returns entity names grouped by type from the novel's worldData.
+ * Falls back to heuristic extraction (all names as characters) when worldData
+ * is absent — the fallback is intentionally lenient for untagged manuscripts.
+ */
+export function resolveEntityNameMap(novel: Novel): EntityNameMap {
+  const wd = novel.worldData;
+  if (wd && (
+    (wd.characters?.length ?? 0) > 0 ||
+    (wd.places?.length ?? 0)     > 0 ||
+    (wd.factions?.length ?? 0)   > 0 ||
+    (wd.entities?.length ?? 0)   > 0
+  )) {
+    const characters = dedup(collectNames(wd.characters ?? []));
+    const places     = dedup(collectNames(wd.places     ?? []));
+    const factions   = dedup(collectNames(wd.factions   ?? []));
+    const entities   = dedup(collectNames(wd.entities   ?? []));
+    // Union in type order; already-seen entries from earlier types win ties.
+    const all = dedup([...characters, ...places, ...factions, ...entities]);
+    return { characters, places, factions, entities, all };
+  }
+  // No worldData: treat all auto-extracted names as potential characters
+  // (forgiving default — user hasn't categorised yet).
+  const extracted = autoExtractKnownNamesFast(novel);
+  return { characters: extracted, places: [], factions: [], entities: [], all: extracted };
+}
+
+/**
+ * Returns the deduplicated list of ALL entity names for the highlight layer.
+ * Prefers world data when present, falls back to heuristic extraction.
+ * World data names always come first so they win equal-length ties during
+ * longest-first sorting in the highlight regex.
  */
 export function resolveKnownNames(novel: Novel): string[] {
-  const fromWorld = buildEntityMap(novel.worldData).names;
-  if (fromWorld.length > 0) {
-    // Deduplicate while preserving insertion order
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const n of fromWorld) {
-      const k = n.toLowerCase();
-      if (!seen.has(k)) { seen.add(k); out.push(n); }
-    }
-    return out;
-  }
-  return autoExtractKnownNamesFast(novel);
+  return resolveEntityNameMap(novel).all;
 }
 
 /**

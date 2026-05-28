@@ -7,6 +7,9 @@ files:
   - dist/**/*
   - electron/**/*
 
+asarUnpack:
+  - node_modules/esbuild-wasm/**/*
+
 extraResources:
   - from: "../novel-writing-system"
     to: "novel-writing-system"
@@ -23,11 +26,10 @@ directories:
 # ─── Default DMG distribution (sideload) ──────────────────────────────────
 mac:
   category: public.app-category.productivity
-  # Source PNG generated from "Latent Write Logo.icon" (the macOS 26
-  # layered-icon bundle): squircle-masked, white background, logo centred
-  # per the bundle's icon.json manifest. electron-builder reads this PNG
-  # and generates the multi-resolution .icns for the app bundle.
-  icon: build/icon.png
+  # Use the Icon Composer bundle directly. electron-builder 26.8.x compiles
+  # this `.icon` asset into the native macOS asset catalog (`Assets.car`) and
+  # also emits `icon.icns` for compatibility/fallback.
+  icon: "Latent Write Logo.icon"
   target:
     - target: dmg
       arch:
@@ -69,7 +71,7 @@ dmg:
 # network, no microphone).
 mas:
   category: public.app-category.productivity
-  icon: build/icon.png
+  icon: "Latent Write Logo.icon"
   hardenedRuntime: false
   entitlements: build/entitlements.mas.plist
   entitlementsInherit: build/entitlements.mas.inherit.plist

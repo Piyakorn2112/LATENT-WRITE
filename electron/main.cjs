@@ -54,7 +54,8 @@ app.setName('Latent Write');
 
 // ── App menu (macOS-conventional) ─────────────────────────────────────────
 // Menu items that act on document state forward to the renderer via IPC.
-// Roles like undo/redo/cut/copy/paste are handled natively by Chromium.
+// Undo/redo forward to the renderer for app-level history.
+// Roles like cut/copy/paste are handled natively by Chromium.
 
 const isMac = process.platform === 'darwin';
 
@@ -121,6 +122,16 @@ function buildMenu() {
           accelerator: 'CmdOrCtrl+Shift+P',
           click: () => sendMenuCommand('export-pdf'),
         },
+        {
+          label: 'Export as Markdown…',
+          accelerator: 'CmdOrCtrl+Shift+M',
+          click: () => sendMenuCommand('export-markdown'),
+        },
+        {
+          label: 'Export as Word (.docx)…',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => sendMenuCommand('export-docx'),
+        },
         { type: 'separator' },
         {
           label: 'Save',
@@ -134,8 +145,16 @@ function buildMenu() {
     {
       label: 'Edit',
       submenu: [
-        { role: 'undo' },
-        { role: 'redo' },
+        {
+          label: 'Undo',
+          accelerator: 'CmdOrCtrl+Z',
+          click: () => sendMenuCommand('undo'),
+        },
+        {
+          label: 'Redo',
+          accelerator: 'CmdOrCtrl+Shift+Z',
+          click: () => sendMenuCommand('redo'),
+        },
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
@@ -166,6 +185,11 @@ function buildMenu() {
           label: 'Cycle Intelligence',
           accelerator: 'CmdOrCtrl+Shift+I',
           click: () => sendMenuCommand('cycle-intel'),
+        },
+        {
+          label: 'Toggle Split View',
+          accelerator: 'CmdOrCtrl+\\',
+          click: () => sendMenuCommand('split-view'),
         },
         { type: 'separator' },
         {
@@ -305,10 +329,17 @@ function createWindow() {
   }
 }
 
-// ── Narrative LM — sentence embedding (all-MiniLM-L6-v2) ──────────────────
+// ── Narrative LM — sentence embedding (MiniLM via onnxruntime-node) ──────────
 // Runs in the Node.js main process via onnxruntime-node (native binaries).
 // This sidesteps all browser WASM / web-worker restrictions in the renderer.
 // The model lives in dist/models/ (bundled) or public/models/ (dev).
+//
+// Preference order: L12 (better quality, 32MB) → L6 (fallback, 22MB).
+// Both models use the same 384-dim output so no downstream changes are needed.
+const PREFERRED_MODEL_IDS = [
+  'Xenova/all-MiniLM-L12-v2',
+  'Xenova/all-MiniLM-L6-v2',
+];
 
 let _lmPipe    = null;
 let _lmLoading = null;
@@ -322,20 +353,28 @@ async function getLMPipeline() {
     const modelBase = app.isPackaged
       ? path.join(app.getAppPath(), 'dist',   'models') + path.sep
       : path.join(app.getAppPath(), 'public', 'models') + path.sep;
-    console.log('[NarrativeLM main] Loading all-MiniLM-L6-v2 from:', modelBase);
     const { pipeline, env } = await import('@xenova/transformers');
     env.localModelPath   = modelBase;
     env.allowLocalModels = true;
     env.useBrowserCache  = false;
-    const pipe = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-    _lmPipe   = pipe;
-    _lmStatus = 'ready';
-    console.log('[NarrativeLM main] ✓ Model ready (onnxruntime-node native)');
-    return pipe;
+
+    for (const modelId of PREFERRED_MODEL_IDS) {
+      try {
+        console.log('[NarrativeLM main] Trying model:', modelId);
+        const pipe = await pipeline('feature-extraction', modelId);
+        _lmPipe   = pipe;
+        _lmStatus = 'ready';
+        console.log('[NarrativeLM main] ✓ Model ready:', modelId);
+        return pipe;
+      } catch (err) {
+        console.log('[NarrativeLM main] Model unavailable, trying next:', err.message);
+      }
+    }
+    throw new Error('No MiniLM model available in models directory');
   })().catch((err) => {
     _lmStatus  = 'offline';
     _lmLoading = null; // allow retry
-    console.error('[NarrativeLM main] Failed to load model:', err.message);
+    console.error('[NarrativeLM main] Failed to load any model:', err.message);
     throw err;
   });
   return _lmLoading;

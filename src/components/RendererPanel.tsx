@@ -8,6 +8,7 @@ import type { ChapterAnalysis } from "../lib/chapter-analysis";
 import type { ChapterParaResult } from "../lib/speech-detect";
 import { runLocalReview } from "../lib/local-review";
 import { setRendererActive } from "../lib/renderer-active-store";
+import { activateCode, type Tier } from "../lib/license";
 import { buildChapterDNA, buildNeighborhoodContext, buildContinuityBrief } from "../lib/chapter-dna";
 import { profileCharacterVoices, computeTagVariety } from "../lib/character-voice";
 import { scoreParagraphs, selectRiskExcerpt } from "../lib/paragraph-risk";
@@ -62,6 +63,8 @@ interface Props {
   onToolHighlights?: (highlights: ToolHighlight[]) => void;
   onToolWidgetData?: (toolName: string, data: unknown) => void;
   visible?: boolean;
+  tier?: Tier;
+  onTierChange?: (t: Tier) => void;
 }
 
 interface ChatMessage {
@@ -659,8 +662,28 @@ export function RendererPanel({
   onToolHighlights,
   onToolWidgetData,
   visible = true,
+  tier = "free",
+  onTierChange,
 }: Props) {
   void _onSetPrefs; void _reviewResult;
+
+  const [gateCodeInput, setGateCodeInput] = useState("");
+  const [gateCodeError, setGateCodeError] = useState<string | null>(null);
+  const [gateActivating, setGateActivating] = useState(false);
+
+  const handleGateActivate = async () => {
+    if (gateActivating) return;
+    setGateActivating(true);
+    const result = await activateCode(gateCodeInput);
+    setGateActivating(false);
+    if (result.ok) {
+      setGateCodeInput("");
+      setGateCodeError(null);
+      onTierChange?.("pro");
+    } else {
+      setGateCodeError(result.error ?? "Invalid code.");
+    }
+  };
 
   // Scan snapshot for diff-based iterative reviews (keyed by chapterId)
   const [scanSnapshots, setScanSnapshots] = useState<Record<string, { hash: string; summary: string; timestamp: number }>>({});
@@ -1813,6 +1836,38 @@ export function RendererPanel({
   return (
     <>
       <div className={`settings-panel rp-chat-shell rp-chat-shell--panel${visible ? " liquid-glass" : ""}`} {...(visible ? { "data-liquid-glass-scroll-adaptive": "panel" } : {})} style={{ position: "relative", overflow: "hidden", flex: "1 1 0", minHeight: 0, height: "100%" }}>
+        {desktop && tier !== "pro" ? (
+          <div className="renderer-pro-gate">
+            <img src={rendererLogoUrl} alt="" className="renderer-pro-gate-logo" />
+            <div className="renderer-pro-gate-title">Renderer workspace</div>
+            <p className="renderer-pro-gate-desc">
+              Write, draft, and review with Claude — from inside the editor. Available in Latent Write Pro.
+            </p>
+            <div className="renderer-pro-gate-form">
+              <div className="settings-code-row">
+                <input
+                  type="text"
+                  className="settings-code-input"
+                  placeholder="Enter your Pro code…"
+                  value={gateCodeInput}
+                  spellCheck={false}
+                  onChange={(e) => { setGateCodeInput(e.target.value); setGateCodeError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { void handleGateActivate(); } }}
+                />
+                <button
+                  type="button"
+                  className={`settings-code-submit${gateCodeInput.trim() ? " settings-code-submit--active" : ""}`}
+                  disabled={gateActivating}
+                  onClick={() => { void handleGateActivate(); }}
+                >
+                  {gateActivating ? "…" : "Activate"}
+                </button>
+              </div>
+              {gateCodeError && <p className="settings-code-status settings-code-status--error">{gateCodeError}</p>}
+            </div>
+          </div>
+        ) : (
+          <>
         {!workspaceOpen && <RendererTextWall fontScale={1.1} height={630} opacity={0.7} />}
 
         <div className="rp-chat-header">
@@ -1857,8 +1912,10 @@ export function RendererPanel({
         </div>
 
         {!workspaceOpen && renderChatInner("panel")}
+          </>
+        )}
       </div>
-      {workspaceOpen && desktop && project && createPortal(
+      {workspaceOpen && desktop && project && tier === "pro" && createPortal(
         <RendererWorkspaceFull
           project={project}
           claude={claude}

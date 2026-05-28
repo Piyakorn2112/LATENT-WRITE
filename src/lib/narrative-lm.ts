@@ -171,8 +171,15 @@ const EVENT_DETAIL_ANCHORS: Record<NarrativeEventDetailType, {
   },
 };
 
-const EMBED_DIM = 384; // all-MiniLM-L6-v2 output dimension
+const EMBED_DIM = 384; // all-MiniLM output dimension (L6 and L12 both use 384)
 const MAX_LABEL_CHARS = 62;
+
+// Ordered preference list — L12 has better semantic quality at comparable size.
+// The app will use whichever model is available in public/models/.
+const PREFERRED_MODEL_IDS = [
+  "Xenova/all-MiniLM-L12-v2",
+  "Xenova/all-MiniLM-L6-v2",
+] as const;
 const LABEL_STOPWORDS = new Set([
   "the", "a", "an", "and", "or", "but", "to", "of", "in", "on", "at", "for", "from",
   "with", "without", "into", "onto", "through", "by", "as", "is", "are", "was", "were",
@@ -192,8 +199,11 @@ let _pipe: EmbedFn | null = null;
 let _loading: Promise<EmbedFn> | null = null;
 let _eventAnchors: Record<string, Float32Array> | null = null;
 let _eventDetailAnchors: Record<NarrativeEventDetailType, Float32Array> | null = null;
-// Cache for arbitrary anchor embeddings (used by semanticSimilarity)
+// Anchor embedding cache (semanticSimilarity + event anchors)
 const _anchorCache = new Map<string, Float32Array>();
+// Per-session sentence embedding cache — avoids re-embedding identical sentences
+// across refineEventType / classifyEventDetail / selectBestLabelCandidate calls.
+const _sentenceCache = new Map<string, Float32Array>();
 
 function getAssetBaseHref(): string {
   if (typeof window !== "undefined" && window.location?.href) {
@@ -209,30 +219,28 @@ async function getEmbeddingPipeline(): Promise<EmbedFn> {
     if (DEV) console.log("[NarrativeLM] Browser fallback: initializing WASM pipeline (Electron should use IPC instead)…");
     const { pipeline, env } = await import("@xenova/transformers");
 
-    // Resolve the app's root URL from the current page when running in the
-    // renderer, or from the local workspace when loaded from node-based tools.
     const pageBase = getAssetBaseHref();
-
-    // Point ORT to the bundled WASM files in public/ort-wasm/.
-    // Using an absolute URL (not "./") avoids relative-path ambiguity in ORT's
-    // internal fetch, and ensures the Vite WASM MIME-type plugin applies.
     env.backends.onnx.wasm.wasmPaths = pageBase + "ort-wasm/";
-
-    // proxy:false — run inference on the main thread, no web worker.
-    // Web workers in Electron's file:// renderer can fail to load the worker
-    // script, causing the "registerBackend" undefined error.
+    // proxy:false — run inference on the main thread; web workers can fail in
+    // Electron's file:// renderer, causing "registerBackend" errors.
     env.backends.onnx.wasm.proxy = false;
     env.backends.onnx.wasm.numThreads = 1;
-
-    // Use bundled model files in public/models/ — fully offline, no download.
     env.allowLocalModels = true;
     env.localModelPath   = pageBase + "models/";
-    env.useBrowserCache  = false; // skip IndexedDB — local files are authoritative
+    env.useBrowserCache  = false;
 
-    const p = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
-    _pipe = p as unknown as EmbedFn;
-    if (DEV) console.log("[NarrativeLM] ✓ Model ready (local)");
-    return _pipe;
+    // Try each model in preference order; L12 is better but L6 is the fallback.
+    for (const modelId of PREFERRED_MODEL_IDS) {
+      try {
+        const p = await pipeline("feature-extraction", modelId);
+        _pipe = p as unknown as EmbedFn;
+        if (DEV) console.log(`[NarrativeLM] ✓ Model ready: ${modelId}`);
+        return _pipe;
+      } catch {
+        if (DEV) console.log(`[NarrativeLM] ${modelId} not available, trying next…`);
+      }
+    }
+    throw new Error("[NarrativeLM] No MiniLM model available in public/models/");
   })();
   return _loading;
 }
@@ -254,17 +262,26 @@ function getElectronAPI(): ElectronAPI | undefined {
 }
 
 async function embed(text: string): Promise<Float32Array> {
+  const cached = _sentenceCache.get(text);
+  if (cached) return cached;
+
+  let result: Float32Array;
   // In Electron: delegate to main process (onnxruntime-node, native binaries).
-  // This completely bypasses browser WASM / web-worker restrictions.
   const api = getElectronAPI();
   if (api?.narrativeLMEmbed) {
     const arr = await api.narrativeLMEmbed(text.slice(0, 500));
-    if (arr) return new Float32Array(arr);
+    if (arr) {
+      result = new Float32Array(arr);
+      _sentenceCache.set(text, result);
+      return result;
+    }
   }
   // Browser/web fallback: use the local WASM pipeline (vite dev server only)
   const pipe = await getEmbeddingPipeline();
   const out  = await pipe(text, { pooling: "mean", normalize: true });
-  return out.data.slice(0, EMBED_DIM) as Float32Array;
+  result = out.data.slice(0, EMBED_DIM) as Float32Array;
+  _sentenceCache.set(text, result);
+  return result;
 }
 
 async function getEventAnchorEmbeddings(): Promise<Record<string, Float32Array>> {

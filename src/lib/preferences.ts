@@ -31,6 +31,10 @@ export interface Preferences {
   customToolsEnabled?: boolean;
   /** Split the top toolbar into separate glass groups. Default false. */
   groupTools?: boolean;
+  /** Show two chapters side by side. Default false. */
+  splitView?: boolean;
+  /** Persisted intelligence mode. Default "auto". */
+  intelMode?: "off" | "fast" | "default" | "high" | "auto";
 }
 
 const DEFAULTS: Preferences = {
@@ -48,6 +52,8 @@ const DEFAULTS: Preferences = {
   sidePanelCompensation: false,
   customToolsEnabled: false,
   groupTools: false,
+  splitView: false,
+  intelMode: "auto",
 };
 
 const KEY = "latentwrite:prefs-v1";
@@ -69,6 +75,10 @@ export function loadPrefs(): Preferences {
       storyNlpEnabled: p.storyNlpEnabled ?? true,
       customToolsEnabled: p.customToolsEnabled ?? false,
       groupTools: p.groupTools ?? false,
+      splitView: p.splitView ?? false,
+      intelMode: (["off", "fast", "default", "high", "auto"] as const).includes(p.intelMode as never)
+        ? p.intelMode
+        : "auto",
     };
   } catch {
     return { ...DEFAULTS };

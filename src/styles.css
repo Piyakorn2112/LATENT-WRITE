@@ -298,12 +298,24 @@ body.scroll-edge-idle .scroll-edge-right {
    backdrop blur fallback while the app is idle. This keeps the visual look
    close to the focused state while dropping the heavier SVG liquid-glass
    composite work across the app until the next user interaction. */
-body.scroll-edge-idle .app .liquid-glass,
+body.scroll-edge-idle .app .liquid-glass {
+  background: var(--bg-glass-strong) !important;
+  -webkit-backdrop-filter: blur(2px) !important;
+  backdrop-filter: blur(2px) !important;
+}
+
 body.scroll-edge-idle .app .analysis-tab,
 body.scroll-edge-idle .app .analysis-action-group {
   background: var(--bg-glass-strong) !important;
-  -webkit-backdrop-filter: blur(3px) !important;
-  backdrop-filter: blur(3px) !important;
+  -webkit-backdrop-filter: blur(1px) !important;
+  backdrop-filter: blur(1px) !important;
+}
+
+body.scroll-edge-idle .app .annotation-popover,
+body.scroll-edge-idle .app .annotation-panel {
+  background: var(--bg-glass-strong) !important;
+  -webkit-backdrop-filter: blur(2px) !important;
+  backdrop-filter: blur(2px) !important;
 }
 
 body.scroll-edge-idle .app .word-count,
@@ -708,6 +720,80 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
      override (both layers must always share metrics, and the user is the
      authority on size). */
 }
+
+/* ─── Split View ─── */
+
+/* No .app overrides needed — split container is position:fixed,
+   so the app flow (toolbar only) stays exactly like single view. */
+
+.split-editor-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  overflow: hidden;
+  z-index: 1;
+  transition: right 0.90s cubic-bezier(0.28, 1.2, 0.03, 1);
+}
+
+.split-editor-container--panel-open {
+  right: 380px;
+}
+
+.split-pane {
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  position: relative;
+  padding-top: 70px;
+}
+
+.split-pane .document {
+  width: 100%;
+  max-width: 760px;
+  transform: none;
+  transition: none;
+}
+
+
+.split-pane:not(.split-pane--active) .document {
+  opacity: 0.85;
+  transition: opacity 0.2s ease;
+}
+
+.split-pane.split-pane--active .document {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
+.split-divider {
+  position: absolute;
+  top: 70px;
+  bottom: 0;
+  width: 4px;
+  transform: translateX(-50%);
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s ease;
+  touch-action: none;
+  -webkit-app-region: no-drag;
+}
+
+.split-divider::before {
+  content: "";
+  position: absolute;
+  inset: 0 -8px;
+}
+
+.split-divider:hover,
+.split-divider--dragging {
+  background: var(--divider-line);
+}
+
+.split-divider--dragging {
+  background: rgba(100, 140, 255, 0.4);
+}
+
 
 /* ─── Empty State ─── */
 .empty-state {
@@ -3902,6 +3988,29 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   z-index: 10;
   z-index: -1;
   pointer-events: none;
+}
+
+/* ─── Entity type modifiers ────────────────────────────────────────────────
+   Characters use the speaker-palette colour (default).
+   Places, factions, and entities use fixed semantic tints drawn from the
+   iOS system palette so they are immediately visually distinct.
+
+   The --entity-color CSS variable is still set per-name for characters
+   (giving each character their unique hue).  For non-character types the
+   variable is overridden here so all places share the same tint, all
+   factions share a different tint, etc.
+
+   The opacity on .entity-tag-bg is reduced for non-characters so their
+   pill backgrounds are clearly lighter / more recessed than character tags.
+*/
+.entity-tag--place   { --entity-color: #1B8A5E; }   /* iOS teal-green  */
+.entity-tag--faction { --entity-color: #9B6B00; }   /* iOS warm amber  */
+.entity-tag--entity  { --entity-color: #5A44B0; }   /* iOS indigo      */
+
+.entity-tag--place .entity-tag-bg,
+.entity-tag--faction .entity-tag-bg,
+.entity-tag--entity .entity-tag-bg {
+  opacity: 0.55;   /* lighter fill — less visually dominant than characters */
 }
 
 
@@ -7354,6 +7463,308 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
   }
 }
 
+/* ─── Onboarding: new hero types (pages 1–6 redesign) ──────────────────── */
+
+/* PAGE 1 — Editor mock */
+.onb-hero--editor {
+  height: 200px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 580px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.onb-editor-mock {
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 4%, transparent);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.onb-editor-mock-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--divider-line);
+  flex-shrink: 0;
+}
+.onb-editor-mock-toolbar-dots {
+  display: flex;
+  gap: 5px;
+}
+.onb-editor-mock-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--panel-text) 14%, transparent);
+}
+.onb-editor-mock-chapter-nav {
+  flex: 1;
+  text-align: center;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.03em;
+}
+.onb-editor-mock-toolbar-orb {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.onb-editor-mock-body {
+  flex: 1;
+  padding: 14px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.onb-editor-mock-title-line {
+  height: 13px;
+  width: 52%;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--panel-text) 18%, transparent);
+}
+.onb-editor-mock-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.onb-editor-mock-line {
+  height: 7px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--panel-text) 10%, transparent);
+}
+
+/* PAGE 2 — Structure (Chapter Index + World Data) */
+.onb-hero--structure {
+  height: 210px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.onb-struct-panels {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  height: 100%;
+}
+.onb-struct-panel {
+  flex: 1;
+  border-radius: 16px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  padding: 11px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+}
+.onb-struct-panel-header {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+}
+.onb-struct-section-label {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-top: 7px;
+  margin-bottom: 2px;
+}
+.onb-struct-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 6px;
+  border-radius: 7px;
+}
+.onb-struct-row--active {
+  background: color-mix(in srgb, var(--panel-text) 7%, transparent);
+}
+.onb-struct-num {
+  flex-shrink: 0;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  width: 14px;
+  text-align: right;
+}
+.onb-struct-icon {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1;
+}
+.onb-struct-label {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* PAGE 3 — Intelligence (orb + entity highlight) */
+.onb-hero--intel {
+  flex-direction: column;
+  gap: 14px;
+  height: auto;
+}
+.onb-intel-highlight {
+  max-width: 480px;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  text-align: left;
+}
+.onb-intel-highlight-text {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--text);
+  margin: 0;
+}
+/* Entity span colors — mirror the production intel highlight palette */
+.onb-ent-speech {
+  background: rgba(16, 102, 255, 0.13);
+  border-radius: 3px;
+  padding: 1px 2px;
+  color: color-mix(in srgb, #1066FF 65%, var(--text));
+}
+.onb-ent-char {
+  background: rgba(0, 190, 175, 0.15);
+  border-radius: 3px;
+  padding: 1px 3px;
+  color: color-mix(in srgb, #00bead 60%, var(--text));
+  font-weight: 500;
+}
+.onb-ent-place {
+  background: rgba(235, 155, 30, 0.14);
+  border-radius: 3px;
+  padding: 1px 3px;
+  color: color-mix(in srgb, #e5980a 60%, var(--text));
+}
+.onb-ent-action {
+  background: rgba(210, 90, 30, 0.11);
+  border-radius: 3px;
+  padding: 1px 2px;
+  color: color-mix(in srgb, #d05a1e 55%, var(--text));
+}
+
+/* PAGE 5 browser — Export formats */
+.onb-hero--export {
+  height: 190px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 620px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.onb-export-cards {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+}
+.onb-export-card {
+  flex: 1;
+  border-radius: 14px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.onb-export-card-fmt {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+.onb-export-card-desc {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-tertiary);
+  letter-spacing: 0.01em;
+}
+
+/* PAGE 6 — Getting-started checklist */
+.onb-hero--checklist {
+  align-items: stretch;
+  width: 100%;
+  max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.onb-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 18px 20px;
+  border-radius: 18px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+}
+.onb-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  opacity: 0;
+}
+.onb-checklist-item--visible {
+  animation: onbCheckIn 0.45s ease forwards;
+}
+@keyframes onbCheckIn {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.onb-checklist-circle {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid var(--divider-line);
+  background: transparent;
+}
+.onb-checklist-text {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  text-align: left;
+}
+
+/* Responsive: collapse structure + export cards to single column */
+@media (max-width: 720px) {
+  .onb-struct-panels,
+  .onb-export-cards { flex-direction: column; gap: 8px; }
+  .onb-hero--structure { height: auto; }
+  .onb-hero--export { height: auto; }
+}
+
 /* ═══════════════════════════════════════════
    PDF EXPORT OVERLAY — page format + paper size picker
    Reuses .index-overlay (full-screen scrim) and .world-panel (glass card),
@@ -8266,6 +8677,114 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
 .pdf-cover-preview-zone--bottom {
   margin-top: auto;
   margin-bottom: 8px;
+}
+
+/* ── Export format switcher (PDF | Markdown | DOCX) ─────────────────────
+   Sits in the world-header between the title and the close button.
+   Uses the same geometry as world-tab but renders as a compact pill group. */
+
+.pdf-format-switcher {
+  display: flex;
+  gap: 3px;
+}
+
+.pdf-format-btn {
+  padding: 5px 11px;
+  border-radius: var(--btn-radius);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.pdf-format-btn:hover {
+  color: var(--text-secondary);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pdf-format-btn:hover { background: rgba(255, 255, 255, 0.05); }
+}
+
+.pdf-format-btn--active {
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.07);
+  border-color: var(--divider-line);
+}
+
+@media (prefers-color-scheme: dark) {
+  .pdf-format-btn--active { background: rgba(255, 255, 255, 0.09); }
+}
+
+/* When PDF sub-tabs follow the header, remove the header's own bottom
+   border so the sub-tabs row provides the single visual separator. */
+.pdf-header--has-subtabs {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
+/* PDF sub-tab row — the existing world-tabs moved outside the header so
+   the header can hold the format switcher instead. Provides its own
+   bottom border so the body content is still visually separated. */
+.pdf-sub-tabs {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider-line);
+}
+
+/* Simple body layout for Markdown / DOCX (no card grid or preview). */
+.pdf-body--simple {
+  align-items: center;
+  justify-content: center;
+}
+
+.pdf-simple-card {
+  max-width: 400px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0;
+}
+
+.pdf-simple-badge {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: var(--bg-glass-hover);
+  border: 1px solid var(--divider-line);
+  border-radius: 8px;
+  padding: 3px 10px;
+}
+
+.pdf-simple-name {
+  font-family: var(--font-body);
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.pdf-simple-stats {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.pdf-simple-desc {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  max-width: 300px;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -12259,4 +12778,282 @@ body.electron-window-unfocused .timeline-full-panel::before {
 .hl-tool--error::after {
   background: rgba(244, 63, 94, 0.85);
   color: #fff;
+}
+
+/* ── Pro badge ──────────────────────────────────────────────── */
+.pro-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 6px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--panel-text) 55%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--panel-text) 16%, transparent);
+  border-radius: 999px;
+  padding: 2px 6px;
+  padding-top: 3px;
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}
+.pro-badge--xs {
+  font-size: 6px;
+  padding: 1px 4px;
+}
+
+/* ── Locked intel button ─────────────────────────────────────── */
+.settings-intel-btn--locked {
+  opacity: 0.62;
+  cursor: default;
+  position: relative;
+}
+.settings-intel-btn--locked .pro-badge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+}
+
+/* ── Locked hint row ─────────────────────────────────────────── */
+.locked-hint {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--panel-text) 60%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 5%, transparent);
+  border-radius: 12px;
+  padding: 6px 10px;
+  opacity: 0;
+  max-height: 0;
+  margin-bottom: -16px;
+  overflow: hidden;
+  transition: opacity 0.18s ease, max-height 0.18s ease;
+}
+.locked-hint--visible {
+  opacity: 1;
+  max-height: 40px;
+  margin-bottom: 0px;
+}
+.locked-hint-icon {
+  flex-shrink: 0;
+  flex-grow: 0;
+  color: color-mix(in srgb, var(--panel-text) 50%, transparent);
+}
+
+/* ── License code input ──────────────────────────────────────── */
+.settings-code-input {
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--divider-line);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: var(--text);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+@media (prefers-color-scheme: dark) {
+  .settings-code-input {
+    background: rgba(255, 255, 255, 0.03);
+  }
+}
+.settings-code-input::placeholder {
+  color: var(--text-tertiary);
+}
+.settings-code-input:focus {
+  border-color: rgba(100, 140, 255, 0.45);
+  box-shadow: 0 0 0 3px rgba(100, 140, 255, 0.10);
+}
+.settings-code-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.settings-code-row .settings-code-input {
+  flex: 1;
+}
+.settings-code-submit {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--divider-line);
+  border-radius: 10px;
+  padding: 9px 14px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.settings-code-submit--active {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+.settings-code-submit--active:hover {
+  background: var(--text-secondary);
+  border-color: var(--text-secondary);
+}
+.settings-code-status {
+  font-size: 11px;
+  margin-top: 5px;
+}
+.settings-code-status--error {
+  color: color-mix(in srgb, #ff5050 70%, var(--panel-text));
+}
+.settings-code-status--success {
+  color: color-mix(in srgb, #22c55e 70%, var(--panel-text));
+}
+.settings-code-active-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--panel-text) 75%, transparent);
+}
+.settings-code-active-label {
+  flex: 1;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--panel-text) 50%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.settings-code-remove-btn {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  background: none;
+  border: 1px solid color-mix(in srgb, var(--panel-text) 20%, transparent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: color-mix(in srgb, var(--panel-text) 55%, transparent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.settings-code-remove-btn:hover {
+  color: color-mix(in srgb, var(--panel-text) 80%, transparent);
+  border-color: color-mix(in srgb, var(--panel-text) 35%, transparent);
+}
+.settings-code-pro-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in srgb, var(--panel-text) 80%, transparent);
+}
+
+/* ── Renderer pro gate ───────────────────────────────────────── */
+.renderer-pro-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px 24px;
+  text-align: center;
+  height: 100%;
+  box-sizing: border-box;
+}
+.renderer-pro-gate-logo {
+  width: 90px;
+  height: 56px;
+  opacity: 0.7;
+}
+@media (prefers-color-scheme: dark) {
+  .renderer-pro-gate-logo {
+    filter: invert(1) opacity(0.7);
+  }
+}
+.renderer-pro-gate-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--panel-text);
+}
+.renderer-pro-gate-desc {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--panel-text) 60%, transparent);
+  line-height: 1.5;
+  max-width: 220px;
+}
+.renderer-pro-gate-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 260px;
+}
+.renderer-pro-gate-hint {
+  font-size: 11px;
+  color: color-mix(in srgb, var(--panel-text) 40%, transparent);
+  margin-top: -2px;
+}
+
+/* ── Onboarding pro code row ─────────────────────────────────── */
+.onb-pro-row {
+  margin-top: 16px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-text) 10%, transparent);
+  padding-top: 12px;
+}
+.onb-pro-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--panel-text) 60%, transparent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  font-family: var(--font-ui);
+}
+.onb-pro-toggle:hover {
+  color: color-mix(in srgb, var(--panel-text) 85%, transparent);
+}
+.onb-pro-toggle-chevron {
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+.onb-pro-toggle-chevron--open {
+  transform: rotate(90deg);
+}
+.onb-pro-expand {
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+.onb-pro-expand--open {
+  max-height: 120px;
+  opacity: 1;
+}
+.onb-pro-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.onb-pro-form .settings-code-input {
+  flex: 1;
+}
+.onb-pro-status {
+  font-size: 11px;
+  margin-top: 5px;
+  color: color-mix(in srgb, var(--panel-text) 55%, transparent);
+}
+.onb-pro-status--error {
+  color: color-mix(in srgb, #ff5050 70%, var(--panel-text));
+}
+.onb-pro-status--success {
+  color: color-mix(in srgb, #22c55e 70%, var(--panel-text));
 }

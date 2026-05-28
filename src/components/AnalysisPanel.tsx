@@ -44,6 +44,8 @@ import {
   saveWidgetConfig,
 } from "../lib/widget-config";
 import { isDesktopApp } from "../lib/project-manager";
+import { activateCode, clearLicense, type Tier } from "../lib/license";
+import { ProBadge, LockedHint } from "./ProBadge";
 import { useRendererActive } from "../lib/renderer-active-store";
 import { type ToolRegistry, type RegisteredTool, EMPTY_REGISTRY, buildToolRegistry } from "../lib/tool-registry";
 
@@ -84,6 +86,8 @@ interface Props {
   onNovelRefresh?: (novel: import("../types").Novel | null) => void;
   onImportTools?: () => void;
   onToolHighlights?: (highlights: import("../lib/tool-runner").ToolHighlight[]) => void;
+  tier: Tier;
+  onTierChange: (t: Tier) => void;
 }
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
@@ -100,12 +104,35 @@ interface SettingsProps {
   prefs: Preferences;
   onSetPrefs: (next: Preferences) => void;
   onImportTools?: () => void;
+  tier: Tier;
+  onTierChange: (t: Tier) => void;
 }
 
 const FONT_OPTIONS: Typography["fontFamily"][] = ["georgia", "iowan", "system", "sf-pro", "menlo"];
 
-function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportTools }: SettingsProps) {
+function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportTools, tier, onTierChange }: SettingsProps) {
   const { typography, goals } = prefs;
+  const [lockedHintFor, setLockedHintFor] = useState<IntelMode | null>(null);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeError, setCodeError] = useState<string | null>(null);
+  const [codeSuccess, setCodeSuccess] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
+
+  const handleActivate = async () => {
+    if (isActivating) return;
+    setIsActivating(true);
+    const result = await activateCode(codeInput);
+    setIsActivating(false);
+    if (result.ok) {
+      setCodeInput("");
+      setCodeSuccess(true);
+      setCodeError(null);
+      onTierChange("pro");
+    } else {
+      setCodeError(result.error ?? "Invalid code.");
+      setCodeSuccess(false);
+    }
+  };
 
   const setTypography = (t: Partial<Typography>) =>
     onSetPrefs({ ...prefs, typography: { ...typography, ...t } });
@@ -121,20 +148,32 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
       <div className="settings-panel-scroll">
       <p className="settings-section-label">Intelligence</p>
       <div className="settings-intel-grid">
-        {INTEL_LEVELS.map(({ value, label, desc, color }) => (
-          <button
-            key={value}
-            className={`settings-intel-btn ${intelMode === value ? "settings-intel-btn--active" : ""}`}
-            style={intelMode === value ? { "--intel-color": color } as CSSProperties : undefined}
-            onClick={() => onSetIntelMode(value)}
-          >
-            <span className="settings-intel-label" style={{ color: intelMode === value ? color : undefined }}>
-              {label}
-            </span>
-            <span className="settings-intel-desc">{desc}</span>
-          </button>
-        ))}
+        {INTEL_LEVELS.map(({ value, label, desc, color }) => {
+          const isLocked = tier === "free" && value !== "auto" && value !== "off";
+          return (
+            <button
+              key={value}
+              className={`settings-intel-btn ${intelMode === value ? "settings-intel-btn--active" : ""}${isLocked ? " settings-intel-btn--locked" : ""}`}
+              style={intelMode === value ? { "--intel-color": color } as CSSProperties : undefined}
+              onClick={() => {
+                if (isLocked) {
+                  setLockedHintFor(lockedHintFor === value ? null : value);
+                } else {
+                  setLockedHintFor(null);
+                  onSetIntelMode(value);
+                }
+              }}
+            >
+              <span className="settings-intel-label" style={{ color: intelMode === value ? color : undefined }}>
+                {label}
+              </span>
+              <span className="settings-intel-desc">{desc}</span>
+              {isLocked && <ProBadge />}
+            </button>
+          );
+        })}
       </div>
+      <LockedHint visible={lockedHintFor !== null} />
 
       <p className="settings-section-label">Typography</p>
 
@@ -220,6 +259,19 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
           ariaLabel="Toggle grouped toolbar tools"
         />
       </div>
+      <div className="settings-toggle-row">
+        <div className="settings-toggle-row-text">
+          <span className="settings-toggle-row-title">Split screen</span>
+          <span className="settings-toggle-row-desc">
+            View two chapters side by side. Toggle with ⌘\.
+          </span>
+        </div>
+        <GlassToggle
+          checked={!!prefs.splitView}
+          onChange={(v) => onSetPrefs({ ...prefs, splitView: v })}
+          ariaLabel="Toggle split screen"
+        />
+      </div>
 
       <p className="settings-section-label">Daily goal</p>
       <div className="settings-stack">
@@ -287,6 +339,48 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
         >
           Import tools from project
         </button>
+      )}
+
+      <p className="settings-section-label">Account</p>
+      {tier === "pro" ? (
+        <div className="settings-toggle-row">
+          <div className="settings-code-pro-status">
+            <ProBadge />
+            <span>Pro active</span>
+          </div>
+          <button
+            type="button"
+            className="settings-code-remove-btn"
+            onClick={() => { clearLicense(); onTierChange("free"); }}
+          >
+            Remove
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="settings-code-row">
+            <input
+              type="text"
+              className="settings-code-input"
+              placeholder="Enter your Pro code…"
+              value={codeInput}
+              spellCheck={false}
+              onChange={(e) => { setCodeInput(e.target.value); setCodeError(null); setCodeSuccess(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") { void handleActivate(); } }}
+            />
+            <button
+              type="button"
+              className={`settings-code-submit${codeInput.trim() ? " settings-code-submit--active" : ""}`}
+              disabled={isActivating}
+              onClick={() => { void handleActivate(); }}
+            >
+              {isActivating ? "…" : "Activate"}
+            </button>
+          </div>
+          {codeError && <p className="settings-code-status settings-code-status--error">{codeError}</p>}
+          {codeSuccess && <p className="settings-code-status settings-code-status--success">Pro activated!</p>}
+          <p className="settings-hint">One-time purchase. Works offline.</p>
+        </>
       )}
 
       <p className="settings-hint">
@@ -495,6 +589,7 @@ export function AnalysisPanel({
   storyGraph, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
   onImportTools, onToolHighlights,
+  tier, onTierChange,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
   // under high intelligence. Auto resolves dynamically per chapter, so we
@@ -913,6 +1008,8 @@ export function AnalysisPanel({
               prefs={prefs}
               onSetPrefs={onSetPrefs}
               onImportTools={onImportTools}
+              tier={tier}
+              onTierChange={onTierChange}
             />
           </div>
         )}
@@ -956,6 +1053,8 @@ export function AnalysisPanel({
               next.set(name, data);
               return next;
             })}
+            tier={tier}
+            onTierChange={onTierChange}
           />
         </div>
 

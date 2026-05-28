@@ -6,7 +6,7 @@ import type { ActionPrediction } from "../lib/action-detect";
 import type { ToolHighlight } from "../lib/tool-runner";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { measurePerfSync } from "../lib/perf-trace";
-import { resolveLiveKnownNames } from "../lib/world-data";
+import { resolveLiveKnownNames, type EntityNameMap } from "../lib/world-data";
 import * as HighlightLayerModule from "./HighlightLayer";
 import { checkGrammar } from "../lib/grammar-check";
 
@@ -17,6 +17,7 @@ interface Props {
   onContentChange: (next: string) => void;
   analysisResult?: ChapterAnalysisResult | null;
   knownNames?: string[];
+  entityNameMap?: EntityNameMap;
   onEntityClick?: (name: string, anchor: DOMRect) => void;
   annotationMode?: boolean;
   onSpeechAnnotate?: (info: AnnotationTarget, anchor: DOMRect) => void;
@@ -29,6 +30,7 @@ interface Props {
   sidePanelOpen?: boolean;
   sidePanelCompensation?: boolean;
   layoutWidthKey?: string;
+  splitMode?: boolean;
 }
 
 const ANALYSIS_PANEL_RESERVED_WIDTH = 410;
@@ -59,12 +61,13 @@ function resolveParagraphSlice(content: string, caret: number): ParagraphSlice {
 }
 
 export function Editor({
-  chapter, onContentChange, analysisResult, knownNames, onEntityClick,
+  chapter, onContentChange, analysisResult, knownNames, entityNameMap, onEntityClick,
   annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides,
   speechPredictions, actionPredictions, toolHighlights, typingSettleMs = 1000,
   sidePanelOpen = false,
   sidePanelCompensation = false,
   layoutWidthKey,
+  splitMode = false,
 }: Props) {
   const articleRef = useRef<HTMLElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -76,8 +79,18 @@ export function Editor({
   const resize = () => {
     const ta = taRef.current;
     if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = ta.scrollHeight + "px";
+    if (splitMode) {
+      const pane = ta.closest(".split-pane");
+      const scrollTop = pane ? pane.scrollTop : 0;
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+      if (pane && pane.scrollTop !== scrollTop) pane.scrollTop = scrollTop;
+    } else {
+      const scrollY = window.scrollY;
+      ta.style.height = "auto";
+      ta.style.height = ta.scrollHeight + "px";
+      if (window.scrollY !== scrollY) window.scrollTo(0, scrollY);
+    }
   };
 
   const scheduleResize = () => {
@@ -186,7 +199,7 @@ export function Editor({
   );
 
   const recomputeCompensation = useCallback(() => {
-    if (!sidePanelCompensation || !sidePanelOpen) {
+    if (splitMode || !sidePanelCompensation || !sidePanelOpen) {
       setCompensationShift((prev) => (prev === 0 ? prev : 0));
       return;
     }
@@ -216,7 +229,7 @@ export function Editor({
     const nextShift = Math.min(desiredShift, maxShift);
 
     setCompensationShift((prev) => (Math.abs(prev - nextShift) < 0.5 ? prev : nextShift));
-  }, [sidePanelCompensation, sidePanelOpen]);
+  }, [splitMode, sidePanelCompensation, sidePanelOpen]);
 
   useLayoutEffect(() => {
     recomputeCompensation();
@@ -249,6 +262,7 @@ export function Editor({
             paragraphs={analysisResult.paragraphs}
             speechResults={analysisResult.speechResults}
             knownNames={knownNames}
+            entityNameMap={entityNameMap}
             liveKnownNames={liveKnownNames}
             liveParagraphRange={activeParagraph.end > activeParagraph.start
               ? { start: activeParagraph.start, end: activeParagraph.end }

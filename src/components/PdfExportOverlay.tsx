@@ -29,7 +29,8 @@ import {
   type CoverTextField,
   type CoverTextPosition,
 } from "../lib/pdf-export";
-import type { NovelMeta } from "../types";
+import { novelToMarkdown, novelToDocx, downloadBlob } from "../lib/text-export";
+import type { Novel, NovelMeta } from "../types";
 import {
   CloseIcon, FileTextIcon, BookOpenIcon, ImageIcon, TypeIcon,
   PlusIcon, TrashIcon, UploadIcon,
@@ -41,9 +42,13 @@ interface Props {
   /** Used to seed default text boxes (title / subtitle / author / description)
    *  with the writer's existing book metadata so they don't have to retype it. */
   meta: NovelMeta;
+  /** Full novel — needed for Markdown and DOCX export. */
+  novel?: Novel;
   onConfirm: (options: PdfExportOptions) => void;
   onClose: () => void;
 }
+
+type ExportType = "pdf" | "markdown" | "docx";
 
 type Tab = "format" | "size" | "front" | "back";
 
@@ -173,9 +178,10 @@ function seedBackCover(meta: NovelMeta): CoverDesign {
 
 // ── Component ─────────────────────────────────────────────────────────────
 
-export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
+export function PdfExportOverlay({ meta, novel, onConfirm, onClose }: Props) {
   const [opts, setOpts] = useState<PdfExportOptions>(() => loadPdfPrefs());
   const [tab, setTab] = useState<Tab>("format");
+  const [exportType, setExportType] = useState<ExportType>("pdf");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -188,7 +194,7 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [opts]);
+  }, [opts, exportType]);
 
   const setFormat = (id: PageFormatId) =>
     setOpts((o) => ({ ...o, pageFormatId: id }));
@@ -201,12 +207,32 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
     setOpts((o) => ({ ...o, backCover: back }));
 
   const confirm = () => {
+    if (exportType === "markdown" || exportType === "docx") {
+      if (!novel) return;
+      const safeTitle = (novel.meta.title || "novel").replace(/[^\w\d-]+/g, "-").toLowerCase();
+      if (exportType === "markdown") {
+        downloadBlob(`${safeTitle}.md`, novelToMarkdown(novel), "text/markdown;charset=utf-8");
+      } else {
+        downloadBlob(
+          `${safeTitle}.docx`,
+          novelToDocx(novel),
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        );
+      }
+      onClose();
+      return;
+    }
     savePdfPrefs(opts);
     onConfirm(opts);
   };
 
   const fmt = PAGE_FORMAT_PRESETS.find((p) => p.id === opts.pageFormatId)!;
   const size = PAPER_SIZE_PRESETS.find((p) => p.id === opts.paperSizeId)!;
+
+  const exportBtnLabel =
+    exportType === "markdown" ? "Export .md"
+    : exportType === "docx"   ? "Export .docx"
+    : "Export PDF";
 
   return (
     <div
@@ -216,9 +242,29 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
       }}
     >
       <div className="world-panel pdf-panel">
-        <div className="world-header">
-          <h2 className="world-title">Export PDF</h2>
-          <div className="world-tabs">
+        {/* Header — title + export-type switcher + close */}
+        <div className={`world-header${exportType === "pdf" ? " pdf-header--has-subtabs" : ""}`}>
+          <h2 className="world-title">Export</h2>
+          <div className="pdf-format-switcher" role="group" aria-label="Export format">
+            {(["pdf", "markdown", "docx"] as ExportType[]).map((t) => (
+              <button
+                key={t}
+                className={`pdf-format-btn${exportType === t ? " pdf-format-btn--active" : ""}`}
+                onClick={() => setExportType(t)}
+                aria-pressed={exportType === t}
+              >
+                {t === "pdf" ? "PDF" : t === "markdown" ? "Markdown" : "DOCX"}
+              </button>
+            ))}
+          </div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close export panel">
+            <CloseIcon />
+          </button>
+        </div>
+
+        {/* PDF sub-tabs (only visible in PDF mode) */}
+        {exportType === "pdf" && (
+          <div className="world-tabs pdf-sub-tabs">
             <button
               className={`world-tab ${tab === "format" ? "world-tab--active" : ""}`}
               onClick={() => setTab("format")}
@@ -260,40 +306,88 @@ export function PdfExportOverlay({ meta, onConfirm, onClose }: Props) {
               )}
             </button>
           </div>
-          <button className="icon-btn" onClick={onClose} aria-label="Close export panel">
-            <CloseIcon />
-          </button>
-        </div>
+        )}
 
-        {tab === "format" || tab === "size" ? (
-          <FormatOrSizeBody
-            tab={tab}
-            opts={opts}
-            fmt={fmt}
-            size={size}
-            onSelectFormat={setFormat}
-            onSelectSize={setSize}
-          />
+        {/* Body */}
+        {exportType === "pdf" ? (
+          tab === "format" || tab === "size" ? (
+            <FormatOrSizeBody
+              tab={tab}
+              opts={opts}
+              fmt={fmt}
+              size={size}
+              onSelectFormat={setFormat}
+              onSelectSize={setSize}
+            />
+          ) : (
+            <CoverComposer
+              variant={tab}
+              cover={tab === "front" ? opts.frontCover : opts.backCover}
+              onChange={(c) => (tab === "front" ? setFrontCover(c) : setBackCover(c))}
+              onSeed={() =>
+                (tab === "front" ? setFrontCover : setBackCover)(
+                  tab === "front" ? seedFrontCover(meta) : seedBackCover(meta),
+                )
+              }
+              paper={{ widthIn: size.widthIn, heightIn: size.heightIn }}
+            />
+          )
         ) : (
-          <CoverComposer
-            variant={tab}
-            cover={tab === "front" ? opts.frontCover : opts.backCover}
-            onChange={(c) => (tab === "front" ? setFrontCover(c) : setBackCover(c))}
-            onSeed={() =>
-              (tab === "front" ? setFrontCover : setBackCover)(
-                tab === "front" ? seedFrontCover(meta) : seedBackCover(meta),
-              )
-            }
-            paper={{ widthIn: size.widthIn, heightIn: size.heightIn }}
-          />
+          <SimpleExportBody novel={novel} exportType={exportType} />
         )}
 
         <div className="pdf-footer">
           <button className="pdf-cancel" onClick={onClose}>Cancel</button>
           <button className="pdf-export-btn" onClick={confirm}>
-            Export PDF
+            {exportBtnLabel}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Simple export body (Markdown / DOCX) ─────────────────────────────────
+
+const FORMAT_META: Record<Exclude<ExportType, "pdf">, { label: string; badge: string; desc: string }> = {
+  markdown: {
+    label: "Markdown (.md)",
+    badge: "Markdown",
+    desc: "Clean Markdown with chapter headings, scene-break dividers, and title / author metadata. Opens in any text editor, Bear, Obsidian, iA Writer, or GitHub.",
+  },
+  docx: {
+    label: "Word Document (.docx)",
+    badge: "DOCX",
+    desc: "Standard Word document — double-spaced Times New Roman, Heading 1 chapter titles, scene-break ornaments. Opens in Word, Pages, LibreOffice, and Google Docs.",
+  },
+};
+
+function SimpleExportBody({ novel, exportType }: { novel?: Novel; exportType: Exclude<ExportType, "pdf"> }) {
+  const wordCount = novel
+    ? novel.chapters.reduce((n, ch) => {
+        let count = 0;
+        let inWord = false;
+        for (let i = 0; i < ch.content.length; i++) {
+          const ws = ch.content[i] === " " || ch.content[i] === "\n" || ch.content[i] === "\t";
+          if (ws) { inWord = false; } else if (!inWord) { count++; inWord = true; }
+        }
+        return n + count;
+      }, 0)
+    : 0;
+
+  const meta = FORMAT_META[exportType];
+
+  return (
+    <div className="pdf-body pdf-body--simple">
+      <div className="pdf-simple-card">
+        <span className="pdf-simple-badge">{meta.badge}</span>
+        <div className="pdf-simple-name">{novel?.meta.title || "Untitled"}</div>
+        {novel && (
+          <div className="pdf-simple-stats">
+            {novel.chapters.length} chapter{novel.chapters.length !== 1 ? "s" : ""} · {wordCount.toLocaleString()} words
+          </div>
+        )}
+        <div className="pdf-simple-desc">{meta.desc}</div>
       </div>
     </div>
   );

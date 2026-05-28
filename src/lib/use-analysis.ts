@@ -13,7 +13,7 @@ import {
   type ChapterRole,
   type ProseRegister,
 } from "./chapter-analysis";
-import { resolveKnownNames } from "./world-data";
+import { resolveEntityNameMap, type EntityNameMap } from "./world-data";
 import { runChapterAnalysisInWorker } from "./analysis-worker-client";
 import { runChapterAnalysis, type ChapterAnalysisResult } from "./chapter-analysis-runner";
 import { logPerfEvent } from "./perf-trace";
@@ -55,8 +55,11 @@ interface UseAnalysisOptions {
 interface UseAnalysisReturn {
   result: ChapterAnalysisResult | null;
   isAnalyzing: boolean;
-  /** Resolved entity name list — exposed so HighlightLayer can highlight uniformly. */
+  /** All entity names (all types) — exposed so HighlightLayer can highlight all entities. */
   knownNames: string[];
+  /** Type-structured entity names — characters only go to speech-detect; the highlight
+   *  layer uses this to render places/factions/entities with distinct visual styles. */
+  entityNameMap: EntityNameMap;
   /** Cached analysis for the chapter immediately before the current one, if
    *  it was previously visited and analysed. null otherwise (no eager
    *  cross-chapter analysis — we don't trigger fresh runs just for context). */
@@ -104,11 +107,15 @@ export function useAnalysis(
   // debounce the chapters reference so that scan only runs after a typing pause,
   // not on every single keystroke.
   const debouncedChapters = useDebouncedValue(novel.chapters, 2000);
-  const knownNames = useMemo(
-    () => resolveKnownNames({ ...novel, chapters: debouncedChapters }),
+  const entityNameMap = useMemo(
+    () => resolveEntityNameMap({ ...novel, chapters: debouncedChapters }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [novel.worldData, debouncedChapters],
   );
+  // All entity names for the highlight layer (places, factions, entities, characters).
+  const knownNames = useMemo(() => entityNameMap.all, [entityNameMap]);
+  // Character names only — the only type eligible to be attributed as speakers.
+  const characterNames = useMemo(() => entityNameMap.characters, [entityNameMap]);
 
   useEffect(() => {
     if (!currentChapterId) {
@@ -181,7 +188,7 @@ export function useAnalysis(
             chapter,
             prevContext,
             siblingStats,
-            knownNames,
+            knownNames: characterNames, // speech-detect only receives character names
             level,
             learnedBias: options.learnedBias,
             adaptiveContext: options.adaptiveContext,
@@ -272,7 +279,7 @@ export function useAnalysis(
             chapter: prevChapter,
             prevContext: prevCtx,
             siblingStats: buildSiblings(prevChapter.id),
-            knownNames,
+            knownNames: characterNames,
             level,
             learnedBias: options.learnedBias,
           };
@@ -290,7 +297,7 @@ export function useAnalysis(
             chapter: nextChapter,
             prevContext: currentCached.endContext,
             siblingStats: buildSiblings(nextChapter.id),
-            knownNames,
+            knownNames: characterNames,
             level,
             learnedBias: options.learnedBias,
           };
@@ -328,5 +335,5 @@ export function useAnalysis(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [novel.chapters, currentChapterId, result, adjacentReady]);
 
-  return { result, isAnalyzing, knownNames, prevResult, nextResult };
+  return { result, isAnalyzing, knownNames, entityNameMap, prevResult, nextResult };
 }

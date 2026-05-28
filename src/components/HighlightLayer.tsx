@@ -7,6 +7,7 @@ import { findActionSentences, attributeActor, type ActionPrediction, type Action
 import type { GrammarSuggestion } from "../lib/grammar-check";
 import type { ToolHighlight } from "../lib/tool-runner";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
+import type { EntityNameMap } from "../lib/world-data";
 
 const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
@@ -100,6 +101,7 @@ function renderInline(
   onEntityClick?: (name: string, anchor: DOMRect) => void,
   annotationMode?: boolean,
   toolLocal?: ToolHighlight[],
+  entityTypeMap?: Map<string, "character" | "place" | "faction" | "entity">,
 ): ReactNode[] {
   // Build a unified list of decoration ranges sorted by start.
   type Deco =
@@ -151,12 +153,14 @@ function renderInline(
     if (d.kind === "entity") {
       const matched = d.matched;
       const canonical = speakerNames.find(n => n.toLowerCase() === matched.toLowerCase()) ?? matched;
+      const entityType = entityTypeMap?.get(canonical.toLowerCase()) ?? "character";
       const entityColor = getSpeakerColor(palette, canonical).text;
       parts.push(
         <span
           key={`${keyPrefix}-e${i++}`}
-          className="entity-tag "
+          className={`entity-tag entity-tag--${entityType}`}
           style={{ "--entity-color": entityColor } as CSSProperties}
+          data-entity-type={entityType}
           onClick={onEntityClick ? (e) => {
             e.stopPropagation();
             const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -244,9 +248,10 @@ function renderActionable(
   onActionClick?: (localActionIndex: number, text: string, actor: string | null, anchor: DOMRect) => void,
   annotationMode?: boolean,
   toolLocal?: ToolHighlight[],
+  entityTypeMap?: Map<string, "character" | "place" | "faction" | "entity">,
 ): ReactNode[] {
   if (actionsLocal.length === 0) {
-    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode, toolLocal);
+    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode, toolLocal, entityTypeMap);
   }
 
   const parts: ReactNode[] = [];
@@ -260,7 +265,7 @@ function renderActionable(
       const toolChunk = clipToolHighlights(toolLocal, cursor, a.start);
       parts.push(
         <span key={`${keyPrefix}-pre${i}`}>
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode, toolChunk)}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode, toolChunk, entityTypeMap)}
         </span>,
       );
     }
@@ -287,7 +292,7 @@ function renderActionable(
             onActionClick(actionIdx, chunk, actor, (e.currentTarget as HTMLElement).getBoundingClientRect());
           } : undefined}
         >
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode, clipToolHighlights(toolLocal, a.start, a.end))}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode, clipToolHighlights(toolLocal, a.start, a.end), entityTypeMap)}
         </span>
         {hasOvr && renderAnnotationPill(`${keyPrefix}-act${i}`, actor, colorVal || "var(--text-secondary)", "action")}
         {annotationMode && needsReview && !hasOvr && renderReviewPill(`${keyPrefix}-act${i}`, colorVal || ACTION_TEXT, "action")}
@@ -302,7 +307,7 @@ function renderActionable(
     const toolChunk = clipToolHighlights(toolLocal, cursor, text.length);
     parts.push(
       <span key={`${keyPrefix}-post${actionsLocal.length}`}>
-        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode, toolChunk)}
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode, toolChunk, entityTypeMap)}
       </span>,
     );
   }
@@ -401,6 +406,8 @@ interface Props {
   visible?: boolean;
   speechResults: ChapterAnalysisResult["speechResults"];
   knownNames?: string[];
+  /** Type-structured entity names — used to apply distinct CSS classes per entity type. */
+  entityNameMap?: EntityNameMap;
   liveKnownNames?: string[];
   liveParagraphRange?: { start: number; end: number } | null;
   /** Grammar suggestions over the FULL `content` (absolute offsets). */
@@ -420,10 +427,22 @@ interface Props {
 }
 
 function HighlightLayerImpl({
-  content, snapshotContent, paragraphs, speechResults, knownNames, liveKnownNames, liveParagraphRange, visible = true,
+  content, snapshotContent, paragraphs, speechResults, knownNames, entityNameMap, liveKnownNames, liveParagraphRange, visible = true,
   grammarSuggestions = [], toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
   annotationOverrides, speechPredictions, actionPredictions,
 }: Props) {
+  // Build a lowercase-name → entity-type map for type-aware tag rendering.
+  const entityTypeMap = useMemo<Map<string, "character" | "place" | "faction" | "entity">>(() => {
+    const m = new Map<string, "character" | "place" | "faction" | "entity">();
+    if (!entityNameMap) return m;
+    for (const n of entityNameMap.characters) m.set(n.toLowerCase(), "character");
+    // Place, faction, entity can overlap with character aliases — characters win
+    // (e.g. a character named "The Council" shouldn't lose their colour).
+    for (const n of entityNameMap.places)    m.set(n.toLowerCase(), "place");
+    for (const n of entityNameMap.factions)  m.set(n.toLowerCase(), "faction");
+    for (const n of entityNameMap.entities)  m.set(n.toLowerCase(), "entity");
+    return m;
+  }, [entityNameMap]);
   const snapshotPlan = useMemo(() => {
     const emptyPalette = new Map<string, ColorPair>();
     if (!paragraphs.length) {
@@ -564,6 +583,7 @@ function HighlightLayerImpl({
                   : undefined,
                 annotationMode,
                 gapToolHL,
+                entityTypeMap,
               )}
             </span>,
           );
@@ -621,7 +641,7 @@ function HighlightLayerImpl({
               onClick={segSpeechOnClick ? segSpeechOnClick(segIndex) : undefined}
             >
               {renderInline(segText, speakerNames, palette, segStyle,
-                segGrammar, `sg${pi}-${seg.start}`, onEntityClick, annotationMode)}
+                segGrammar, `sg${pi}-${seg.start}`, onEntityClick, annotationMode, undefined, entityTypeMap)}
             </span>
             {hasOverride && renderAnnotationPill(`sg${pi}-${seg.start}`, overrideName, color, "speech")}
             {annotationMode && speechPrediction?.needsReview && !hasOverride && renderReviewPill(`sg${pi}-${seg.start}`, color, "speech")}
@@ -680,6 +700,7 @@ function HighlightLayerImpl({
                 : undefined,
               annotationMode,
               tailToolHL,
+              entityTypeMap,
             )}
           </span>,
         );
@@ -690,7 +711,7 @@ function HighlightLayerImpl({
     }
 
     return { speakerNames, palette, paragraphNodes, paragraphMeta };
-  }, [snapshotContent, paragraphs, speechResults, knownNames, grammarSuggestions, toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
+  }, [snapshotContent, paragraphs, speechResults, knownNames, entityNameMap, grammarSuggestions, toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, speechPredictions, actionPredictions]);
 
   const livePlan = useMemo(() => {
     const names = [...new Set([...(liveKnownNames ?? []), ...snapshotPlan.speakerNames])];
@@ -749,6 +770,8 @@ function HighlightLayerImpl({
                 `${key}-live`,
                 onEntityClick,
                 annotationMode,
+                undefined,
+                entityTypeMap,
               )}
             </span>,
           );
@@ -773,6 +796,8 @@ function HighlightLayerImpl({
             key,
             onEntityClick,
             annotationMode,
+            undefined,
+            entityTypeMap,
           )}
         </span>
       );

@@ -171,13 +171,17 @@ function clampRes(v: number, min = FILTER_RES_MIN): number {
 function readBlur(el: Element): number {
   if (el.classList.contains("liquid-glass-control-knob")) return 0;
   if (el.matches(".glass-range-knob, .glass-toggle-knob")) return 0;
-  if (el.classList.contains("toolbar")) return 3;
+  if (el.classList.contains("toolbar")) return 2;
   if (el.classList.contains("settings-panel")) return 5;
-  if (el.matches(".analysis-tab, .analysis-action-group")) return 2;
+  if (el.matches(".analysis-tab, .analysis-action-group")) return 1;
   if (el.classList.contains("status-pill")) return 2;
-  if (el.matches(".annotation-popover, .annotation-panel")) return 3;
+  if (el.matches(".annotation-popover, .annotation-panel")) return 2;
   return BLUR_DEFAULT;
 }
+
+// Sync note: These blur values also need to match the CSS idle-state fallback
+// overrides in styles.css (body.scroll-edge-idle rules). When updating blur
+// values here, verify the corresponding CSS rules apply the same blur px value.
 
 function readMapPreset(el: Element): MapPreset {
   if (el.classList.contains("glass-toggle-knob") && el.classList.contains("liquid-glass-control-knob")) {

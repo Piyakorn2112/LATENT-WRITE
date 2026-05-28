@@ -4,18 +4,41 @@
   },
   "groups" : [
     {
+      "blur-material" : null,
       "hidden" : false,
       "layers" : [
         {
-          "image-name" : "Latent Logo.svg",
-          "name" : "Latent Logo",
+          "fill" : {
+            "solid" : "srgb:1.00000,1.00000,1.00000,1.00000"
+          },
+          "image-name" : "qdwqdwqd 2.svg",
+          "name" : "qdwqdwqd 2",
           "position" : {
-            "scale" : 1,
+            "scale" : 1.4,
             "translation-in-points" : [
               0,
-              -5
+              -20
             ]
           }
+        }
+      ],
+      "shadow" : {
+        "kind" : "layer-color",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "blur-material" : null,
+      "hidden" : false,
+      "layers" : [
+        {
+          "fill" : "none",
+          "image-name" : "wdqwdwqd.svg",
+          "name" : "wdqwdwqd"
         }
       ],
       "name" : "Group",
@@ -27,14 +50,25 @@
         ]
       },
       "shadow" : {
-        "kind" : "neutral",
+        "kind" : "layer-color",
         "opacity" : 0.5
       },
-      "specular" : false,
-      "translucency" : {
-        "enabled" : false,
-        "value" : 0.5
-      }
+      "specular" : true,
+      "translucency-specializations" : [
+        {
+          "value" : {
+            "enabled" : true,
+            "value" : 0.8
+          }
+        },
+        {
+          "appearance" : "light",
+          "value" : {
+            "enabled" : true,
+            "value" : 0
+          }
+        }
+      ]
     }
   ],
   "supported-platforms" : {
