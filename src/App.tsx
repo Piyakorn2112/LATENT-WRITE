@@ -311,7 +311,8 @@ export default function App() {
   const [tier, setTier] = useState<Tier>(() => loadLicense().tier);
   const handleTierChange = useCallback((t: Tier) => {
     setTier(t);
-    setIntelMode(t === "pro" ? "default" : "auto");
+    // When pro is deactivated, reset to auto — manual modes require pro.
+    if (t !== "pro") setIntelMode("auto");
   }, []);
   const [storyGraph, setStoryGraph] = useState<StoryGraph>(() => loadStoryGraph());
   // Ref so the storyGraph effect can read current entries without stale closure

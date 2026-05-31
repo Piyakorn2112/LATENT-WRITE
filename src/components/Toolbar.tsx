@@ -8,6 +8,17 @@ import {
 
 export type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
+type OrbPalette = { a: string; b: string; c: string };
+type ResolvedIntelMode = Exclude<IntelMode, "off" | "auto">;
+
+const INTEL_MODE_COPY: Record<IntelMode, { label: string; description: string }> = {
+  off:     { label: "Off",      description: "no highlighting" },
+  auto:    { label: "Auto",     description: "chooses the right depth per chapter" },
+  fast:    { label: "Fast",     description: "lightweight drafting feedback" },
+  default: { label: "Balanced", description: "everyday context-aware analysis" },
+  high:    { label: "High",     description: "deepest chapter analysis" },
+};
+
 // 60 : 30 : 10 feel — a=dominant, b=complement, c=highlight accent.
 //
 // These hex values are the originals after applying the SVG `saturate(200%)`
@@ -19,50 +30,80 @@ export type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 //   R' = 1.787R − 0.715G − 0.072B
 //   G' = −0.213R + 1.285G − 0.072B
 //   B' = −0.213R − 0.715G + 1.928B
-const ORB_COLORS: Record<Exclude<IntelMode, "off" | "auto">, { a: string; b: string; c: string }> = {
-  // fast — originals: #FFB42E / #F47A2D / #FFE0A0
-  fast:    { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
-  // default — originals: #3D68FF / #7dd8ff / #C0D8FF
-  default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
-  // high — originals: #8B2FF8 / #d880ff / #FFB8F8
-  high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
+// Per-mode bodies, tuned to the app theme. Each stays distinct in hue family:
+//   fast    → warm amber/coral (the warm complement to the blue theme)
+//   default → clean electric blue + cyan (no violet — distinct from auto)
+//   high    → deep violet → magenta → pink (theme violet family, most intense)
+const ORB_COLORS: Record<Exclude<IntelMode, "off" | "auto">, OrbPalette> = {
+  fast:    { a: "#FF9F0A", b: "#FF5E2A", c: "#FFD24A" },
+  default: { a: "#1A5BFF", b: "#33E9FF", c: "#B8E6FF" },
+  high:    { a: "#A02BF5", b: "#E04DFF", c: "#FFA6F0" },
 };
+
+const ORB_ACCENT_COLORS: Record<Exclude<IntelMode, "off" | "auto">, OrbPalette> = {
+  fast:    { a: "#34A8FF", b: "#7DE8FF", c: "#BFE9FF" },
+  default: { a: "#6F86FF", b: "#9FEEFF", c: "#CFE4FF" },
+  high:    { a: "#6F86FF", b: "#9CD8FF", c: "#F2C0FF" },
+};
+
+const paletteStyleVars = (palette?: OrbPalette): CSSProperties | undefined => palette
+  ? ({ "--orb-a": palette.a, "--orb-b": palette.b, "--orb-c": palette.c } as CSSProperties)
+  : undefined;
 
 const IDLE_PASSIVE_ORB_BODY_CLASS = "scroll-edge-idle";
 
 interface IntelBtnProps {
   mode: IntelMode;
   /** When mode === "auto", the level the prescan currently resolves to. */
-  resolvedLevel?: "fast" | "default" | "high";
+  resolvedLevel?: ResolvedIntelMode;
   onClick: () => void;
   analyzing: boolean;
   /** When true, overlays the bouncy gooey-eyes easter egg on the orb. */
   funMode?: boolean;
+  topPalette?: OrbPalette;
+  underPalette?: OrbPalette;
+  accentPalette?: OrbPalette;
 }
 
-function IntelBtn({ mode, resolvedLevel, onClick, analyzing, funMode }: IntelBtnProps) {
+function IntelBtn({
+  mode,
+  resolvedLevel,
+  onClick,
+  analyzing,
+  funMode,
+  topPalette,
+  underPalette,
+  accentPalette,
+}: IntelBtnProps) {
   const [passiveOrbActive, setPassiveOrbActive] = useState(false);
 
   // Same 6-orb geometry for ALL modes — auto cycles colours via CSS @property
   // animation, no extra dots, no scale transitions, no jump frames.
   const isAuto = mode === "auto";
-  const single = mode === "fast" || mode === "default" || mode === "high"
+  const resolvedPalette = mode === "fast" || mode === "default" || mode === "high"
     ? ORB_COLORS[mode]
-    : null;
-
-  // For auto mode the colours come entirely from @keyframes; no inline style
-  // variables required. For single modes, set --orb-a/b/c inline as before.
-  const styleVars = !isAuto && single
-    ? ({ "--orb-a": single.a, "--orb-b": single.b, "--orb-c": single.c } as CSSProperties)
+    : undefined;
+  const resolvedAccentPalette = mode === "fast" || mode === "default" || mode === "high"
+    ? ORB_ACCENT_COLORS[mode]
     : undefined;
 
+  // Keep the three mesh layers independently addressable even when they share
+  // the same palette by default.
+  const topStyleVars = paletteStyleVars(!isAuto ? (topPalette ?? resolvedPalette) : topPalette);
+  const underStyleVars = paletteStyleVars(!isAuto ? (underPalette ?? resolvedPalette) : underPalette);
+  const accentStyleVars = paletteStyleVars(!isAuto ? (accentPalette ?? resolvedAccentPalette) : accentPalette);
+  const fallbackStyleVars = topStyleVars;
+  const resolvedMode = resolvedLevel ?? "default";
+  const activeModeCopy = INTEL_MODE_COPY[mode];
+  const resolvedModeCopy = INTEL_MODE_COPY[resolvedMode];
+
   const ariaLabel = isAuto
-    ? `Intelligence mode: auto (resolved to ${resolvedLevel ?? "default"})${analyzing ? " (analyzing)" : ""}`
-    : `Intelligence mode: ${mode}${analyzing ? " (analyzing)" : ""}`;
+    ? `Intelligence mode: ${activeModeCopy.label} - ${activeModeCopy.description} (resolved to ${resolvedModeCopy.label})${analyzing ? " (analyzing)" : ""}`
+    : `Intelligence mode: ${activeModeCopy.label} - ${activeModeCopy.description}${analyzing ? " (analyzing)" : ""}`;
 
   const titleText = isAuto
-    ? `Intelligence: auto → ${resolvedLevel ?? "default"} (click to cycle)`
-    : `Intelligence: ${mode} (click to cycle)`;
+    ? `Intelligence: ${activeModeCopy.label} -> ${resolvedModeCopy.label} - ${activeModeCopy.description} (click to cycle)`
+    : `Intelligence: ${activeModeCopy.label} - ${activeModeCopy.description} (click to cycle)`;
 
   useEffect(() => {
     const body = document.body;
@@ -95,25 +136,32 @@ function IntelBtn({ mode, resolvedLevel, onClick, analyzing, funMode }: IntelBtn
     >
       <span className="intel-btn-inner">
         <span className="intel-orb-live">
-          {/* Two stacked mesh layers — the second one overlays the first
-              exactly, compounding the chroma additively. This is what
-              actually carries the saturated look across both Chromium and
-              WebKit; the `saturate()` filter still runs but no longer has
-              to do all the lifting on its own (which is where the cross-
-              engine green tint was creeping in). */}
+            {/* Three mesh layers: blue body, warmer under-glow, then a brighter
+              accent rim that can carry complementary colour. Keeping them
+              separate lets the third layer behave like a tiny chromatic
+              aberration pass instead of just doubling the same blur. */}
           <span
             className="intel-mesh-dot"
             data-mode={mode}
-            data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
-            style={styleVars}
+            data-resolved={isAuto ? resolvedMode : undefined}
+            style={topStyleVars}
+          >
+            {renderOrbs()}
+          </span>
+          <span
+            className="intel-mesh-dot intel-mesh-dot--accent"
+            data-mode={mode}
+            data-resolved={isAuto ? resolvedMode : undefined}
+            style={accentStyleVars}
+            aria-hidden="true"
           >
             {renderOrbs()}
           </span>
           <span
             className="intel-mesh-dot intel-mesh-dot--ghost"
             data-mode={mode}
-            data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
-            style={styleVars}
+            data-resolved={isAuto ? resolvedMode : undefined}
+            style={underStyleVars}
             aria-hidden="true"
           >
             {renderOrbs()}
@@ -123,8 +171,8 @@ function IntelBtn({ mode, resolvedLevel, onClick, analyzing, funMode }: IntelBtn
         <span
           className="intel-mesh-fallback"
           data-mode={mode}
-          data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
-          style={styleVars}
+          data-resolved={isAuto ? resolvedMode : undefined}
+          style={fallbackStyleVars}
           aria-hidden="true"
         >
           <span className="intel-mesh-fallback-core" />
@@ -133,6 +181,44 @@ function IntelBtn({ mode, resolvedLevel, onClick, analyzing, funMode }: IntelBtn
     </button>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Toolbar ambient glow — the pill "catches" the orb's colour.
+//
+// A single low-cost layer: one element painting three soft radial gradients
+// sampled from the orb's own --orb-a/b/c palette (gradient softness does the
+// "blur", so no per-dot duplication and no heavy filter pass). It's expanded
+// well beyond the orb at low opacity. The wrapper fills the pill edge-to-edge
+// with `overflow: hidden` + inherited radius, so the glow reads as if it lives
+// inside the toolbar glass. The blob is pinned to the orb's centre
+// (`6px` pad + half a button) so it sits under the orb in any layout — and is
+// only rendered in the first pill.
+//
+// Colour tracking is free: static modes inherit the same inline --orb-* vars
+// as the orb; auto mode reuses the existing `autoFrontCycleEqual` @property
+// animation. Hidden entirely when intelligence is off.
+function ToolbarOrbAmbient({
+  mode, resolvedLevel, analyzing,
+}: { mode: IntelMode; resolvedLevel?: ResolvedIntelMode; analyzing?: boolean }) {
+  const isAuto = mode === "auto";
+  const palette = mode === "fast" || mode === "default" || mode === "high"
+    ? ORB_COLORS[mode]
+    : undefined;
+  const ambientStyleVars = paletteStyleVars(palette);
+  return (
+    <span className="toolbar-ambient" aria-hidden="true">
+      <span
+        className="toolbar-ambient-orb"
+        data-mode={mode}
+        data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
+        data-analyzing={analyzing ? "true" : undefined}
+        style={ambientStyleVars}
+      />
+    </span>
+  );
+}
+
+
 
 // ─────────────────────────────────────────────────────────────────────────
 // Fun-mode eyes: four stacked <path> elements per pair — pill (open) and
@@ -439,30 +525,31 @@ export function Toolbar({
       {groupTools ? (
         <div className="toolbar-grouped-layout">
           <div className="toolbar toolbar-group liquid-glass" data-liquid-glass-transient="true">
-            <IntelBtn
-              mode={intelMode}
-              resolvedLevel={intelResolvedLevel}
-              onClick={onCycleIntel}
-              analyzing={isAnalyzing}
-              funMode={funMode}
-            />
-            <button
-              className="icon-btn"
-              onClick={onOpenIndex}
-              aria-label="Chapter index"
-              title="Chapter index"
-            >
-              <BookOpenIcon size={17} />
-            </button>
-            <button
-              className="icon-btn"
-              onClick={onOpenWorld}
-              aria-label="World data"
-              title="World data"
-            >
-              <UsersIcon size={17} />
-            </button>
-          </div>
+              <ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
+              <IntelBtn
+                mode={intelMode}
+                resolvedLevel={intelResolvedLevel}
+                onClick={onCycleIntel}
+                analyzing={isAnalyzing}
+                funMode={funMode}
+              />
+              <button
+                className="icon-btn"
+                onClick={onOpenIndex}
+                aria-label="Chapter index"
+                title="Chapter index"
+              >
+                <BookOpenIcon size={17} />
+              </button>
+              <button
+                className="icon-btn"
+                onClick={onOpenWorld}
+                aria-label="World data"
+                title="World data"
+              >
+                <UsersIcon size={17} />
+              </button>
+            </div>
 
           <div className="toolbar-group-spacer" aria-hidden="true" />
 
@@ -639,159 +726,160 @@ export function Toolbar({
         </div>
       ) : (
         <div className="toolbar liquid-glass">
-          <IntelBtn
-            mode={intelMode}
-            resolvedLevel={intelResolvedLevel}
-            onClick={onCycleIntel}
-            analyzing={isAnalyzing}
-            funMode={funMode}
-          />
+            <ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
+            <IntelBtn
+              mode={intelMode}
+              resolvedLevel={intelResolvedLevel}
+              onClick={onCycleIntel}
+              analyzing={isAnalyzing}
+              funMode={funMode}
+            />
 
-          <button
-            className="icon-btn"
-            onClick={onOpenIndex}
-            aria-label="Chapter index"
-            title="Chapter index"
-          >
-            <BookOpenIcon size={17} />
-          </button>
-
-          <button
-            className="icon-btn"
-            onClick={onOpenWorld}
-            aria-label="World data"
-            title="World data"
-          >
-            <UsersIcon size={17} />
-          </button>
-
-          <div className="toolbar-divider" />
-
-          <button
-            className="icon-btn"
-            onClick={onUndo}
-            disabled={!canUndo}
-            aria-label="Undo"
-            title="Undo (⌘Z)"
-          >
-            <UndoIcon size={16} />
-          </button>
-          <button
-            className="icon-btn"
-            onClick={onRedo}
-            disabled={!canRedo}
-            aria-label="Redo"
-            title="Redo (⇧⌘Z)"
-          >
-            <RedoIcon size={16} />
-          </button>
-
-          <div className="toolbar-divider" />
-
-          <button
-            className="icon-btn"
-            onClick={onPrev}
-            disabled={currentIndex <= 0}
-            aria-label={splitView ? "Previous chapter (left)" : "Previous chapter"}
-            title={splitView ? "Previous chapter (left)" : "Previous chapter"}
-          >
-            <ChevronLeft />
-          </button>
-          <button
-            className="icon-btn"
-            onClick={onNext}
-            disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
-            aria-label={splitView ? "Next chapter (left)" : "Next chapter"}
-            title={splitView ? "Next chapter (left)" : "Next chapter"}
-          >
-            <ChevronRight />
-          </button>
-
-          <input
-            ref={inputRef}
-            className="toolbar-title-input"
-            value={chapterTitle}
-            onChange={(e) => onChapterTitleChange(e.target.value)}
-            placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
-            disabled={!hasChapter}
-            spellCheck={false}
-            onFocus={() => splitView && onActiveSideChange?.("left")}
-          />
-
-          <span className="chapter-counter">
-            {totalChapters > 0
-              ? splitView ? `${currentIndex + 1}` : `${currentIndex + 1} / ${totalChapters}`
-              : "—"}
-          </span>
-
-          {splitView && (
-            <>
-              <div className="toolbar-divider" />
-              <button
-                className="icon-btn"
-                onClick={onSecondaryPrev}
-                disabled={(secondaryIndex ?? 0) <= 0}
-                aria-label="Previous chapter (right)"
-                title="Previous chapter (right)"
-              >
-                <ChevronLeft />
-              </button>
-              <button
-                className="icon-btn"
-                onClick={onSecondaryNext}
-                disabled={(secondaryIndex ?? 0) >= totalChapters - 1 || totalChapters === 0}
-                aria-label="Next chapter (right)"
-                title="Next chapter (right)"
-              >
-                <ChevronRight />
-              </button>
-              <input
-                ref={secondaryInputRef}
-                className="toolbar-title-input"
-                value={secondaryTitle ?? ""}
-                onChange={(e) => onSecondaryTitleChange?.(e.target.value)}
-                placeholder="Chapter title"
-                disabled={secondaryIndex === undefined || secondaryIndex < 0}
-                spellCheck={false}
-                onFocus={() => onActiveSideChange?.("right")}
-              />
-              <span className="chapter-counter">
-                {secondaryIndex !== undefined && secondaryIndex >= 0
-                  ? `${secondaryIndex + 1}`
-                  : "—"}
-              </span>
-            </>
-          )}
-
-          <div className="toolbar-divider" />
-
-          <button className="icon-btn" onClick={onAddChapter} aria-label="New chapter" title="New chapter">
-            <PlusIcon />
-          </button>
-          {isElectronApp ? (
-            <button className="icon-btn" onClick={onOpenProject} aria-label="Open project" title="Open project folder">
-              <FolderIcon />
+            <button
+              className="icon-btn"
+              onClick={onOpenIndex}
+              aria-label="Chapter index"
+              title="Chapter index"
+            >
+              <BookOpenIcon size={17} />
             </button>
-          ) : (
-            <button className="icon-btn" onClick={onImport} aria-label="Import .txt" title="Import .txt">
-              <UploadIcon />
+
+            <button
+              className="icon-btn"
+              onClick={onOpenWorld}
+              aria-label="World data"
+              title="World data"
+            >
+              <UsersIcon size={17} />
             </button>
-          )}
-          <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
-            <DownloadIcon />
-          </button>
-          <button
-            className={`icon-btn toolbar-annotation-btn${annotationMode ? " icon-btn-active" : ""}`}
-            onClick={onToggleAnnotation}
-            aria-label="Annotation mode"
-            title="Annotation mode — click speech or action spans to correct attribution"
-          >
-            <AnnotateIcon size={16} />
-          </button>
-          <button className="icon-btn" onClick={onExportPdf} aria-label="Export PDF" title="Export PDF">
-            <FileTextIcon size={16} />
-          </button>
-        </div>
+
+            <div className="toolbar-divider" />
+
+            <button
+              className="icon-btn"
+              onClick={onUndo}
+              disabled={!canUndo}
+              aria-label="Undo"
+              title="Undo (⌘Z)"
+            >
+              <UndoIcon size={16} />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={onRedo}
+              disabled={!canRedo}
+              aria-label="Redo"
+              title="Redo (⇧⌘Z)"
+            >
+              <RedoIcon size={16} />
+            </button>
+
+            <div className="toolbar-divider" />
+
+            <button
+              className="icon-btn"
+              onClick={onPrev}
+              disabled={currentIndex <= 0}
+              aria-label={splitView ? "Previous chapter (left)" : "Previous chapter"}
+              title={splitView ? "Previous chapter (left)" : "Previous chapter"}
+            >
+              <ChevronLeft />
+            </button>
+            <button
+              className="icon-btn"
+              onClick={onNext}
+              disabled={currentIndex >= totalChapters - 1 || totalChapters === 0}
+              aria-label={splitView ? "Next chapter (left)" : "Next chapter"}
+              title={splitView ? "Next chapter (left)" : "Next chapter"}
+            >
+              <ChevronRight />
+            </button>
+
+            <input
+              ref={inputRef}
+              className="toolbar-title-input"
+              value={chapterTitle}
+              onChange={(e) => onChapterTitleChange(e.target.value)}
+              placeholder={hasChapter ? "Chapter title" : "Add a chapter to begin"}
+              disabled={!hasChapter}
+              spellCheck={false}
+              onFocus={() => splitView && onActiveSideChange?.("left")}
+            />
+
+            <span className="chapter-counter">
+              {totalChapters > 0
+                ? splitView ? `${currentIndex + 1}` : `${currentIndex + 1} / ${totalChapters}`
+                : "—"}
+            </span>
+
+            {splitView && (
+              <>
+                <div className="toolbar-divider" />
+                <button
+                  className="icon-btn"
+                  onClick={onSecondaryPrev}
+                  disabled={(secondaryIndex ?? 0) <= 0}
+                  aria-label="Previous chapter (right)"
+                  title="Previous chapter (right)"
+                >
+                  <ChevronLeft />
+                </button>
+                <button
+                  className="icon-btn"
+                  onClick={onSecondaryNext}
+                  disabled={(secondaryIndex ?? 0) >= totalChapters - 1 || totalChapters === 0}
+                  aria-label="Next chapter (right)"
+                  title="Next chapter (right)"
+                >
+                  <ChevronRight />
+                </button>
+                <input
+                  ref={secondaryInputRef}
+                  className="toolbar-title-input"
+                  value={secondaryTitle ?? ""}
+                  onChange={(e) => onSecondaryTitleChange?.(e.target.value)}
+                  placeholder="Chapter title"
+                  disabled={secondaryIndex === undefined || secondaryIndex < 0}
+                  spellCheck={false}
+                  onFocus={() => onActiveSideChange?.("right")}
+                />
+                <span className="chapter-counter">
+                  {secondaryIndex !== undefined && secondaryIndex >= 0
+                    ? `${secondaryIndex + 1}`
+                    : "—"}
+                </span>
+              </>
+            )}
+
+            <div className="toolbar-divider" />
+
+            <button className="icon-btn" onClick={onAddChapter} aria-label="New chapter" title="New chapter">
+              <PlusIcon />
+            </button>
+            {isElectronApp ? (
+              <button className="icon-btn" onClick={onOpenProject} aria-label="Open project" title="Open project folder">
+                <FolderIcon />
+              </button>
+            ) : (
+              <button className="icon-btn" onClick={onImport} aria-label="Import .txt" title="Import .txt">
+                <UploadIcon />
+              </button>
+            )}
+            <button className="icon-btn" onClick={onExport} aria-label="Export .txt" title="Export .txt">
+              <DownloadIcon />
+            </button>
+            <button
+              className={`icon-btn toolbar-annotation-btn${annotationMode ? " icon-btn-active" : ""}`}
+              onClick={onToggleAnnotation}
+              aria-label="Annotation mode"
+              title="Annotation mode — click speech or action spans to correct attribution"
+            >
+              <AnnotateIcon size={16} />
+            </button>
+            <button className="icon-btn" onClick={onExportPdf} aria-label="Export PDF" title="Export PDF">
+              <FileTextIcon size={16} />
+            </button>
+          </div>
       )}
     </div>
   );

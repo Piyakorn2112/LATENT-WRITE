@@ -1236,6 +1236,18 @@ export function RendererPanel({
     return () => cancelAnimationFrame(id1);
   }, [workspaceOpen, scrollChatToEnd]);
 
+  // Scroll to bottom when the panel is opened (the panel stays mounted and
+  // doesn't unmount/remount, so the messages effect alone won't fire on open).
+  useEffect(() => {
+    if (!visible) return;
+    let id1 = requestAnimationFrame(() => {
+      id1 = requestAnimationFrame(() => {
+        scrollChatToEnd("instant");
+      });
+    });
+    return () => cancelAnimationFrame(id1);
+  }, [visible, scrollChatToEnd]);
+
   // ── Handlers ───────────────────────────────────────────────────────────
 
   const handleSend = useCallback(async () => {

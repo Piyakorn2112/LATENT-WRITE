@@ -10,21 +10,46 @@ import { activateCode } from "../lib/license";
 // welcome experience visually identical to the toolbar orb users see later.
 type IntelMode = "fast" | "default" | "high" | "auto";
 
-const ORB_COLORS: Record<Exclude<IntelMode, "auto">, { a: string; b: string; c: string }> = {
+type OrbPalette = { a: string; b: string; c: string };
+
+const ORB_COLORS: Record<Exclude<IntelMode, "auto">, OrbPalette> = {
   fast:    { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
   default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
   high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
 };
 
+const ORB_ACCENT_COLORS: Record<Exclude<IntelMode, "auto">, OrbPalette> = {
+  fast:    { a: "#34A8FF", b: "#7DE8FF", c: "#C7FFD0" },
+  default: { a: "#7080FF", b: "#9FEEFF", c: "#FFAB92" },
+  high:    { a: "#5B79FF", b: "#8CE5FF", c: "#FFC38E" },
+};
+
 const MODE_ORDER: Exclude<IntelMode, "auto">[] = ["default", "high", "fast"];
 
+const paletteStyleVars = (palette?: OrbPalette): CSSProperties | undefined => palette
+  ? ({ "--orb-a": palette.a, "--orb-b": palette.b, "--orb-c": palette.c } as CSSProperties)
+  : undefined;
+
 // ─── HeroOrb ──────────────────────────────────────────────────────────────
-function HeroOrb({ mode, size = 220 }: { mode: IntelMode; size?: number }) {
+function HeroOrb({
+  mode,
+  size = 220,
+  topPalette,
+  underPalette,
+  accentPalette,
+}: {
+  mode: IntelMode;
+  size?: number;
+  topPalette?: OrbPalette;
+  underPalette?: OrbPalette;
+  accentPalette?: OrbPalette;
+}) {
   const isAuto = mode === "auto";
-  const single = !isAuto ? ORB_COLORS[mode] : null;
-  const styleVars = !isAuto && single
-    ? ({ "--orb-a": single.a, "--orb-b": single.b, "--orb-c": single.c } as CSSProperties)
-    : undefined;
+  const resolvedPalette = !isAuto ? ORB_COLORS[mode] : undefined;
+  const resolvedAccentPalette = !isAuto ? ORB_ACCENT_COLORS[mode] : undefined;
+  const topStyleVars = paletteStyleVars(topPalette ?? resolvedPalette);
+  const underStyleVars = paletteStyleVars(underPalette ?? resolvedPalette);
+  const accentStyleVars = paletteStyleVars(accentPalette ?? resolvedAccentPalette);
   const scale = size / 20;
   return (
     <div className="onb-orb" style={{ width: size, height: size }}>
@@ -32,7 +57,7 @@ function HeroOrb({ mode, size = 220 }: { mode: IntelMode; size?: number }) {
         className="onb-orb-stage"
         style={{ transform: `scale(${scale})`, transformOrigin: "center" }}
       >
-        <span className="intel-mesh-dot" data-mode={mode} style={styleVars}>
+        <span className="intel-mesh-dot" data-mode={mode} style={topStyleVars}>
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <span key={i} className="intel-mesh-dot-orb" />
           ))}
@@ -40,7 +65,17 @@ function HeroOrb({ mode, size = 220 }: { mode: IntelMode; size?: number }) {
         <span
           className="intel-mesh-dot intel-mesh-dot--ghost"
           data-mode={mode}
-          style={styleVars}
+          style={underStyleVars}
+          aria-hidden="true"
+        >
+          {[0, 1, 2, 3, 4, 5].map((i) => (
+            <span key={i} className="intel-mesh-dot-orb" />
+          ))}
+        </span>
+        <span
+          className="intel-mesh-dot intel-mesh-dot--accent"
+          data-mode={mode}
+          style={accentStyleVars}
           aria-hidden="true"
         >
           {[0, 1, 2, 3, 4, 5].map((i) => (

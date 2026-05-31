@@ -15,6 +15,7 @@ import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useStat
 import { Activity } from "lucide-react";
 import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
+import { measureTextWidth } from "../lib/measure-text";
 import { CloseIcon } from "./Icon";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
@@ -71,8 +72,6 @@ const VIEW_OVERSCAN = 6;   // chapters rendered outside the current viewport
 const BOX_VIS_PAD   = 220; // px overscan for off-column event boxes
 const BOX_SIDE_PAD = 10;
 const BOX_DETAIL_GAP = 6;
-const BOX_LABEL_CHAR_W = 5.6;
-const BOX_DETAIL_CHAR_W = 4.8;
 const BOX_DETAIL_TRACK_W = 12;
 const BOX_LABEL_MAX = 30;
 const BOX_LABEL_MAX_WITH_DETAIL = 20;
@@ -151,13 +150,22 @@ function layoutBoxes(
     for (let ei = 0; ei < events.length; ei++) {
       const evt   = events[ei];
       const detail = detailTag(evt);
-      const label = evt.label.slice(0, detail ? BOX_LABEL_MAX_WITH_DETAIL : BOX_LABEL_MAX);
-      const detailW = detail ? detail.length * BOX_DETAIL_CHAR_W + BOX_DETAIL_TRACK_W : 0;
+      // Ellipsis-truncate (and trim trailing whitespace) so labels are never
+      // silently cut, then size the box from the actual rendered text width so
+      // the pill hugs the text instead of leaving a length-dependent gap.
+      const rawLabel = evt.label.trim();
+      const maxLen   = detail ? BOX_LABEL_MAX_WITH_DETAIL : BOX_LABEL_MAX;
+      const label    = rawLabel.length > maxLen
+        ? rawLabel.slice(0, maxLen - 1).trimEnd() + "…"
+        : rawLabel;
+      const detailTextW = detail ? measureTextWidth(detail, 6.4, { weight: 700, letterSpacingEm: 0.08 }) : 0;
+      const detailW = detail ? detailTextW + BOX_DETAIL_TRACK_W : 0;
+      const labelW  = measureTextWidth(label, 8.5, { italic: true, letterSpacingEm: 0.01 });
       // Collision tuning was calibrated for narrower centered chips. Keep the
       // richer tag treatment, but size from explicit text paddings so the
       // solver sees roughly the same physical box footprint that gets rendered.
       const w = Math.min(
-        BOX_SIDE_PAD * 2 + detailW + (detail ? BOX_DETAIL_GAP : 0) + label.length * BOX_LABEL_CHAR_W,
+        BOX_SIDE_PAD * 2 + detailW + (detail ? BOX_DETAIL_GAP : 0) + labelW,
         BOX_MAX_W,
       );
       // Initial position: stack above node, closest event nearest node

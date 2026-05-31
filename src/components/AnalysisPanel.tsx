@@ -92,9 +92,9 @@ interface Props {
 
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
   { value: "off",     label: "Off",     desc: "No highlighting",            color: "#888888" },
-  { value: "auto",    label: "Auto",    desc: "Adapts to chapter content",  color: IOS_COLORS.green.text  },
-  { value: "fast",    label: "Fast",    desc: "Fast, ~85% accuracy",        color: IOS_COLORS.orange.text },
-  { value: "default", label: "Default", desc: "Balanced analysis",          color: IOS_COLORS.blue.text   },
+  { value: "auto",    label: "Auto",    desc: "Pre-reads each chapter and picks the right depth", color: IOS_COLORS.indigo.text },
+  { value: "fast",    label: "Fast",    desc: "Lightweight pass for quick drafting feedback", color: IOS_COLORS.orange.text },
+  { value: "default", label: "Balanced", desc: "Everyday analysis with richer context tracking", color: IOS_COLORS.blue.text   },
   { value: "high",    label: "High",    desc: "Max accuracy",               color: IOS_COLORS.purple.text },
 ];
 

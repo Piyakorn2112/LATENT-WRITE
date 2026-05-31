@@ -210,6 +210,175 @@ export function novelToDocx(novel: Novel): Uint8Array {
   ]);
 }
 
+// ── EPUB builders ─────────────────────────────────────────────────────────
+//
+// EPUB 3 is a ZIP with a fixed layout. We reuse buildZip (STORE, no
+// compression) and place `mimetype` first, exactly as the OCF spec requires.
+
+const EPUB_CSS = `@namespace epub "http://www.idpf.org/2007/ops";
+html { font-size: 100%; }
+body { font-family: Georgia, "Times New Roman", serif; line-height: 1.5; margin: 1em 1.2em; }
+h1 { font-size: 1.5em; font-weight: bold; text-align: center; margin: 1.6em 0 1.2em; page-break-before: always; break-before: page; }
+p { margin: 0; text-indent: 1.4em; text-align: justify; widows: 2; orphans: 2; }
+h1 + p { text-indent: 0; }
+p.scene { text-indent: 0; text-align: center; margin: 1.4em 0; }
+.titlepage { text-align: center; margin-top: 25%; }
+.book-title { font-size: 2.1em; page-break-before: avoid; margin-bottom: 0.4em; }
+.book-subtitle { font-style: italic; font-size: 1.1em; margin: 0.4em 0; }
+.book-author { margin-top: 2.4em; font-size: 1.05em; }
+nav#toc ol { list-style: none; padding-left: 0; line-height: 1.9; }
+`;
+
+function pad3(n: number): string { return String(n).padStart(3, "0"); }
+
+function epubUuid(): string {
+  try {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+  } catch { /* fall through */ }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+function xhtmlDoc(title: string, inner: string): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>${xmlEsc(title)}</title>
+<link rel="stylesheet" type="text/css" href="style.css"/>
+</head>
+<body>
+${inner}
+</body>
+</html>`;
+}
+
+function chapterXhtml(ch: Novel["chapters"][number]): string {
+  const title = ch.title || `Chapter ${ch.number}`;
+  const parts: string[] = [`<h1>${xmlEsc(title)}</h1>`];
+  for (const line of ch.content.split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    if (SCENE_BREAK_RE.test(t)) { parts.push(`<p class="scene">* * *</p>`); continue; }
+    parts.push(`<p>${xmlEsc(line)}</p>`);
+  }
+  return xhtmlDoc(title, parts.join("\n"));
+}
+
+function titleXhtml(novel: Novel): string {
+  const m = novel.meta;
+  const parts = [`<div class="titlepage">`, `<h1 class="book-title">${xmlEsc(m.title || "Untitled")}</h1>`];
+  if (m.subtitle) parts.push(`<p class="book-subtitle">${xmlEsc(m.subtitle)}</p>`);
+  if (m.author) parts.push(`<p class="book-author">${xmlEsc(m.author)}</p>`);
+  parts.push(`</div>`);
+  return xhtmlDoc(m.title || "Untitled", parts.join("\n"));
+}
+
+function navXhtml(novel: Novel): string {
+  const items = novel.chapters.map((ch, i) =>
+    `<li><a href="chapter-${pad3(i + 1)}.xhtml">${xmlEsc(ch.title || `Chapter ${ch.number}`)}</a></li>`,
+  ).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="en" lang="en">
+<head><meta charset="utf-8"/><title>Contents</title><link rel="stylesheet" type="text/css" href="style.css"/></head>
+<body>
+<nav epub:type="toc" id="toc">
+<h1>Contents</h1>
+<ol>
+<li><a href="title.xhtml">Title page</a></li>
+${items}
+</ol>
+</nav>
+</body>
+</html>`;
+}
+
+function ncxXml(novel: Novel, uid: string): string {
+  const points = novel.chapters.map((ch, i) =>
+    `<navPoint id="navpoint-${i + 1}" playOrder="${i + 2}"><navLabel><text>${xmlEsc(ch.title || `Chapter ${ch.number}`)}</text></navLabel><content src="chapter-${pad3(i + 1)}.xhtml"/></navPoint>`,
+  ).join("\n");
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1" xml:lang="en">
+<head>
+<meta name="dtb:uid" content="${xmlEsc(uid)}"/>
+<meta name="dtb:depth" content="1"/>
+<meta name="dtb:totalPageCount" content="0"/>
+<meta name="dtb:maxPageNumber" content="0"/>
+</head>
+<docTitle><text>${xmlEsc(novel.meta.title || "Untitled")}</text></docTitle>
+<navMap>
+<navPoint id="navpoint-title" playOrder="1"><navLabel><text>Title page</text></navLabel><content src="title.xhtml"/></navPoint>
+${points}
+</navMap>
+</ncx>`;
+}
+
+function contentOpf(novel: Novel, uuid: string, modified: string): string {
+  const m = novel.meta;
+  const manifestChapters = novel.chapters.map((_, i) =>
+    `<item id="chap${i + 1}" href="chapter-${pad3(i + 1)}.xhtml" media-type="application/xhtml+xml"/>`,
+  ).join("\n");
+  const spineChapters = novel.chapters.map((_, i) => `<itemref idref="chap${i + 1}"/>`).join("\n");
+  const creator = m.author ? `<dc:creator>${xmlEsc(m.author)}</dc:creator>` : "";
+  const desc = m.subtitle ? `<dc:description>${xmlEsc(m.subtitle)}</dc:description>` : "";
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="en">
+<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+<dc:identifier id="bookid">urn:uuid:${uuid}</dc:identifier>
+<dc:title>${xmlEsc(m.title || "Untitled")}</dc:title>
+<dc:language>en</dc:language>
+${creator}
+${desc}
+<meta property="dcterms:modified">${modified}</meta>
+</metadata>
+<manifest>
+<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+<item id="css" href="style.css" media-type="text/css"/>
+<item id="titlepage" href="title.xhtml" media-type="application/xhtml+xml"/>
+${manifestChapters}
+</manifest>
+<spine toc="ncx">
+<itemref idref="titlepage"/>
+${spineChapters}
+</spine>
+</package>`;
+}
+
+const EPUB_CONTAINER_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+<rootfiles>
+<rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+</rootfiles>
+</container>`;
+
+export function novelToEpub(novel: Novel): Uint8Array {
+  const uuid = epubUuid();
+  const modified = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  const files: Array<{ name: string; data: Uint8Array }> = [
+    // `mimetype` MUST be first and uncompressed (buildZip uses STORE).
+    { name: "mimetype",                data: enc("application/epub+zip") },
+    { name: "META-INF/container.xml",  data: enc(EPUB_CONTAINER_XML) },
+    { name: "OEBPS/content.opf",       data: enc(contentOpf(novel, uuid, modified)) },
+    { name: "OEBPS/nav.xhtml",         data: enc(navXhtml(novel)) },
+    { name: "OEBPS/toc.ncx",           data: enc(ncxXml(novel, `urn:uuid:${uuid}`)) },
+    { name: "OEBPS/style.css",         data: enc(EPUB_CSS) },
+    { name: "OEBPS/title.xhtml",       data: enc(titleXhtml(novel)) },
+  ];
+  novel.chapters.forEach((ch, i) => {
+    files.push({ name: `OEBPS/chapter-${pad3(i + 1)}.xhtml`, data: enc(chapterXhtml(ch)) });
+  });
+
+  return buildZip(files);
+}
+
 export function downloadBlob(filename: string, data: Uint8Array | string, mimeType: string): void {
   // BlobPart requires ArrayBuffer specifically; Uint8Array carries ArrayBufferLike
   // in TS 5.x (which includes SharedArrayBuffer), so we cast. Runtime is fine.

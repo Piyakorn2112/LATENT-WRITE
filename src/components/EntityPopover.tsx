@@ -1,10 +1,22 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
+import { Users, MapPin, Flag, Tag } from "lucide-react";
 import type { WorldData, WorldCharacter, WorldFaction, WorldGenericEntity, WorldPlace } from "../types";
 import { findEntityIndex } from "../lib/world-data";
 import { CloseIcon } from "./Icon";
 
 type DraftEntity = WorldCharacter | WorldPlace | WorldFaction | WorldGenericEntity;
+
+// World-data bucket keys, with a label + icon for the category switcher.
+// Icons mirror the in-text entity badge markers for consistency.
+type EntityKind = "characters" | "places" | "factions" | "entities";
+const KIND_META: Record<EntityKind, { label: string; Icon: typeof Users }> = {
+  characters: { label: "Character", Icon: Users },
+  places:     { label: "Place",     Icon: MapPin },
+  factions:   { label: "Faction",   Icon: Flag },
+  entities:   { label: "Entity",    Icon: Tag },
+};
+const KIND_ORDER: EntityKind[] = ["characters", "places", "factions", "entities"];
 
 interface Props {
   /** Name as clicked in the document — may match a name OR an alias. */
@@ -142,6 +154,49 @@ export function EntityPopover({
     originalNameRef.current = draft.name.trim();
   };
 
+  // Which bucket the entity currently lives in (defaults to characters for a
+  // not-yet-saved entity).
+  const currentKind: EntityKind = foundRef.current?.kind ?? "characters";
+
+  // Move the entity to another category, converting the role↔type field and
+  // merging into any same-named record already there. Mirrors WorldDataView's
+  // "Move To". The resulting world-data change re-derives the entity-type map,
+  // so the in-text highlight updates its colour/icon immediately.
+  const moveTo = (target: EntityKind) => {
+    if (target === currentKind) return;
+
+    const buckets: Record<EntityKind, DraftEntity[]> = {
+      characters: [...(worldData?.characters ?? [])],
+      places: [...(worldData?.places ?? [])],
+      factions: [...(worldData?.factions ?? [])],
+      entities: [...(worldData?.entities ?? [])],
+    };
+
+    if (foundRef.current) buckets[foundRef.current.kind].splice(foundRef.current.index, 1);
+
+    const roleVal = ((draft as WorldCharacter).role ?? (draft as WorldPlace).type ?? "").trim();
+    const base = { name: draft.name.trim() || initialName, aliases: draft.aliases ?? [], description: draft.description ?? "" };
+    const moved: DraftEntity = target === "characters"
+      ? ({ ...base, role: roleVal } as WorldCharacter)
+      : ({ ...base, type: roleVal } as WorldPlace);
+
+    const existingIndex = buckets[target].findIndex(
+      (e) => e.name.trim().toLowerCase() === base.name.toLowerCase(),
+    );
+    if (existingIndex >= 0) buckets[target][existingIndex] = moved;
+    else buckets[target].push(moved);
+
+    foundRef.current = { kind: target, index: existingIndex >= 0 ? existingIndex : buckets[target].length - 1 };
+    setDraft(moved);
+
+    onUpdate({
+      characters: buckets.characters as WorldCharacter[],
+      places: buckets.places as WorldPlace[],
+      factions: buckets.factions as WorldFaction[],
+      entities: buckets.entities as WorldGenericEntity[],
+    });
+  };
+
   return (
     <div ref={cardRef} className="entity-popover liquid-glass" style={pos}>
       <div className="entity-popover-header">
@@ -176,6 +231,29 @@ export function EntityPopover({
           </button>
         </div>
       )}
+
+      <div className="world-field">
+        <span className="world-field-label">Category</span>
+        <div className="entity-popover-category">
+          {KIND_ORDER.map((k) => {
+            const { label, Icon } = KIND_META[k];
+            const active = k === currentKind;
+            return (
+              <button
+                key={k}
+                type="button"
+                className={`entity-cat-btn${active ? " entity-cat-btn--active" : ""}`}
+                onClick={() => moveTo(k)}
+                aria-pressed={active}
+                title={active ? `${label} (current)` : `Switch to ${label.toLowerCase()}`}
+              >
+                <Icon size={13} strokeWidth={2.2} />
+                <span>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <label className="world-field">
         <span className="world-field-label">Aliases</span>

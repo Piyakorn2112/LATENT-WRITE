@@ -1,5 +1,5 @@
 import React, { memo, useMemo, type ReactNode, type CSSProperties } from "react";
-import { PenLine } from "lucide-react";
+import { PenLine, MapPin, Flag, Tag } from "lucide-react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
 import { measurePerfSync } from "../lib/perf-trace";
@@ -8,6 +8,16 @@ import type { GrammarSuggestion } from "../lib/grammar-check";
 import type { ToolHighlight } from "../lib/tool-runner";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 import type { EntityNameMap } from "../lib/world-data";
+
+// Type marker icons shown at the top-right of non-character entity badges.
+// Characters are already identified by their per-name colour, so they stay
+// iconless (keeps the common case non-obtrusive). Elements are built once and
+// reused across every badge → no per-mention allocation overhead.
+const ENTITY_TYPE_ICON: Partial<Record<"character" | "place" | "faction" | "entity", ReactNode>> = {
+  place:   <MapPin size={11} strokeWidth={2.4} aria-hidden="true" />,
+  faction: <Flag   size={11} strokeWidth={2.4} aria-hidden="true" />,
+  entity:  <Tag    size={11} strokeWidth={2.4} aria-hidden="true" />,
+};
 
 const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
@@ -170,6 +180,11 @@ function renderInline(
           <div className="entity-tag-bg-sub" />
           <div className="entity-tag-bg" />
           {matched}
+          {ENTITY_TYPE_ICON[entityType] && (
+            <span className="entity-tag-icon" aria-hidden="true">
+              {ENTITY_TYPE_ICON[entityType]}
+            </span>
+          )}
         </span>,
       );
     } else if (d.kind === "grammar") {

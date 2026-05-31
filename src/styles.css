@@ -364,6 +364,7 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   pointer-events: none;
 }
 
+
 /* Keep all interactive controls inside the toolbar clickable even where
    they overlap the drag strip. */
 .toolbar button,
@@ -3991,26 +3992,43 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 }
 
 /* ─── Entity type modifiers ────────────────────────────────────────────────
-   Characters use the speaker-palette colour (default).
-   Places, factions, and entities use fixed semantic tints drawn from the
-   iOS system palette so they are immediately visually distinct.
-
-   The --entity-color CSS variable is still set per-name for characters
-   (giving each character their unique hue).  For non-character types the
-   variable is overridden here so all places share the same tint, all
-   factions share a different tint, etc.
-
-   The opacity on .entity-tag-bg is reduced for non-characters so their
-   pill backgrounds are clearly lighter / more recessed than character tags.
+   Characters use the speaker-palette colour (default) and are identified by
+   that per-name hue. Places, factions, and entities use fixed semantic tints
+   AND a small type icon at the top-right of the badge (see .entity-tag-icon),
+   which is clearer than the old opacity-based recession. All badge fills now
+   share the same opacity so type is read from icon + tint, not weight.
 */
 .entity-tag--place   { --entity-color: #1B8A5E; }   /* iOS teal-green  */
 .entity-tag--faction { --entity-color: #9B6B00; }   /* iOS warm amber  */
 .entity-tag--entity  { --entity-color: #5A44B0; }   /* iOS indigo      */
 
-.entity-tag--place .entity-tag-bg,
-.entity-tag--faction .entity-tag-bg,
-.entity-tag--entity .entity-tag-bg {
-  opacity: 0.55;   /* lighter fill — less visually dominant than characters */
+/* ─── Entity type marker icon ──────────────────────────────────────────────
+   A small white rounded chip holding a colour-matched glyph, tucked inside the
+   top-right of the badge with a little margin from the edge. The white disc
+   lifts the marker clear of the prose underneath so it never reads as overlap.
+   Sized in em so it tracks the prose font. Out of flow (absolute) so it adds no
+   reflow; pointer-events off so it never interferes with clicks or selection. */
+.entity-tag-icon {
+  position: absolute;
+  top: 0.16em;
+  right: 0.18em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.76em;
+  height: 0.76em;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--entity-color, #888);
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  z-index: 12;
+  line-height: 0;
+}
+.entity-tag-icon svg {
+  width: 0.5em;
+  height: 0.5em;
+  display: block;
 }
 
 
@@ -4136,6 +4154,252 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
    ═══════════════════════════════════════════ */
 .intel-btn { position: relative; }
 
+/* ─── Toolbar ambient glow — the pill "catches" the orb's colour ───────────
+   One low-cost layer: three soft radial gradients sampled from the orb's own
+   --orb-a/b/c palette (gradient softness is the blur — no per-dot duplication),
+   expanded well beyond the orb and dimmed. Mounted in a sibling shell behind
+   the actual glass node so the toolbar's backdrop/refraction can catch it.
+   The wrapper still matches the pill bounds, so the glow keeps the same orb
+   anchor in either layout. Only rendered behind the first pill. */
+.toolbar-ambient {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Inside the glass fill, above background, below the buttons (which are at
+     z-index:1 via .toolbar > *:not(.toolbar-ambient)). */
+  z-index: 0;
+}
+
+.toolbar-ambient-orb {
+  position: absolute;
+  top: 0px;
+  bottom: 0px;
+  left: 0px;
+  /* Small stadium-shaped layer over the pill's left end, with a full radius so
+     its left side is a true semicircle matching the pill cap — the inset shadow
+     hugs that curve. */
+  width: 80px;
+  border-radius: 9999px;
+  pointer-events: none;
+  filter: blur(1px);
+  /* Edge glow: inset shadows hug the rounded left cap + top/bottom edge of the
+     pill (naturally hollow in the centre), and the radial mask localises it to
+     the orb and fades it along the border. Sitting behind the specular (the
+     container is z-index:-1) and with no will-change layer, it no longer fights
+     the liquid glass. LIGHT MODE (default): pale, white-heavy tints so it reads
+     bright on the light glass; dark mode swaps in the saturated version below.
+     The first inset is a near-white hot tip → bright right at the edge. */
+  --toolbar-ambient-opacity: 0.4;
+  box-shadow:
+    inset 0 0 2px 0    color-mix(in srgb, var(--orb-a) 18%, white 82%),
+    inset 0 0 6px 1px  color-mix(in srgb, var(--orb-a) 36%, white 64%),
+    inset 0 0 14px 3px color-mix(in srgb, var(--orb-a) 52%, white 48%);
+  -webkit-mask-image: radial-gradient(circle 38px at calc(6px + var(--btn-size) / 2) 50%, #000 0 20%, transparent 100%);
+  mask-image: radial-gradient(circle 38px at calc(6px + var(--btn-size) / 2) 50%, #000 0 20%, transparent 100%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  /* opacity breathes in time with the orb's motion; the keyframe reads the
+     variable so mode/analysing states only bump --toolbar-ambient-opacity. */
+  animation: toolbarAmbientPulse 3.3s ease-in-out infinite;
+  /* opacity transition for fade-in on restore; display transition handled in
+     the inactive rules below via allow-discrete. */
+  transition: opacity 0.4s ease;
+  /* default palette fallback (blue family, matches .intel-mesh-dot defaults) */
+  --orb-a: #1066FF;
+  --orb-b: #33E9FF;
+  --orb-c: #AADAFF;
+}
+
+.toolbar-ambient-glint {
+  position: absolute;
+  top: 50%;
+  /* pulled to the left rim so the sparkle reinforces the edge catch rather
+     than lighting the centre under the orb */
+  left: 13px;
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  opacity: 0.12;
+  transition: opacity 0.35s ease, filter 0.35s ease;
+  --orb-a: #1066FF;
+  --orb-b: #33E9FF;
+  --orb-c: #AADAFF;
+}
+
+.toolbar-ambient-glint--cool {
+  width: 34px;
+  height: 22px;
+  background:
+    radial-gradient(closest-side ellipse at 34% 40%, transparent 0 18%, color-mix(in srgb, var(--orb-b) 78%, white 22%) 40% 56%, transparent 82%),
+    radial-gradient(closest-side ellipse at 76% 60%, transparent 0 14%, color-mix(in srgb, var(--orb-c) 72%, white 28%) 32% 46%, transparent 76%);
+  filter: blur(4px) saturate(1.65) brightness(1.55);
+  animation: toolbarAmbientGlintCool 4.8s ease-in-out infinite;
+}
+
+.toolbar-ambient-glint--warm {
+  width: 34px;
+  height: 21px;
+  background:
+    radial-gradient(closest-side ellipse at 48% 52%, transparent 0 14%, #FF9477 36% 56%, transparent 84%),
+    radial-gradient(closest-side ellipse at 72% 36%, transparent 0 10%, #F39BEF 22% 38%, transparent 70%),
+    radial-gradient(closest-side ellipse at 26% 60%, transparent 0 8%, #FFC0A1 18% 28%, transparent 56%);
+  filter: blur(4.4px) saturate(1.86) brightness(1.48);
+  animation: toolbarAmbientGlintWarm 6.4s ease-in-out infinite;
+  opacity: 0.11;
+}
+
+/* Auto mode: reuse the orb's existing front-layer colour cycle for free,
+   layered with the drift so colour and motion both stay live. */
+.toolbar-ambient-orb[data-mode="auto"] {
+  /* light mode: same pale glow, blended through to a soft pink so auto stays
+     multi-hue. --orb-a/-b cycle via the colour animation → the glow cycles with
+     the orb. (Opacity inherits the base light/dark value.) */
+  box-shadow:
+    inset 0 0 2px 0    color-mix(in srgb, var(--orb-a) 18%, white 82%),
+    inset 0 0 6px 1px  color-mix(in srgb, var(--orb-a) 36%, white 64%),
+    inset 0 0 13px 3px color-mix(in srgb, var(--orb-b) 42%, white 58%),
+    inset 0 0 18px 5px color-mix(in srgb, #EE8CEB 30%, white 70%);
+  animation:
+    autoFrontCycleEqual 12s ease-in-out infinite,
+    toolbarAmbientPulse 3.3s ease-in-out infinite;
+  transition:
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease;
+}
+
+/* Dark mode: brighter and more saturated — a colour glow reads as bright on the
+   dark glass, so it can be intense here (and stronger than light mode). */
+@media (prefers-color-scheme: dark) {
+  .toolbar-ambient-orb {
+    --toolbar-ambient-opacity: 0.5;
+    box-shadow:
+      inset 0 0 2px 0    color-mix(in srgb, var(--orb-a) 42%, white 58%),
+      inset 0 0 6px 1px  var(--orb-a),
+      inset 0 0 15px 4px color-mix(in srgb, var(--orb-b) 72%, transparent 28%);
+  }
+  .toolbar-ambient-orb[data-mode="auto"] {
+    box-shadow:
+      inset 0 0 2px 0    color-mix(in srgb, var(--orb-a) 42%, white 58%),
+      inset 0 0 6px 1px  var(--orb-a),
+      inset 0 0 14px 3px color-mix(in srgb, var(--orb-b) 70%, transparent 30%),
+      inset 0 0 20px 6px color-mix(in srgb, #EE8CEB 52%, transparent 48%);
+  }
+}
+
+.toolbar-ambient-glint--cool[data-mode="auto"] {
+  opacity: 0.17;
+  animation:
+    autoFrontCycleEqual 12s ease-in-out infinite,
+    toolbarAmbientGlintCool 4.6s ease-in-out infinite;
+  transition:
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease,
+    opacity 0.35s ease,
+    filter 0.35s ease;
+}
+
+.toolbar-ambient-glint--warm[data-mode="auto"] {
+  width: 38px;
+  height: 23px;
+  background:
+    radial-gradient(closest-side ellipse at 42% 54%, transparent 0 14%, #FF8966 34% 54%, transparent 82%),
+    radial-gradient(closest-side ellipse at 74% 36%, transparent 0 8%, #F090E8 20% 36%, transparent 68%),
+    radial-gradient(closest-side ellipse at 28% 44%, transparent 0 7%, #FFC0A0 18% 30%, transparent 60%);
+  filter: blur(4.6px) saturate(2.08) brightness(1.58);
+  opacity: 0.21;
+}
+
+.toolbar-ambient-orb[data-analyzing="true"] {
+  --toolbar-ambient-opacity: 0.56;
+  /* brighter and a faster breathe — visibly reacts while the orb works */
+  animation: toolbarAmbientPulse 1.7s ease-in-out infinite;
+}
+
+.toolbar-ambient-orb[data-mode="auto"][data-analyzing="true"] {
+  --toolbar-ambient-opacity: 0.56;
+  animation:
+    autoFrontCycleEqual 12s ease-in-out infinite,
+    toolbarAmbientPulse 1.7s ease-in-out infinite;
+}
+
+.toolbar-ambient-glint--cool[data-analyzing="true"] {
+  opacity: 0.22;
+  --ambient-analyze-blur: 3.8px;
+  --ambient-analyze-sat: 1.9;
+  --ambient-analyze-bright-min: 1.72;
+  --ambient-analyze-bright-max: 2.02;
+  animation:
+    toolbarAmbientGlintCool 3.4s ease-in-out infinite,
+    toolbarAmbientAnalyzePulse 1.9s ease-in-out infinite;
+}
+
+.toolbar-ambient-glint--cool[data-mode="auto"][data-analyzing="true"] {
+  opacity: 0.28;
+  animation:
+    autoFrontCycleEqual 12s ease-in-out infinite,
+    toolbarAmbientGlintCool 3.2s ease-in-out infinite,
+    toolbarAmbientAnalyzePulse 1.9s ease-in-out infinite;
+}
+
+.toolbar-ambient-glint--warm[data-analyzing="true"] {
+  opacity: 0.2;
+  --ambient-analyze-blur: 4.1px;
+  --ambient-analyze-sat: 2.05;
+  --ambient-analyze-bright-min: 1.68;
+  --ambient-analyze-bright-max: 1.98;
+  animation:
+    toolbarAmbientGlintWarm 4.6s ease-in-out infinite,
+    toolbarAmbientAnalyzePulse 1.9s ease-in-out infinite 0.22s;
+}
+
+.toolbar-ambient-glint--warm[data-mode="auto"][data-analyzing="true"] {
+  opacity: 0.29;
+  --ambient-analyze-blur: 4.3px;
+  --ambient-analyze-sat: 2.15;
+  --ambient-analyze-bright-min: 1.8;
+  --ambient-analyze-bright-max: 2.1;
+}
+
+/* No intelligence → no glow. (animation off so opacity:0 isn't overridden) */
+.toolbar-ambient-orb[data-mode="off"] { animation: none; opacity: 0; }
+.toolbar-ambient-glint[data-mode="off"] { opacity: 0; }
+
+/* Opacity breathe, ~synced to the orb's dot-orbit period so the rim glow feels
+   tied to the orb's motion. Reads the variable so variants only set opacity. */
+@keyframes toolbarAmbientPulse {
+  0%, 100% { opacity: var(--toolbar-ambient-opacity); }
+  50%      { opacity: calc(var(--toolbar-ambient-opacity) - 0.26); }
+}
+
+@keyframes toolbarAmbientGlintCool {
+  0%   { transform: translate(calc(-50% - 2px), calc(-50% - 1px)) scale(0.88); opacity: 0.06; }
+  35%  { transform: translate(calc(-50% + 5px), calc(-50% - 7px)) scale(1.08); opacity: 0.18; }
+  70%  { transform: translate(calc(-50% + 1px), calc(-50% + 5px)) scale(0.94); opacity: 0.1; }
+  100% { transform: translate(calc(-50% - 2px), calc(-50% - 1px)) scale(0.88); opacity: 0.06; }
+}
+
+@keyframes toolbarAmbientGlintWarm {
+  0%   { transform: translate(calc(-50% + 10px), calc(-50% + 6px)) scale(0.84); opacity: 0.04; }
+  42%  { transform: translate(calc(-50% + 16px), calc(-50% + 1px)) scale(1.06); opacity: 0.14; }
+  74%  { transform: translate(calc(-50% + 7px), calc(-50% + 10px)) scale(0.92); opacity: 0.08; }
+  100% { transform: translate(calc(-50% + 10px), calc(-50% + 6px)) scale(0.84); opacity: 0.04; }
+}
+
+@keyframes toolbarAmbientAnalyzePulse {
+  0%, 100% {
+    filter: blur(var(--ambient-analyze-blur, 4px)) saturate(var(--ambient-analyze-sat, 1.9)) brightness(var(--ambient-analyze-bright-min, 1.7));
+  }
+  50% {
+    filter: blur(var(--ambient-analyze-blur, 4px)) saturate(var(--ambient-analyze-sat, 1.9)) brightness(var(--ambient-analyze-bright-max, 2));
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .toolbar-ambient-orb[data-mode="off"] { opacity: 0; }
+}
+
 .intel-btn-inner {
   position: relative;
   display: flex;
@@ -4234,10 +4498,66 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   transition: filter 0.22s ease;
 }
 
-.intel-mesh-dot--ghost {
+.intel-mesh-dot--ghost,
+.intel-mesh-dot--accent {
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+.intel-mesh-dot--accent {
+  opacity: 0.4;
+  filter: blur(1.45px) contrast(148%) brightness(142%);
+  transform: scale(1.04);
+}
+
+/* Offset the additive layer slightly so the two mesh stacks do not trace
+   the exact same path. Keeping the geometry identical preserves the orb's
+   silhouette while the phase drift restores the liquid shimmer. */
+.intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(1) {
+  animation-duration: 3.45s;
+  animation-delay: 0.24s;
+}
+.intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(2) {
+  animation-duration: 4.05s;
+  animation-delay: 0.92s;
+}
+.intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(3) {
+  animation-duration: 3.1s;
+  animation-delay: 1.38s;
+}
+.intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(4) {
+  animation-duration: 3.45s;
+  animation-delay: 1.88s;
+}
+.intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(5) {
+  animation-duration: 4.05s;
+  animation-delay: 2.58s;
+}
+.intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(6) {
+  animation-duration: 3.1s;
+  animation-delay: 3.02s;
+}
+
+/* Accent layer: lower blur and slightly wider motion so it reads as a small
+   rim-light / aberration shimmer rather than another full body pass. */
+.intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(1) {
+  animation: intelOrbitAccentA 3.55s ease-in-out infinite 0.18s;
+}
+.intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(2) {
+  animation: intelOrbitAccentB 4.2s ease-in-out infinite 0.74s;
+}
+.intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(3) {
+  animation: intelOrbitAccentC 3.25s ease-in-out infinite 1.08s;
+}
+.intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(4) {
+  animation: intelOrbitAccentA 3.55s ease-in-out infinite reverse 1.64s;
+}
+.intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(5) {
+  animation: intelOrbitAccentB 4.2s ease-in-out infinite reverse 2.28s;
+}
+.intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(6) {
+  animation: intelOrbitAccentC 3.25s ease-in-out infinite reverse 2.82s;
 }
 
 .intel-btn--analyzing .intel-mesh-dot {
@@ -4313,18 +4633,17 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 .intel-mesh-dot-orb:nth-child(6) { animation: intelOrbitC 2.9s ease-in-out infinite reverse 2.7s; }
 
 /* ─── AUTO mode — uses the same 6-orb geometry as the single-mode orbs to
-       avoid any layout/transform conflict (which caused frame jumps). The only
-       thing that changes in auto is the orb COLOURS, smoothly cycling through
-       all three level palettes via @property-registered CSS color variables.
-       The resolved mode's hue dwells longer in the cycle so the underlying
-       mode is identifiable, but no single colour ever dominates outright. ─── */
+       avoid any layout/transform conflict (which caused frame jumps). The
+       front layer stays logo-blue while the additive ghost layer drifts
+       through the orb mark's warmer lavender / pink / peach accents. The
+       resolved mode still changes which region gets the longest dwell. ─── */
 @property --orb-a { syntax: "<color>"; inherits: true; initial-value: #888; }
 @property --orb-b { syntax: "<color>"; inherits: true; initial-value: #888; }
 @property --orb-c { syntax: "<color>"; inherits: true; initial-value: #888; }
 
 /* Default cycle — equal time on each palette (used when resolved level isn't set yet) */
 .intel-mesh-dot[data-mode="auto"] {
-  animation: autoCycleEqual 12s ease-in-out infinite;
+  animation: autoFrontCycleEqual 12s ease-in-out infinite;
   transition:
     transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
     filter 0.5s ease,
@@ -4333,8 +4652,32 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
     --orb-c 1.4s ease;
 }
 
+.intel-mesh-dot--ghost[data-mode="auto"] {
+  animation: autoGhostCycleEqual 14s ease-in-out infinite;
+  opacity: 0.66;
+  transition:
+    transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
+    opacity 0.6s ease,
+    filter 0.5s ease,
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease;
+}
+
+.intel-mesh-dot--accent[data-mode="auto"] {
+  animation: autoAccentCycleEqual 13s ease-in-out infinite;
+  opacity: 0.6;
+  transition:
+    transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
+    opacity 0.6s ease,
+    filter 0.5s ease,
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease;
+}
+
 .intel-mesh-fallback[data-mode="auto"] {
-  animation: autoCycleEqual 12s ease-in-out infinite;
+  animation: autoFallbackCycleEqual 12s ease-in-out infinite;
   transition:
     transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
     opacity 0.18s ease,
@@ -4343,68 +4686,165 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
     --orb-c 1.4s ease;
 }
 
-/* Resolved-level cycles — each resolved palette drifts toward its
-  intelligence mode's colour region while staying green-anchored.
-  All four animations share jade as their 0%/100% anchor so switching
-  resolved level restarts at a neutral midpoint — the @property
-  transition on --orb-* smooths whatever residual gap remains. */
+/* Resolved-level cycles — the front layer stays blue-led while the ghost
+  layer leans warm or violet depending on the resolved mode. All animations
+  share a logo-blue anchor so switching resolved level restarts from the same
+  visual family and the @property transition smooths the handoff. */
 .intel-mesh-dot[data-mode="auto"][data-resolved="fast"] {
-  animation: autoCycleLow 14s ease-in-out infinite;
+  animation: autoFrontCycleFast 14s ease-in-out infinite;
+}
+.intel-mesh-dot--ghost[data-mode="auto"][data-resolved="fast"] {
+  animation: autoGhostCycleFast 14s ease-in-out infinite;
+}
+.intel-mesh-dot--accent[data-mode="auto"][data-resolved="fast"] {
+  animation: autoAccentCycleFast 14s ease-in-out infinite;
 }
 .intel-mesh-fallback[data-mode="auto"][data-resolved="fast"] {
-  animation: autoCycleLow 14s ease-in-out infinite;
+  animation: autoFallbackCycleFast 14s ease-in-out infinite;
 }
 .intel-mesh-dot[data-mode="auto"][data-resolved="default"] {
-  animation: autoCycleDefault 14s ease-in-out infinite;
+  animation: autoFrontCycleDefault 14s ease-in-out infinite;
+}
+.intel-mesh-dot--ghost[data-mode="auto"][data-resolved="default"] {
+  animation: autoGhostCycleDefault 14s ease-in-out infinite;
+}
+.intel-mesh-dot--accent[data-mode="auto"][data-resolved="default"] {
+  animation: autoAccentCycleDefault 14s ease-in-out infinite;
 }
 .intel-mesh-fallback[data-mode="auto"][data-resolved="default"] {
-  animation: autoCycleDefault 14s ease-in-out infinite;
+  animation: autoFallbackCycleDefault 14s ease-in-out infinite;
 }
 .intel-mesh-dot[data-mode="auto"][data-resolved="high"] {
-  animation: autoCycleHigh 14s ease-in-out infinite;
+  animation: autoFrontCycleHigh 14s ease-in-out infinite;
+}
+.intel-mesh-dot--ghost[data-mode="auto"][data-resolved="high"] {
+  animation: autoGhostCycleHigh 14s ease-in-out infinite;
+}
+.intel-mesh-dot--accent[data-mode="auto"][data-resolved="high"] {
+  animation: autoAccentCycleHigh 14s ease-in-out infinite;
 }
 .intel-mesh-fallback[data-mode="auto"][data-resolved="high"] {
-  animation: autoCycleHigh 14s ease-in-out infinite;
+  animation: autoFallbackCycleHigh 14s ease-in-out infinite;
 }
 
-/* Green-spectrum chromatic aberration with brightness-locked slots.
-   a ≈ 96 lum (dark), b ≈ 160 (mid), c ≈ 204 (light) — matches
-   single-mode orbs.  All cycles anchor at jade (0%/100%).
-
-   Anchor — jade:      #208840  #5CCC70  #A0E8A0
-   Teal (cool):        #108868  #48C8A0  #90E8C8
-   Chartreuse (warm):  #488010  #90C040  #C0E480
-
-   Resolved tints (mode identity through green):
-   Low  — warm olive:  #3C8420  #80C448  #C0E080  accent #D8D878
-   Def  — cool teal:   #108868  #48C8A0  #90E8C8  accent #90E8E8
-   High — deep teal:   #188078  #50C4B0  #98E4D0  accent #D0C8E4 */
-@keyframes autoCycleEqual {
-  0%   { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
-  33%  { --orb-a: #108868; --orb-b: #48C8A0; --orb-c: #90E8C8; }
-  66%  { --orb-a: #488010; --orb-b: #90C040; --orb-c: #C0E480; }
-  100% { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+/* Front layer: carry the hero palette directly — blue body (a) alongside a
+   violet (b) and a pink↔ice highlight (c), so the orb reads blue-dominant with
+   visible violet/pink, like the site mesh. */
+@keyframes autoFrontCycleEqual {
+  0%   { --orb-a: #2747E6; --orb-b: #7E6BF2; --orb-c: #CBB2EE; }
+  33%  { --orb-a: #3157EE; --orb-b: #9A72EC; --orb-c: #E0A8CD; }
+  66%  { --orb-a: #244AE4; --orb-b: #6E8BFF; --orb-c: #A8E4FF; }
+  100% { --orb-a: #2747E6; --orb-b: #7E6BF2; --orb-c: #CBB2EE; }
 }
 
-@keyframes autoCycleLow {
-  0%    { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
-  25%   { --orb-a: #3C8420; --orb-b: #80C448; --orb-c: #C0E080; }
-  60%   { --orb-a: #3C8420; --orb-b: #80C448; --orb-c: #D8D878; }
-  100%  { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+@keyframes autoFrontCycleFast {
+  0%    { --orb-a: #2A4BE8; --orb-b: #7468F0; --orb-c: #C6B4F0; }
+  25%   { --orb-a: #3360F2; --orb-b: #8F7BEE; --orb-c: #E6AEDA; }
+  60%   { --orb-a: #2856EC; --orb-b: #6E92FF; --orb-c: #9EE6FF; }
+  100%  { --orb-a: #2A4BE8; --orb-b: #7468F0; --orb-c: #C6B4F0; }
 }
 
-@keyframes autoCycleDefault {
-  0%    { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
-  25%   { --orb-a: #108868; --orb-b: #48C8A0; --orb-c: #90E8C8; }
-  60%   { --orb-a: #108868; --orb-b: #48C8A0; --orb-c: #90E8E8; }
-  100%  { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+@keyframes autoFrontCycleDefault {
+  0%    { --orb-a: #2747E6; --orb-b: #7E6BF2; --orb-c: #CBB2EE; }
+  25%   { --orb-a: #3157EE; --orb-b: #9A72EC; --orb-c: #E0A8CD; }
+  60%   { --orb-a: #244AE4; --orb-b: #6E8BFF; --orb-c: #A8E4FF; }
+  100%  { --orb-a: #2747E6; --orb-b: #7E6BF2; --orb-c: #CBB2EE; }
 }
 
-@keyframes autoCycleHigh {
-  0%    { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
-  25%   { --orb-a: #287068; --orb-b: #68B8A8; --orb-c: #B8D8D0; }
-  60%   { --orb-a: #287068; --orb-b: #68B8A8; --orb-c: #D8B8E8; }
-  100%  { --orb-a: #208840; --orb-b: #5CCC70; --orb-c: #A0E8A0; }
+@keyframes autoFrontCycleHigh {
+  0%    { --orb-a: #2A45E8; --orb-b: #8366F2; --orb-c: #D2A8E8; }
+  25%   { --orb-a: #3552EE; --orb-b: #A06FEA; --orb-c: #E8A4D4; }
+  60%   { --orb-a: #2649E6; --orb-b: #7382FF; --orb-c: #ADD8FF; }
+  100%  { --orb-a: #2A45E8; --orb-b: #8366F2; --orb-c: #D2A8E8; }
+}
+
+/* Ghost layer: supports the body with blue → violet → soft pink underneath —
+   no coral/orange, so it stays in the hero family. */
+@keyframes autoGhostCycleEqual {
+  0%   { --orb-a: #244BEB; --orb-b: #6671F4; --orb-c: #9FC4FF; }
+  33%  { --orb-a: #305AF0; --orb-b: #8C64F0; --orb-c: #E08EDB; }
+  66%  { --orb-a: #3D6AF4; --orb-b: #AF69DE; --orb-c: #E9B0D6; }
+  100% { --orb-a: #244BEB; --orb-b: #6671F4; --orb-c: #9FC4FF; }
+}
+
+@keyframes autoGhostCycleFast {
+  0%    { --orb-a: #244CED; --orb-b: #6673F5; --orb-c: #A0C5FF; }
+  25%   { --orb-a: #3360F4; --orb-b: #9565F0; --orb-c: #EC90D5; }
+  60%   { --orb-a: #4172F8; --orb-b: #BD66D7; --orb-c: #EFA8CE; }
+  100%  { --orb-a: #244CED; --orb-b: #6673F5; --orb-c: #A0C5FF; }
+}
+
+@keyframes autoGhostCycleDefault {
+  0%    { --orb-a: #244BEB; --orb-b: #6470F3; --orb-c: #9EC3FF; }
+  25%   { --orb-a: #305BF0; --orb-b: #8A66EF; --orb-c: #DF8EDB; }
+  60%   { --orb-a: #3E6AF4; --orb-b: #A967DE; --orb-c: #EDA8CF; }
+  100%  { --orb-a: #244BEB; --orb-b: #6470F3; --orb-c: #9EC3FF; }
+}
+
+@keyframes autoGhostCycleHigh {
+  0%    { --orb-a: #244BEC; --orb-b: #656EF4; --orb-c: #9CC0FF; }
+  25%   { --orb-a: #2E58EF; --orb-b: #8463F4; --orb-c: #D78DDF; }
+  60%   { --orb-a: #3A68F4; --orb-b: #9E66E7; --orb-c: #E6AAD6; }
+  100%  { --orb-a: #244BEC; --orb-b: #656EF4; --orb-c: #9CC0FF; }
+}
+
+/* Accent layer: bright icy-cyan and violet edge flashes with a warm-white /
+   pink highlight (hero's warm white) instead of coral. */
+@keyframes autoAccentCycleEqual {
+  0%   { --orb-a: #6F86FF; --orb-b: #B7F3FF; --orb-c: #F3E0EC; }
+  33%  { --orb-a: #7A79FF; --orb-b: #9CE6FF; --orb-c: #F4D4E2; }
+  66%  { --orb-a: #67C8FF; --orb-b: #BF7AF3; --orb-c: #F0BEDA; }
+  100% { --orb-a: #6F86FF; --orb-b: #B7F3FF; --orb-c: #F3E0EC; }
+}
+
+@keyframes autoAccentCycleFast {
+  0%    { --orb-a: #6B94FF; --orb-b: #C1F6FF; --orb-c: #F3E2EC; }
+  25%   { --orb-a: #5F84FF; --orb-b: #83E2FF; --orb-c: #F1D2E0; }
+  60%   { --orb-a: #4CCBFF; --orb-b: #A775FF; --orb-c: #EFBFD8; }
+  100%  { --orb-a: #6B94FF; --orb-b: #C1F6FF; --orb-c: #F3E2EC; }
+}
+
+@keyframes autoAccentCycleDefault {
+  0%    { --orb-a: #6F88FF; --orb-b: #B9F3FF; --orb-c: #F3E0EC; }
+  25%   { --orb-a: #727FFF; --orb-b: #99E0FF; --orb-c: #F3D6E2; }
+  60%   { --orb-a: #63BCFF; --orb-b: #B778F7; --orb-c: #EFBFD8; }
+  100%  { --orb-a: #6F88FF; --orb-b: #B9F3FF; --orb-c: #F3E0EC; }
+}
+
+@keyframes autoAccentCycleHigh {
+  0%    { --orb-a: #7283FF; --orb-b: #B3EAFF; --orb-c: #F4E2EE; }
+  25%   { --orb-a: #866EFF; --orb-b: #A18DFF; --orb-c: #F2D6E6; }
+  60%   { --orb-a: #8E88FF; --orb-b: #CB79FF; --orb-c: #EFC2DE; }
+  100%  { --orb-a: #7283FF; --orb-b: #B3EAFF; --orb-c: #F4E2EE; }
+}
+
+/* Fallback: blue body with a soft pink highlight (no coral). */
+@keyframes autoFallbackCycleEqual {
+  0%   { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #B9C8F5; }
+  33%  { --orb-a: #2A55EA; --orb-b: #8C76F2; --orb-c: #E0A8CD; }
+  66%  { --orb-a: #2360EE; --orb-b: #6FA0FF; --orb-c: #CDB6E6; }
+  100% { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #B9C8F5; }
+}
+
+@keyframes autoFallbackCycleFast {
+  0%    { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #B9C8F5; }
+  25%   { --orb-a: #2A55EA; --orb-b: #8C76F2; --orb-c: #E6AEDA; }
+  60%   { --orb-a: #2360EE; --orb-b: #6FA0FF; --orb-c: #C9B6E8; }
+  100%  { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #B9C8F5; }
+}
+
+@keyframes autoFallbackCycleDefault {
+  0%    { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #B9C8F5; }
+  25%   { --orb-a: #2A55EA; --orb-b: #8C76F2; --orb-c: #E0A8CD; }
+  60%   { --orb-a: #2360EE; --orb-b: #6FA0FF; --orb-c: #CDB6E6; }
+  100%  { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #B9C8F5; }
+}
+
+@keyframes autoFallbackCycleHigh {
+  0%    { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #BCC2F2; }
+  25%   { --orb-a: #2E52E8; --orb-b: #9070F2; --orb-c: #DA9CE0; }
+  60%   { --orb-a: #2858EC; --orb-b: #6F98FF; --orb-c: #CBB2E8; }
+  100%  { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #BCC2F2; }
 }
 
 @keyframes intelPassiveOrbRotate {
@@ -4427,6 +4867,23 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   33%  { transform: translate(calc(-50% - 3px), calc(-50% - 1px)); }
   66%  { transform: translate(calc(-50% + 1px), calc(-50% - 3px)); }
   100% { transform: translate(calc(-50% + 2px), calc(-50% + 3px)); }
+}
+
+@keyframes intelOrbitAccentA {
+  0%   { transform: translate(calc(-50% + 4px), calc(-50% - 3px)); }
+  50%  { transform: translate(calc(-50% - 4px), calc(-50% + 2px)); }
+  100% { transform: translate(calc(-50% + 4px), calc(-50% - 3px)); }
+}
+@keyframes intelOrbitAccentB {
+  0%   { transform: translate(calc(-50% - 3px), calc(-50% - 4px)); }
+  50%  { transform: translate(calc(-50% + 3px), calc(-50% + 4px)); }
+  100% { transform: translate(calc(-50% - 3px), calc(-50% - 4px)); }
+}
+@keyframes intelOrbitAccentC {
+  0%   { transform: translate(calc(-50% + 3px), calc(-50% + 4px)); }
+  33%  { transform: translate(calc(-50% - 4px), calc(-50% - 2px)); }
+  66%  { transform: translate(calc(-50% + 2px), calc(-50% - 4px)); }
+  100% { transform: translate(calc(-50% + 3px), calc(-50% + 4px)); }
 }
 
 body.electron-window-unfocused .intel-btn .intel-orb-live {
@@ -4454,6 +4911,31 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-dot[data-mode="
 body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback[data-mode="auto"],
 body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
   animation-play-state: paused;
+}
+
+/* Ambient glow off in unfocused and idle paths.
+   Sequence OUT: opacity fades to 0 over 0.4s, then display snaps to none
+   (0s delay = after the 0.4s opacity transition, via allow-discrete).
+   Sequence IN: display snaps back to block immediately (allow-discrete),
+   @starting-style provides opacity:0 as the starting point, then opacity
+   transitions back to the animated value over 0.4s. animation-play-state
+   paused + will-change:auto eliminate the keyframe + compositor cost while
+   hidden. */
+body.electron-window-unfocused .toolbar-ambient-orb,
+body.scroll-edge-idle .toolbar-ambient-orb {
+  display: none;
+  opacity: 0;
+  animation-play-state: paused;
+  will-change: auto;
+  transition: opacity 0.4s ease, display 0s 0.4s allow-discrete;
+}
+
+/* Fade-in starting point: when display goes from none → block, start at
+   opacity 0 so the 0.4s transition plays (rather than snapping to full). */
+@starting-style {
+  body:not(.electron-window-unfocused):not(.scroll-edge-idle) .toolbar-ambient-orb {
+    opacity: 0;
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -4983,6 +5465,53 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
   .rename-btn:hover {
     background: rgba(255, 255, 255, 0.05);
   }
+}
+
+/* ─── Entity category switcher (popover) ───────────────────────────────────
+   Mirrors WorldDataView's "Move To": quick re-classification of an entity,
+   shown as a 2×2 set so the current category stays visible. */
+.entity-popover-category {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.entity-cat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.entity-cat-btn svg { flex-shrink: 0; }
+.entity-cat-btn:hover {
+  color: var(--text);
+  border-color: var(--text-tertiary);
+  background: rgba(0, 0, 0, 0.03);
+}
+@media (prefers-color-scheme: dark) {
+  .entity-cat-btn:hover { background: rgba(255, 255, 255, 0.05); }
+}
+.entity-cat-btn--active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  cursor: default;
+}
+.entity-cat-btn--active:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 /* ── Auto-scan UI ─────────────────────────────────────────────────────── */
@@ -7034,9 +7563,10 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
        its width: 20px / height: 20px from the base class actually apply
        (inline-default spans ignore those properties — that's why removing
        flex earlier rendered an empty container).
-     • Explicit 20×20 size keeps the ghost layer's `position: absolute;
-       inset: 0;` resolving against a 20×20 box, perfectly overlapping
-       the main cluster instead of anchoring at the wrapper's top-left.
+     • Explicit 20×20 size keeps the layered mesh spans' `position:
+       absolute; inset: 0;` resolving against a 20×20 box, perfectly
+       overlapping the main cluster instead of anchoring at the wrapper's
+       top-left.
    The transform: scale() on the stage then visually inflates the
    correctly-laid-out 20×20 unit to the requested hero size. */
 .onb-orb-stage {
@@ -7074,6 +7604,20 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
 .onb-orb .intel-mesh-dot-orb:nth-child(4) { animation-duration: 8.5s; }
 .onb-orb .intel-mesh-dot-orb:nth-child(5) { animation-duration: 10s; }
 .onb-orb .intel-mesh-dot-orb:nth-child(6) { animation-duration: 7.5s; }
+
+.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(1) { animation-duration: 9.1s; }
+.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(2) { animation-duration: 10.7s; }
+.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(3) { animation-duration: 8.1s; }
+.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(4) { animation-duration: 9.1s; }
+.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(5) { animation-duration: 10.7s; }
+.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(6) { animation-duration: 8.1s; }
+
+.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(1) { animation-duration: 9.8s; }
+.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(2) { animation-duration: 11.2s; }
+.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(3) { animation-duration: 8.7s; }
+.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(4) { animation-duration: 9.8s; }
+.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(5) { animation-duration: 11.2s; }
+.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(6) { animation-duration: 8.7s; }
 
 /* ─── Modes row (page 2) ────────────────────────────────────────────────── */
 .onb-mode {

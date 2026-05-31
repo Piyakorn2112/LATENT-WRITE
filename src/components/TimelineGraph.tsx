@@ -14,6 +14,7 @@
 import { memo } from "react";
 import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
+import { measureTextWidth } from "../lib/measure-text";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
 
@@ -263,14 +264,27 @@ function TimelineGraphImpl({
               const chipY  = evY + ei * EVENT_H;
               const ec     = EVENT_COLOR[evt.type] ?? "#64748b";
               const detail = detailTag(evt);
-              const label  = evt.label.slice(0, detail ? 28 : 36);
-              const detailW = detail ? detail.length * 4.1 + 10 : 0;
-              const chipW  = Math.min(detailW + label.length * 5.4 + 22, SVG_W - INFO_X - 6);
+              // Truncate with an ellipsis (and drop trailing whitespace) so the
+              // label never gets silently cut, then size the pill to the actual
+              // rendered text width — not a per-char estimate, which left a gap.
+              const rawLabel = evt.label.trim();
+              const maxLen   = detail ? 28 : 36;
+              const label    = rawLabel.length > maxLen
+                ? rawLabel.slice(0, maxLen - 1).trimEnd() + "…"
+                : rawLabel;
+              const SIDE_PAD = 8, DETAIL_GAP = 6, DOT_ALLOW = 6;
+              const detailTextW = detail ? measureTextWidth(detail, 6.2, { weight: 700, letterSpacingEm: 0.08 }) : 0;
+              const detailW = detail ? detailTextW + DOT_ALLOW : 0;
+              const labelW  = measureTextWidth(label, 8.5, { italic: true, letterSpacingEm: 0.01 });
+              const chipW  = Math.min(
+                SIDE_PAD * 2 + detailW + (detail ? DETAIL_GAP : 0) + labelW,
+                SVG_W - INFO_X - 6,
+              );
               const chipH  = 14;
               const chipX  = INFO_X;
-              const detailX = chipX + 8;
-              const dotX = detailX + detailW - 3;
-              const labelX = chipX + 8 + detailW + (detail ? 6 : 0);
+              const detailX = chipX + SIDE_PAD;
+              const dotX = detailX + detailTextW + 3;
+              const labelX = chipX + SIDE_PAD + detailW + (detail ? DETAIL_GAP : 0);
               return (
                 <g key={`evt-${ch.id}-${ei}`} opacity={0.9}>
                   {/* Thin vertical tick from spine to first chip only */}

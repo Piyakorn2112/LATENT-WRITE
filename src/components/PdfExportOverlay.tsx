@@ -29,7 +29,7 @@ import {
   type CoverTextField,
   type CoverTextPosition,
 } from "../lib/pdf-export";
-import { novelToMarkdown, novelToDocx, downloadBlob } from "../lib/text-export";
+import { novelToMarkdown, novelToDocx, novelToEpub, downloadBlob } from "../lib/text-export";
 import type { Novel, NovelMeta } from "../types";
 import {
   CloseIcon, FileTextIcon, BookOpenIcon, ImageIcon, TypeIcon,
@@ -48,7 +48,7 @@ interface Props {
   onClose: () => void;
 }
 
-type ExportType = "pdf" | "markdown" | "docx";
+type ExportType = "pdf" | "markdown" | "docx" | "epub";
 
 type Tab = "format" | "size" | "front" | "back";
 
@@ -207,17 +207,19 @@ export function PdfExportOverlay({ meta, novel, onConfirm, onClose }: Props) {
     setOpts((o) => ({ ...o, backCover: back }));
 
   const confirm = () => {
-    if (exportType === "markdown" || exportType === "docx") {
+    if (exportType !== "pdf") {
       if (!novel) return;
       const safeTitle = (novel.meta.title || "novel").replace(/[^\w\d-]+/g, "-").toLowerCase();
       if (exportType === "markdown") {
         downloadBlob(`${safeTitle}.md`, novelToMarkdown(novel), "text/markdown;charset=utf-8");
-      } else {
+      } else if (exportType === "docx") {
         downloadBlob(
           `${safeTitle}.docx`,
           novelToDocx(novel),
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         );
+      } else {
+        downloadBlob(`${safeTitle}.epub`, novelToEpub(novel), "application/epub+zip");
       }
       onClose();
       return;
@@ -232,6 +234,7 @@ export function PdfExportOverlay({ meta, novel, onConfirm, onClose }: Props) {
   const exportBtnLabel =
     exportType === "markdown" ? "Export .md"
     : exportType === "docx"   ? "Export .docx"
+    : exportType === "epub"   ? "Export .epub"
     : "Export PDF";
 
   return (
@@ -246,14 +249,14 @@ export function PdfExportOverlay({ meta, novel, onConfirm, onClose }: Props) {
         <div className={`world-header${exportType === "pdf" ? " pdf-header--has-subtabs" : ""}`}>
           <h2 className="world-title">Export</h2>
           <div className="pdf-format-switcher" role="group" aria-label="Export format">
-            {(["pdf", "markdown", "docx"] as ExportType[]).map((t) => (
+            {(["pdf", "markdown", "docx", "epub"] as ExportType[]).map((t) => (
               <button
                 key={t}
                 className={`pdf-format-btn${exportType === t ? " pdf-format-btn--active" : ""}`}
                 onClick={() => setExportType(t)}
                 aria-pressed={exportType === t}
               >
-                {t === "pdf" ? "PDF" : t === "markdown" ? "Markdown" : "DOCX"}
+                {t === "pdf" ? "PDF" : t === "markdown" ? "Markdown" : t === "docx" ? "DOCX" : "EPUB"}
               </button>
             ))}
           </div>
@@ -359,6 +362,11 @@ const FORMAT_META: Record<Exclude<ExportType, "pdf">, { label: string; badge: st
     label: "Word Document (.docx)",
     badge: "DOCX",
     desc: "Standard Word document — double-spaced Times New Roman, Heading 1 chapter titles, scene-break ornaments. Opens in Word, Pages, LibreOffice, and Google Docs.",
+  },
+  epub: {
+    label: "EPUB (.epub)",
+    badge: "EPUB",
+    desc: "Reflowable EPUB 3 e-book with a chapter table of contents, title page, and scene-break ornaments. Opens in Apple Books, Kobo, Calibre, and most e-readers.",
   },
 };
 
