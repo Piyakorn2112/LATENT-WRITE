@@ -1,7 +1,7 @@
 :root {
-  --bg: #eeeeee;
-  --bg-page: #fafaf9;
-  --bg-scroll-edge: #fafaf9bc;
+  --bg: #e9e9e9;
+  --bg-page: #e9e9e9;
+  --bg-scroll-edge: #e9e9e9;
   --overlay-scrim-bg: rgba(20, 20, 22, 0.18);
   --overlay-scrim-bg-unfocused: rgba(245, 246, 248, 0.68);
   --overlay-scrim-blur: 8px;
@@ -9,34 +9,62 @@
   --overlay-scroll-mask-edge-bottom: 14px;
   --overlay-scroll-inset-top: 6px;
   --overlay-scroll-inset-bottom: 10px;
-  --bg-glass: rgba(255, 255, 255, 0.621);
-  --bg-glass-hover: rgba(255, 255, 255, 0.78);
+  --bg-glass: rgba(241, 241, 241, 0.621);
+  --bg-glass-hover: rgba(241, 241, 241, 0.78);
   --bg-glass-strong: rgba(255, 255, 255, 0.72);
   --bg-glass-unfocused: rgb(248, 248, 246);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
   --bg-edge-right: #000000;
 
-  /* Liquid glass specular gradient — top highlight, mid shadow, bottom rim */
+  /* Liquid glass edge system — drives the border ring (::before) and the
+     additive edge glow (::after) on every glass surface, so updating these
+     two variables restyles all glass at once.
+       · grad — white top & bottom, transparent sides, at 0°. Masked to the
+         1px ring by the consumers, it reads as a lit top/bottom rim.
+       · glow — the same white top/bottom, blurred + plus-lighter on ::after
+         so the rim blooms additively over the refracted material. */
   --border-glass-grad: linear-gradient(
-    180deg,
-    rgba(255, 255, 255, 0.593) 0%,
-    rgba(255, 255, 255, 0.45) 18%,
-    rgba(255, 255, 255, 0.08) 45%,
-    rgba(255, 255, 255, 0) 80%,
-    rgba(255, 255, 255, 0.35) 100%
+    0deg,
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(255, 255, 255, 0) 20px,
+    rgba(255, 255, 255, 0) calc(100% - 20px),
+    rgba(255, 255, 255, 0.9) 100%
+  );
+  --border-glass-glow: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.9) 0,
+    rgba(255, 255, 255, 0) 3px,
+    rgba(255, 255, 255, 0) calc(100% - 3px),
+    rgba(255, 255, 255, 0.9) 100%
   );
 
-   --border-glass-grad-widget: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.275) 0%,
-      rgba(255, 255, 255, 0.10) 22%,
-      rgba(255, 255, 255, 0.02) 50%,
-      rgba(255, 255, 255, 0) 82%,
-      rgba(255, 255, 255, 0.187) 100%
-    );
+  /* Widget border — same white-edge system as --border-glass-grad, but on a
+     solid card a bright rim is too loud, so light mode is much dimmer (0.3
+     vs 0.9). Dark mode matches the normal glass (0.2). */
+  --border-glass-grad-widget: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0) 20px,
+    rgba(255, 255, 255, 0) calc(100% - 20px),
+    rgba(255, 255, 255, 0.3) 100%
+  );
 
-  --shadow-glass: 0 2px 15px rgba(0, 0, 0, 0.05);
-  --shadow-glass-hover: 0 4px 18px rgba(0, 0, 0, 0.08);
+  /* Drop shadow + an outer 1px "border" cloned from the ::before specular
+     edge — white top & bottom, dark left & right. box-shadow can't carry a
+     gradient, so each edge is its own directional (offset, 0-blur) layer;
+     together they read as the same white→dark→white rim, on the outside. */
+  --shadow-glass:
+    0 -0.5px 0 0 rgba(0, 0, 0, 0.02),
+    0  0.5px 0 0 rgba(0, 0, 0, 0.02),
+    -0.5px 0 0 0 rgba(0, 0, 0, 0.15),
+    0.5px  0 0 0 rgba(0, 0, 0, 0.15),
+    0 2px 15px rgba(0, 0, 0, 0.02);
+  --shadow-glass-hover:
+    0 -0.5px 0 0 rgba(0, 0, 0, 0.02),
+    0  0.5px 0 0 rgba(0, 0, 0, 0.02),
+    -0.5px 0 0 0 rgba(0, 0, 0, 0.15),
+    0.5px  0 0 0 rgba(0, 0, 0, 0.15),
+    0 2px 5px rgba(0, 0, 0, 0.02);
 
   --text: #1a1a1a;
   --text-secondary: #555;
@@ -69,32 +97,47 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #111110;
-    --bg-page: #111110;
-    --bg-scroll-edge: #111110bc;
-    --bg-glass: rgba(36, 36, 34, 0.55);
+    --bg: #191919;
+    --bg-page: #191919;
+    --bg-scroll-edge: #191919bc;
+    --bg-glass: rgba(45, 45, 45, 0.7);
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
     --bg-glass-unfocused: rgb(24, 24, 22);
     --overlay-scrim-bg-unfocused: rgba(8, 10, 14, 0.58);
     --border-glass-grad: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.199) 0%,
-      rgba(255, 255, 255, 0.10) 22%,
-      rgba(255, 255, 255, 0.02) 50%,
-      rgba(255, 255, 255, 0.069) 82%,
-      rgba(255, 255, 255, 0.156) 100%
+      0deg,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0) 20px,
+      rgba(255, 255, 255, 0) calc(100% - 20px),
+      rgba(255, 255, 255, 0.2) 100%
+    );
+    --border-glass-glow: linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.2) 0,
+      rgba(255, 255, 255, 0) 1px,
+      rgba(255, 255, 255, 0) calc(100% - 1px),
+      rgba(255, 255, 255, 0.2) 100%
     );
     --border-glass-grad-widget: linear-gradient(
-      180deg,
-      rgba(255, 255, 255, 0.154) 0%,
-      rgba(255, 255, 255, 0.10) 22%,
-      rgba(255, 255, 255, 0.02) 50%,
-      rgba(255, 255, 255, 0) 82%,
-      rgba(255, 255, 255, 0.08) 100%
+      0deg,
+      rgba(255, 255, 255, 0.2) 0%,
+      rgba(255, 255, 255, 0) 20px,
+      rgba(255, 255, 255, 0) calc(100% - 20px),
+      rgba(255, 255, 255, 0.2) 100%
     );
-    --shadow-glass: 0 2px 18px rgba(0, 0, 0, 0.25);
-    --shadow-glass-hover: 0 4px 26px rgba(0, 0, 0, 0.35);
+    --shadow-glass:
+      0 -0.5px 0 0 rgba(0, 0, 0, 0.1),
+      0  0.5px 0 0 rgba(0, 0, 0, 0.1),
+      -0.5px 0 0 0 rgba(0, 0, 0, 0.3),
+      0.5px  0 0 0 rgba(0, 0, 0, 0.3),
+      0 2px 15px rgba(0, 0, 0, 0.05);
+    --shadow-glass-hover:
+      0 -0.5px 0 0 rgba(0, 0, 0, 0.1),
+      0  0.5px 0 0 rgba(0, 0, 0, 0.1),
+      -0.5px 0 0 0 rgba(0, 0, 0, 0.3),
+      0.5px  0 0 0 rgba(0, 0, 0, 0.3),
+      0 2px 15px rgba(0, 0, 0, 0.05);
     --text: #ededec;
     --text-secondary: #a8a8a4;
     --text-tertiary: #6b6b67;
@@ -156,13 +199,14 @@ body {
 }
 
 
-/* Specular gradient border — mask keeps paint only in the 1px ring */
+/* Specular ring (::before) — masked 1px ring filled with the shared
+   --border-glass-grad (white top/bottom, transparent sides, per scheme). */
 .liquid-glass::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -175,6 +219,57 @@ body {
   pointer-events: none;
   z-index: 0;
 }
+
+/* Edge glow (::after) — full-box layer filled with --border-glass-glow
+   (white top & bottom, transparent middle), blurred so the white edges
+   bloom into a soft luminous rim. Shared across every glass surface.
+
+   Two things keep it on top of the liquid-glass material rather than being
+   washed out by it:
+     • z-index above the content and inner overlays, so it is the element's
+       topmost layer.
+     • mix-blend-mode: plus-lighter — the glow is composited *additively*
+       over the refracted/saturated backdrop instead of painting flat over
+       it, so it always adds light and can't be overpowered (this is the
+       same additive-specular trick Apple's glass highlights use). screen
+       is the fallback for engines without plus-lighter. */
+.liquid-glass::after,
+.analysis-action-group::after,
+.analysis-tab::after,
+.world-panel::after,
+.glass-range-knob::after,
+.glass-toggle-knob::after,
+.renderer-full-panel::after,
+.timeline-full-panel::after,
+.wc-panel::after,
+.widget-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--border-glass-glow);
+  filter: blur(3px);
+  mix-blend-mode: screen;
+  mix-blend-mode: plus-lighter;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.widget-card::after {
+  filter:blur(5px);
+  opacity: 0.6;
+  inset: -1px
+}
+
+
+@media (prefers-color-scheme: dark) {
+  .widget-card::after {
+     opacity:1;
+     filter: blur(5px);
+     inset:0
+  }
+}
+
 
 .liquid-glass:hover {
   box-shadow: var(--shadow-glass-hover);
@@ -1042,7 +1137,7 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: destination-out;
@@ -1113,7 +1208,7 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: destination-out;
@@ -1418,16 +1513,16 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   border-radius: inherit;
 }
 
-/* Specular gradient border ring — identical mask technique to .liquid-glass.
-   padding is the *source* thickness; visual = padding × zoom on the
-   parent .analysis-inner. With zoom now 0.8 (was 0.6), 1.4 × 0.8 = 1.12 px
-   visual (was 1.6 × 0.6 = 0.96 px). Slightly thicker but still hairline. */
+/* Border ring — same masked technique as .liquid-glass, but driven by the
+   widget-specific --border-glass-grad-widget (dimmer in light mode since a
+   bright rim reads loud on a solid card). 0.5px source (× the 0.8 zoom on
+   .analysis-inner ≈ 0.4px visual hairline). */
 .widget-card::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: 32px;
-  padding: 1.2px;
+  padding: 0.5px;
   background: var(--border-glass-grad-widget);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -5088,7 +5183,7 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -5944,14 +6039,15 @@ body.scroll-edge-idle .toolbar-ambient-orb {
    tints purple in High, orange in Low, blue in Default — same
    identity logic as the world-data scan orb. */
 .status-pill--auto-paragraph {
-  /* Toned-down halo — the previous 32px / 9px / 55% read as overstated
-     once the window-scale backdrop orb came online. The orb is now
-     doing most of the "active" signalling at viewport scale; the pill
-     just needs a tinted edge to confirm the pill itself is the active
-     indicator, not a louder halo competing with the backdrop. */
+  /* Keep the shared glass edge (--shadow-glass: white top/bottom + dark
+     sides + drop), then add only the mode-tinted active halo on top — so
+     the loading pill complies with the glass system instead of replacing
+     its border with an old uniform 1px ring. Halo stays toned down since
+     the window-scale backdrop orb already carries most of the "active"
+     signal; the pill just needs a tinted edge to mark itself as the
+     indicator. */
   box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.08),
-    0 2px 12px rgba(0, 0, 0, 0.18),
+    var(--shadow-glass),
     0 0 18px 4px color-mix(in srgb, var(--orb-color, #1066FF) 32%, transparent);
 }
 
@@ -5968,6 +6064,176 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   border-top-color: var(--text);
   opacity: 0.78;
   animation: intelSpin 1.55s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+}
+
+/* ── Loading lens ─────────────────────────────────────────────────────────
+   A big clear refraction circle over the editor during one-shot format
+   passes (auto-paragraph / scene-break). Sits in front of the scrolling
+   text but behind the toolbar/panels; carries no fill or blur — the glass
+   engine applies displacement-only refraction (.liquid-glass-lens → blur 0),
+   so all you see is the text bending through it. The pill is its centre. */
+.loading-lens-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 24;                 /* > editor text (1–11), < scroll-edge (30) / toolbar (40) */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  opacity: 1;
+}
+.loading-lens-shell--on { opacity: 1; }
+
+.liquid-glass-lens {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  /* completely clear — no fill, no border, no shadow, no CSS blur fallback.
+     The JS engine is the only thing that paints it (pure refraction).
+     Refraction strength / radius / blur are tuned from the LENS_* knobs in
+     liquid-glass-filter.ts.
+
+     Sizing: the filter renders poorly above a certain px size, so the lens
+     keeps a small 100px base and is blown up with transform: scale() — the
+     LENS_SUPERSAMPLE knob renders the filter at higher resolution so the
+     scale-up stays smooth (no ridges). The scale MUST live inside
+     `transform`, AFTER translate(-50%, -50%), so the centring offset is
+     never scaled. (A separate `scale:` property applies after `transform`
+     per spec and scales the -50% too, shifting the lens off centre.)
+     Only motion is the one-shot grow-in on appear (4.5 → 5×). */
+  background: transparent;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(10);
+  transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  opacity: 0;
+}
+
+.loading-lens-shell--on .liquid-glass-lens {
+  transform: translate(-50%, -50%) scale(7);
+  opacity:1;
+}
+
+.liquid-glass-lens-edge{
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) scale(1.44);
+  width: 690px;
+  height: 690px;
+  border-radius: 50%;
+  opacity: 0;
+  transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  box-shadow: var(--shadow-glass);
+}
+.liquid-glass-lens-edge::before{
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  filter: blur(2px);
+  background: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.3) 0%,
+    rgba(255, 255, 255, 0) 300px,
+    rgba(255, 255, 255, 0) calc(100% - 300px),
+    rgba(255, 255, 255, 0.3) 100%
+  );;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.liquid-glass-lens-edge::after {
+  content: "";
+  position: absolute;
+  inset: -0px;
+  border-radius: inherit;
+  background: radial-gradient(
+    circle at center,
+    rgba(255, 255, 255, 0) 60%,   /* transparent center */
+    rgba(255, 255, 255, 0.2) 85%, /* soft falloff */
+    rgba(255, 255, 255, 0.32) 100%   /* bright edge */
+  );
+  mix-blend-mode: plus-lighter;
+  pointer-events: none;
+  z-index: 5;
+}
+.loading-lens-shell--on .liquid-glass-lens-edge {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+
+/* Text-mask fade — covers the editor text outside the lens circle with the
+   page colour, so the whole area reads as enclosed inside the bubble. The
+   lens radius is 300px (100px base × scale 6 / 2); the clear core is pulled
+   a little inside that (250px) and fully masked by the lens edge (300px), so
+   everything outside the bubble is hidden. No transition-delay: the format
+   pass only lasts ~980ms, so it must come up immediately, in sync with the
+   lens (same 0.5s curve, 0 delay). */
+.loading-lens-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 50% 50%, transparent 0 270px, var(--bg) 350px);
+  opacity: 0;
+  transition: opacity 0.82s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.loading-lens-shell--on .loading-lens-fade {
+  opacity: 1;
+}
+
+/* Soft blur spot — a small circle that backdrop-blurs the (refracted) text
+   under the loading pill, then a radial mask feathers its edge so the blur
+   dissolves outward instead of ending on a hard circle. Reads as a soft
+   focus pool the text sits on. Fades in with the lens (0.5s, 0 delay). */
+.loading-lens-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 430px;
+  height: 430px;
+  border-radius: 50%;
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  /* feather the circle edge → soft blur falloff (the "blur the circle
+     itself" softening). */
+  -webkit-mask-image: radial-gradient(closest-side, #000 30%, transparent 82%);
+  mask-image: radial-gradient(closest-side, #000 30%, transparent 82%);
+  opacity: 0;
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+}
+.loading-lens-shell--on .loading-lens-core {
+  opacity: 1;
+}
+
+/* The pill is the flex-centred item, painted above the lens + fade. It grows
+   in synced to the lens (same 0.5s curve, opacity + scale, 0 delay), so the
+   indicator and the bubble appear together within the ~980ms pass window. */
+.loading-lens-pill {
+  position: relative;
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+              transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.loading-lens-shell--on .loading-lens-pill {
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* ─── Find & Replace floating panel ───
@@ -11934,7 +12200,7 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -12570,6 +12836,280 @@ body.scroll-edge-idle .toolbar-ambient-orb {
 }
 
 /* ═══════════════════════════════════════════
+   RENDERER WORKSPACE — STANDALONE WINDOW + FILE EDITING
+   ═══════════════════════════════════════════ */
+
+/* Full-bleed window variant: fill the OS window, drop the scrim + box. */
+.renderer-full-overlay.renderer-full-overlay--window {
+  position: fixed;
+  inset: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  animation: none;
+}
+.renderer-full-panel.renderer-full-panel--window {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.renderer-full-panel--window::before,
+.renderer-full-panel--window::after { display: none; }
+
+/* The header doubles as the window drag strip (macOS hidden-inset); buttons
+   and inputs stay clickable, and the left edge clears the traffic lights. */
+.renderer-full-header--drag { -webkit-app-region: drag; }
+.renderer-full-header--drag button,
+.renderer-full-header--drag input,
+.renderer-full-header--drag a,
+.renderer-full-header--drag [role="button"] { -webkit-app-region: no-drag; }
+body.workspace-window { background: transparent; }
+body.workspace-window .renderer-full-header--drag { padding-left: 84px; }
+
+.renderer-full-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Liquid-glass chat input — used inside the standalone window. Two-class
+   selector so it overrides the flat .rp-chat-input-row fill. */
+.rp-chat-input-row.liquid-glass {
+  background: var(--bg-glass);
+  border: none;
+}
+
+/* ── Standalone-window chat treatment (scoped to body.workspace-window so the
+      side panel + in-window overlay are untouched) ──────────────────────── */
+
+/* (1) Whole window painted the solid app background. The panel base shifts
+   from the frosted --bg-glass-strong to --bg, so every region (sidebar,
+   section index, viewer — all translucent panel-text tints) is pulled toward
+   --bg while keeping its original relative tint delta. The chat column is set
+   explicitly so it stays solid --bg too. */
+body.workspace-window .renderer-full-panel {
+  background: var(--bg);
+}
+body.workspace-window .renderer-full-chat {
+  background: var(--bg);
+}
+
+/* (2) Messages fill the whole chat body; the input floats over the bottom so
+   text scrolls up behind the frosted glass and dissolves under it. */
+body.workspace-window .renderer-full-chat .rp-chat-body {
+  position: relative;
+}
+body.workspace-window .renderer-full-chat .rp-chat-messages {
+  /* extra bottom run-off + a longer bottom fade aligned with the floating
+     input, so messages melt into --bg right where the glass begins. */
+  --overlay-scroll-edge-bottom: 58px;
+  --overlay-scroll-pad-bottom: 56px;
+}
+body.workspace-window .renderer-full-chat .rp-chat-input-area {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: transparent;
+}
+
+/* (3) Loading glow moved INSIDE + UNDER the glass: a soft, blurred, rotating
+   yellow light painted behind the input row (lower z-index sibling) so the
+   row's liquid-glass refraction bends it — instead of the crisp on-top ring.
+   Only the window path is affected; the original streaming ring is untouched. */
+body.workspace-window .renderer-full-chat .rp-chat-input-row {
+  position: relative;
+  z-index: 1;
+}
+body.workspace-window .renderer-full-chat .rp-chat-input-row--streaming::before {
+  display: none; /* drop the on-top rotating border ring in window mode */
+}
+body.workspace-window .renderer-full-chat .rp-chat-input-area::before {
+  content: "";
+  position: absolute;
+  inset: 7px 15px 15px 15px; /* sit just INSIDE the input row, behind the glass */
+  border-radius: 15px;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  /* thin sharp travelling arc — a 1.25px ring masked to the inset rect, so it
+     stays contained inside the input and reads crisp through the refraction. */
+  padding: 1.25px;
+  background: conic-gradient(
+    from var(--rp-glow-angle),
+    transparent 64%,
+    rgba(255, 168, 0, 0.85) 76%,
+    rgba(255, 224, 130, 1) 80%,
+    rgba(255, 168, 0, 0.85) 84%,
+    transparent 96%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  transition: opacity 0.3s ease;
+}
+body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input-row--streaming)::before {
+  opacity: 1;
+  animation: rp-border-glow 2.4s linear infinite;
+}
+
+/* Window shells for the no-project / pro-gate states. */
+.rp-window-chat-shell,
+.rp-window-gate-shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rp-window-gate-shell { align-items: center; justify-content: center; }
+
+/* Detach card — shown in the main-window side panel while a separate
+   workspace window owns the chat. */
+.rp-detach-card {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 24px;
+  text-align: center;
+}
+.rp-detach-logo {
+  width: auto;
+  height: 26px;
+  filter: opacity(0.8);
+}
+@media (prefers-color-scheme: dark) {
+  .rp-detach-logo { filter: invert(1) opacity(0.8); }
+}
+.rp-detach-title {
+  font-family: var(--font-body);
+  font-style: italic;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+.rp-detach-copy {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--panel-text-4);
+  max-width: 260px;
+  margin: 0;
+}
+.rp-detach-btn {
+  margin-top: 4px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  background: var(--accent, #ff9c00);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.rp-detach-btn:hover { filter: brightness(1.05); }
+.rp-detach-btn:active { transform: scale(0.96); }
+
+/* Viewer editing controls. */
+.renderer-full-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.renderer-full-action-btn {
+  padding: 4px 11px;
+  border-radius: 9999px;
+  background: var(--panel-btn-bg);
+  border: 1px solid var(--panel-btn-border);
+  color: var(--panel-text);
+  cursor: pointer;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background 0.12s ease, opacity 0.12s ease;
+}
+.renderer-full-action-btn:hover { background: color-mix(in srgb, var(--panel-text) 8%, transparent); }
+.renderer-full-action-btn--primary {
+  background: var(--accent, #ff9c00);
+  border-color: transparent;
+  color: #fff;
+}
+.renderer-full-action-btn--primary:hover { filter: brightness(1.05); background: var(--accent, #ff9c00); }
+.renderer-full-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.renderer-full-dirty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #ff9c00);
+  flex-shrink: 0;
+}
+.renderer-full-json-status {
+  padding: 3px 8px;
+  border-radius: 9999px;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.22);
+  cursor: help;
+}
+.renderer-full-json-status[data-ok] {
+  background: rgba(34, 197, 94, 0.12);
+  color: #16a34a;
+  border-color: rgba(34, 197, 94, 0.22);
+}
+.renderer-full-editor {
+  display: block;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  tab-size: 2;
+  scrollbar-width: thin;
+  scrollbar-color: var(--divider-line) transparent;
+}
+.renderer-full-save-error {
+  position: sticky;
+  bottom: 0;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  font-family: var(--font-ui);
+  font-size: 10px;
+}
+
+/* ═══════════════════════════════════════════
    FULLSCREEN TIMELINE OVERLAY
   Match the other fullscreen overlays: one backdrop blur plane on the
   outer overlay, no additional blur on the inner panel.
@@ -12613,7 +13153,7 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -12751,6 +13291,19 @@ body.electron-window-unfocused .app .glass-toggle-knob::before {
   content: none !important;
 }
 
+/* Drop the additive edge-glow (::after) on every glass surface while the
+   window is unfocused — the flat unfocused fallback has no live glass to rim.
+   Mirrors the ::before removal above; focused/other paths are untouched. */
+body.electron-window-unfocused .app .liquid-glass::after,
+body.electron-window-unfocused .app .analysis-tab::after,
+body.electron-window-unfocused .app .analysis-action-group::after,
+body.electron-window-unfocused .app .glass-range-knob::after,
+body.electron-window-unfocused .app .glass-toggle-knob::after,
+body.electron-window-unfocused .app .world-panel::after,
+body.electron-window-unfocused .app .widget-card::after {
+  content: none !important;
+}
+
 body.electron-window-unfocused .app .world-panel,
 body.electron-window-unfocused .app .index-panel {
   background: var(--bg-glass-unfocused) !important;
@@ -12807,6 +13360,14 @@ body.electron-window-unfocused .timeline-full-panel {
 
 body.electron-window-unfocused .renderer-full-panel::before,
 body.electron-window-unfocused .timeline-full-panel::before {
+  content: none !important;
+}
+
+/* Edge-glow (::after) removal for the overlay glass panels (rendered outside
+   .app), matching the in-app rule above. */
+body.electron-window-unfocused .renderer-full-panel::after,
+body.electron-window-unfocused .timeline-full-panel::after,
+body.electron-window-unfocused .wc-panel::after {
   content: none !important;
 }
 
@@ -12880,7 +13441,7 @@ body.electron-window-unfocused .timeline-full-panel::before {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  padding: 1px;
+  padding: 0.5px;
   background: var(--border-glass-grad);
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,

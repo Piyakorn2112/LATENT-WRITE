@@ -1,0 +1,244 @@
+/* ═══════════════════════════════════════════
+   ORB ENGINE — WebGL orb + toolbar refraction layer
+   Self-contained: deleting this file + the orb/ folder and flipping the
+   USE_ORB_ENGINE flags restores the legacy CSS orb untouched in styles.css.
+   ═══════════════════════════════════════════ */
+
+.orb-engine {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+/* Canvas is 1.5× the orb so the plasma halo can breathe past the
+   silhouette without clipping. A hair of CSS blur keeps the essence of
+   the old soft orb without paying for a filter on animated children —
+   the canvas is one composited layer. */
+.orb-engine-canvas {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  filter: blur(0.3px);
+}
+
+/* ── State hooks when mounted inside the toolbar IntelBtn ──────────────
+   The engine replaces .intel-mesh-dot inside .intel-orb-live, so legacy
+   state classes on the button still land here. */
+
+/* Analyzing: same expand the legacy orb did, on the engine wrapper. */
+.intel-orb-live--engine {
+  transition: transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+.intel-btn--analyzing .intel-orb-live--engine {
+  transform: scale(1.22);
+}
+
+/* Passive idle: the legacy orb swapped to a static fallback core; the
+   engine instead self-throttles to 8 fps and lowers its energy, so keep
+   it visible — just soften it. These override the legacy passive rules. */
+.intel-btn--passive-orb-active .intel-orb-live--engine {
+  transform: none;
+  opacity: 0.55;
+}
+.intel-btn--passive-orb-active .intel-orb-live--engine ~ .intel-mesh-fallback {
+  opacity: 0;
+}
+
+/* ═══════════════════════════════════════════
+   TOOLBAR REFRACTION LAYER — OrbBackGlow
+   Painted *behind* the liquid-glass pill (earlier sibling), so the pill's
+   backdrop-filter actually blurs/refracts it — light living inside the
+   glass, not painted onto it. The bleed past the pill edge reads as glow
+   escaping the slab, like the Siri hardware reference.
+   GPU note: gradients + blur rasterize once; only transform/opacity
+   animate, so the layer is compositor-cheap. It does sit in the pill's
+   backdrop sample area, which the existing ambient layer already keeps
+   live — no new per-frame cost class.
+   ═══════════════════════════════════════════ */
+
+.orb-backglow {
+  position: absolute;
+  /* centred under the orb: 6px pill pad + half a 34px button */
+  left: calc(6px + var(--btn-size, 34px) / 2);
+  top: 50%;
+  /* sized to live almost entirely behind the pill (≈46px tall): the
+     toolbar glass is the glow's boundary — only a whisper escapes it */
+  width: 118px;
+  height: 70px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  /* wrapper stays at full opacity (state rules below fade it as a unit);
+     the bloom/spectral support layers carry their own dimming via vars so
+     the behind-glass orb twin keeps its light */
+  opacity: 1;
+  --bloom-base: 0.22;
+  --spectral-base: 0.07;
+  transition: opacity 0.45s ease;
+  --orb-a: #1066FF;
+  --orb-b: #33E9FF;
+  --orb-c: #AADAFF;
+}
+
+.orb-backglow-bloom {
+  position: absolute;
+  inset: 0;
+  /* All three colour blobs sit on the orb's vertical midline (50%) and
+     close to its centre horizontally, so the ambient pools exactly under
+     the orb instead of riding high. The heavy blur spreads them into one
+     soft, even wash — wider reach, lower peak, so it stays subtle. */
+  background:
+    radial-gradient(closest-side at 50% 50%, color-mix(in srgb, var(--orb-a) 44%, transparent), transparent 82%),
+    radial-gradient(closest-side at 43% 50%, color-mix(in srgb, var(--orb-b) 30%, transparent), transparent 72%),
+    radial-gradient(closest-side at 57% 50%, color-mix(in srgb, var(--orb-c) 26%, transparent), transparent 68%);
+  filter: blur(18px) saturate(1.5);
+  animation: orbBackglowDrift 9s ease-in-out infinite;
+}
+
+/* The behind-glass orb twin — pinned dead-centre of the wrapper, which is
+   itself anchored at the toolbar orb button's centre. The pill's liquid
+   glass (blur + saturate ± SVG refraction) is what shapes it; it has no
+   boundary of its own. Slightly larger than the 20px button orb so its
+   light survives the blur. */
+.orb-backglow-orb {
+  position: absolute;
+  left: 44%;
+  top: 49%;
+  /* Scale lives INSIDE the transform, after translate(-50%, -50%), so the
+     centring offset is never scaled — the orb grows/shrinks about its own
+     centre and stays pinned. (Using the separate `scale:` property breaks
+     this: per spec it applies after `transform`, scaling the -50% offset
+     too, which drifts the orb a few px as it resizes.) Rests contracted,
+     expands to full size while the orb works; same spring as the button. */
+  transform: translate(-50%, -50%) scale(0.7);
+  filter: blur(2px);
+  transition: transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1), left 0.55s cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+/* Active (scanning / analysing): grow the twin. */
+.orb-backglow[data-analyzing="true"] .orb-backglow-orb {
+  transform: translate(-50%, -50%) scale(1.2);
+  left: 50%;
+}
+
+/* Twin orb — separate light/dark handlers.
+   Dark: full-bodied glow (the dark glass needs the orb to carry weight).
+   Light: the glass already reads bright, so a strong colour cloud would
+   dominate — drop the opacity further and crank saturation so the orb
+   stays vivid and legible as colour rather than turning into a pale wash. */
+@media (prefers-color-scheme: dark) {
+  .orb-backglow-orb { opacity: 1; filter: (saturate(1.2))}
+}
+@media (prefers-color-scheme: light) {
+  .orb-backglow-orb {
+    opacity: 0.3;
+    filter: saturate(1.85) brightness(1.2) blur(7px);
+  }
+}
+
+/* Dispersion shard — a faint spectral streak, the refraction artifact a
+   prism edge would throw. Deliberately not palette-tinted (real dispersion
+   is spectral) but kept low-opacity so the mode colour still dominates. */
+.orb-backglow-spectral {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 116px;
+  height: 46px;
+  transform: translate(-50%, -50%) rotate(-9deg);
+  background: linear-gradient(100deg,
+    transparent 8%,
+    rgba(255, 92, 60, 0.50) 30%,
+    rgba(255, 214, 96, 0.46) 42%,
+    rgba(126, 255, 215, 0.42) 54%,
+    rgba(86, 158, 255, 0.52) 68%,
+    transparent 90%);
+  -webkit-mask-image: radial-gradient(closest-side ellipse at 50% 50%, #000 28%, transparent 76%);
+  mask-image: radial-gradient(closest-side ellipse at 50% 50%, #000 28%, transparent 76%);
+  filter: blur(7px) saturate(1.6);
+  opacity: var(--spectral-base);
+  animation: orbBackglowSpectral 13s ease-in-out infinite;
+}
+
+@media (prefers-color-scheme: dark) {
+  .orb-backglow {
+    --bloom-base: 0.34;
+    --spectral-base: 0.13;
+  }
+}
+
+/* Auto mode: ride the same registered-property colour cycle the legacy
+   ambient uses, so glass and orb stay in one colour family. */
+.orb-backglow[data-mode="auto"] {
+  animation: autoFrontCycleEqual 12s ease-in-out infinite;
+  transition:
+    opacity 0.45s ease,
+    --orb-a 1.4s ease,
+    --orb-b 1.4s ease,
+    --orb-c 1.4s ease;
+}
+
+.orb-backglow[data-analyzing="true"] { --bloom-base: 0.36; }
+.orb-backglow[data-analyzing="true"] .orb-backglow-bloom {
+  animation-duration: 4.5s;
+}
+@media (prefers-color-scheme: dark) {
+  .orb-backglow[data-analyzing="true"] { --bloom-base: 0.5; }
+}
+
+.orb-backglow[data-mode="off"] { opacity: 0; }
+.orb-backglow[data-mode="off"] .orb-backglow-bloom,
+.orb-backglow[data-mode="off"] .orb-backglow-spectral { animation-play-state: paused; }
+
+/* Same power-saving paths as the legacy ambient glow. */
+body.electron-window-unfocused .orb-backglow,
+body.scroll-edge-idle .orb-backglow {
+  opacity: 0;
+}
+body.electron-window-unfocused .orb-backglow-bloom,
+body.scroll-edge-idle .orb-backglow-bloom,
+body.electron-window-unfocused .orb-backglow-spectral,
+body.scroll-edge-idle .orb-backglow-spectral {
+  animation-play-state: paused;
+}
+
+/* keyframe opacities scale the per-layer base vars (an animated opacity
+   replaces the static one entirely, so the dimming must live here too) */
+@keyframes orbBackglowDrift {
+  0%   { transform: translate(0, 0) scale(0.94); opacity: calc(var(--bloom-base, 0.22) * 0.8); }
+  38%  { transform: translate(5px, -1px) scale(1.06); opacity: var(--bloom-base, 0.22); }
+  72%  { transform: translate(-4px, 1px) scale(0.98); opacity: calc(var(--bloom-base, 0.22) * 0.86); }
+  100% { transform: translate(0, 0) scale(0.94); opacity: calc(var(--bloom-base, 0.22) * 0.8); }
+}
+
+@keyframes orbBackglowSpectral {
+  0%   { transform: translate(-50%, -50%) rotate(-9deg) translateX(-6px); opacity: calc(var(--spectral-base, 0.07) * 0.7); }
+  45%  { transform: translate(-50%, -50%) rotate(-5deg) translateX(8px);  opacity: var(--spectral-base, 0.07); }
+  100% { transform: translate(-50%, -50%) rotate(-9deg) translateX(-6px); opacity: calc(var(--spectral-base, 0.07) * 0.7); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-backglow-bloom,
+  .orb-backglow-spectral,
+  .orb-backglow[data-mode="auto"] {
+    animation: none;
+  }
+}
+
+/* ── .toolbar-frame — wrapper that gives the single-pill toolbar layout a
+   positioned box matching the pill, so the backglow can sit behind the
+   glass as an earlier sibling. (The grouped layout already has
+   .toolbar-grouped-layout with position: relative.) ── */
+.toolbar-frame {
+  position: relative;
+  display: flex;
+  justify-content: center;
+  width: min(100%, 920px);
+  min-width: 0;
+  pointer-events: none;
+}
+.toolbar-frame > .toolbar {
+  width: 100%;
+}

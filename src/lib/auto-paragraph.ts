@@ -1,331 +1,298 @@
 /**
- * Smart chapter auto-paragraphing.
+ * Smart chapter auto-paragraphing — "respect & augment" auditor.
  *
- * Given a chapter's raw content, produce a re-paragraphed version using
- * signals already derivable from the prose: speech detection (quote
- * boundaries + speaker change), action verb density, discourse / time-shift
- * markers, and a length cap. The goal isn't 100% fidelity — it's giving
- * the writer a sane starting point they can review and tweak in seconds
- * instead of hand-breaking a wall of text.
+ * Behaviour (chosen deliberately, see the design notes in the test suite):
+ *   • The author's existing paragraph breaks are AUTHORITATIVE. Every newline
+ *     in the chapter is a paragraph boundary (matching the app's own
+ *     `toParagraphs` split, `content.split(/\n{2,}|\n/)`). We never merge two
+ *     existing paragraphs and never flatten the document.
+ *   • Each existing paragraph is AUDITED independently and split only where a
+ *     break is *clearly missing* — two speakers jammed together, a dialogue
+ *     speaker change, or a time/place jump mid-paragraph.
+ *   • A chapter that is a single unbroken block (a pasted wall of text) is the
+ *     one case we fully reconstruct: there are no authorial breaks to respect,
+ *     so the richer rule set (incl. narration→dialogue, pure-narration actor
+ *     switches, and a length cap) rebuilds sane paragraphing.
  *
- * The algorithm operates on flat sentence sequences:
- *   1. Preserve existing scene breaks (lines like "* * *" or "---")
- *      verbatim — those are an authorial decision and never split.
- *   2. Within each prose chunk, collapse all whitespace (newlines + spaces)
- *      to single spaces — we re-derive the paragraph structure from
- *      scratch rather than honour the user's existing breaks, otherwise
- *      a wall-of-text input would get unchanged output.
- *   3. Sentence-tokenise the chunk.
- *   4. Annotate each sentence with quote presence, attribution-tag
- *      detection, time-shift opener, action-verb head, and a coarse
- *      speaker guess.
- *   5. Walk pairwise; insert a paragraph break before sentence i when
- *      one of the rules fires (see RULES below).
- *   6. Re-emit `paragraphs.join("\n\n")`.
+ * High-precision posture: when a boundary signal is ambiguous we do NOT break.
+ * A missed split costs the writer one keystroke; a wrong split corrupts their
+ * formatting and erodes trust.
  *
- * Design choices:
- *   • No dependency on `detectSpeechInChapter` — that operates on
- *     pre-split paragraphs, which we don't have yet. We use a lightweight
- *     local quote/attribution scan tuned for paragraphing decisions only.
- *   • Conservative on breaks: we'd rather under-split than over-split,
- *     because the output is meant to be a reasonable draft, not noisy
- *     fragments the writer has to glue back together.
- *   • No async / no worker — the algorithm is fast enough to run
- *     synchronously even on long chapters; the loading shell exists for
- *     UX feedback (the orb / pill), not because the work blocks.
+ * All linguistic work is delegated to the shared, unit-tested primitives in
+ * `prose-segments.ts` (sentence tokenizer, apostrophe-safe quote analyzer,
+ * discourse-marker taxonomy). This module only owns the break-decision policy.
  */
 
-const SCENE_BREAK_RE = /^[\s\*\-—#~=|]{3,}$/;
+import {
+  splitSentences,
+  analyzeQuotes,
+  classifyOpener,
+  stripQuotes,
+  isSceneBreakLine,
+  type QuoteAnalysis,
+} from "./prose-segments";
 
-// Quote characters across common conventions. Matches anywhere in a
-// sentence to flag dialogue presence; we don't try to balance pairs
-// since the paragraphing rules only need "is there speech here at all".
-const QUOTE_ANY = /[“”"'‘’«»]/;
-const QUOTE_OPENER_AT_START = /^\s*[“"'‘«]/;
-
-// Attribution verbs for "X said" / "she whispered" pattern detection.
-// Matches the speech-detect verb list at a smaller, paragraphing-only
-// granularity — enough to recognise that "Alice said" anchors a quote
-// to the SAME paragraph as that quote rather than the next.
-const ATTRIB_VERBS = [
-  "said","says","asked","asks","replied","replies","whispered","whispers",
-  "shouted","shouts","muttered","mutters","exclaimed","added","adds",
-  "answered","answers","called","calling","cried","cries","murmured","sighed",
-  "snapped","stated","told","tells","yelled","gasped","breathed","interrupted",
-  "continued","began","begins","insisted","explained","scoffed","groaned",
-  "growled","laughed","screamed","spoke","speaks","mumbled","barked",
-  "hissed","stammered","wondered","muttered","retorted","remarked","quipped",
-];
-const ATTRIB_VERBS_RE = new RegExp(
-  `\\b(?:${ATTRIB_VERBS.join("|")})\\b`,
-  "i",
-);
-
-// Discourse markers at sentence start that strongly suggest a paragraph
-// break. Time-shift = jumps in narrative time. Abrupt = sudden pivots.
-const TIME_SHIFT_RE = /^(?:later|then|afterwards?|that\s+(?:morning|afternoon|evening|night|day)|the\s+next\s+\w+|hours?\s+later|days?\s+later|weeks?\s+later|months?\s+later|years?\s+later|moments?\s+later|much\s+later|meanwhile|elsewhere|outside|inside|across\s+the\s+(?:room|street|hall|table|city)|down\s+(?:the\s+\w+)|when\s+(?:the\s+)?(?:morning|night|sun|moon|day|evening|dawn|dusk)|by\s+(?:the\s+time|nightfall|morning|noon|dawn|dusk))\b/i;
-
-const ABRUPT_RE = /^(?:suddenly|abruptly|without\s+warning|in\s+an\s+instant|all\s+at\s+once|just\s+then)\b/i;
-
-// Action-beat heuristics — matches sentences that lead with motion, used
-// to consider a paragraph break when a strong physical beat follows
-// non-physical narration. A small, high-precision verb set keeps the
-// rule from firing on every "She walked over" inside an existing scene.
-const ACTION_HEAD_VERBS = [
-  "stood","sat","rose","fell","stepped","walked","ran","sprinted","jumped",
-  "leapt","crouched","kneeled","knelt","bolted","dashed","staggered",
-  "stumbled","grabbed","reached","pulled","pushed","slammed","slipped",
-  "turned","spun","whirled","dropped","flung","threw","caught","struck",
-  "hit","kicked","punched","drew","raised","lowered","leaned","bowed",
-  "lunged","sprang","fled","chased","entered","exited","crossed","passed",
-];
-const ACTION_HEAD_RE = new RegExp(
-  `^(?:[A-Z][a-z'\\-]+\\s+)?(?:${ACTION_HEAD_VERBS.join("|")})\\b`,
-  "i",
-);
-
-// Paragraph length cap — beyond this many sentences the next reasonable
-// boundary forces a break for readability. Calibrated against trade-
-// paperback prose where the median paragraph is 2–4 sentences and 6+
-// reads as a wall.
+/** Force-break a wall-of-text paragraph once it reaches this many sentences. */
 const MAX_SENTENCES_PER_PARA = 5;
 
-interface SentenceInfo {
-  text: string;
-  /** Sentence contains at least one quote character. */
-  hasQuote: boolean;
-  /** Sentence is essentially nothing but a quoted line (≥ 60% in quotes). */
-  isMostlyQuote: boolean;
-  /** Sentence ends with " or " followed by punctuation (closing quote). */
-  endsWithCloseQuote: boolean;
-  /** Sentence opens with a quote marker. */
-  startsWithOpenQuote: boolean;
-  /** Sentence contains a "said" / "asked" / etc. attribution verb. */
-  hasAttribVerb: boolean;
-  /** Sentence text starts with a known time-shift discourse marker. */
-  startsWithTimeShift: boolean;
-  /** Sentence text starts with an abrupt-pivot marker. */
-  startsWithAbrupt: boolean;
-  /** Sentence opens with an action-head verb (Subject + walked/turned/…). */
-  startsWithActionHead: boolean;
-  /** Coarse speaker guess for dialogue-only lines (a known name appearing
-   *  in the sentence's attribution, or the lone speaker in the line). */
-  speakerGuess?: string;
+const NOMINATIVE_PRONOUN = /\b(he|she|they|i|we)\b/i;
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-// ── Sentence tokenisation ────────────────────────────────────────────────
+interface NameMatcher {
+  key: string;
+  re: RegExp;
+}
 
-function splitSentences(text: string): string[] {
-  const out: string[] = [];
-  // End boundary: ., !, or ? followed optionally by a closing quote /
-  // bracket, then whitespace or end-of-input. We keep the punctuation
-  // attached to the sentence.
-  const re = /[.!?]+['")\]’”]?(?=\s|$)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const end = m.index + m[0].length;
-    let start = last;
-    while (start < end && /\s/.test(text[start])) start++;
-    if (start < end) out.push(text.slice(start, end));
-    last = end;
-  }
-  if (last < text.length) {
-    let start = last;
-    while (start < text.length && /\s/.test(text[start])) start++;
-    if (start < text.length) {
-      const tail = text.slice(start).trim();
-      if (tail) out.push(tail);
-    }
+function buildNameMatchers(knownNames: string[]): NameMatcher[] {
+  const out: NameMatcher[] = [];
+  for (const name of knownNames) {
+    const trimmed = name?.trim();
+    if (!trimmed) continue;
+    out.push({ key: trimmed.toLowerCase(), re: new RegExp(`\\b${escapeRegex(trimmed)}\\b`, "i") });
   }
   return out;
 }
 
-// ── Sentence annotation ──────────────────────────────────────────────────
-
-function annotate(sentence: string, knownNames: string[]): SentenceInfo {
-  const trimmed = sentence.trim();
-  const hasQuote = QUOTE_ANY.test(trimmed);
-  const startsWithOpenQuote = QUOTE_OPENER_AT_START.test(trimmed);
-  const endsWithCloseQuote = /['"’”][.,!?;:]?\s*$/.test(trimmed);
-  const hasAttribVerb = hasQuote && ATTRIB_VERBS_RE.test(trimmed);
-
-  // "Mostly quote" = the in-quote portion is ≥ 60% of the sentence chars.
-  // Used to recognise pure dialogue lines (no surrounding narration).
-  let inQuoteChars = 0;
-  let inside = false;
-  for (const ch of trimmed) {
-    if (ch === "“" || ch === "‘" || ch === "«" || ch === '"' || ch === "'") {
-      inside = !inside;
-      continue;
-    }
-    if (ch === "”" || ch === "’" || ch === "»") {
-      inside = false;
-      continue;
-    }
-    if (inside) inQuoteChars++;
-  }
-  const isMostlyQuote = trimmed.length > 0 && inQuoteChars / trimmed.length >= 0.55;
-
-  const startsWithTimeShift = TIME_SHIFT_RE.test(trimmed);
-  const startsWithAbrupt = ABRUPT_RE.test(trimmed);
-  const startsWithActionHead = ACTION_HEAD_RE.test(trimmed);
-
-  // Speaker guess — find the first known name in this sentence (works
-  // when the sentence contains an attribution like "Alice said").
-  let speakerGuess: string | undefined;
-  if (hasAttribVerb && knownNames.length) {
-    for (const name of knownNames) {
-      if (!name) continue;
-      const re = new RegExp(`\\b${escapeRegex(name)}\\b`);
-      if (re.test(trimmed)) {
-        speakerGuess = name;
-        break;
-      }
-    }
-  }
-
-  return {
-    text: trimmed,
-    hasQuote,
-    isMostlyQuote,
-    endsWithCloseQuote,
-    startsWithOpenQuote,
-    hasAttribVerb,
-    startsWithTimeShift,
-    startsWithAbrupt,
-    startsWithActionHead,
-    speakerGuess,
-  };
-}
-
-function escapeRegex(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// ── Break decision ───────────────────────────────────────────────────────
-
 /**
- * RULES — return `true` to insert a paragraph break BEFORE `curr`.
- * Rules are ordered from strongest (always-break) to weakest (only when
- * paragraph is already long). First match wins; later rules don't override.
+ * The acting subject of a sentence: the first person referenced in its
+ * narration (a known character name or a nominative pronoun), reading OUTSIDE
+ * any quoted span so dialogue-internal pronouns don't masquerade as the
+ * speaker. Returns a normalized key, or undefined when no person is found
+ * (e.g. a bare quote line, or scene-setting narration with no actor).
  */
-function shouldBreakBefore(
-  prev: SentenceInfo,
-  curr: SentenceInfo,
-  paraLen: number,
-  carriedSpeaker: string | undefined,
-): boolean {
-  // 1. Speaker change in dialogue-heavy lines. If both sentences are
-  //    mostly quote and we can identify two different speakers, break.
-  if (prev.isMostlyQuote && curr.isMostlyQuote) {
-    const a = prev.speakerGuess ?? carriedSpeaker;
-    const b = curr.speakerGuess;
-    if (a && b && a !== b) return true;
-    // Two consecutive pure-dialogue lines — even without speaker certainty,
-    // the convention is a paragraph break. Keep dialogue lines clean.
-    if (!prev.hasAttribVerb && !curr.hasAttribVerb) return true;
+function sentenceSubject(text: string, names: NameMatcher[]): string | undefined {
+  const narration = stripQuotes(text);
+  let best: { key: string; pos: number } | undefined;
+
+  const pm = NOMINATIVE_PRONOUN.exec(narration);
+  if (pm) best = { key: pm[1].toLowerCase(), pos: pm.index };
+
+  for (const { key, re } of names) {
+    const m = re.exec(narration);
+    if (m && (!best || m.index < best.pos)) best = { key, pos: m.index };
   }
-
-  // 2. Narration → dialogue transition. If curr opens with a quote and
-  //    prev didn't end with attribution (which would tie them together),
-  //    break before curr.
-  if (curr.startsWithOpenQuote && !prev.isMostlyQuote) {
-    // Don't break when prev sets up the quote ("She turned and said,").
-    if (!/(:|,)\s*$/.test(prev.text) && !prev.hasAttribVerb) return true;
-  }
-
-  // 3. Dialogue → narration transition. A pure quote line followed by
-  //    descriptive narration almost always wants its own paragraph.
-  if (prev.isMostlyQuote && !curr.hasQuote && !curr.hasAttribVerb) {
-    return true;
-  }
-
-  // 4. Time-shift markers — strong signal of new paragraph.
-  if (curr.startsWithTimeShift) return true;
-
-  // 5. Abrupt pivots — also strong.
-  if (curr.startsWithAbrupt) return true;
-
-  // 6. Action beat after narration: when the current paragraph has run a
-  //    few sentences AND curr leads with an action head verb, break for
-  //    pacing. The threshold (≥3) keeps us from breaking on every action.
-  if (curr.startsWithActionHead && paraLen >= 3) return true;
-
-  // 7. Length cap — force-break at the next sentence boundary once a
-  //    paragraph has reached MAX_SENTENCES_PER_PARA.
-  if (paraLen >= MAX_SENTENCES_PER_PARA) return true;
-
-  return false;
+  return best?.key;
 }
 
-// ── Per-block reparagraphing ─────────────────────────────────────────────
+const PRONOUN_KEYS = new Set(["he", "she", "they", "i", "we"]);
 
-function reparagraphProse(text: string, knownNames: string[]): string {
-  // Collapse all whitespace (including existing newlines) to single spaces.
-  const flat = text.replace(/\s+/g, " ").trim();
-  if (!flat) return "";
+type Gender = "m" | "f" | undefined;
 
-  const rawSentences = splitSentences(flat);
-  if (rawSentences.length === 0) return flat;
-
-  const annotated = rawSentences.map((s) => annotate(s, knownNames));
-
-  const paragraphs: string[][] = [[annotated[0].text]];
-  let carriedSpeaker = annotated[0].speakerGuess;
-
-  for (let i = 1; i < annotated.length; i++) {
-    const prev = annotated[i - 1];
-    const curr = annotated[i];
-    const currentPara = paragraphs[paragraphs.length - 1];
-
-    if (shouldBreakBefore(prev, curr, currentPara.length, carriedSpeaker)) {
-      paragraphs.push([curr.text]);
-    } else {
-      currentPara.push(curr.text);
-    }
-
-    if (curr.speakerGuess) carriedSpeaker = curr.speakerGuess;
-  }
-
-  return paragraphs.map((p) => p.join(" ")).join("\n\n");
+function pronounGender(key: string): Gender {
+  return key === "he" ? "m" : key === "she" ? "f" : undefined;
 }
 
-// ── Public API ───────────────────────────────────────────────────────────
+const MALE_TITLE =
+  "mr|mister|sir|lord|king|prince|father|fr|brother|br|master|duke|count|baron|monsieur|herr|don|uncle";
+const FEMALE_TITLE =
+  "mrs|ms|miss|mistress|lady|queen|princess|mother|sister|madam|madame|mlle|mme|duchess|countess|baroness|dame|aunt|nan";
 
 /**
- * Re-paragraph an entire chapter's content. Scene-break markers (lines
- * matching `^[\s\*\-—#~=|]{3,}$`, e.g. `* * *`) are preserved verbatim
- * because they encode an authorial decision the algorithm shouldn't
- * second-guess. Everything else is collapsed and re-segmented from
- * scratch.
+ * Infer a gender for known names from honorifics in the text ("Mr. Poole",
+ * "Lady Vale"). Titles are high-precision, low-risk evidence — far safer than
+ * pronoun-proximity guessing, which can misfire when two characters share a
+ * sentence. Names without a title stay unknown (and are then treated as
+ * gender-compatible, i.e. we don't break on them).
+ */
+function buildGenderMap(content: string, knownNames: string[]): Map<string, Gender> {
+  const map = new Map<string, Gender>();
+  for (const name of knownNames) {
+    const trimmed = name?.trim();
+    if (!trimmed) continue;
+    const nm = escapeRegex(trimmed);
+    if (new RegExp(`\\b(?:${MALE_TITLE})\\.?\\s+${nm}\\b`, "i").test(content)) {
+      map.set(trimmed.toLowerCase(), "m");
+    } else if (new RegExp(`\\b(?:${FEMALE_TITLE})\\.?\\s+${nm}\\b`, "i").test(content)) {
+      map.set(trimmed.toLowerCase(), "f");
+    }
+  }
+  return map;
+}
+
+/**
+ * Is moving from subject `a` to subject `b` a *confident* change of person?
+ * Coreference- and gender-aware, high-precision:
+ *   • two different names                → change
+ *   • two contrastive pronouns (he↔she)  → change
+ *   • name ↔ pronoun                     → change ONLY if a known title gives
+ *                                          the name a gender that the pronoun
+ *                                          contradicts ("Mr. Poole" → "she");
+ *                                          otherwise assumed coreferent.
+ * This avoids the classic false split across a speaker's own dialogue
+ * (`Aldous said … he asked`) while still catching real handoffs.
+ */
+function isSubjectChange(
+  a: string | undefined,
+  b: string | undefined,
+  genderOf: (key: string) => Gender,
+): boolean {
+  if (!a || !b || a === b) return false;
+  const pa = PRONOUN_KEYS.has(a);
+  const pb = PRONOUN_KEYS.has(b);
+  if (pa && pb) return true; // he vs she vs they — distinct persons
+  if (!pa && !pb) return true; // two different names — distinct persons
+  const name = pa ? b : a;
+  const pron = pa ? a : b;
+  const ng = genderOf(name);
+  const pg = pronounGender(pron);
+  return !!ng && !!pg && ng !== pg; // gendered contradiction ⇒ different person
+}
+
+/** Confident that `a` and `b` are the SAME speaker (so a new quoted turn is a
+ *  continuation, not a handoff). Both must be identified and not a change. */
+function confidentlySameSpeaker(
+  a: string | undefined,
+  b: string | undefined,
+  genderOf: (key: string) => Gender,
+): boolean {
+  return !!a && !!b && !isSubjectChange(a, b, genderOf);
+}
+
+/** Does the previous sentence set up the following quote ("…, she said," /
+ *  "…as follows:")? Then a following quote belongs with it, not a new para. */
+function endsWithLeadIn(text: string): boolean {
+  return /[,:]\s*$/.test(text);
+}
+
+interface SentenceInfo {
+  text: string;
+  q: QuoteAnalysis;
+  subject: string | undefined;
+  opener: ReturnType<typeof classifyOpener>;
+}
+
+/**
+ * Audit a single existing paragraph and return it, possibly subdivided into
+ * several paragraphs joined by `sep`. `wallMode` enables the fuller
+ * reconstruction rule set used only when the whole chapter is one block.
+ */
+function auditParagraph(
+  para: string,
+  names: NameMatcher[],
+  genders: Map<string, Gender>,
+  wallMode: boolean,
+  sep: string,
+): string {
+  const genderOf = (key: string): Gender => genders.get(key);
+  const sentences = splitSentences(para);
+  if (sentences.length <= 1) return para;
+
+  const infos: SentenceInfo[] = sentences.map((s) => ({
+    text: s.text,
+    q: analyzeQuotes(s.text),
+    subject: sentenceSubject(s.text, names),
+    opener: classifyOpener(s.text),
+  }));
+
+  // An "obvious exchange" = two or more quoted turns in this paragraph. The
+  // aggressive per-turn split only fires inside one, so a lone embedded or
+  // scare quote in narration is never treated as dialogue.
+  const openQuoteCount = infos.filter((s) => s.q.startsWithOpenQuote).length;
+  const hasExchange = openQuoteCount >= 2;
+
+  const groups: string[][] = [[infos[0].text]];
+  let currentSubject = infos[0].subject;
+  let paraLen = 1;
+
+  for (let i = 1; i < infos.length; i++) {
+    const prev = infos[i - 1];
+    const curr = infos[i];
+
+    const subjChanged = isSubjectChange(currentSubject, curr.subject, genderOf);
+    const dialogueInvolved = curr.q.hasQuote || prev.q.hasQuote;
+
+    let brk = false;
+    // 1a. Time/place jump opener — clearly a new beat, both modes.
+    if (curr.opener === "time-major" || curr.opener === "place-shift") brk = true;
+    // 1b. Abrupt pivot ("Suddenly…") — reconstruction only.
+    else if (wallMode && curr.opener === "abrupt") brk = true;
+    // 2. Dialogue exchange — a new quoted turn that isn't confidently the same
+    //    speaker gets its own line (covers the cardinal "new speaker = new
+    //    paragraph" rule AND tagged→bare replies like `"Get out," she said.
+    //    "Why?"`). Gated to obvious exchanges; same-speaker continuations and
+    //    one-sentence-of-a-longer-quote stay put.
+    else if (
+      hasExchange &&
+      curr.q.startsWithOpenQuote &&
+      prev.q.hasQuote &&
+      !confidentlySameSpeaker(currentSubject, curr.subject, genderOf)
+    )
+      brk = true;
+    // 3. Speaker change with dialogue elsewhere (a beat, then a new speaker).
+    else if (subjChanged && dialogueInvolved) brk = true;
+    // 3b. Pure-narration actor switch — reconstruction only.
+    else if (wallMode && subjChanged) brk = true;
+    // 4. Narration → dialogue with no identifiable actor — reconstruction only.
+    else if (
+      wallMode &&
+      curr.q.startsWithOpenQuote &&
+      !prev.q.hasQuote &&
+      currentSubject == null &&
+      !endsWithLeadIn(prev.text)
+    )
+      brk = true;
+    // 5. Length cap — reconstruction only.
+    else if (wallMode && paraLen >= MAX_SENTENCES_PER_PARA) brk = true;
+
+    if (brk) {
+      groups.push([curr.text]);
+      paraLen = 1;
+    } else {
+      groups[groups.length - 1].push(curr.text);
+      paraLen++;
+    }
+
+    // Track the most-specific antecedent: a name pins the subject; a pronoun
+    // only replaces it when it's a genuine handoff (otherwise it corefers and
+    // we keep the named subject so gender checks stay anchored).
+    if (curr.subject) {
+      if (!PRONOUN_KEYS.has(curr.subject) || subjChanged) currentSubject = curr.subject;
+    }
+  }
+
+  if (groups.length === 1) return para;
+  return groups.map((g) => g.join(" ")).join(sep);
+}
+
+/**
+ * Re-paragraph a chapter's content. Existing paragraph breaks and scene-break
+ * markers are preserved verbatim; each prose paragraph is audited for missing
+ * internal breaks. Returns the (possibly unchanged) content.
  */
 export function autoParagraph(content: string, knownNames: string[] = []): string {
   if (!content || !content.trim()) return content;
 
-  // Walk line by line, accumulating a running prose buffer. When we hit a
-  // scene-break line, flush the buffer through reparagraphProse and emit
-  // the scene break as-is. This keeps "* * *" exactly where the user put it.
-  const lines = content.split("\n");
-  const out: string[] = [];
-  let buffer: string[] = [];
+  const names = buildNameMatchers(knownNames);
+  const genders = buildGenderMap(content, knownNames);
+  const origParas = content
+    .split(/\n{2,}|\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (origParas.length === 0) return content;
 
-  const flush = () => {
-    if (buffer.length === 0) return;
-    const reparagraphed = reparagraphProse(buffer.join("\n"), knownNames);
-    if (reparagraphed) out.push(reparagraphed);
-    buffer = [];
-  };
+  const wallMode = origParas.length === 1;
+  const docHasBlankLines = /\n[ \t]*\n/.test(content);
+  const sep = wallMode || docHasBlankLines ? "\n\n" : "\n";
 
-  for (const line of lines) {
-    if (SCENE_BREAK_RE.test(line.trim())) {
-      flush();
-      out.push(line.trim());
-    } else {
-      buffer.push(line);
+  // Walk the original content so we preserve the author's exact inter-paragraph
+  // whitespace (and any preamble/trailing content) rather than re-joining.
+  let out = "";
+  let cursor = 0;
+  for (const p of origParas) {
+    const idx = content.indexOf(p, cursor);
+    const audited = isSceneBreakLine(p) ? p : auditParagraph(p, names, genders, wallMode, sep);
+    if (idx < 0) {
+      if (out && !out.endsWith("\n")) out += sep;
+      out += audited;
+      continue;
     }
+    out += content.slice(cursor, idx);
+    out += audited;
+    cursor = idx + p.length;
   }
-  flush();
-
-  return out.join("\n\n");
+  out += content.slice(cursor);
+  return out;
 }

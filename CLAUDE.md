@@ -25,7 +25,16 @@ npx tsx scripts/test-continuity-voice.ts    # continuity + voice
 npx tsx scripts/test-chapter-dna.ts         # chapter DNA builder
 npx tsx scripts/test-paragraph-risk.ts      # paragraph risk scoring
 npx tsx scripts/test-chapter-diff.ts        # chapter diff
+npx tsx scripts/test-prose-segments.ts      # prose primitives: tokenizer/quotes/markers (≥95%)
+npx tsx scripts/test-auto-format.ts         # auto-paragraph + auto-scene-break (≥90%)
+npx tsx scripts/test-tension-scene.ts       # chapter tension scanner + scene labels (calm/elevated ≥85%)
+npx tsx scripts/test-cast-roles.ts          # cast influence roles + chapter-role direction (clear cases)
 ```
+
+`auto-paragraph.ts` and `auto-scene-break.ts` are the two one-shot formatting
+passes; both build on the shared `prose-segments.ts` primitives (sentence
+tokenizer, apostrophe-safe quote analyzer, discourse-marker taxonomy). Edit
+those three together and run the two suites above.
 
 Test suites exit with code 1 if below target.
 

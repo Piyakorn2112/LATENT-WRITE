@@ -9,6 +9,7 @@ import { AnnotationPopover } from "./components/AnnotationPopover";
 import { DebugPanel } from "./components/DebugPanel";
 
 import { StatusPill, type StatusTask } from "./components/StatusPill";
+import { LoadingLens } from "./components/LoadingLens";
 import { AnalysisPanel } from "./components/AnalysisPanel";
 import { ScrollEdgeTop } from "./components/ScrollEdgeTop";
 import { FindReplace } from "./components/FindReplace";
@@ -911,10 +912,20 @@ export default function App() {
     [currentId],
   );
 
-  const statusTask: StatusTask | null = renameTask
-    ?? (autoParagraphing ? { kind: "auto-paragraph", label: "Re-paragraphing chapter…" } : null)
-    ?? (sceneBreaking    ? { kind: "auto-paragraph", label: "Inserting scene breaks…"  } : null)
-    ?? (analysisRunning  ? { kind: "analyzing",      label: "Analysing chapter…"      } : null);
+  // The one-shot format passes (auto-paragraph / scene-break) now surface in
+  // the centred loading lens over the editor, not the top status pill — so
+  // suppress the top pill while either runs.
+  const lensActive = autoParagraphing || sceneBreaking;
+  const lensLabel = autoParagraphing
+    ? "Re-paragraphing chapter…"
+    : sceneBreaking
+      ? "Inserting scene breaks…"
+      : "";
+
+  const statusTask: StatusTask | null = lensActive
+    ? null
+    : renameTask
+      ?? (analysisRunning ? { kind: "analyzing", label: "Analysing chapter…" } : null);
 
   // Initialize secondaryId when entering split mode
   useEffect(() => {
@@ -1444,18 +1455,10 @@ export default function App() {
   return (
     <div className={appClass} style={editorStyle}>
       <div className="app-drag-region" aria-hidden="true" />
-      {/* Window-sized scan orb — fades in across the entire viewport
-          whenever a smart-process pass is running (auto-paragraph or
-          auto-scene-break). Lives at the app root so its
-          `position: fixed` is positioned against the viewport (parents
-          like .document have transform/contain set, which would
-          otherwise reanchor fixed positioning). */}
-      <div
-        className={`editor-scan-orb${
-          autoParagraphing || sceneBreaking ? " editor-scan-orb--visible" : ""
-        }`}
-        aria-hidden="true"
-      />
+      {/* The window-sized mode-tinted scan orb that used to fade in during
+          auto-paragraph / scene-break is removed — the centred LoadingLens
+          (below) is now the indicator for those passes, and a coloured glow
+          would clash with the lens's neutral refraction. */}
       <ScrollEdgeTop />
       <Toolbar
         chapterTitle={current?.title ?? ""}
@@ -1503,6 +1506,8 @@ export default function App() {
       />
 
       <StatusPill task={statusTask} />
+
+      <LoadingLens active={lensActive} label={lensLabel} />
 
       {splitView && current && secondaryChapter ? (
         <div className={`split-editor-container${analysisPanelOpen && !focusMode && prefs.sidePanelCompensation ? " split-editor-container--panel-open" : ""}`}>

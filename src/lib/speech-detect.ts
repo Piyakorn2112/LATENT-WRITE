@@ -1782,6 +1782,30 @@ const META_SIGNIFICANT_HINTS: readonly string[] = [
   'the moment', 'in that moment',
 ];
 
+// Explicit violence / combat / injury vocabulary. Weighted moderately so a
+// single stray gothic term ("blood", "bone") can't flip calm prose, but a
+// genuine action beat (several terms) reads high. Substring-matched.
+const META_VIOLENCE_TERMS: readonly string[] = [
+  'blade', 'knife', 'sword', 'dagger', 'axe', 'spear',
+  'blood', 'bloody', 'wound', 'gash', 'stab', 'slash', 'impaled',
+  'fist', 'punch', 'kick', 'choke', 'strangl', 'throat', 'skull', 'ribs', 'claw',
+  'swung', 'hurled', 'flung', 'smashed', 'crushed', 'wrench', 'recoil',
+  'shatter', 'crash', 'grappl', 'jaw',
+  'lunging', 'tackled', 'wrestled', 'gunshot', 'bullet', 'trigger',
+  'hit the floor', 'drove into', 'could not breathe', "couldn't breathe",
+  "couldn’t breathe", 'crumpled', 'reeled', 'the blows', 'blow after',
+];
+
+// Subtle dread / unease — psychological tension without violent words. Light
+// weight; needs several to register so calm prose stays calm.
+const META_UNEASE_TERMS: readonly string[] = [
+  'something was wrong', 'something wrong', 'something was off', 'not right',
+  'would not meet', 'could not meet', "couldn't meet", "couldn’t meet",
+  'would not look', 'refused to meet', 'avoided her eyes', 'avoided his eyes',
+  'chest tightened', 'chest tightening', 'went cold', 'blood ran cold',
+  'a chill', 'uneasy', 'unease', 'on edge', 'wary',
+];
+
 // ── Paragraph tension metadata ───────────────────────────────────────────
 
 /**
@@ -1861,6 +1885,11 @@ function computeParagraphMeta(
   for (const w of META_FEAR_TERMS) if (has(w)) fearCount++;
   score += Math.min(fearCount * 1.5, 6);
 
+  // ── Signal 3b: Subtle dread / unease — psychological tension (+1.5, cap 4.5)
+  let uneaseCount = 0;
+  for (const w of META_UNEASE_TERMS) if (has(w)) uneaseCount++;
+  score += Math.min(uneaseCount * 1.5, 4.5);
+
   // ── Signal 4: Silence / constraint vocabulary (+1 each, cap 5) ────────
   let silenceCount = 0;
   for (const w of META_SILENCE_TERMS) if (has(w)) silenceCount++;
@@ -1875,6 +1904,11 @@ function computeParagraphMeta(
   let disasterCount = 0;
   for (const w of META_DISASTER_TERMS) if (has(w)) disasterCount++;
   score += Math.min(disasterCount * 2.5, 7.5);
+
+  // ── Signal 6b: Explicit violence / combat / injury (+2.5 each, cap 10) ─
+  let violenceCount = 0;
+  for (const w of META_VIOLENCE_TERMS) if (has(w)) violenceCount++;
+  score += Math.min(violenceCount * 2.5, 10);
 
   // ── Signal 7: Revelation / truth vocabulary (+1.5 each, cap 4.5) ──────
   let revelationCount = 0;
@@ -1921,7 +1955,7 @@ function computeParagraphMeta(
   // A lone short quote (e.g. "Where is the facility?") inflates question/
   // density/exchange signals without any real tense lexical content.
   const hasHighLexical = confrontationCount >= 1 || physicalCount >= 1
-    || disasterCount >= 1 || fearCount >= 1;
+    || disasterCount >= 1 || fearCount >= 1 || violenceCount >= 1;
   if (!hasHighLexical && speechSegs.length <= 1 && dialogueDensity > 0.80 && totalChars < 150) {
     score *= 0.3;
   }
@@ -1994,6 +2028,8 @@ function computeParagraphMeta(
     tension = 'high';
     if (disasterCount >= 2)
       label = 'impact';
+    else if (violenceCount >= 3)
+      label = 'violence';
     else if (confrontationCount >= 2 && questionCount >= 2)
       label = 'confrontation';
     else if (shortRatio > 0.65 && sents.length >= 3)
@@ -2087,6 +2123,12 @@ function computeSceneLabel(
   for (const h of hints) votes.set(h, (votes.get(h) ?? 0) + 1);
 
   const sceneText = paragraphTexts.join(' ').toLowerCase();
+
+  // Silence / withholding scene → the "weighted silence" beat. Fires on a
+  // concentration of silence + refusal vocabulary even when tension stays calm.
+  const silenceVocab = ['silence', 'said nothing', 'refused', 'would not', 'turned away', 'looked away', 'without a word', 'no words']
+    .filter(w => sceneText.includes(w)).length;
+  if (silenceVocab >= 2) return 'weighted silence';
 
   // Celebratory: needs both hint vote and strong vocabulary overlap
   const celebVocab = ['festival', 'celebration', 'music', 'laughter', 'dancing', 'joy', 'golden', 'together']

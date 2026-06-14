@@ -17,7 +17,7 @@ import { summarizeContinuity } from "../lib/continuity";
 import { RendererTextWall } from "./RendererTextWall";
 import { RendererWorkspaceFull } from "./RendererWorkspaceFull";
 import rendererLogoUrl from "../assets/renderer-logo.svg";
-import { ArrowUpIcon, Maximize2Icon } from "./Icon";
+import { ArrowUpIcon, Maximize2Icon, ExternalLinkIcon } from "./Icon";
 import { emptyNovel } from "../lib/parser";
 import {
   type ProjectStatus,
@@ -36,6 +36,10 @@ import {
   openProject,
   createProject,
   isDesktopApp,
+  openWorkspaceWindow,
+  focusWorkspaceWindow,
+  isWorkspaceWindowOpen,
+  subscribeWorkspaceWindowState,
 } from "../lib/project-manager";
 import { clearProjectLocalStorage, loadNovelFromProject, saveNovelToProject } from "../lib/storage";
 import { type ToolRegistry, EMPTY_REGISTRY, buildToolRegistry } from "../lib/tool-registry";
@@ -65,6 +69,9 @@ interface Props {
   visible?: boolean;
   tier?: Tier;
   onTierChange?: (t: Tier) => void;
+  // When true, this panel IS the standalone workspace window: it always renders
+  // the full-bleed workspace, never detaches, and uses a liquid-glass chat bar.
+  windowMode?: boolean;
 }
 
 interface ChatMessage {
@@ -664,6 +671,7 @@ export function RendererPanel({
   visible = true,
   tier = "free",
   onTierChange,
+  windowMode = false,
 }: Props) {
   void _onSetPrefs; void _reviewResult;
 
@@ -700,6 +708,10 @@ export function RendererPanel({
   const [claudeSessionId, setClaudeSessionId] = useState<string | null>(null);
   const [chatHydrating, setChatHydrating] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  // poppedOut: a separate workspace window owns the chat, so this (main-window)
+  // panel is dormant. Never true in windowMode (the window never detaches itself).
+  const [poppedOut, setPoppedOut] = useState(false);
+  const [resumeToken, setResumeToken] = useState(0);
   const [workspaceRefreshToken, setWorkspaceRefreshToken] = useState(0);
   const [registrationRefreshToken, setRegistrationRefreshToken] = useState(0);
   const [toolRefreshToken, setToolRefreshToken] = useState(0);
@@ -726,6 +738,31 @@ export function RendererPanel({
   const hydratedProjectPathRef = useRef<string | null>(null);
   const desktop = isDesktopApp();
   const browserBlocked = !desktop;
+
+  // Track whether a separate workspace window owns the chat. The main-window
+  // panel detaches while it does; the window itself (windowMode) never detaches.
+  useEffect(() => {
+    if (!desktop || windowMode) return;
+
+    let cancelled = false;
+    void isWorkspaceWindowOpen().then((open) => {
+      if (!cancelled && open) {
+        setPoppedOut(true);
+        setWorkspaceOpen(false);
+      }
+    });
+
+    const unsub = subscribeWorkspaceWindowState((open) => {
+      setPoppedOut(open);
+      if (open) setWorkspaceOpen(false);
+      else setResumeToken((value) => value + 1);
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [desktop, windowMode]);
 
   const refreshMissingCanonRegistrations = useCallback(async (): Promise<PendingCanonRegistration[]> => {
     if (!desktop || !project?.path) {
@@ -1097,14 +1134,17 @@ export function RendererPanel({
     return () => {
       cancelled = true;
     };
-  }, [desktop, project?.path, resetChatState]);
+    // resumeToken: re-hydrate from the project file when a workspace window
+    // (the owner while popped out) closes, so we pick up its latest writes.
+  }, [desktop, project?.path, resetChatState, resumeToken]);
 
   useEffect(() => {
     if (persistTimerRef.current !== null && (streaming || awaitingFirstChunk)) {
       window.clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
     }
-    if (!desktop || !project?.path || chatHydrating || hydratedProjectPathRef.current !== project.path || streaming || awaitingFirstChunk) return;
+    // While popped out, the workspace window is the sole writer — stay dormant.
+    if (!desktop || poppedOut || !project?.path || chatHydrating || hydratedProjectPathRef.current !== project.path || streaming || awaitingFirstChunk) return;
 
     const snapshot: PersistedRendererChatState = {
       version: 1,
@@ -1126,10 +1166,10 @@ export function RendererPanel({
         persistTimerRef.current = null;
       }
     };
-  }, [desktop, project?.path, messages, model, effort, claudeSessionId, chatHydrating, streaming, awaitingFirstChunk]);
+  }, [desktop, poppedOut, project?.path, messages, model, effort, claudeSessionId, chatHydrating, streaming, awaitingFirstChunk]);
 
   useEffect(() => {
-    if (!desktop || chatHydrating || streaming || !claude?.active) return;
+    if (!desktop || poppedOut || chatHydrating || streaming || !claude?.active) return;
     if (claude.activeCwd && project?.path && claude.activeCwd !== project.path) return;
 
     const restored = markActiveStreamMessages(messages);
@@ -1137,10 +1177,10 @@ export function RendererPanel({
     setStreaming(true);
     setAwaitingFirstChunk(!restored.hasStreamableTurn);
     if (claude.activeSessionId) setClaudeSessionId(claude.activeSessionId);
-  }, [desktop, chatHydrating, streaming, claude?.active, claude?.activeCwd, claude?.activeSessionId, project?.path, messages]);
+  }, [desktop, poppedOut, chatHydrating, streaming, claude?.active, claude?.activeCwd, claude?.activeSessionId, project?.path, messages]);
 
   useEffect(() => {
-    if (!desktop) return;
+    if (!desktop || poppedOut) return;
     const unsub = subscribeStream({
       onStart: (data: StreamEvent) => {
         setStreaming(true);
@@ -1207,16 +1247,16 @@ export function RendererPanel({
       },
     });
     return unsub;
-  }, [desktop, addFailureMsg, addSystemMsg, appendStreamChunk, finishStreaming, onNovelRefresh, setClaudeRuntimeActive, clearClaudeRuntimeActive]);
+  }, [desktop, poppedOut, addFailureMsg, addSystemMsg, appendStreamChunk, finishStreaming, onNovelRefresh, setClaudeRuntimeActive, clearClaudeRuntimeActive]);
 
   const streamingRef = useRef(false);
   streamingRef.current = streaming;
   const userHasSentRef = useRef(false);
 
   const scrollChatToEnd = useCallback((behavior: ScrollBehavior) => {
-    const activeRef = workspaceOpen ? fullscreenMessagesEndRef : panelMessagesEndRef;
+    const activeRef = (workspaceOpen || windowMode) ? fullscreenMessagesEndRef : panelMessagesEndRef;
     activeRef.current?.scrollIntoView({ behavior, block: "end" });
-  }, [workspaceOpen]);
+  }, [workspaceOpen, windowMode]);
 
   useEffect(() => {
     const useSmooth = userHasSentRef.current && !streamingRef.current;
@@ -1662,8 +1702,9 @@ export function RendererPanel({
 
   // ── Render ─────────────────────────────────────────────────────────────
 
-  const renderChatInner = (variant: "panel" | "fullscreen") => {
+  const renderChatInner = (variant: "panel" | "fullscreen" | "window") => {
     const endRef = variant === "panel" ? panelMessagesEndRef : fullscreenMessagesEndRef;
+    const glassInput = variant === "window";
 
     return (
       <div className={`rp-chat-body rp-chat-body--${variant}`}>
@@ -1787,7 +1828,7 @@ export function RendererPanel({
           {streaming && (
             <button onClick={handleCancel} className="rp-chat-cancel-btn">Stop</button>
           )}
-          <div className={`rp-chat-input-row${browserBlocked ? " rp-chat-input-row--disabled" : ""}${streaming ? " rp-chat-input-row--streaming" : ""}`}>
+          <div className={`rp-chat-input-row${glassInput ? " liquid-glass" : ""}${browserBlocked ? " rp-chat-input-row--disabled" : ""}${streaming ? " rp-chat-input-row--streaming" : ""}`}>
             <textarea
               ref={inputRef}
               value={input}
@@ -1845,39 +1886,77 @@ export function RendererPanel({
     );
   };
 
+  const renderProGate = () => (
+    <div className="renderer-pro-gate">
+      <img src={rendererLogoUrl} alt="" className="renderer-pro-gate-logo" />
+      <div className="renderer-pro-gate-title">Renderer workspace</div>
+      <p className="renderer-pro-gate-desc">
+        Write, draft, and review with Claude — from inside the editor. Available in Latent Write Pro.
+      </p>
+      <div className="renderer-pro-gate-form">
+        <div className="settings-code-row">
+          <input
+            type="text"
+            className="settings-code-input"
+            placeholder="Enter your Pro code…"
+            value={gateCodeInput}
+            spellCheck={false}
+            onChange={(e) => { setGateCodeInput(e.target.value); setGateCodeError(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") { void handleGateActivate(); } }}
+          />
+          <button
+            type="button"
+            className={`settings-code-submit${gateCodeInput.trim() ? " settings-code-submit--active" : ""}`}
+            disabled={gateActivating}
+            onClick={() => { void handleGateActivate(); }}
+          >
+            {gateActivating ? "…" : "Activate"}
+          </button>
+        </div>
+        {gateCodeError && <p className="settings-code-status settings-code-status--error">{gateCodeError}</p>}
+      </div>
+    </div>
+  );
+
+  // Spawn / focus the standalone workspace window. Closing the overlay locally
+  // avoids a flash before the broadcast `workspace:window-state` arrives.
+  const handlePopOutWindow = () => {
+    void openWorkspaceWindow();
+    setWorkspaceOpen(false);
+  };
+  const handleExpandClick = () => {
+    if (poppedOut) void focusWorkspaceWindow();
+    else setWorkspaceOpen(true);
+  };
+
+  // ── Standalone workspace window ──────────────────────────────────────────
+  if (windowMode) {
+    if (desktop && tier !== "pro") {
+      return <div className="rp-window-gate-shell">{renderProGate()}</div>;
+    }
+    if (desktop && project) {
+      return (
+        <RendererWorkspaceFull
+          variant="window"
+          project={project}
+          claude={claude}
+          model={model}
+          effort={effort}
+          chatPane={renderChatInner("window")}
+          refreshToken={workspaceRefreshToken}
+          onClose={() => window.close()}
+        />
+      );
+    }
+    // No project yet — show the chat (with open/create affordances) full-bleed.
+    return <div className="rp-window-chat-shell liquid-glass">{renderChatInner("window")}</div>;
+  }
+
   return (
     <>
       <div className={`settings-panel rp-chat-shell rp-chat-shell--panel${visible ? " liquid-glass" : ""}`} {...(visible ? { "data-liquid-glass-scroll-adaptive": "panel" } : {})} style={{ position: "relative", overflow: "hidden", flex: "1 1 0", minHeight: 0, height: "100%" }}>
         {desktop && tier !== "pro" ? (
-          <div className="renderer-pro-gate">
-            <img src={rendererLogoUrl} alt="" className="renderer-pro-gate-logo" />
-            <div className="renderer-pro-gate-title">Renderer workspace</div>
-            <p className="renderer-pro-gate-desc">
-              Write, draft, and review with Claude — from inside the editor. Available in Latent Write Pro.
-            </p>
-            <div className="renderer-pro-gate-form">
-              <div className="settings-code-row">
-                <input
-                  type="text"
-                  className="settings-code-input"
-                  placeholder="Enter your Pro code…"
-                  value={gateCodeInput}
-                  spellCheck={false}
-                  onChange={(e) => { setGateCodeInput(e.target.value); setGateCodeError(null); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") { void handleGateActivate(); } }}
-                />
-                <button
-                  type="button"
-                  className={`settings-code-submit${gateCodeInput.trim() ? " settings-code-submit--active" : ""}`}
-                  disabled={gateActivating}
-                  onClick={() => { void handleGateActivate(); }}
-                >
-                  {gateActivating ? "…" : "Activate"}
-                </button>
-              </div>
-              {gateCodeError && <p className="settings-code-status settings-code-status--error">{gateCodeError}</p>}
-            </div>
-          </div>
+          renderProGate()
         ) : (
           <>
         {!workspaceOpen && <RendererTextWall fontScale={1.1} height={630} opacity={0.7} />}
@@ -1904,11 +1983,11 @@ export function RendererPanel({
             <button
               type="button"
               className="icon-btn rp-chat-expand-btn"
-              onClick={() => setWorkspaceOpen(true)}
-              aria-label="Open renderer workspace"
-              title="Open renderer workspace"
+              onClick={handleExpandClick}
+              aria-label={poppedOut ? "Bring workspace window to front" : "Open renderer workspace"}
+              title={poppedOut ? "Bring workspace window to front" : "Open renderer workspace"}
             >
-              <Maximize2Icon size={12} />
+              {poppedOut ? <ExternalLinkIcon size={12} /> : <Maximize2Icon size={12} />}
             </button>
           )}
 
@@ -1923,12 +2002,26 @@ export function RendererPanel({
           )}
         </div>
 
-        {!workspaceOpen && renderChatInner("panel")}
+        {poppedOut ? (
+          <div className="rp-detach-card">
+            <img src={rendererLogoUrl} alt="" className="rp-detach-logo" />
+            <div className="rp-detach-title">Workspace open in a separate window</div>
+            <p className="rp-detach-copy">
+              The renderer chat is running in its own window. Bring it to the front to keep writing.
+            </p>
+            <button type="button" className="rp-detach-btn" onClick={() => void focusWorkspaceWindow()}>
+              Bring to Front
+            </button>
+          </div>
+        ) : (
+          !workspaceOpen && renderChatInner("panel")
+        )}
           </>
         )}
       </div>
-      {workspaceOpen && desktop && project && tier === "pro" && createPortal(
+      {workspaceOpen && !poppedOut && desktop && project && tier === "pro" && createPortal(
         <RendererWorkspaceFull
+          variant="overlay"
           project={project}
           claude={claude}
           model={model}
@@ -1936,6 +2029,7 @@ export function RendererPanel({
           chatPane={renderChatInner("fullscreen")}
           refreshToken={workspaceRefreshToken}
           onClose={() => setWorkspaceOpen(false)}
+          onPopOut={handlePopOutWindow}
         />,
         document.body,
       )}

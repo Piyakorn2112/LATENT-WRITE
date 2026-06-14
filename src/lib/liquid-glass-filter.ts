@@ -25,7 +25,7 @@
 
 const SVG_ID = "lg-filter-svg";
 const NS = "http://www.w3.org/2000/svg";
-const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group, .liquid-glass-control-knob";
+const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group, .liquid-glass-control-knob, .liquid-glass-lens";
 const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freeze", "electron-window-unfocused", "scroll-edge-idle"];
 
 // ── Tunables ─────────────────────────────────────────────────────────────
@@ -37,9 +37,28 @@ const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freez
 
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
-const DISP_PX = 30;        // max refraction shift, pixels
+const DISP_PX = 40;        // max refraction shift, pixels
 const BLUR_DEFAULT = 4;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
+
+// Bezel width (refraction radius) default lives in liquid-glass-worker.ts as
+// BEZEL_PX (120). Per-element overrides (the lens) are passed to the worker;
+// a null override means "use the worker's BEZEL_PX".
+
+// ── Loading-lens knobs (this component only) ───────────────────────────────
+// These three values tune ONLY `.liquid-glass-lens` (the centred loading
+// circle). They do not touch the toolbar, panels, knobs, or any other glass.
+// Everything adjustable for the lens lives right here:
+const LENS_REFRACTION        = 20;   // refraction strength — px the backdrop shifts at the rim
+const LENS_REFRACTION_RADIUS = 20;  // refraction radius   — bezel width (px) the lens bends over
+const LENS_BLUR              = 0.2;     // blur radius         — px (0 = pure refraction, no frost)
+const LENS_SUPERSAMPLE       = 5;     // supersampling — renders the filter + displacement map at
+                                      // this multiple of the base size so the CSS scale-up stays
+                                      // smooth (no ridges). Raise it if the CSS scale grows.
+const LENS_SATURATE          = 1;     // saturation of the refracted backdrop. The global glass uses
+                                      // 1.8 (vivid); the lens uses 0 so it never amplifies the mode-
+                                      // tinted scan gradient / highlights behind it into colour. 1 =
+                                      // natural, >1 = more vivid.
 
 // Round (W, H, R) to this for cache key — sub-pixel differences do not
 // produce a visually different filter and otherwise we'd build a new map
@@ -111,13 +130,15 @@ function buildMapInWorker(
   radius: number,
   overflow: number,
   preset: MapPreset,
+  bezel: number | null,
+  superSample: number,
 ): Promise<string | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
   return new Promise((resolve) => {
     const id = `req-${++reqCounter}`;
     pendingBlob.set(id, (blob) => resolve(URL.createObjectURL(blob)));
-    w.postMessage({ id, elemW, elemH, radius, overflow, preset });
+    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample });
   });
 }
 
@@ -169,14 +190,43 @@ function clampRes(v: number, min = FILTER_RES_MIN): number {
 }
 
 function readBlur(el: Element): number {
-  if (el.classList.contains("liquid-glass-control-knob")) return 0;
+  // The loading lens pulls pure refraction — displacement only, no blur — so
+  // it reads as a clear glass lens over the scrolling text, not a frosted disc.
+  if (el.classList.contains("liquid-glass-lens")) return LENS_BLUR;
+  if (el.classList.contains("liquid-glass-control-knob")) return 0.2;
   if (el.matches(".glass-range-knob, .glass-toggle-knob")) return 0;
-  if (el.classList.contains("toolbar")) return 2;
-  if (el.classList.contains("settings-panel")) return 5;
+  if (el.classList.contains("toolbar")) return 1.5;
+  if (el.classList.contains("settings-panel")) return 4;
   if (el.matches(".analysis-tab, .analysis-action-group")) return 1;
   if (el.classList.contains("status-pill")) return 2;
   if (el.matches(".annotation-popover, .annotation-panel")) return 2;
   return BLUR_DEFAULT;
+}
+
+// Refraction strength (feDisplacementMap scale). Only the lens overrides it.
+function readDisp(el: Element): number {
+  if (el.classList.contains("liquid-glass-lens")) return LENS_REFRACTION;
+  return DISP_PX;
+}
+
+// Refraction radius (bezel width) override; null → the worker's BEZEL_PX.
+function readBezel(el: Element): number | null {
+  if (el.classList.contains("liquid-glass-lens")) return LENS_REFRACTION_RADIUS;
+  return null;
+}
+
+// Supersample factor — renders the filter chain + displacement map at this
+// multiple of the element's layout size. 1 = normal (the perf-tuned downscale).
+function readSuperSample(el: Element): number {
+  if (el.classList.contains("liquid-glass-lens")) return LENS_SUPERSAMPLE;
+  return 1;
+}
+
+// Saturation of the refracted backdrop (feColorMatrix). Only the lens overrides
+// the global SATURATE, so it doesn't amplify mode-coloured content behind it.
+function readSaturate(el: Element): number {
+  if (el.classList.contains("liquid-glass-lens")) return LENS_SATURATE;
+  return parseFloat(SATURATE);
 }
 
 // Sync note: These blur values also need to match the CSS idle-state fallback
@@ -211,13 +261,27 @@ function buildFilterEl(
   mapUrl: string,
   blur: number,
   preset: MapPreset,
+  disp: number,
+  superSample: number,
+  saturate: number,
 ): SVGFilterElement {
   const totalW = w + 2 * overflow;
   const totalH = h + 2 * overflow;
-  const displacementScale = DISP_PX * 2;
+  const displacementScale = disp * 2;
   const dispMapAntialias = readDispMapAntialias(preset);
   const dispMapInput = dispMapAntialias > 0 ? "dispMapAA" : "dispMap";
-  const filterRes = readFilterResConfig(preset);
+  // Supersample (the lens): rasterise the whole filter chain at superSample×
+  // the element size — capped — so a CSS scale-up of the element stays smooth
+  // instead of magnifying the perf downscale into ridges. Otherwise use the
+  // normal perf-tuned fractional resolution.
+  let filterResStr: string;
+  if (superSample > 1) {
+    const ss = (v: number) => String(Math.min(2048, Math.round(v * superSample)));
+    filterResStr = `${ss(totalW)} ${ss(totalH)}`;
+  } else {
+    const filterRes = readFilterResConfig(preset);
+    filterResStr = `${clampRes(totalW * filterRes.scale, filterRes.min)} ${clampRes(totalH * filterRes.scale, filterRes.min)}`;
+  }
   const filter = createElNS("filter", {
     id,
     filterUnits: "userSpaceOnUse",
@@ -227,7 +291,7 @@ function buildFilterEl(
     width: String(totalW),
     height: String(totalH),
     "color-interpolation-filters": "sRGB",
-    filterRes: `${clampRes(totalW * filterRes.scale, filterRes.min)} ${clampRes(totalH * filterRes.scale, filterRes.min)}`,
+    filterRes: filterResStr,
   }) as SVGFilterElement;
 
   filter.append(
@@ -273,7 +337,7 @@ function buildFilterEl(
     createElNS("feColorMatrix", {
       in: "blurred",
       type: "saturate",
-      values: SATURATE,
+      values: String(saturate),
     }),
   );
 
@@ -322,12 +386,16 @@ async function ensureFilter(
   radius: number,
   blur: number,
   preset: MapPreset,
+  disp: number,
+  bezel: number | null,
+  superSample: number,
+  saturate: number,
 ): Promise<string | null> {
   ensureSvgRoot();
   const w = snap(elemW);
   const h = snap(elemH);
   const r = snap(radius);
-  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}`;
+  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}-d${disp}-z${bezel ?? "def"}${superSample > 1 ? `-s${superSample}` : ""}-q${saturate}`;
 
   const cached = filterCache.get(id);
   if (cached) {
@@ -341,11 +409,11 @@ async function ensureFilter(
   if (existing) return existing;
 
   const promise = (async () => {
-    const overflow = DISP_PX + blur * 2 + 4;
-    const mapUrl = await buildMapInWorker(w, h, r, overflow, preset);
+    const overflow = disp + blur * 2 + 4;
+    const mapUrl = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample);
     if (!mapUrl) return null;
 
-    const filter = buildFilterEl(id, w, h, overflow, mapUrl, blur, preset);
+    const filter = buildFilterEl(id, w, h, overflow, mapUrl, blur, preset, disp, superSample, saturate);
     defs!.append(filter);
     filterCache.set(id, { filter, blobUrl: mapUrl, refCount: 0 });
     evictLRU();
@@ -484,10 +552,14 @@ function applyTo(element: HTMLElement) {
     const r = readRadius(element);
     const blur = readBlur(element);
     const preset = readMapPreset(element);
-    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}`;
+    const disp = readDisp(element);
+    const bezel = readBezel(element);
+    const superSample = readSuperSample(element);
+    const saturate = readSaturate(element);
+    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}-d${disp}-z${bezel ?? "def"}-s${superSample}-q${saturate}`;
     if (lastSize.get(element) === key) return;
     lastSize.set(element, key);
-    const id = await ensureFilter(w, h, r, blur, preset);
+    const id = await ensureFilter(w, h, r, blur, preset, disp, bezel, superSample, saturate);
     if (!id) return; // worker dead → CSS fallback stays
     if (glassPaused) return;
     if (lastSize.get(element) !== key) return;

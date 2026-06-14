@@ -32,6 +32,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   projectLoadState:   (key)                => ipcRenderer.invoke('project:loadState', key),
   projectReopenLast:  ()                   => ipcRenderer.invoke('project:reopenLast'),
 
+  // ── Renderer workspace window ──
+  workspaceOpenWindow:    ()  => ipcRenderer.invoke('workspace:open'),
+  workspaceFocusWindow:   ()  => ipcRenderer.invoke('workspace:focus'),
+  workspaceIsWindowOpen:  ()  => ipcRenderer.invoke('workspace:isOpen'),
+  onWorkspaceWindowState: (cb) => {
+    const listener = (_e, data) => cb(data);
+    ipcRenderer.on('workspace:window-state', listener);
+    return () => ipcRenderer.removeListener('workspace:window-state', listener);
+  },
+
   // ── Tool system ──
   toolCompile:        (opts)       => ipcRenderer.invoke('tool:compile', opts),
   toolScanProject:    ()           => ipcRenderer.invoke('tool:scanProject'),

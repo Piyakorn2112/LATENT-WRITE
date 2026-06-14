@@ -145,6 +145,12 @@ interface MapRequest {
   radius: number;
   overflow: number;
   preset: MapPreset;
+  /** Per-element bezel (refraction radius) override; undefined/null → BEZEL_PX. */
+  bezel?: number | null;
+  /** Full quality: keep the fine map divisor regardless of element size. */
+  fullQuality?: boolean;
+  /** Supersample factor for the displacement-map resolution (1 = normal). */
+  superSample?: number;
 }
 
 interface MapResponse {
@@ -191,10 +197,17 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
       ? "control-knob"
       : "default";
   const channelGain = CHANNEL_GAIN[preset];
-  const mapOversample = MAP_OVERSAMPLE[preset];
-  const renderOversample = Math.max(mapOversample, MAP_RENDER_OVERSAMPLE[preset]);
+  // Supersample boosts the map's pixel resolution so a CSS scale-up of the
+  // element (the lens) stays smooth instead of revealing stair-step ridges.
+  const ss = Math.max(1, req.superSample ?? 1);
+  const mapOversample = MAP_OVERSAMPLE[preset] * ss;
+  const renderOversample = Math.max(mapOversample, MAP_RENDER_OVERSAMPLE[preset] * ss);
 
-  const divisor = Math.min(elemW, elemH) > MAP_DIVISOR_BREAK ? MAP_DIVISOR_LARGE : MAP_DIVISOR;
+  // fullQuality (the lens) keeps the fine divisor at any size — it ignores the
+  // large-element coarsening that trades map resolution for perf above the break.
+  const divisor = req.fullQuality
+    ? MAP_DIVISOR
+    : Math.min(elemW, elemH) > MAP_DIVISOR_BREAK ? MAP_DIVISOR_LARGE : MAP_DIVISOR;
   const renderSize = computeMapSize(elemW, elemH, overflow, divisor, renderOversample);
   const outputSize = computeMapSize(elemW, elemH, overflow, divisor, mapOversample);
   const mwElem = renderSize.elemWidth;
@@ -209,7 +222,7 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
   const halfShorter = Math.min(halfW, halfH);
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
-  const bezel = Math.min(BEZEL_PX, halfShorter * 0.8);
+  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
   // Ramp goes from the actual rim (distToEdge = 0) up to blurRimEnd. Within
   // that band, mask starts at BLUR_EDGE_MIN (so the very edge is already
   // partly blurred — no sharp band) and rises to 1 (full blur).

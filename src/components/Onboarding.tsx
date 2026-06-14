@@ -5,6 +5,11 @@ import { ProseProfileWidget } from "./widgets/ProseProfileWidget";
 import rendererLogoUrl from "../assets/renderer-logo.svg";
 import type { ChapterAnalysis } from "../lib/use-analysis";
 import { activateCode } from "../lib/license";
+import { OrbEngine } from "./orb/OrbEngine";
+
+// Mirrors the flag in Toolbar.tsx — flip to false to restore the legacy
+// CSS mesh-dot hero orb below, which is left fully intact.
+const USE_ORB_ENGINE: boolean = false;
 
 // Each "mode" reuses the production orb's pre-saturated palette. Keeps the
 // welcome experience visually identical to the toolbar orb users see later.
@@ -51,6 +56,15 @@ function HeroOrb({
   const underStyleVars = paletteStyleVars(underPalette ?? resolvedPalette);
   const accentStyleVars = paletteStyleVars(accentPalette ?? resolvedAccentPalette);
   const scale = size / 20;
+  if (USE_ORB_ENGINE) {
+    return (
+      <div className="onb-orb" style={{ width: size, height: size }}>
+        {/* flowScale < 1 — at hero scale the toolbar flow speed reads
+            frantic, same reason the legacy orbits were slowed ~2.6×. */}
+        <OrbEngine mode={mode} size={size} flowScale={0.45} />
+      </div>
+    );
+  }
   return (
     <div className="onb-orb" style={{ width: size, height: size }}>
       <div

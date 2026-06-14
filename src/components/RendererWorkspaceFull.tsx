@@ -2,10 +2,11 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rendererLogoUrl from "../assets/renderer-logo.svg";
-import { ChevronRight, CloseIcon, FileTextIcon, FolderIcon } from "./Icon";
+import { ChevronRight, CloseIcon, ExternalLinkIcon, FileTextIcon, FolderIcon } from "./Icon";
 import {
   listProjectTree,
   readProjectFile,
+  writeProjectFile,
   type ClaudeStatus,
   type ProjectStatus,
   type ProjectTreeNode,
@@ -19,6 +20,11 @@ interface Props {
   refreshToken: number;
   chatPane: ReactNode;
   onClose: () => void;
+  // "overlay" (default): scrim + centred box inside the main window.
+  // "window": full-bleed, fills a standalone OS window.
+  variant?: "overlay" | "window";
+  // Spawn the standalone workspace window (overlay variant only).
+  onPopOut?: () => void;
 }
 
 const RENDERER_OVERLAY_BODY_CLASS = "renderer-workspace-freeze";
@@ -30,7 +36,16 @@ const SIDEBAR_WIDTH = 248;
 function isPreviewableFile(relativePath: string | null): boolean {
   if (!relativePath) return false;
   const normalized = relativePath.toLowerCase();
-  return normalized.endsWith(".md") || normalized.endsWith(".txt");
+  return normalized.endsWith(".md") || normalized.endsWith(".txt") || normalized.endsWith(".json");
+}
+
+// Every previewable file is also editable (md / txt / json).
+function isEditableFile(relativePath: string | null): boolean {
+  return isPreviewableFile(relativePath);
+}
+
+function isJsonFile(relativePath: string | null): boolean {
+  return !!relativePath && relativePath.toLowerCase().endsWith(".json");
 }
 
 function fileKindLabel(relativePath: string | null): string {
@@ -38,6 +53,7 @@ function fileKindLabel(relativePath: string | null): string {
   const normalized = relativePath.toLowerCase();
   if (normalized.endsWith(".md")) return "Markdown";
   if (normalized.endsWith(".txt")) return "Plain text";
+  if (normalized.endsWith(".json")) return "JSON";
   return "Preview unavailable";
 }
 
@@ -723,7 +739,8 @@ function MarkdownPreview({
   );
 }
 
-function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToken, chatPane, onClose }: Props) {
+function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToken, chatPane, onClose, variant = "overlay", onPopOut }: Props) {
+  const isWindow = variant === "window";
   const panelRef = useRef<HTMLDivElement | null>(null);
   const viewerScrollRef = useRef<HTMLDivElement | null>(null);
   const selectedPathRef = useRef<string | null>(null);
@@ -739,6 +756,13 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
   const [fileError, setFileError] = useState<string | null>(null);
   const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
   const [resizing, setResizing] = useState(false);
+
+  // ── File editing ──
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const dirty = editMode && draft !== fileContent;
 
   selectedPathRef.current = selectedPath;
 
@@ -780,12 +804,15 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
   }, []);
 
   useEffect(() => {
+    // In the standalone window, Esc must not close the OS window (it would
+    // discard unsaved edits); the window chrome / Cmd+W owns that.
+    if (isWindow) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
+  }, [onClose, isWindow]);
 
   useEffect(() => {
     let cancelled = false;
@@ -861,6 +888,63 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
     };
   }, [selectedPath, refreshToken]);
 
+  // Leave edit mode whenever the selected file changes. `draft` is kept
+  // independent of `fileContent`, so background reloads (e.g. Claude editing a
+  // file) refresh the on-disk baseline without discarding in-progress edits.
+  useEffect(() => {
+    setEditMode(false);
+    setDraft("");
+    setSaveError(null);
+  }, [selectedPath]);
+
+  const enterEditMode = useCallback(() => {
+    setDraft(fileContent);
+    setSaveError(null);
+    setEditMode(true);
+  }, [fileContent]);
+
+  const exitEditMode = useCallback(() => {
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
+    setEditMode(false);
+    setSaveError(null);
+  }, [dirty]);
+
+  const handleSave = useCallback(async () => {
+    if (!selectedPath || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const ok = await writeProjectFile(selectedPath, draft);
+      if (ok) setFileContent(draft);
+      else setSaveError("Could not save this file.");
+    } catch (error: unknown) {
+      setSaveError(error instanceof Error ? error.message : "Could not save this file.");
+    } finally {
+      setSaving(false);
+    }
+  }, [selectedPath, draft, saving]);
+
+  const jsonStatus = useMemo<{ ok: boolean; message: string } | null>(() => {
+    if (!editMode || !isJsonFile(selectedPath)) return null;
+    try {
+      JSON.parse(draft);
+      return { ok: true, message: "Valid JSON" };
+    } catch (error: unknown) {
+      return { ok: false, message: error instanceof Error ? error.message : "Invalid JSON" };
+    }
+  }, [editMode, selectedPath, draft]);
+
+  // Warn before the OS closes the standalone window with unsaved edits.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
+
   useEffect(() => {
     const syncWidth = () => {
       setChatWidth((prev) => clampChatWidth(prev));
@@ -924,6 +1008,8 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
   }, []);
 
   const selectPath = useCallback((path: string) => {
+    if (path === selectedPathRef.current) return;
+    if (dirty && !window.confirm("Discard unsaved changes?")) return;
     setSelectedPath(path);
     const ancestors = findAncestorPaths(tree, path);
     setExpandedPaths((prev) => {
@@ -931,15 +1017,15 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
       for (const entry of ancestors) next.add(entry);
       return next;
     });
-  }, [tree]);
+  }, [tree, dirty]);
 
   return (
     <div
-      className="renderer-full-overlay"
-      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      className={`renderer-full-overlay${isWindow ? " renderer-full-overlay--window" : ""}`}
+      onClick={(event) => { if (!isWindow && event.target === event.currentTarget) onClose(); }}
     >
-      <div className="renderer-full-panel" ref={panelRef}>
-        <div className="renderer-full-header">
+      <div className={`renderer-full-panel${isWindow ? " renderer-full-panel--window" : ""}`} ref={panelRef}>
+        <div className={`renderer-full-header${isWindow ? " renderer-full-header--drag" : ""}`}>
           <div className="renderer-full-header-main">
             <span className="renderer-full-brand">
               <img src={rendererLogoUrl} alt="" className="renderer-full-brand-logo" />
@@ -961,9 +1047,22 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
             <span className="renderer-full-header-path">{selectedPath ?? "Project files"}</span>
             <span className="renderer-full-header-kind">{fileKindLabel(selectedPath)}</span>
           </div>
-          <button className="icon-btn renderer-full-close" type="button" onClick={onClose} aria-label="Close" title="Close (Esc)">
-            <CloseIcon />
-          </button>
+          <div className="renderer-full-header-controls">
+            {!isWindow && onPopOut && (
+              <button
+                className="icon-btn renderer-full-popout"
+                type="button"
+                onClick={onPopOut}
+                aria-label="Open in separate window"
+                title="Open in separate window"
+              >
+                <ExternalLinkIcon size={13} />
+              </button>
+            )}
+            <button className="icon-btn renderer-full-close" type="button" onClick={onClose} aria-label="Close" title={isWindow ? "Close window" : "Close (Esc)"}>
+              <CloseIcon />
+            </button>
+          </div>
         </div>
 
         <div className="renderer-full-body">
@@ -986,7 +1085,7 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
             </div>
           </aside>
 
-          {sections.length > 0 && (
+          {sections.length > 0 && !editMode && (
             <SectionIndex sections={sections} scrollRef={viewerScrollRef} isMd={!!selectedPath && selectedPath.toLowerCase().endsWith(".md")} />
           )}
 
@@ -996,12 +1095,43 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
                 <span className="renderer-full-section-title">{selectedPath ? selectedPath.split("/").pop() : "Preview"}</span>
                 {selectedPath && <span className="renderer-full-section-subtle">{selectedPath}</span>}
               </div>
-              <span className="renderer-full-viewer-kind">{fileKindLabel(selectedPath)}</span>
+              <div className="renderer-full-viewer-actions">
+                {editMode && jsonStatus && (
+                  <span
+                    className="renderer-full-json-status"
+                    data-ok={jsonStatus.ok ? "" : undefined}
+                    title={jsonStatus.message}
+                  >
+                    {jsonStatus.ok ? "Valid JSON" : "Invalid JSON"}
+                  </span>
+                )}
+                {editMode && dirty && <span className="renderer-full-dirty-dot" title="Unsaved changes" aria-hidden="true" />}
+                {selectedPath && isEditableFile(selectedPath) && !fileLoading && !fileError && (
+                  <button
+                    type="button"
+                    className="renderer-full-action-btn"
+                    onClick={editMode ? exitEditMode : enterEditMode}
+                  >
+                    {editMode ? "Preview" : "Edit"}
+                  </button>
+                )}
+                {editMode && (
+                  <button
+                    type="button"
+                    className="renderer-full-action-btn renderer-full-action-btn--primary"
+                    onClick={() => void handleSave()}
+                    disabled={!dirty || saving}
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                )}
+                <span className="renderer-full-viewer-kind">{fileKindLabel(selectedPath)}</span>
+              </div>
             </div>
             <div className="renderer-full-viewer-scroll" ref={viewerScrollRef}>
               {!selectedPath && <div className="renderer-full-placeholder">Select a file to preview it here.</div>}
               {selectedPath && !isPreviewableFile(selectedPath) && (
-                <div className="renderer-full-placeholder">This workspace preview supports .md and .txt files.</div>
+                <div className="renderer-full-placeholder">This workspace supports .md, .txt, and .json files.</div>
               )}
               {selectedPath && isPreviewableFile(selectedPath) && fileLoading && (
                 <div className="renderer-full-placeholder">Loading {selectedPath.split("/").pop()}…</div>
@@ -1009,10 +1139,22 @@ function RendererWorkspaceFullImpl({ project, claude, model, effort, refreshToke
               {selectedPath && isPreviewableFile(selectedPath) && !fileLoading && fileError && (
                 <div className="renderer-full-placeholder">{fileError}</div>
               )}
-              {selectedPath && isPreviewableFile(selectedPath) && !fileLoading && !fileError && selectedPath.toLowerCase().endsWith(".md") && (
+              {selectedPath && isEditableFile(selectedPath) && !fileLoading && !fileError && editMode && (
+                <>
+                  <textarea
+                    className="renderer-full-editor"
+                    value={draft}
+                    spellCheck={false}
+                    onChange={(event) => setDraft(event.target.value)}
+                    aria-label={`Edit ${selectedPath.split("/").pop()}`}
+                  />
+                  {saveError && <div className="renderer-full-save-error">{saveError}</div>}
+                </>
+              )}
+              {selectedPath && isPreviewableFile(selectedPath) && !fileLoading && !fileError && !editMode && selectedPath.toLowerCase().endsWith(".md") && (
                 <MarkdownPreview content={fileContent} scrollRef={viewerScrollRef} sections={sections} />
               )}
-              {selectedPath && isPreviewableFile(selectedPath) && !fileLoading && !fileError && selectedPath.toLowerCase().endsWith(".txt") && (
+              {selectedPath && isPreviewableFile(selectedPath) && !fileLoading && !fileError && !editMode && !selectedPath.toLowerCase().endsWith(".md") && (
                 <PlainTextPreview content={fileContent} scrollRef={viewerScrollRef} sections={sections} />
               )}
             </div>

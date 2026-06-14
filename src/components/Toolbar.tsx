@@ -5,6 +5,15 @@ import {
   PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon, FolderIcon,
   MoreHorizontalIcon, UndoIcon, RedoIcon,
 } from "./Icon";
+import { OrbEngine, OrbBackGlow } from "./orb/OrbEngine";
+
+// ── Orb engine switch ──
+// false → the original CSS mesh-dot orb renders in the toolbar button
+//         (fully intact below and in styles.css).
+// The OrbBackGlow refraction layer is independent of this flag: it mounts
+// a WebGL orb *behind* the toolbar glass at the same position, so the
+// pill's liquid glass refracts it while the original orb stays on top.
+const USE_ORB_ENGINE: boolean = false;
 
 export type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
@@ -135,6 +144,17 @@ function IntelBtn({
       title={titleText}
     >
       <span className="intel-btn-inner">
+        {USE_ORB_ENGINE ? (
+          <span className="intel-orb-live intel-orb-live--engine">
+            <OrbEngine
+              mode={mode}
+              resolvedLevel={resolvedLevel}
+              analyzing={analyzing}
+              size={20}
+            />
+            {funMode && <IntelEyes />}
+          </span>
+        ) : (
         <span className="intel-orb-live">
             {/* Three mesh layers: blue body, warmer under-glow, then a brighter
               accent rim that can carry complementary colour. Keeping them
@@ -168,6 +188,8 @@ function IntelBtn({
           </span>
           {funMode && <IntelEyes />}
         </span>
+        )}
+        {!USE_ORB_ENGINE && (
         <span
           className="intel-mesh-fallback"
           data-mode={mode}
@@ -177,6 +199,7 @@ function IntelBtn({
         >
           <span className="intel-mesh-fallback-core" />
         </span>
+        )}
       </span>
     </button>
   );
@@ -197,6 +220,8 @@ function IntelBtn({
 // Colour tracking is free: static modes inherit the same inline --orb-* vars
 // as the orb; auto mode reuses the existing `autoFrontCycleEqual` @property
 // animation. Hidden entirely when intelligence is off.
+
+/*
 function ToolbarOrbAmbient({
   mode, resolvedLevel, analyzing,
 }: { mode: IntelMode; resolvedLevel?: ResolvedIntelMode; analyzing?: boolean }) {
@@ -217,6 +242,7 @@ function ToolbarOrbAmbient({
     </span>
   );
 }
+*/
 
 
 
@@ -524,8 +550,11 @@ export function Toolbar({
     <div ref={shellRef} className={`toolbar-shell${groupTools ? " toolbar-shell--grouped" : ""}`}>
       {groupTools ? (
         <div className="toolbar-grouped-layout">
+          {/* Painted before the glass pills → caught by their backdrop
+              filter, i.e. genuinely refracted by the glass. */}
+          <OrbBackGlow mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
           <div className="toolbar toolbar-group liquid-glass" data-liquid-glass-transient="true">
-              <ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
+              {/*<ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />*/}
               <IntelBtn
                 mode={intelMode}
                 resolvedLevel={intelResolvedLevel}
@@ -725,8 +754,11 @@ export function Toolbar({
           )}
         </div>
       ) : (
-        <div className="toolbar liquid-glass">
-            <ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
+        <div className="toolbar-frame">
+          {/* Painted before the glass pill → refracted by its backdrop. */}
+          <OrbBackGlow mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
+          <div className="toolbar liquid-glass">
+            {/*<ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} /> */}
             <IntelBtn
               mode={intelMode}
               resolvedLevel={intelResolvedLevel}
@@ -880,6 +912,7 @@ export function Toolbar({
               <FileTextIcon size={16} />
             </button>
           </div>
+        </div>
       )}
     </div>
   );

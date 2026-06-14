@@ -216,6 +216,11 @@ function buildMenu() {
     {
       label: 'Window',
       submenu: [
+        {
+          label: 'Open Renderer Workspace Window',
+          click: () => createWorkspaceWindow(),
+        },
+        { type: 'separator' },
         { role: 'minimize' },
         { role: 'zoom' },
         ...(isMac
@@ -327,6 +332,91 @@ function createWindow() {
       }
     });
   }
+}
+
+// ── Renderer workspace pop-out window ───────────────────────────────────────
+// A single secondary window that hosts ONLY the renderer workspace, loaded from
+// the same bundle via the #workspace hash route. Claude streams already
+// broadcast to every window (see claude-code.cjs sendToRenderer), so the
+// workspace window stays in sync with the project + active session. The main
+// window listens for `workspace:window-state` to detach its side panel while
+// this window is open (single chat owner).
+let _workspaceWindow = null;
+
+function broadcastWorkspaceWindowState(open) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('workspace:window-state', { open });
+  }
+}
+
+function createWorkspaceWindow() {
+  if (_workspaceWindow && !_workspaceWindow.isDestroyed()) {
+    if (_workspaceWindow.isMinimized()) _workspaceWindow.restore();
+    _workspaceWindow.focus();
+    return _workspaceWindow;
+  }
+
+  const win = new BrowserWindow({
+    title: 'Renderer Workspace',
+    width: 1320,
+    height: 880,
+    minWidth: 760,
+    minHeight: 540,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 18 },
+    vibrancy: 'under-window',
+    visualEffectState: 'followWindow',
+    roundedCorners: true,
+    backgroundColor: '#00000000',
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  });
+
+  _workspaceWindow = win;
+  win.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'workspace' });
+
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  if (!app.isPackaged) {
+    win.webContents.on('before-input-event', (_e, input) => {
+      const devToolsKey =
+        input.key === 'F12' ||
+        (input.meta && input.alt && input.key === 'i') ||
+        (input.control && input.shift && input.key === 'I');
+      if (devToolsKey && input.type === 'keyDown') win.webContents.toggleDevTools();
+    });
+  }
+
+  win.once('ready-to-show', () => broadcastWorkspaceWindowState(true));
+  win.on('closed', () => {
+    _workspaceWindow = null;
+    broadcastWorkspaceWindowState(false);
+  });
+
+  return win;
+}
+
+function registerWorkspaceWindow() {
+  ipcMain.handle('workspace:open', () => {
+    createWorkspaceWindow();
+    return { ok: true };
+  });
+  ipcMain.handle('workspace:focus', () => {
+    if (_workspaceWindow && !_workspaceWindow.isDestroyed()) {
+      if (_workspaceWindow.isMinimized()) _workspaceWindow.restore();
+      _workspaceWindow.focus();
+      return { ok: true };
+    }
+    return { ok: false };
+  });
+  ipcMain.handle('workspace:isOpen', () => !!(_workspaceWindow && !_workspaceWindow.isDestroyed()));
 }
 
 // ── Narrative LM — sentence embedding (MiniLM via onnxruntime-node) ──────────
@@ -528,6 +618,7 @@ ipcMain.on('draft-guard:update', (event, state) => {
 app.whenReady().then(() => {
   registerProjectFS();
   registerClaudeCode();
+  registerWorkspaceWindow();
   buildMenu();
   createWindow();
   app.on('activate', () => {

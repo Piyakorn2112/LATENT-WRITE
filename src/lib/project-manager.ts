@@ -162,6 +162,11 @@ interface ElectronAPI {
   onClaudeStreamError: (cb: (data: StreamEvent) => void) => () => void;
   onClaudeStreamStderr: (cb: (data: StreamEvent) => void) => () => void;
   onClaudeFileChanged: (cb: (data: { filePath: string }) => void) => () => void;
+  // Renderer workspace window
+  workspaceOpenWindow: () => Promise<{ ok: boolean }>;
+  workspaceFocusWindow: () => Promise<{ ok: boolean }>;
+  workspaceIsWindowOpen: () => Promise<boolean>;
+  onWorkspaceWindowState: (cb: (data: { open: boolean }) => void) => () => void;
   // Tool system
   toolCompile: (opts: { code: string; format: "ts" | "tsx" }) => Promise<{ ok: boolean; code?: string; error?: string }>;
   toolScanProject: () => Promise<ToolScanResult>;
@@ -322,6 +327,34 @@ export async function importTools(
   const a = api();
   if (!a) return { ok: false };
   return a.toolImportTools({ sourcePath, imports });
+}
+
+// ── Renderer workspace window ────────────────────────────────────────────────
+
+export async function openWorkspaceWindow(): Promise<boolean> {
+  const a = api();
+  if (!a) return false;
+  const result = await a.workspaceOpenWindow();
+  return result.ok;
+}
+
+export async function focusWorkspaceWindow(): Promise<boolean> {
+  const a = api();
+  if (!a) return false;
+  const result = await a.workspaceFocusWindow();
+  return result.ok;
+}
+
+export async function isWorkspaceWindowOpen(): Promise<boolean> {
+  const a = api();
+  if (!a) return false;
+  return a.workspaceIsWindowOpen();
+}
+
+export function subscribeWorkspaceWindowState(cb: (open: boolean) => void): () => void {
+  const a = api();
+  if (!a) return () => {};
+  return a.onWorkspaceWindowState((data) => cb(!!data?.open));
 }
 
 export function subscribeStream(callbacks: {

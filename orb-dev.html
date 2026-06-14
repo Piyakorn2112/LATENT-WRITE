@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- Dev-only harness for tuning the OrbEngine (not part of the app build).
+     Open http://localhost:<vite-port>/orb-dev.html -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OrbEngine dev harness</title>
+    <style>
+      body { margin: 0; display: flex; font-family: system-ui; }
+      .half { flex: 1; min-height: 100vh; padding: 24px; box-sizing: border-box; }
+      .dark { background: #111110; color: #eee; }
+      .light { background: #eeeeee; color: #222; }
+      .row { display: flex; align-items: center; gap: 28px; margin-bottom: 18px; }
+      .row b { width: 64px; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" style="display:flex;flex:1"></div>
+    <script type="module" src="/src/orb-dev.tsx"></script>
+  </body>
+</html>
