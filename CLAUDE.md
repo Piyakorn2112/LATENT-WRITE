@@ -45,16 +45,24 @@ Test suites exit with code 1 if below target.
 a hard **zero-visual-change** constraint. The look is signed off; do not retune
 blur, bezel, refraction, or saturation while optimising.
 
-One deliberate exception, approved 2026-07-26: the knob presets' `MAP_OVERSAMPLE`
-went 12 → 3. **Do not raise it back.** At 12 the two control knobs cost
-13.3 ms/frame on an M1 Pro — about 40× the entire 1100×44 toolbar — because
-`filterRes` rasterises them at 2 device px per element px while the map carried
-12 texels per element px, so the compositor minified ~36× per pixel every frame
-and discarded almost all of it. 3 still exceeds what the filter can display, and
-`MAP_RENDER_OVERSAMPLE` stays at 16 so the bezel is still supersampled and
-averaged down. Cost: ~750 px on the knobs alone (max channel delta 53),
-indistinguishable at 6× magnification. `scripts/liquid-glass-baseline.ts` mirrors
-this one value and says so; nothing else in it may be synced.
+The look was deliberately re-signed-off ONCE, 2026-07-26 (owner-mandated): the
+**fold-free refraction model** — profile `g(t)=(1−t)²` with a per-shape
+displacement cap (`effectiveDisp`) and LOCAL corner attenuation baked into the
+map (`MapRequest.dispPx`), replacing the Snell/squircle profile whose singular
+rim slope guaranteed mirrored fold-over on every shape whose bezel was smaller
+than the displacement. The lens alone keeps the legacy model
+(`profile:"snell"`). `scripts/liquid-glass-baseline.ts` was re-frozen to the
+new math at the same time and says so in its header; the zero-visual-change
+discipline continues from that baseline. `glass-direction.html` is the
+stripe-field diagnostic that makes fold-over/swirl defects visible — use it
+before believing any refraction change.
+
+Earlier deliberate exception, approved the same day: the knob presets'
+`MAP_OVERSAMPLE` went 12 → 3. **Do not raise it back.** At 12 the two control
+knobs cost 13.3 ms/frame on an M1 Pro — about 40× the entire 1100×44 toolbar —
+because `filterRes` rasterises them at 4 device px per element px while the map
+carried 12 texels per element px, so the compositor minified per pixel every
+frame and discarded almost all of it.
 
 Three harnesses prove a change is invisible. Run all three:
 

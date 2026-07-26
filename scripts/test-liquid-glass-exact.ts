@@ -23,28 +23,27 @@ const live = (await import(
 
 // ── The real shapes ───────────────────────────────────────────────────────
 // Each entry mirrors what liquid-glass-filter.ts computes for that element:
-//   dispEff  = effectiveDisp(disp, w, h, r, bezel, profile)   (fold-free cap)
+//   dispEff  = effectiveDisp(disp, w, h, bezel, profile)      (fold-free cap)
 //   overflow = ceil(dispEff) + blur * 2 + 4
+//   dispPx   = dispEff (drives the map's local corner attenuation)
 // Keep this mirror in sync with FOLD_SAFE / PROFILE_SLOPE / BEZEL_PX_MAIN.
-const FOLD_SAFE = 0.85;
-const PROFILE_SLOPE = 3;
+const FOLD_SAFE = 0.9;
+const PROFILE_SLOPE = 2;
 const BEZEL_MAIN = 120;
 function dispEff(
-  disp: number, w: number, h: number, radius: number, bezel: number | null, profile: "snell" | "foldfree",
+  disp: number, w: number, h: number, bezel: number | null, profile: "snell" | "foldfree",
 ): number {
   if (profile === "snell") return disp;
   const halfShorter = Math.min(w, h) / 2;
   const bz = Math.min(bezel ?? BEZEL_MAIN, halfShorter * 0.8);
-  const r = Math.min(Math.max(radius, 1), halfShorter);
-  const edgeCap = (FOLD_SAFE * bz) / PROFILE_SLOPE;
-  const cornerCap = Math.max(FOLD_SAFE * r, 0.3 * edgeCap);
-  return Math.min(disp, edgeCap, cornerCap);
+  return Math.min(disp, (FOLD_SAFE * bz) / PROFILE_SLOPE);
 }
 interface Geo { w: number; h: number; r: number; bezel?: number | null; profile?: "snell" | "foldfree" }
 function mk(label: string, g: Geo, disp: number, blur: number, preset: MapRequest["preset"], superSample = 1): Case {
   const profile = g.profile ?? "foldfree";
-  const overflow = Math.ceil(dispEff(disp, g.w, g.h, g.r, g.bezel ?? null, profile)) + blur * 2 + 4;
-  return { label, id: "c", elemW: g.w, elemH: g.h, radius: g.r, overflow, preset, bezel: g.bezel ?? null, superSample, profile };
+  const de = dispEff(disp, g.w, g.h, g.bezel ?? null, profile);
+  const overflow = Math.ceil(de) + blur * 2 + 4;
+  return { label, id: "c", elemW: g.w, elemH: g.h, radius: g.r, overflow, preset, bezel: g.bezel ?? null, superSample, profile, dispPx: de };
 }
 
 interface Case extends MapRequest { label: string }

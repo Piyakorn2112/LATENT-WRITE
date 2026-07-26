@@ -8,11 +8,13 @@
  * Uint8ClampedArray is preserved for `data` and `maskBuf` because their
  * assignment-rounding semantics (round-half-to-even) are part of the output.
  *
- * RE-FROZEN once, 2026-07-26, at the fold-free refraction rewrite (owner-
- * mandated look change): profile g(t)=(1−t)³ with per-shape dispEff caps on
- * the main thread, shape-relative gradient smoothing (gradKFor), and full-
- * range channel packing for foldfree maps. The legacy Snell/squircle model
- * is retained under profile:"snell" (the lens). Originally frozen at a6d7caf.
+ * RE-FROZEN at the fold-free refraction rewrite, 2026-07-26 (owner-mandated
+ * look change), then adjusted same day on owner feedback ("refraction too
+ * small"): profile g(t)=(1−t)² with the per-shape edge cap on the main
+ * thread and LOCAL corner attenuation (dispPx), shape-relative gradient
+ * smoothing (gradKFor), full-range channel packing for foldfree maps. The
+ * legacy Snell/squircle model is retained under profile:"snell" (the lens).
+ * Originally frozen at a6d7caf.
  *
  * DO NOT EDIT — with one documented exception below (MAP_OVERSAMPLE). This is
  * the oracle for the zero-visual-change proof, and it is only useful for as
@@ -128,7 +130,10 @@ export interface MapRequest {
   fullQuality?: boolean;
   superSample?: number;
   profile?: MapProfile;
+  dispPx?: number | null;
 }
+
+const FOLD_SAFE_W = 0.9;
 
 function computeMapSize(
   elemW: number,
@@ -197,6 +202,9 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
   const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
+  const dispPx = profile === "foldfree" ? Math.max(0, req.dispPx ?? 0) : 0;
+  const cornerF = dispPx > 0 ? Math.min(1, (FOLD_SAFE_W * r) / dispPx) : 1;
+  const cornerW = Math.min(16, Math.max(1, r * 0.5));
   const gradK = gradKFor(halfW - r, halfH - r);
   const blurRimEnd = Math.max(1, Math.min(halfShorter * BLUR_TRANSITION_PCT, halfShorter));
 
@@ -266,10 +274,22 @@ export function buildMapPixels(req: MapRequest): MapPixels {
         disp = snellDisp(slope, eta);
       } else {
         const u = 1 - t;
-        disp = u * u * u;
+        disp = u * u;
       }
 
       if (disp < 1e-6) continue;
+
+      // Local corner attenuation — same expression as the worker's corner
+      // branch, applied wherever the pixel sits in a corner-arc quadrant.
+      if (cornerF < 1) {
+        const cqx = Math.abs(px_rel) - (halfW - r);
+        const cqy = Math.abs(py_rel) - (halfH - r);
+        if (cqx > 0 && cqy > 0) {
+          const sx = cqx >= cornerW ? 1 : cqx / cornerW;
+          const sy = cqy >= cornerW ? 1 : cqy / cornerW;
+          disp *= 1 - sx * sy * (1 - cornerF);
+        }
+      }
 
       const [gx, gy] = sdfGrad(px_rel, py_rel, halfW, halfH, r, gradK);
       const dx = -gx * disp * dispCoverage;

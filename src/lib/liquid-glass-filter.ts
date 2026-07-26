@@ -51,32 +51,30 @@ const BLUR_DEFAULT = 5;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
 
 // ── Fold-free displacement cap ───────────────────────────────────────────
-// The map's falloff is g(t) = (1−t)³ across the bezel (worker profile
+// The map's falloff is g(t) = (1−t)² across the bezel (worker profile
 // "foldfree"), whose steepest normalised slope is PROFILE_SLOPE at the rim.
 // Sampling stays monotone — the rim MAGNIFIES but can never fold over and
 // mirror interior content — iff peak displacement ≤ bezel / PROFILE_SLOPE.
-// FOLD_SAFE keeps a margin under that bound; at 0.85 the rim's peak
-// magnification is 1/(1−0.85) ≈ 6.7x. The corner term caps displacement at
-// the corner radius so corner sampling never crosses the arc centre (which
-// mirrors a blob into the corner); the 0.3·edge floor keeps near-sharp
-// rectangles from losing the effect entirely.
-// The old model had NO cap: 40px of displacement into e.g. the toolbar's
-// 17.6px bezel guaranteed fold-over — the mirrored bars/rings/vortex-eyes
-// the glass-direction.html diagnostic shows on every pre-rewrite shape.
-const FOLD_SAFE = 0.85;
-const PROFILE_SLOPE = 3;
-// Mirror of the worker's BEZEL_PX / RADIUS_FLOOR + bezel cap — keep in sync.
+// FOLD_SAFE keeps a margin under that bound; at 0.9 the rim's peak
+// magnification is 1/(1−0.9) = 10x.
+// The corner constraint (sampling inward past the corner-arc centre mirrors
+// a blob into the corner) is NOT a term here any more: it is applied LOCALLY
+// inside the map's corner-arc quadrants (worker, MapRequest.dispPx), so
+// straight edges run at the full edge cap. A global corner term was what
+// read as "refraction too small" — it dragged whole panels from 40px to ~20.
+// The pre-rewrite model had NO cap at all: 40px of displacement into the
+// toolbar's 17.6px bezel guaranteed the mirrored-bar fold-over.
+const FOLD_SAFE = 0.9;
+const PROFILE_SLOPE = 2;
+// Mirror of the worker's BEZEL_PX + bezel cap — keep in sync.
 const BEZEL_PX_MAIN = 120;
 function effectiveDisp(
-  disp: number, w: number, h: number, radius: number, bezelOverride: number | null, profile: "snell" | "foldfree",
+  disp: number, w: number, h: number, bezelOverride: number | null, profile: "snell" | "foldfree",
 ): number {
   if (profile === "snell") return disp;
   const halfShorter = Math.min(w, h) / 2;
   const bezel = Math.min(bezelOverride ?? BEZEL_PX_MAIN, halfShorter * 0.8);
-  const r = Math.min(Math.max(radius, 1), halfShorter);
-  const edgeCap = (FOLD_SAFE * bezel) / PROFILE_SLOPE;
-  const cornerCap = Math.max(FOLD_SAFE * r, 0.3 * edgeCap);
-  return Math.min(disp, edgeCap, cornerCap);
+  return Math.min(disp, (FOLD_SAFE * bezel) / PROFILE_SLOPE);
 }
 
 // Blue channel of the map's neutral margin: (BLUR_EDGE_MIN * 255 + 0.5) | 0
@@ -191,6 +189,7 @@ function buildMapInWorker(
   superSample: number,
   mapPad: number | null,
   profile: "snell" | "foldfree",
+  dispPx: number,
 ): Promise<BuiltMap | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
@@ -198,7 +197,7 @@ function buildMapInWorker(
     const id = `req-${++reqCounter}`;
     pendingBlob.set(id, ({ blob, padX, padY }) =>
       resolve({ url: URL.createObjectURL(blob), padX, padY }));
-    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad, profile });
+    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad, profile, dispPx });
   });
 }
 
@@ -556,9 +555,9 @@ async function ensureFilter(
   if (existing) return existing;
 
   const promise = (async () => {
-    const dispEff = effectiveDisp(disp, w, h, r, bezel, profile);
+    const dispEff = effectiveDisp(disp, w, h, bezel, profile);
     const overflow = Math.ceil(dispEff) + blur * 2 + 4;
-    const map = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX, profile);
+    const map = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX, profile, dispEff);
     if (!map) return null;
 
     const filter = buildFilterEl(id, w, h, overflow, map, blur, preset, dispEff, superSample, saturate);

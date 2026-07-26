@@ -71,8 +71,11 @@ export interface EdgeColorOptions {
   refract?: boolean;
   /** Edge bias 0..1 — how shallow the glow's inward depth is (higher = hugs the rim). Default 0.55. */
   edgeBias?: number;
-  /** Unused since the soft-ellipse rewrite — falloff is authored into the
-   *  gradients themselves, so the body layer runs with no CSS blur at all. */
+  /** Blur that melts the body bands into one wash, css px. Default 28.
+   *  ★ Do not remove again: the ellipse gradients are soft along their OWN
+   *  axes, but only this blur merges the two bands meeting at a rounded
+   *  corner — without it the corner shows two separate lobes with a dark
+   *  gap on the arc (owner: "breaks the blend around the curve"). */
   softness?: number;
   /**
    * Backing-store resolution of the BODY glow, 0.1..1 (1 = full res). The body
@@ -376,13 +379,16 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     s.clipPath = `inset(0 round ${(r * S).toFixed(2)}px)`;
     s.opacity = String(op);
     s.backgroundRepeat = "no-repeat";
-    // ★ NO CSS blur on the body any more. Every band is painted as a soft
-    // ELLIPTICAL gradient (band() soften path), so the falloff is authored
-    // into the paint itself — running a live `filter: blur()` over a layer
-    // that repaints while sources move was a per-repaint filter pass that
-    // only re-softened already-soft gradients. The glass's own
-    // backdrop-filter still diffuses the wash a second time for free.
-    if (s.filter) { s.filter = ""; (s as unknown as { webkitFilter: string }).webkitFilter = ""; }
+    // Melt the per-edge bands into one wash. The soft-ellipse gradients carry
+    // their own falloff, but two bands meeting at a rounded corner are still
+    // two separate paints — this blur is what fuses them around the arc. An
+    // attempt to drop it (the ellipses "look soft enough") left a dark gap on
+    // every corner; the owner called it immediately. blur × S so the
+    // up-scaled result matches the requested softness while the filter runs
+    // over S² fewer pixels; measured cost is noise-level (~0.03 ms).
+    const f = opt.softness > 0 ? `blur(${(opt.softness * S).toFixed(2)}px)` : "";
+    s.filter = f;
+    (s as unknown as { webkitFilter: string }).webkitFilter = f;
 
     if (entry.rim) {
       const rs = entry.rim.style;
@@ -624,11 +630,15 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
             else myp = gh;
           }
           // Arc radius from the source's extent along the lit edge, plus a
-          // margin so the falloff has room; clamped so one source can never
-          // wrap the whole surface.
+          // generous margin; clamped so one source can never wrap the whole
+          // surface. ★ Keep the feather WIDE (long opaque core + slow fade,
+          // see the stops below): a tight mask cut the ring off mid-corner —
+          // the euclidean circle does not follow the perimeter, so a hard
+          // mask edge lands ON the arc and breaks the wrap the inset shadow
+          // gives for free (owner: "breaks the blend around the curve").
           const onVertEdge = mxp === 0 || mxp === gw;
           const ext = Math.max(24, onVertEdge ? oy1 - oy0 : ox1 - ox0);
-          const arcR = Math.min(Math.max(ext * 0.5 + 30, 44), Math.max(gw, gh));
+          const arcR = Math.min(Math.max(ext * 0.5 + 48, 72), Math.max(gw, gh));
 
           // ★ Exponential falloff: brightest hairline exactly AT the edge —
           // stacked shadow stops approximate e^-x far better than one gradient
@@ -643,7 +653,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
           if (shadow) {
             ringData.push({
               shadow,
-              mask: `radial-gradient(circle ${arcR.toFixed(0)}px at ${mxp.toFixed(1)}px ${myp.toFixed(1)}px, #fff 0%, #fff 45%, transparent 100%)`,
+              mask: `radial-gradient(circle ${arcR.toFixed(0)}px at ${mxp.toFixed(1)}px ${myp.toFixed(1)}px, #fff 0%, #fff 30%, transparent 100%)`,
             });
           }
         }

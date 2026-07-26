@@ -60,11 +60,16 @@ type MapPreset = "default" | "control-knob" | "toggle-control-knob";
  * How the displacement magnitude falls off across the bezel.
  *
  *  "foldfree" — the DEFAULT since the refraction rewrite. Analytic profile
- *      g(t) = (1−t)³ (t = 0 at the rim, 1 at the bezel's inner end). Its
- *      normalised slope is bounded (|g′| ≤ 3), so as long as the caller caps
- *      the peak displacement at FOLD_SAFE·bezel/3 (see the main thread's
+ *      g(t) = (1−t)² (t = 0 at the rim, 1 at the bezel's inner end). Its
+ *      normalised slope is bounded (|g′| ≤ 2), so as long as the caller caps
+ *      the peak displacement at FOLD_SAFE·bezel/2 (see the main thread's
  *      dispEff), the sampling x′ = x + Δ(d) stays MONOTONE: the rim magnifies
- *      (up to ~6.7x at the very edge) but can never fold over and mirror.
+ *      (up to ~10x at the very edge) but can never fold over and mirror.
+ *      (The first fold-free cut used (1−t)³ with a GLOBAL corner cap; the
+ *      owner read that as "refraction index too small" — the corner cap was
+ *      dragging whole panels from 40px down to ~20. The corner constraint is
+ *      LOCAL now — see the corner attenuation below — so straight edges run
+ *      at the full edge cap again.)
  *
  *  "snell" — the original physical model: Snell's-law lateral displacement of
  *      the convex squircle h(t) = (1−(1−t)⁴)^¼. The squircle's slope is
@@ -127,6 +132,10 @@ const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
 
 // Visual bezel thickness in element pixels (must match main-thread filter).
 const BEZEL_PX = 120;
+
+// Mirror of the main thread's FOLD_SAFE — keep in sync. Used here only for
+// the local corner attenuation (see MapRequest.dispPx).
+const FOLD_SAFE_W = 0.9;
 
 // Progressive blur — sharp-rim → blurred-interior gradient.
 //   BLUR_EDGE_MIN       — mask value at the very edge. >0 means blur is already
@@ -297,7 +306,7 @@ function scalarsFor(
     disp = snellDisp(slope, eta);
   } else {
     const u = 1 - t;
-    disp = u * u * u;
+    disp = u * u;
   }
 
   if (disp < 1e-6) {
@@ -348,6 +357,16 @@ interface MapRequest {
   mapPad?: number | null;
   /** Displacement falloff model; undefined → "foldfree". See MapProfile. */
   profile?: MapProfile;
+  /**
+   * Peak displacement in element px the filter will apply (the main thread's
+   * dispEff). Foldfree only: enables the LOCAL corner attenuation — inside a
+   * corner-arc quadrant, sampling inward by more than the corner radius
+   * crosses the arc centre and mirrors a blob into the corner, so corner
+   * pixels scale their displacement toward FOLD_SAFE·r/dispPx, blended
+   * smoothly over CORNER_BLEND px so the straight edges (which keep FULL
+   * strength) meet the arcs without a seam. 0/undefined → no attenuation.
+   */
+  dispPx?: number | null;
 }
 
 interface MapResponse {
@@ -512,6 +531,11 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
   const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
+  // Local corner attenuation (foldfree only): constant factor per shape,
+  // blended in over cornerW px inside the corner-arc quadrant. 1 = no-op.
+  const dispPx = profile === "foldfree" ? Math.max(0, req.dispPx ?? 0) : 0;
+  const cornerF = dispPx > 0 ? Math.min(1, (FOLD_SAFE_W * r) / dispPx) : 1;
+  const cornerW = Math.min(16, Math.max(1, r * 0.5));
   // Ramp goes from the actual rim (distToEdge = 0) up to blurRimEnd. Within
   // that band, mask starts at BLUR_EDGE_MIN (so the very edge is already
   // partly blurred — no sharp band) and rises to 1 (full blur).
@@ -674,6 +698,14 @@ export function buildMapPixels(req: MapRequest): MapPixels {
         maskV = S_mask;
         disp = S_disp;
         cov = S_cov;
+        // Corner attenuation: fades in over cornerW so the full-strength
+        // straight edges meet the capped arc without a seam (sx·sy is 0 on
+        // the quadrant boundary, 1 deep in the corner).
+        if (flag === S_FULL && cornerF < 1) {
+          const sx = qx >= cornerW ? 1 : qx / cornerW;
+          const sy = qy >= cornerW ? 1 : qy / cornerW;
+          disp *= 1 - sx * sy * (1 - cornerF);
+        }
       } else if (qy >= qx) {
         flag = rFlag;
         maskV = rMask;
