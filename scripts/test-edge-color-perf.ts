@@ -323,16 +323,18 @@ let paintedRings = 0;
 for (const o of createdOverlays) {
   if ((o.style.backgroundImage || "").includes("linear-gradient")) paintedRings++;
 }
-// The specular rim paints thin bright bands at the source-facing edges.
-// Accepts ANY gradient rather than `linear-gradient` specifically: the rim now
-// draws each band as an elliptical radial-gradient so it tapers at BOTH ENDS
-// instead of stopping dead (a linear-gradient only falls off across the band, so
-// the line had two hard stops). This gate is named for the behaviour — that
-// bands get painted — and the gradient function used to draw them is an
-// implementation detail it should not pin down.
+// The specular rim lights the source-facing part of the perimeter.
+// It is drawn with stacked INSET BOX-SHADOWS rather than background gradients:
+// a shadow follows the element's `border-radius`, so the light bends around a
+// rounded corner by construction. Axis-aligned gradient bands cannot — two of
+// them meeting at a corner form an L, which is what made corners read wrong no
+// matter how they were weighted. This gate is named for the behaviour (the rim
+// paints a coloured catch at all), so it accepts either mechanism.
 let paintedSpecular = 0;
 for (const o of createdRims) {
-  if (/(?:linear|radial)-gradient/.test(o.style.backgroundImage || "")) paintedSpecular++;
+  const painted = /inset/.test(o.style.boxShadow || "") ||
+    /(?:linear|radial)-gradient/.test(o.style.backgroundImage || "");
+  if (painted) paintedSpecular++;
 }
 
 // Structural facts must be read BEFORE destroy() detaches the overlays.

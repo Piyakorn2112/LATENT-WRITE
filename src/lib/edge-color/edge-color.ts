@@ -151,6 +151,22 @@ const DEFAULTS: Required<EdgeColorOptions> = {
 
 const RADIUS_FLOOR = 1;
 
+/**
+ * Exponential inward falloff for the specular rim, as [blurMultiple, alphaMultiple]
+ * of `rimWidth`. Each stop roughly triples in width and drops to about a third of
+ * the alpha, which approximates e^-x far better than any single gradient stop —
+ * the first stop is the bright hairline sitting exactly ON the edge, and the rest
+ * are the light diffusing into the material.
+ *
+ * Stacked inset shadows are why this works at all: each one follows the element's
+ * `border-radius`, so the whole falloff bends around a corner together.
+ */
+const RIM_FALLOFF: ReadonlyArray<readonly [number, number]> = [
+  [1.0, 1.0],
+  [3.2, 0.34],
+  [9.0, 0.11],
+];
+
 type Mode = "fixed" | "flow";
 
 interface Entry {
@@ -344,18 +360,13 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       rs.borderRadius = `${r}px`;
       rs.clipPath = `inset(0 round ${r}px)`;
       rs.backgroundRepeat = "no-repeat";
-      // ★ Blur WIDER than the band itself, but only just. Two failure modes sit
-      // either side of this value:
-      //   · `softness * 0.25` (the original) is 7px over a ~2px band at default
-      //     softness — the specular is smeared several times its own width and
-      //     dissolves into the body wash, so there is no catch at all.
-      //   · Matching the band's width makes it a crisp line, which reads as a
-      //     drawn outline rather than light on glass.
-      // Slightly over the band keeps it unmistakably AT the edge while staying a
-      // whisper. Tied to the band's thickness so the two move together.
-      const rf = `blur(${Math.min(2.2, Math.max(0.9, opt.rimWidth * 1.25)).toFixed(2)}px)`;
-      rs.filter = rf;
-      (rs as unknown as { webkitFilter: string }).webkitFilter = rf;
+      // ★ NO filter on the rim. Its softness is the RIM_FALLOFF shadow stops,
+      // and those follow the corner radius; a CSS blur on top would smear the
+      // bright hairline that is the whole point of the catch, and would add a
+      // real filter pass over a live layer for nothing. (This used to be
+      // `softness * 0.25` — 7px over a ~2px band — which dissolved the specular
+      // into the body wash entirely.)
+      if (rs.filter) { rs.filter = ""; (rs as unknown as { webkitFilter: string }).webkitFilter = ""; }
     }
   }
 
@@ -372,9 +383,10 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     const gw = gr.width, gh = gr.height;
     const minSpan = 24;
     const depth = Math.max(6, Math.min(opt.glowRadius, Math.min(gw, gh) * (1 - opt.edgeBias) * 0.5));
-    const rimDepth = Math.max(2, opt.rimWidth);
+    // (no rim DEPTH here any more — the rim's inward extent comes from the
+    // RIM_FALLOFF blur stops, which follow the corner radius; see below.)
     const images: string[] = [], sizes: string[] = [], positions: string[] = [];
-    const rImages: string[] = [], rSizes: string[] = [], rPositions: string[] = [];
+    const rShadows: string[] = [];
 
     // edge band layer geometry → push a fading gradient rect into the given
     // arrays. `k` maps from glass px into the target layer's coordinate space
@@ -525,24 +537,60 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
 
         // body: soft inward glow (fades to nothing at `depth`) — down-scaled space
         band(images, sizes, positions, edge, alongStart, span, depth, c, a * ef, 0, S);
-        // rim: thin, bright specular band hugging the very edge — full res
-        if (entry.rim) {
-          // ★ HUE-ACCURATE brightening. Multiplying each channel and clamping at
-          // 255 per channel is what made the caught colour wrong: the dominant
-          // channel clips while the others keep climbing, so a saturated red
-          // drifts to pink and a deep blue to lavender — the rim stopped matching
-          // the element it was catching. Scaling ALL channels by one factor,
-          // limited by the headroom of the largest, brightens without clipping
-          // any channel, so the ratio between them — the hue — is exactly
-          // preserved. Any brightness the headroom cannot give is handed to alpha
-          // instead, which does not distort colour.
-          const peak = Math.max(r, g, b, 1);
-          const k = Math.min(opt.rimBrightness, 255 / peak);
-          const rr = Math.round(r * k), rg = Math.round(g * k), rb = Math.round(b * k);
-          const spill = opt.rimBrightness > k ? Math.min(1.25, opt.rimBrightness / k) : 1;
-          const ra = Math.min(1, wgt * opt.rimIntensity * ef * spill);
-          band(rImages, rSizes, rPositions, edge, alongStart, span, rimDepth,
-               `rgba(${rr},${rg},${rb},`, ra, ra * 0.35, 1, true);
+      }
+
+      // ── rim: light that follows the CONTOUR, not the four sides ──────────
+      // ★★ THIS is why corners never looked right before. The rim was built from
+      // axis-aligned rectangular bands, and two rectangles meeting at a rounded
+      // corner form an L — they cannot bend along the arc, no matter how they are
+      // weighted or blended. An INSET box-shadow follows `border-radius` exactly,
+      // so the light curves around the corner by construction, and because the
+      // direction below is a continuous vector the highlight ROTATES around the
+      // contour as the source moves instead of being handed between sides.
+      // (Same idiom as `.toolbar-ambient-orb` in styles.css, which uses stacked
+      // inset shadows precisely because they hug the pill's rounded cap.)
+      // Emitted once per SOURCE, not per edge — the shadow handles the geometry,
+      // so there is nothing left for the per-edge split to do here.
+      if (entry.rim) {
+        // ★ HUE-ACCURATE brightening. Multiplying each channel and clamping at
+        // 255 per channel is what made the caught colour wrong: the dominant
+        // channel clips while the others keep climbing, so a saturated red drifts
+        // to pink and a deep blue to lavender. Scaling ALL channels by one factor,
+        // limited by the headroom of the largest, brightens without clipping any
+        // channel, so the ratio between them — the hue — is preserved exactly.
+        // Brightness the headroom cannot supply is handed to alpha, which does
+        // not distort colour.
+        const peak = Math.max(r, g, b, 1);
+        const k = Math.min(opt.rimBrightness, 255 / peak);
+        const rr = Math.round(r * k), rg = Math.round(g * k), rb = Math.round(b * k);
+        const spill = opt.rimBrightness > k ? Math.min(1.25, opt.rimBrightness / k) : 1;
+        const ra = Math.min(1, wgt * opt.rimIntensity * spill);
+
+        // Direction from the glass centre toward the source; the shadow is offset
+        // AGAINST it so the light lands on the facing part of the perimeter.
+        let nx = (sc.cx - gr.left) - gw / 2;
+        let ny = (sc.cy - gr.top) - gh / 2;
+        const nl = Math.hypot(nx, ny) || 1;
+        nx /= nl; ny /= nl;
+        // ★ The offset must stay SMALL. An inset offset does not slide a line
+        // along the edge, it grows the shadow on that side — push it far and the
+        // "rim" floods half the surface instead of hugging the edge. A couple of
+        // band-widths biases the ring toward the source while keeping it a rim.
+        const w0 = Math.max(0.35, opt.rimWidth);
+        const push = w0 * 2.6;
+        const ox = (-nx * push).toFixed(2), oy = (-ny * push).toFixed(2);
+
+        // ★ Exponential falloff: brightest hairline exactly AT the edge, then
+        // each stop roughly triples in width and drops to about a third of the
+        // alpha. Stacked blurs approximate an exponential far better than one
+        // gradient stop, which is what makes it read as light diffusing into the
+        // material rather than a drawn border.
+        for (const [mulB, mulA] of RIM_FALLOFF) {
+          const a = ra * mulA;
+          if (a < 0.004) continue;
+          rShadows.push(
+            `inset ${ox}px ${oy}px ${(w0 * mulB).toFixed(2)}px rgba(${rr},${rg},${rb},${a.toFixed(3)})`,
+          );
         }
       }
     }
@@ -556,14 +604,10 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       bs.backgroundPosition = positions.join(",");
     }
     if (entry.rim) {
+      // One box-shadow list, however many sources — no background layers at all.
       const rs = entry.rim.style;
-      if (rImages.length === 0) {
-        if (rs.backgroundImage) { rs.backgroundImage = ""; rs.backgroundSize = ""; rs.backgroundPosition = ""; }
-      } else {
-        rs.backgroundImage = rImages.join(",");
-        rs.backgroundSize = rSizes.join(",");
-        rs.backgroundPosition = rPositions.join(",");
-      }
+      const next = rShadows.join(",");
+      if (rs.boxShadow !== next) rs.boxShadow = next;
     }
   }
 
