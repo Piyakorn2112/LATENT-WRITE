@@ -9,12 +9,12 @@
   --overlay-scroll-mask-edge-bottom: 14px;
   --overlay-scroll-inset-top: 6px;
   --overlay-scroll-inset-bottom: 10px;
-  --bg-glass: rgba(241, 241, 241, 0.621);
+  --bg-glass: rgba(241, 241, 241, 0.342);
   --bg-glass-hover: rgba(241, 241, 241, 0.78);
   --bg-glass-strong: rgba(255, 255, 255, 0.72);
   --bg-glass-unfocused: rgb(248, 248, 246);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
-  --bg-edge-right: #000000;
+  --bg-edge-right: #e9e9e9;
 
   /* Liquid glass edge system — drives the border ring (::before) and the
      additive edge glow (::after) on every glass surface, so updating these
@@ -52,19 +52,37 @@
   /* Drop shadow + an outer 1px "border" cloned from the ::before specular
      edge — white top & bottom, dark left & right. box-shadow can't carry a
      gradient, so each edge is its own directional (offset, 0-blur) layer;
-     together they read as the same white→dark→white rim, on the outside. */
+     together they read as the same white→dark→white rim, on the outside.
+
+     ★★ THE CONTACT SHADOW MUST STAY TIGHT. It used to be `0 2px 15px
+     rgba(0,0,0,0.02)` and rendered as HARD RECTANGLES around the toolbar and
+     the analysis-tab rail. That is 8-bit contour banding, not a Chrome bug:
+     2% black on the #e9e9e9 page is at most ~4.7 of 255 levels, and once the
+     15px blur spreads it the measured range below the toolbar was 231-233 —
+     THREE distinct values. A 15px falloff quantised into 3 steps can only
+     draw 3 contours, and along the bar's long straight edges those contours
+     ARE straight lines.
+
+     The rule: banding is invisible when the falloff spans more levels than
+     pixels, i.e. `alpha * bgLuma > blurPx`. Either raise alpha or shrink the
+     blur — and since this surface must read FLAT rather than floating, shrink
+     the blur. At 2px/0.045 the ramp is ~10 levels over 2px (≈0.2px per
+     contour), which no display can resolve, and the surface still sits on the
+     page instead of hovering over it. Verify with the distinct-value count,
+     not by eye: `stretch.cjs` contrast-amplification makes 1-level steps
+     obvious that look perfectly smooth at normal contrast. */
   --shadow-glass:
     0 -0.5px 0 0 rgba(0, 0, 0, 0.02),
     0  0.5px 0 0 rgba(0, 0, 0, 0.02),
     -0.5px 0 0 0 rgba(0, 0, 0, 0.15),
     0.5px  0 0 0 rgba(0, 0, 0, 0.15),
-    0 2px 15px rgba(0, 0, 0, 0.02);
+    0 1px 2px rgba(0, 0, 0, 0.045);
   --shadow-glass-hover:
     0 -0.5px 0 0 rgba(0, 0, 0, 0.02),
     0  0.5px 0 0 rgba(0, 0, 0, 0.02),
     -0.5px 0 0 0 rgba(0, 0, 0, 0.15),
     0.5px  0 0 0 rgba(0, 0, 0, 0.15),
-    0 2px 5px rgba(0, 0, 0, 0.02);
+    0 1.5px 3px rgba(0, 0, 0, 0.055);
 
   --text: #1a1a1a;
   --text-secondary: #555;
@@ -100,7 +118,7 @@
     --bg: #191919;
     --bg-page: #191919;
     --bg-scroll-edge: #191919bc;
-    --bg-glass: rgba(45, 45, 45, 0.7);
+    --bg-glass: rgba(45, 45, 45, 0.415);
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
     --bg-glass-unfocused: rgb(24, 24, 22);
@@ -126,18 +144,24 @@
       rgba(255, 255, 255, 0) calc(100% - 20px),
       rgba(255, 255, 255, 0.2) 100%
     );
+    /* Same tight contact shadow as light mode, and for the same reason: at
+       15px blur this alpha spans ~1.3 of 255 levels over #191919, so it drew
+       one hard contour instead of a falloff (measured 24/25/26 — three values
+       across the whole area below the bar). Alpha is unchanged, only the
+       spread; the peak darkness is identical, it simply no longer has 15px to
+       band across. */
     --shadow-glass:
       0 -0.5px 0 0 rgba(0, 0, 0, 0.1),
       0  0.5px 0 0 rgba(0, 0, 0, 0.1),
       -0.5px 0 0 0 rgba(0, 0, 0, 0.3),
       0.5px  0 0 0 rgba(0, 0, 0, 0.3),
-      0 2px 15px rgba(0, 0, 0, 0.05);
+      0 1px 2px rgba(0, 0, 0, 0.05);
     --shadow-glass-hover:
       0 -0.5px 0 0 rgba(0, 0, 0, 0.1),
       0  0.5px 0 0 rgba(0, 0, 0, 0.1),
       -0.5px 0 0 0 rgba(0, 0, 0, 0.3),
       0.5px  0 0 0 rgba(0, 0, 0, 0.3),
-      0 2px 15px rgba(0, 0, 0, 0.05);
+      0 1.5px 3px rgba(0, 0, 0, 0.06);
     --text: #ededec;
     --text-secondary: #a8a8a4;
     --text-tertiary: #6b6b67;
@@ -248,7 +272,7 @@ body {
   inset: 0;
   border-radius: inherit;
   background: var(--border-glass-glow);
-  filter: blur(3px);
+  filter: blur(3px) brightness(2);
   mix-blend-mode: screen;
   mix-blend-mode: plus-lighter;
   pointer-events: none;
