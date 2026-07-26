@@ -45,25 +45,25 @@ Test suites exit with code 1 if below target.
 a hard **zero-visual-change** constraint. The look is signed off; do not retune
 blur, bezel, refraction, or saturation while optimising.
 
-The look was deliberately re-signed-off ONCE, 2026-07-26 (owner-mandated): the
-**fold-free refraction model** — profile `g(t)=(1−t)^1.25` with a per-shape
-displacement cap (`effectiveDisp`) and LOCAL corner attenuation baked into the
-map (`MapRequest.dispPx`), replacing the Snell/squircle profile whose singular
-rim slope guaranteed mirrored fold-over on every shape. The lens alone keeps
-the legacy model (`profile:"snell"`).
-`scripts/liquid-glass-baseline.ts` was re-frozen to the new math at the same
-time and says so in its header; the zero-visual-change discipline continues
-from that baseline.
+**The refraction is the ORIGINAL squircle→Snell model** (`DISP_PX` 40, no
+displacement cap). A fold-free variant was built and reverted twice; the
+engine does not contain it. Read the next paragraph before proposing another.
 
-**The rule that matters: sampling must stay monotone.** `y' = y + disp(y)` has
-to increase, or the rim shows a mirrored, compressed copy of interior content.
-That is what "the top edge leans left and the bottom leans right" turned out to
-be — not a rotational field. Peak displacement must stay under
-`bezel / PROFILE_SLOPE`, so a FLATTER falloff buys more strength for the same
-budget; don't raise the exponent to "soften" the look, it costs displacement
-almost linearly. Panels are never limited by this (wide bezel → they keep the
-full `DISP_PX`); only chrome thinner than ~2× the displacement is capped, and
-there it is arithmetic — a 44px-tall bar cannot carry 40px of fold-free pull.
+**Known artifact, understood and accepted: the sampling folds.** `y' = y +
+disp(y)` must increase or the rim shows a mirrored, compressed copy of interior
+content. With 40px of pull into the toolbar's 17.6px bezel it decreases for 8
+of the first 22 rows — 28.4px of backdrop squeezed REVERSED into the top ~8px,
+mirrored at the bottom. Over body text the two bands land on different lines
+crushed ~3.5:1, which reads as "the top edge leans left and the bottom leans
+right". It is NOT a rotational field: the map's R channel is exactly 128 across
+the whole middle span, and a grating measures `dx(y) = 0.000` at every row.
+
+Removing it is arithmetic, not tuning: fold-free needs peak ≤ `bezel/max|g′|`,
+so a 44px-tall bar cannot carry 40px of pull (its ceiling is the 22px
+half-height). Every fold-free profile therefore trades displacement on THIN
+chrome — that trade was rejected. Panels are wide enough to be fold-free at the
+full 40px, so the fold could be confined to thin chrome per-preset if it is
+ever revisited. Do not "fix" it silently.
 
 Two diagnostics, both dev-only pages driven by scripts:
 - `glass-direction.html` — glass over vertical + horizontal stripe fields;
