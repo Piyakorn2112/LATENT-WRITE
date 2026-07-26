@@ -366,8 +366,24 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
   }
 
   // ── shape: rim-band mask (body) + ring mask (rim), set only on change ────────
+  //
+  // ★ Per-scheme strength, via a CSS token rather than a second set of options.
+  // A colour wash has far less to work against on a bright surface than on a
+  // dark one, so light mode needs more of it for the same read. Read ONCE (and
+  // again only when the scheme actually flips) — this must never touch
+  // getComputedStyle from the frame loop, which is what the perf gates assert.
+  let glowBoost = 1;
+  function readGlowBoost(): number {
+    const raw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--lqg-glow-boost").trim();
+    const v = parseFloat(raw);
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  }
+  glowBoost = readGlowBoost();
+
   function opacityFor(w: number, h: number): number {
-    return Math.max(w, h) >= opt.largeThreshold ? opt.opacityLarge : opt.opacity;
+    const base = Math.max(w, h) >= opt.largeThreshold ? opt.opacityLarge : opt.opacity;
+    return Math.min(1, base * glowBoost);
   }
   function applyShape(entry: Entry, _w: number, _h: number, r: number, op: number): void {
     const s = entry.body.style;
@@ -902,6 +918,19 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
   const onResize = () => wake();
   const onMotion = () => wake();
   const onVisibility = () => schedule();
+  // Scheme flip: re-read the boost and force every surface to re-apply its
+  // opacity (the shape key caches it, so it has to be invalidated).
+  const schemeMq = typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
+  const onScheme = () => {
+    const next = readGlowBoost();
+    if (next === glowBoost) return;
+    glowBoost = next;
+    for (const entry of entries.values()) entry.shape = "";
+    wake();
+  };
+  schemeMq?.addEventListener?.("change", onScheme);
 
   scan(document);
   mo.observe(document.documentElement, { childList: true, subtree: true });
@@ -924,6 +953,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       document.removeEventListener("transitionrun", onMotion, { capture: true } as EventListenerOptions);
       document.removeEventListener("animationstart", onMotion, { capture: true } as EventListenerOptions);
       document.removeEventListener("visibilitychange", onVisibility);
+      schemeMq?.removeEventListener?.("change", onScheme);
       for (const glass of [...entries.keys()]) release(glass);
     },
   };
