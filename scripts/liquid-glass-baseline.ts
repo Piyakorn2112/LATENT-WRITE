@@ -6,7 +6,9 @@
  * Uint8ClampedArray is preserved for `data` and `maskBuf` because their
  * assignment-rounding semantics (round-half-to-even) are part of the output.
  *
- * DO NOT EDIT. This is the oracle for the zero-visual-change proof.
+ * DO NOT EDIT — with one documented exception below (MAP_OVERSAMPLE). This is
+ * the oracle for the zero-visual-change proof, and it is only useful for as
+ * long as it is allowed to disagree with the code.
  */
 
 const N1 = 1;
@@ -22,10 +24,21 @@ const EDGE_AA_SPAN: Record<MapPreset, number> = {
   "control-knob": 1.25,
   "toggle-control-knob": 1.1,
 };
+// ⚠ The ONLY value in this file changed since it was frozen: 12 -> 3, on
+// 2026-07-26, deliberately and with sign-off. See MAP_OVERSAMPLE in
+// liquid-glass-worker.ts for the measurement and reasoning.
+//
+// It is mirrored here because this oracle guards the per-pixel ALGORITHM, not
+// the tunables — left at 12, every knob case would report a diff forever and
+// the harness would stop meaning anything.
+//
+// This is NOT licence to sync other values. If a change makes this file
+// disagree, the change is what needs justifying; that is the whole point of
+// keeping a frozen copy.
 const MAP_OVERSAMPLE: Record<MapPreset, number> = {
   default: 1,
-  "control-knob": 12,
-  "toggle-control-knob": 12,
+  "control-knob": 3,
+  "toggle-control-knob": 3,
 };
 const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
   default: 1,

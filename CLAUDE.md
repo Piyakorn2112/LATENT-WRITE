@@ -45,6 +45,17 @@ Test suites exit with code 1 if below target.
 a hard **zero-visual-change** constraint. The look is signed off; do not retune
 blur, bezel, refraction, or saturation while optimising.
 
+One deliberate exception, approved 2026-07-26: the knob presets' `MAP_OVERSAMPLE`
+went 12 → 3. **Do not raise it back.** At 12 the two control knobs cost
+13.3 ms/frame on an M1 Pro — about 40× the entire 1100×44 toolbar — because
+`filterRes` rasterises them at 2 device px per element px while the map carried
+12 texels per element px, so the compositor minified ~36× per pixel every frame
+and discarded almost all of it. 3 still exceeds what the filter can display, and
+`MAP_RENDER_OVERSAMPLE` stays at 16 so the bezel is still supersampled and
+averaged down. Cost: ~750 px on the knobs alone (max channel delta 53),
+indistinguishable at 6× magnification. `scripts/liquid-glass-baseline.ts` mirrors
+this one value and says so; nothing else in it may be synced.
+
 Three harnesses prove a change is invisible. Run all three:
 
 ```

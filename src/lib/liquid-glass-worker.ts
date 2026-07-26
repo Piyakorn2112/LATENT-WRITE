@@ -63,11 +63,33 @@ const EDGE_AA_SPAN: Record<MapPreset, number> = {
   "control-knob": 1.25,
   "toggle-control-knob": 1.1,
 };
+// Texels per element px in the FINAL map — the density the compositor has to
+// resample every frame the backdrop changes.
+//
+// ★★ DO NOT RAISE THIS BACK TO 12. It was 12, and that was the single most
+// expensive thing in the whole glass system: two knobs cost 13.31 ms/frame on
+// an M1 Pro, roughly 40x the entire 1100x44 toolbar. The cause is minification,
+// not size — `filterRes` rasterises the knob presets at 2 device px per element
+// px (see readFilterResConfig), so a 12-texel/px map is reduced ~36x per pixel
+// every frame and almost all of it is thrown away. Ablation: dropping density
+// alone, changing nothing else, measured 13.31 -> 0.39 ms/frame (33x).
+//
+// 3 still exceeds the 2 device px/element px the filter can actually display,
+// so no showable detail is lost, and MAP_RENDER_OVERSAMPLE below keeps the
+// worker supersampling from 16x and averaging down — the bezel is still built
+// at high precision, it is simply stored at a sane density.
+//
+// This is the one place the glass rendering deliberately changed: ~750 px on
+// the two knobs (max channel delta 53), indistinguishable at 6x magnification,
+// approved explicitly. Everything else in the engine is pixel-frozen.
 const MAP_OVERSAMPLE: Record<MapPreset, number> = {
   default: 1,
-  "control-knob": 12,
-  "toggle-control-knob": 12,
+  "control-knob": 3,
+  "toggle-control-knob": 3,
 };
+// Internal render density, averaged down to MAP_OVERSAMPLE for real SSAA. Keep
+// this well above MAP_OVERSAMPLE — it is what makes the knob bezel smooth, and
+// it costs worker CPU only, never per-frame GPU.
 const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
   default: 1,
   "control-knob": 16,
