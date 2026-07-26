@@ -46,16 +46,34 @@ a hard **zero-visual-change** constraint. The look is signed off; do not retune
 blur, bezel, refraction, or saturation while optimising.
 
 The look was deliberately re-signed-off ONCE, 2026-07-26 (owner-mandated): the
-**fold-free refraction model** — profile `g(t)=(1−t)²` with a per-shape
+**fold-free refraction model** — profile `g(t)=(1−t)^1.25` with a per-shape
 displacement cap (`effectiveDisp`) and LOCAL corner attenuation baked into the
 map (`MapRequest.dispPx`), replacing the Snell/squircle profile whose singular
-rim slope guaranteed mirrored fold-over on every shape whose bezel was smaller
-than the displacement. The lens alone keeps the legacy model
-(`profile:"snell"`). `scripts/liquid-glass-baseline.ts` was re-frozen to the
-new math at the same time and says so in its header; the zero-visual-change
-discipline continues from that baseline. `glass-direction.html` is the
-stripe-field diagnostic that makes fold-over/swirl defects visible — use it
-before believing any refraction change.
+rim slope guaranteed mirrored fold-over on every shape. The lens alone keeps
+the legacy model (`profile:"snell"`).
+`scripts/liquid-glass-baseline.ts` was re-frozen to the new math at the same
+time and says so in its header; the zero-visual-change discipline continues
+from that baseline.
+
+**The rule that matters: sampling must stay monotone.** `y' = y + disp(y)` has
+to increase, or the rim shows a mirrored, compressed copy of interior content.
+That is what "the top edge leans left and the bottom leans right" turned out to
+be — not a rotational field. Peak displacement must stay under
+`bezel / PROFILE_SLOPE`, so a FLATTER falloff buys more strength for the same
+budget; don't raise the exponent to "soften" the look, it costs displacement
+almost linearly. Panels are never limited by this (wide bezel → they keep the
+full `DISP_PX`); only chrome thinner than ~2× the displacement is capped, and
+there it is arithmetic — a 44px-tall bar cannot carry 40px of fold-free pull.
+
+Two diagnostics, both dev-only pages driven by scripts:
+- `glass-direction.html` — glass over vertical + horizontal stripe fields;
+  makes fold-over and gradient swirl visible at a glance.
+- `glass-shear.html` + `node scripts/glass-shear.cjs` — recovers the
+  displacement field sub-pixel from the phase of a 16px grating's first
+  harmonic, and prints whether it is symmetric. Use it before believing any
+  claim about refraction *direction*. ⚠ `capturePage()` returns DEVICE pixels;
+  scale every coordinate, or the analyser reads the wrong region and reports
+  a confident zero.
 
 Earlier deliberate exception, approved the same day: the knob presets'
 `MAP_OVERSAMPLE` went 12 → 3. **Do not raise it back.** At 12 the two control
