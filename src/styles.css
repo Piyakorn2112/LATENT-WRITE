@@ -1,7 +1,26 @@
 :root {
-  --bg: #e9e9e9;
-  --bg-page: #e9e9e9;
-  --bg-scroll-edge: #e9e9e9;
+  /* ── Light-mode calibration ────────────────────────────────────────────
+     Measured before/after, not eyeballed (the whole page spans ~13 of 255
+     levels, so eyes are useless here — see the ladder in the commit).
+
+     WAS: page #e9e9e9 (L 233) with the glass landing at L 236. Three levels
+     of separation, at chroma 0 — the surface did not read as a distinct
+     brighter material, it read as the same dead grey, slightly dirty. That
+     is the "muddy" complaint, and it came from darkening the glass to expose
+     the colour glow, which fights how the material is supposed to work:
+     Apple's own guidance is that over light content the glass LIGHTENS while
+     the text/icons ON it darken.
+
+     NOW: the page is lighter and carries a faint cool cast (chroma 5) so it
+     reads as a colour rather than a neutral smudge, and the glass is a WHITE
+     translucent tint rather than a grey one, which puts it well above the
+     page. Separation is bought back at the EDGE (see --shadow-glass's inset
+     ring) instead of by dimming the surface — the same move iOS 27 made when
+     it darkened the glass edge and brightened the specular "for more depth
+     and visual separation", while flattening chrome so it stops floating. */
+  --bg: #eef0f3;
+  --bg-page: #eef0f3;
+  --bg-scroll-edge: #eef0f3;
   --overlay-scrim-bg: rgba(20, 20, 22, 0.18);
   --overlay-scrim-bg-unfocused: rgba(245, 246, 248, 0.68);
   --overlay-scrim-blur: 8px;
@@ -9,12 +28,16 @@
   --overlay-scroll-mask-edge-bottom: 14px;
   --overlay-scroll-inset-top: 6px;
   --overlay-scroll-inset-bottom: 10px;
-  --bg-glass: rgba(241, 241, 241, 0.342);
-  --bg-glass-hover: rgba(241, 241, 241, 0.78);
-  --bg-glass-strong: rgba(255, 255, 255, 0.72);
+  /* WHITE, not grey. A grey tint desaturates whatever the backdrop-filter's
+     saturate() just boosted, which is the classic "frosted glass goes muddy"
+     failure — if a colour needs to show through, it belongs in the backdrop
+     being blurred, never in the tint fill. */
+  --bg-glass: rgba(255, 255, 255, 0.5);
+  --bg-glass-hover: rgba(255, 255, 255, 0.82);
+  --bg-glass-strong: rgba(255, 255, 255, 0.76);
   --bg-glass-unfocused: rgb(248, 248, 246);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
-  --bg-edge-right: #e9e9e9;
+  --bg-edge-right: #eef0f3;
 
   /* Liquid glass edge system — drives the border ring (::before) and the
      additive edge glow (::after) on every glass surface, so updating these
@@ -71,18 +94,39 @@
      page instead of hovering over it. Verify with the distinct-value count,
      not by eye: `stretch.cjs` contrast-amplification makes 1-level steps
      obvious that look perfectly smooth at normal contrast. */
+  /* ★ The top/bottom outer hairline is 0.075, not the 0.02 it was. On the
+     brighter page the white specular (::before, pure 255) had only ~7 levels
+     over the fill and was disappearing — the fill got bright, so the rim had
+     nothing to stand against. This dark hairline sits immediately OUTSIDE the
+     white one, so the edge reads page → dark line → white line → bright glass:
+     the specular is carried by LOCAL contrast against the dark line (~30
+     levels) rather than by dimming the whole surface, which is what let the
+     fill stay bright and clean. Sides stay 0.15; they have no specular. */
   --shadow-glass:
-    0 -0.5px 0 0 rgba(0, 0, 0, 0.02),
-    0  0.5px 0 0 rgba(0, 0, 0, 0.02),
+    0 -0.5px 0 0 rgba(0, 0, 0, 0.075),
+    0  0.5px 0 0 rgba(0, 0, 0, 0.075),
     -0.5px 0 0 0 rgba(0, 0, 0, 0.15),
     0.5px  0 0 0 rgba(0, 0, 0, 0.15),
-    0 1px 2px rgba(0, 0, 0, 0.045);
+    0 1px 2px rgba(0, 0, 0, 0.045),
+    /* ── The darkened edge (iOS 27's separation cue) ──────────────────
+       An INSET ring hugging the shape's own boundary, plus a slightly
+       deeper shade along the bottom inner edge where a surface lit from
+       above would self-shade. This is what lets the fill be pushed bright
+       without the surface dissolving into the page: the boundary carries
+       the contrast, so nothing has to float. It paints above the element's
+       background but UNDER its children, so the ::before specular ring
+       lands on top of it — white line directly against a dark line is the
+       strongest possible edge for the fewest levels spent. */
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.055),
+    inset 0 -1.5px 2px -1px rgba(0, 0, 0, 0.05);
   --shadow-glass-hover:
-    0 -0.5px 0 0 rgba(0, 0, 0, 0.02),
-    0  0.5px 0 0 rgba(0, 0, 0, 0.02),
+    0 -0.5px 0 0 rgba(0, 0, 0, 0.075),
+    0  0.5px 0 0 rgba(0, 0, 0, 0.075),
     -0.5px 0 0 0 rgba(0, 0, 0, 0.15),
     0.5px  0 0 0 rgba(0, 0, 0, 0.15),
-    0 1.5px 3px rgba(0, 0, 0, 0.055);
+    0 1.5px 3px rgba(0, 0, 0, 0.055),
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.055),
+    inset 0 -1.5px 2px -1px rgba(0, 0, 0, 0.05);
 
   --text: #1a1a1a;
   --text-secondary: #555;
