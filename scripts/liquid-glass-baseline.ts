@@ -1,20 +1,10 @@
 /**
- * FROZEN BASELINE — naive per-pixel reference implementation of the map math
- * in src/lib/liquid-glass-worker.ts, deliberately free of the worker's
- * axis-table/row-narrowing optimisations, so byte-equality against it proves
- * the optimised build computes the same function.
+ * FROZEN BASELINE — verbatim copy of the per-pixel math in
+ * src/lib/liquid-glass-worker.ts as of commit a6d7caf (working tree).
  *
  * Canvas/encode calls are replaced by a plain buffer so this runs in Node.
  * Uint8ClampedArray is preserved for `data` and `maskBuf` because their
  * assignment-rounding semantics (round-half-to-even) are part of the output.
- *
- * RE-FROZEN at the fold-free refraction rewrite, 2026-07-26 (owner-mandated
- * look change), then adjusted same day on owner feedback ("refraction too
- * small"): profile g(t)=(1−t)² with the per-shape edge cap on the main
- * thread and LOCAL corner attenuation (dispPx), shape-relative gradient
- * smoothing (gradKFor), full-range channel packing for foldfree maps. The
- * legacy Snell/squircle model is retained under profile:"snell" (the lens).
- * Originally frozen at a6d7caf.
  *
  * DO NOT EDIT — with one documented exception below (MAP_OVERSAMPLE). This is
  * the oracle for the zero-visual-change proof, and it is only useful for as
@@ -57,8 +47,6 @@ const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
 };
 
 const BEZEL_PX = 120;
-const BEZEL_FRAC = 1;
-const PROFILE_EXP = 1.25;
 
 const BLUR_EDGE_MIN = 0.85;
 const BLUR_TRANSITION_PCT = 0.25;
@@ -84,26 +72,23 @@ function sdRoundedBox(px: number, py: number, bx: number, by: number, r: number)
   return outside + inside - r;
 }
 
-const GRAD_K_MAX = 40;
-function gradKFor(insetX: number, insetY: number): number {
-  return Math.min(Math.max(Math.min(insetX, insetY), 1), GRAD_K_MAX);
-}
-function sdRoundedBoxSmooth(px: number, py: number, bx: number, by: number, r: number, k: number): number {
+const GRAD_K = 40;
+function sdRoundedBoxSmooth(px: number, py: number, bx: number, by: number, r: number): number {
   const qx = Math.abs(px) - (bx - r);
   const qy = Math.abs(py) - (by - r);
   const outside = Math.hypot(Math.max(qx, 0), Math.max(qy, 0));
-  const d = Math.max(k - Math.abs(qx - qy), 0) / k;
-  const inside = Math.min(Math.max(qx, qy) + d * d * k * 0.25, 0);
+  const d = Math.max(GRAD_K - Math.abs(qx - qy), 0) / GRAD_K;
+  const inside = Math.min(Math.max(qx, qy) + d * d * GRAD_K * 0.25, 0);
   return outside + inside - r;
 }
 
 function sdfGrad(
-  px: number, py: number, bx: number, by: number, r: number, k: number,
+  px: number, py: number, bx: number, by: number, r: number,
 ): [number, number] {
   const eps = 0.5;
-  const d = sdRoundedBoxSmooth(px, py, bx, by, r, k);
-  const gx = sdRoundedBoxSmooth(px + eps, py, bx, by, r, k) - d;
-  const gy = sdRoundedBoxSmooth(px, py + eps, bx, by, r, k) - d;
+  const d = sdRoundedBoxSmooth(px, py, bx, by, r);
+  const gx = sdRoundedBoxSmooth(px + eps, py, bx, by, r) - d;
+  const gy = sdRoundedBoxSmooth(px, py + eps, bx, by, r) - d;
   const len = Math.hypot(gx, gy);
   if (len < 1e-6) return [0, 0];
   return [gx / len, gy / len];
@@ -119,8 +104,6 @@ function snellDisp(slope: number, eta: number): number {
   return (Math.sqrt(1 - sinSq) - eta * nZ) * nSurface;
 }
 
-export type MapProfile = "snell" | "foldfree";
-
 export interface MapRequest {
   id: string;
   elemW: number;
@@ -131,11 +114,7 @@ export interface MapRequest {
   bezel?: number | null;
   fullQuality?: boolean;
   superSample?: number;
-  profile?: MapProfile;
-  dispPx?: number | null;
 }
-
-const FOLD_SAFE_W = 0.9;
 
 function computeMapSize(
   elemW: number,
@@ -180,8 +159,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
     : req.preset === "control-knob"
       ? "control-knob"
       : "default";
-  const profile: MapProfile = req.profile === "snell" ? "snell" : "foldfree";
-  const channelGain = profile === "snell" ? CHANNEL_GAIN[preset] : 1;
+  const channelGain = CHANNEL_GAIN[preset];
   const ss = Math.max(1, req.superSample ?? 1);
   const mapOversample = MAP_OVERSAMPLE[preset] * ss;
   const renderOversample = Math.max(mapOversample, MAP_RENDER_OVERSAMPLE[preset] * ss);
@@ -203,11 +181,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const halfShorter = Math.min(halfW, halfH);
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
-  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * BEZEL_FRAC);
-  const dispPx = profile === "foldfree" ? Math.max(0, req.dispPx ?? 0) : 0;
-  const cornerF = dispPx > 0 ? Math.min(1, (FOLD_SAFE_W * r) / dispPx) : 1;
-  const cornerW = Math.min(16, Math.max(1, r * 0.5));
-  const gradK = gradKFor(halfW - r, halfH - r);
+  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
   const blurRimEnd = Math.max(1, Math.min(halfShorter * BLUR_TRANSITION_PCT, halfShorter));
 
   const sxInv = elemW / mwElem;
@@ -270,29 +244,12 @@ export function buildMapPixels(req: MapRequest): MapPixels {
       if (dispCoverage <= 0) continue;
 
       const t = Math.min(Math.max(distToEdge, 0), bezel) / bezel;
-      let disp: number;
-      if (profile === "snell") {
-        const slope = Math.min(dh(t), 5.0);
-        disp = snellDisp(slope, eta);
-      } else {
-        disp = Math.pow(1 - t, PROFILE_EXP);
-      }
+      const slope = Math.min(dh(t), 5.0);
+      const disp = snellDisp(slope, eta);
 
       if (disp < 1e-6) continue;
 
-      // Local corner attenuation — same expression as the worker's corner
-      // branch, applied wherever the pixel sits in a corner-arc quadrant.
-      if (cornerF < 1) {
-        const cqx = Math.abs(px_rel) - (halfW - r);
-        const cqy = Math.abs(py_rel) - (halfH - r);
-        if (cqx > 0 && cqy > 0) {
-          const sx = cqx >= cornerW ? 1 : cqx / cornerW;
-          const sy = cqy >= cornerW ? 1 : cqy / cornerW;
-          disp *= 1 - sx * sy * (1 - cornerF);
-        }
-      }
-
-      const [gx, gy] = sdfGrad(px_rel, py_rel, halfW, halfH, r, gradK);
+      const [gx, gy] = sdfGrad(px_rel, py_rel, halfW, halfH, r);
       const dx = -gx * disp * dispCoverage;
       const dy = -gy * disp * dispCoverage;
 

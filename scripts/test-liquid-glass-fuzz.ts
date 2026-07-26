@@ -90,15 +90,9 @@ for (let i = 0; i < N; i++) {
   const bPick = rand();
   const bezel = bPick < 0.4 ? null : bPick < 0.7 ? 5 + rand() * 40 : rand() * 400;
   const superSample = knob ? 1 : rand() < 0.15 ? 1 + Math.floor(rand() * 4) : 1;
-  // Both falloff models, weighted toward the one the app now ships everywhere.
-  const profile = rand() < 0.3 ? "snell" as const : "foldfree" as const;
-  // Peak displacement driving the corner attenuation: absent, tiny, or large
-  // enough that cornerF clamps to 1 — all three paths.
-  const dPick = rand();
-  const dispPx = dPick < 0.25 ? null : dPick < 0.5 ? rand() * 6 : disp * (0.5 + rand());
 
   const req: MapRequest = {
-    id: "f", elemW: w, elemH: h, radius, overflow, preset, bezel, superSample, profile, dispPx,
+    id: "f", elemW: w, elemH: h, radius, overflow, preset, bezel, superSample,
   };
 
   // Guard against accidentally generating a multi-hundred-megapixel map.
