@@ -117,6 +117,30 @@
   transition: transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1), left 0.55s cubic-bezier(0.34, 1.42, 0.64, 1);
 }
 
+/* ★★ PERF: THIS `filter` IS THE APP'S SINGLE MOST EXPENSIVE EFFECT, and the
+   reason is worth knowing before touching anything here.
+   This element contains a LIVE WebGL canvas (the twin below). A CSS filter over
+   live content cannot cache — the content must be re-rasterised THROUGH the
+   filter every frame. Measured in the editor on an M1 Pro, vsync off
+   (npm run profile:glass-app):
+
+     .orb-backglow-orb removed entirely   → 0.72-0.78 ms/frame recovered (~36%)
+     this filter removed, canvas kept     → 0.14-0.23 ms
+     canvas removed, filter kept          → 0.20 ms
+
+   Two things that do NOT help, both measured, so nobody repeats them:
+     · Slowing the twin down. maxFps 20 → 12 → 8 → 4 changed the frame cost by
+       nothing. The re-raster is driven by the filter and by the canvas being a
+       live layer inside the toolbar glass's backdrop, not by redraw rate.
+     · Shrinking its resolution. resolutionScale 1 → 0.25 is 16x fewer
+       fragments and moved the frame cost by ~0.1 ms. The cost is
+       COMPOSITING-bound, not fragment-bound.
+
+   So the remaining ~0.7 ms can only go away by not having a live canvas behind
+   the glass at all (bake the twin to a static image, or drop it and carry the
+   colour with the bloom/spectral gradients below). All of those change how the
+   pill looks, which is a design call — deliberately not taken unilaterally. */
+
 /* Active (scanning / analysing): grow the twin. */
 .orb-backglow[data-analyzing="true"] .orb-backglow-orb {
   transform: translate(-50%, -50%) scale(1.2);
@@ -126,10 +150,21 @@
 /* Twin orb — separate light/dark handlers.
    Dark: full-bodied glow (the dark glass needs the orb to carry weight).
    Light: the glass already reads bright, so a strong colour cloud would
-   dominate — drop the opacity further and crank saturation so the orb
-   stays vivid and legible as colour rather than turning into a pale wash. */
+   dominate — drop the opacity further so the orb stays legible as colour
+   rather than turning into a pale wash.
+
+   ⚠ BUG, left in place deliberately: the dark rule's `filter` value is NOT
+   valid CSS — `(saturate(1.6), brightness(1.1))` is a parenthesised,
+   comma-separated list, so the whole declaration is dropped and dark mode
+   silently falls back to the base `filter: blur(2px)` above. Dark mode has
+   therefore never received the intended saturate/brightness lift.
+   Not "fixed" here because correcting it CHANGES how dark mode looks (it would
+   add a lift that has never been visible), and it would add cost to the app's
+   most expensive filter. The right fix is to carry it in the engine's
+   `vibrance` uniform, which is free — but that is a look change, so it needs a
+   decision rather than a silent edit. */
 @media (prefers-color-scheme: dark) {
-  .orb-backglow-orb { opacity: 1; filter: (saturate(1.2))}
+  .orb-backglow-orb { opacity: 1; filter: (saturate(1.6), brightness(1.1))}
 }
 @media (prefers-color-scheme: light) {
   .orb-backglow-orb {
