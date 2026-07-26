@@ -17,11 +17,15 @@
  *      paragraph makes a tall glow, not a dot) and pinned to the glass edge
  *      nearest the source. A 4-gradient rim-band mask keeps it near the
  *      perimeter so it doesn't wash the centre.
- *   2. SPECULAR RIM — a child on top (not refracted, stays crisp) carrying thin,
- *      bright colour bands at the very edge facing each nearby source, blended
- *      `screen`. This is the "really bright" catch. Like the body, its extent is
- *      pure background-size/position — no mask (a masked conic ring rendered as a
- *      whole-element gradient with a centre point on some compositor paths).
+ *   2. SPECULAR RIM — a child on top (not refracted, stays crisp), blended
+ *      `screen`: one pooled RING div per nearby source, each an un-offset
+ *      inset-shadow hairline (follows border-radius, so it bends around
+ *      corners) localised to the facing arc by a small RADIAL mask centred on
+ *      the border point nearest the source. Equal thickness on every edge;
+ *      soft ends and proximity gating come from the mask. (The historical
+ *      mask-phobia here was about a masked CONIC on the whole element, which
+ *      rendered as a centre-point artifact on some compositor paths; a radial
+ *      mask on a plain shadow-carrying child has no such path.)
  *
  * ── Colour: read the highlight layer directly ───────────────────────────────
  * No window capture (a flat capture is occluded by the glass and can't ignore
@@ -67,7 +71,8 @@ export interface EdgeColorOptions {
   refract?: boolean;
   /** Edge bias 0..1 — how shallow the glow's inward depth is (higher = hugs the rim). Default 0.55. */
   edgeBias?: number;
-  /** Blur that softens the shaped glow into a soft edge glow, css px. Default 10. */
+  /** Unused since the soft-ellipse rewrite — falloff is authored into the
+   *  gradients themselves, so the body layer runs with no CSS blur at all. */
   softness?: number;
   /**
    * Backing-store resolution of the BODY glow, 0.1..1 (1 = full res). The body
@@ -155,6 +160,21 @@ const DEFAULTS: Required<EdgeColorOptions> = {
 const RADIUS_FLOOR = 1;
 
 /**
+ * Rim rings per surface, hard cap. Each ring is one tiny composited child
+ * (an inset-shadow hairline + a radial mask); more than a handful adds
+ * nothing visually — the strongest sources already won in `near`.
+ */
+const MAX_RINGS = 6;
+
+/**
+ * The specular rim reads within this fraction of `reach`. The body wash is
+ * ambient and may gather from the full reach, but the CATCH is a local
+ * phenomenon: a source most of a reach away lighting a bright hairline is
+ * what made "anything vaguely nearby" glow the far sides of a surface.
+ */
+const RIM_REACH_FRAC = 0.65;
+
+/**
  * Exponential inward falloff for the specular rim, as [blurMultiple, alphaMultiple]
  * of `rimWidth`. The first stop is the hairline sitting exactly ON the edge; the
  * rest are the light diffusing into the material. Stacked blurs approximate e^-x
@@ -180,7 +200,8 @@ type Mode = "fixed" | "flow";
 interface Entry {
   glass: HTMLElement;
   body: HTMLDivElement;   // refracted glow, sibling behind the glass
-  rim: HTMLDivElement | null; // specular ring, child on top
+  rim: HTMLDivElement | null; // specular ring container, child on top
+  rings: HTMLDivElement[];    // pooled per-source rings inside `rim`
   mode: Mode;
   visible: boolean;
   radius: number;         // cached; read on adopt / resize, never per frame
@@ -355,13 +376,13 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     s.clipPath = `inset(0 round ${(r * S).toFixed(2)}px)`;
     s.opacity = String(op);
     s.backgroundRepeat = "no-repeat";
-    // Soften the shaped (rectangular) glow into a nice edge glow. Painting-based
-    // (cached when static); the glass's own backdrop-filter softens it further.
-    // blur × S so the up-scaled result matches the requested softness while the
-    // filter runs over S² fewer pixels.
-    const f = opt.softness > 0 ? `blur(${(opt.softness * S).toFixed(2)}px)` : "";
-    s.filter = f;
-    (s as unknown as { webkitFilter: string }).webkitFilter = f;
+    // ★ NO CSS blur on the body any more. Every band is painted as a soft
+    // ELLIPTICAL gradient (band() soften path), so the falloff is authored
+    // into the paint itself — running a live `filter: blur()` over a layer
+    // that repaints while sources move was a per-repaint filter pass that
+    // only re-softened already-soft gradients. The glass's own
+    // backdrop-filter still diffuses the wash a second time for free.
+    if (s.filter) { s.filter = ""; (s as unknown as { webkitFilter: string }).webkitFilter = ""; }
 
     if (entry.rim) {
       const rs = entry.rim.style;
@@ -394,7 +415,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     // (no rim DEPTH here any more — the rim's inward extent comes from the
     // RIM_FALLOFF blur stops, which follow the corner radius; see below.)
     const images: string[] = [], sizes: string[] = [], positions: string[] = [];
-    const rShadows: string[] = [];
+    const ringData: Array<{ shadow: string; mask: string }> = [];
 
     // edge band layer geometry → push a fading gradient rect into the given
     // arrays. `k` maps from glass px into the target layer's coordinate space
@@ -547,67 +568,84 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
           span = Math.min(span, along - alongStart);
         }
 
-        // body: soft inward glow (fades to nothing at `depth`) — down-scaled space
-        band(images, sizes, positions, edge, alongStart, span, depth, c, a * ef, 0, S);
+        // body: soft inward glow (fades to nothing at `depth`) — down-scaled
+        // space. Always the soften path: the elliptical falloff is what lets
+        // the layer run with NO CSS blur (see applyShape).
+        band(images, sizes, positions, edge, alongStart, span, depth, c, a * ef, 0, S, true);
       }
 
-      // ── rim: light that follows the CONTOUR, not the four sides ──────────
-      // ★★ THIS is why corners never looked right before. The rim was built from
-      // axis-aligned rectangular bands, and two rectangles meeting at a rounded
-      // corner form an L — they cannot bend along the arc, no matter how they are
-      // weighted or blended. An INSET box-shadow follows `border-radius` exactly,
-      // so the light curves around the corner by construction, and because the
-      // direction below is a continuous vector the highlight ROTATES around the
-      // contour as the source moves instead of being handed between sides.
-      // (Same idiom as `.toolbar-ambient-orb` in styles.css, which uses stacked
-      // inset shadows precisely because they hug the pill's rounded cap.)
-      // Emitted once per SOURCE, not per edge — the shadow handles the geometry,
-      // so there is nothing left for the per-edge split to do here.
-      if (entry.rim) {
-        // ★ HUE-ACCURATE brightening. Multiplying each channel and clamping at
-        // 255 per channel is what made the caught colour wrong: the dominant
-        // channel clips while the others keep climbing, so a saturated red drifts
-        // to pink and a deep blue to lavender. Scaling ALL channels by one factor,
-        // limited by the headroom of the largest, brightens without clipping any
-        // channel, so the ratio between them — the hue — is preserved exactly.
-        // Brightness the headroom cannot supply is handed to alpha, which does
-        // not distort colour.
-        const peak = Math.max(r, g, b, 1);
-        const k = Math.min(opt.rimBrightness, 255 / peak);
-        const rr = Math.round(r * k), rg = Math.round(g * k), rb = Math.round(b * k);
-        const spill = opt.rimBrightness > k ? Math.min(1.25, opt.rimBrightness / k) : 1;
-        const ra = Math.min(1, wgt * opt.rimIntensity * spill);
+      // ── rim: a masked ring per source — the arc that faces it, only ──────
+      // ★★ Two structural facts, learned the hard way:
+      //   · An INSET box-shadow follows `border-radius`, so the light bends
+      //     around a rounded corner by construction (gradient bands cannot —
+      //     two rectangles meeting at an arc form an L).
+      //   · But an inset shadow lights the WHOLE perimeter. The old version
+      //     nudged it toward the source with a 1px offset, which (a) barely
+      //     localised anything — every source still lit the far edges, so a
+      //     paragraph below the toolbar glowed both END CAPS — and (b) made
+      //     the lit side THICKER than the others, which is exactly the
+      //     "left/right edges too fat" complaint: an inset offset does not
+      //     slide the ring, it grows it on one side.
+      // So: the shadow is now UN-offset (one hairline, identical thickness on
+      // every edge), and the localisation is a RADIAL MASK on a per-source
+      // ring child, centred on the point of the border nearest the source and
+      // sized to the source's facing extent. The mask fades the ring out along
+      // the perimeter in both directions — soft ends for free — and a source
+      // only ever lights the arc it actually faces.
+      if (entry.rim && ringData.length < MAX_RINGS) {
+        // Tighter reach than the body wash — the catch is local (see
+        // RIM_REACH_FRAC). Beyond it a source contributes body glow only.
+        const wr = sc.w * Math.max(0, 1 - dist / (reach * RIM_REACH_FRAC));
+        if (wr > 0.02) {
+          // ★ HUE-ACCURATE brightening. Multiplying each channel and clamping
+          // at 255 per channel made the caught colour wrong: the dominant
+          // channel clips while the others keep climbing, so a saturated red
+          // drifts to pink. One shared factor, limited by the headroom of the
+          // largest channel, brightens without moving the hue; brightness the
+          // headroom cannot supply is handed to alpha instead.
+          const peak = Math.max(r, g, b, 1);
+          const k = Math.min(opt.rimBrightness, 255 / peak);
+          const rr = Math.round(r * k), rg = Math.round(g * k), rb = Math.round(b * k);
+          const spill = opt.rimBrightness > k ? Math.min(1.25, opt.rimBrightness / k) : 1;
+          const ra = Math.min(1, wr * opt.rimIntensity * spill);
 
-        // Direction from the glass centre toward the source; the shadow is offset
-        // AGAINST it so the light lands on the facing part of the perimeter.
-        let nx = (sc.cx - gr.left) - gw / 2;
-        let ny = (sc.cy - gr.top) - gh / 2;
-        const nl = Math.hypot(nx, ny) || 1;
-        nx /= nl; ny /= nl;
-        // ★ The offset must stay SMALL. An inset offset does not slide a line
-        // along the edge, it grows the shadow on that side — push it far and the
-        // "rim" floods half the surface instead of hugging the edge. A couple of
-        // band-widths biases the ring toward the source while keeping it a rim.
-        const w0 = Math.max(0.35, opt.rimWidth);
-        // ★ Keep the bias to about one hairline. This offset is also what smears
-        // the catch off the edge: every px of it thickens the lit side, so a
-        // larger push trades precision for reach and the rim stops looking like
-        // it is ON the contour. One width is enough to tell which side the colour
-        // is coming from.
-        const push = w0 * 1.1;
-        const ox = (-nx * push).toFixed(2), oy = (-ny * push).toFixed(2);
+          // Mask centre: the source centre clamped into the glass, then pushed
+          // to the nearest edge if it landed in the interior. A corner source
+          // clamps straight onto the corner, so the mask sits on the arc and
+          // the ring lights both adjacent edges continuously.
+          let mxp = Math.max(0, Math.min(gw, sc.cx - gr.left));
+          let myp = Math.max(0, Math.min(gh, sc.cy - gr.top));
+          const dEdgeL = mxp, dEdgeR = gw - mxp, dEdgeT = myp, dEdgeB = gh - myp;
+          const mind = Math.min(dEdgeL, dEdgeR, dEdgeT, dEdgeB);
+          if (mind > 0) {
+            if (mind === dEdgeL) mxp = 0;
+            else if (mind === dEdgeR) mxp = gw;
+            else if (mind === dEdgeT) myp = 0;
+            else myp = gh;
+          }
+          // Arc radius from the source's extent along the lit edge, plus a
+          // margin so the falloff has room; clamped so one source can never
+          // wrap the whole surface.
+          const onVertEdge = mxp === 0 || mxp === gw;
+          const ext = Math.max(24, onVertEdge ? oy1 - oy0 : ox1 - ox0);
+          const arcR = Math.min(Math.max(ext * 0.5 + 30, 44), Math.max(gw, gh));
 
-        // ★ Exponential falloff: brightest hairline exactly AT the edge, then
-        // each stop roughly triples in width and drops to about a third of the
-        // alpha. Stacked blurs approximate an exponential far better than one
-        // gradient stop, which is what makes it read as light diffusing into the
-        // material rather than a drawn border.
-        for (const [mulB, mulA] of RIM_FALLOFF) {
-          const a = ra * mulA;
-          if (a < 0.004) continue;
-          rShadows.push(
-            `inset ${ox}px ${oy}px ${(w0 * mulB).toFixed(2)}px rgba(${rr},${rg},${rb},${a.toFixed(3)})`,
-          );
+          // ★ Exponential falloff: brightest hairline exactly AT the edge —
+          // stacked shadow stops approximate e^-x far better than one gradient
+          // stop. NO offset: thickness is identical on all four edges.
+          const w0 = Math.max(0.35, opt.rimWidth);
+          let shadow = "";
+          for (const [mulB, mulA] of RIM_FALLOFF) {
+            const a2 = ra * mulA;
+            if (a2 < 0.004) continue;
+            shadow += `${shadow ? "," : ""}inset 0 0 ${(w0 * mulB).toFixed(2)}px rgba(${rr},${rg},${rb},${a2.toFixed(3)})`;
+          }
+          if (shadow) {
+            ringData.push({
+              shadow,
+              mask: `radial-gradient(circle ${arcR.toFixed(0)}px at ${mxp.toFixed(1)}px ${myp.toFixed(1)}px, #fff 0%, #fff 45%, transparent 100%)`,
+            });
+          }
         }
       }
     }
@@ -621,10 +659,37 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       bs.backgroundPosition = positions.join(",");
     }
     if (entry.rim) {
-      // One box-shadow list, however many sources — no background layers at all.
-      const rs = entry.rim.style;
-      const next = rShadows.join(",");
-      if (rs.boxShadow !== next) rs.boxShadow = next;
+      // Sync the ring pool: one child per active source, spares hidden (not
+      // removed — DOM churn while sources move is worse than a few idle divs).
+      const rim = entry.rim;
+      if (rim.style.boxShadow) rim.style.boxShadow = ""; // pre-ring leftovers
+      while (entry.rings.length < ringData.length) {
+        const ring = document.createElement("div");
+        const s = ring.style;
+        s.position = "absolute";
+        s.inset = "0";
+        s.borderRadius = "inherit";
+        s.pointerEvents = "none";
+        rim.appendChild(ring);
+        entry.rings.push(ring);
+      }
+      for (let i = 0; i < entry.rings.length; i++) {
+        const rs = entry.rings[i].style;
+        const d = i < ringData.length ? ringData[i] : null;
+        if (!d) {
+          if (rs.boxShadow) {
+            rs.boxShadow = "";
+            rs.display = "none";
+          }
+          continue;
+        }
+        if (rs.display) rs.display = "";
+        if (rs.boxShadow !== d.shadow) rs.boxShadow = d.shadow;
+        if (rs.webkitMaskImage !== d.mask) {
+          rs.webkitMaskImage = d.mask;
+          rs.maskImage = d.mask;
+        }
+      }
     }
   }
 
@@ -701,7 +766,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     const rect = glass.getBoundingClientRect();
     const radius = radiusOf(glass, Math.max(2, rect.width), Math.max(2, rect.height));
     const entry: Entry = {
-      glass, body, rim, mode, visible: true, radius, shape: "",
+      glass, body, rim, rings: [], mode, visible: true, radius, shape: "",
       gx: 0, gy: 0, gw: 0, gh: 0, restorePosition,
     };
     entries.set(glass, entry);

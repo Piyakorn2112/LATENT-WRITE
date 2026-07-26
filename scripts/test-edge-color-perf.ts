@@ -321,19 +321,25 @@ for (const o of [...createdOverlays, ...createdRims]) {
 // radial glows from sampled source colours, not nothing.
 let paintedRings = 0;
 for (const o of createdOverlays) {
-  if ((o.style.backgroundImage || "").includes("linear-gradient")) paintedRings++;
+  // Soft-ellipse rewrite: body bands are radial gradients (linear before it).
+  if (/(?:linear|radial)-gradient/.test(o.style.backgroundImage || "")) paintedRings++;
 }
 // The specular rim lights the source-facing part of the perimeter.
 // It is drawn with stacked INSET BOX-SHADOWS rather than background gradients:
 // a shadow follows the element's `border-radius`, so the light bends around a
 // rounded corner by construction. Axis-aligned gradient bands cannot — two of
 // them meeting at a corner form an L, which is what made corners read wrong no
-// matter how they were weighted. This gate is named for the behaviour (the rim
-// paints a coloured catch at all), so it accepts either mechanism.
+// matter how they were weighted. Since the masked-ring rewrite the shadows
+// live on pooled per-source RING CHILDREN of the rim, each localised to its
+// facing arc by a radial mask. This gate is named for the behaviour (the rim
+// paints a coloured catch at all), so it accepts any mechanism — a shadow or
+// gradient on the rim itself or on any of its ring children.
 let paintedSpecular = 0;
 for (const o of createdRims) {
-  const painted = /inset/.test(o.style.boxShadow || "") ||
-    /(?:linear|radial)-gradient/.test(o.style.backgroundImage || "");
+  const carriers = [o, ...o.children];
+  const painted = carriers.some((c) =>
+    /inset/.test(c.style.boxShadow || "") ||
+    /(?:linear|radial)-gradient/.test(c.style.backgroundImage || ""));
   if (painted) paintedSpecular++;
 }
 
@@ -431,7 +437,7 @@ gate(
   `pos="${body0?.style.position}" z="${body0?.style.zIndex}" (must be a positioned sibling before the glass, not a z:-1 child)`,
 );
 // The specular rim is a separate, crisp (un-refracted) child painting bright
-// edge bands — no mask (so no centre-point artifact).
+// edge arcs via its masked ring children.
 gate(
   "specular rim catches nearby colour (bright edge bands)",
   paintedSpecular > 0,
