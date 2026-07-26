@@ -23,6 +23,10 @@
     "test:auto-format": "tsx scripts/test-auto-format.ts",
     "test:tension-scene": "tsx scripts/test-tension-scene.ts",
     "test:cast-roles": "tsx scripts/test-cast-roles.ts",
+    "test:glass-exact": "tsx scripts/test-liquid-glass-exact.ts",
+    "test:glass-fuzz": "tsx scripts/test-liquid-glass-fuzz.ts 1200",
+    "test:glass-pixels": "electron scripts/glass-pixel-diff.cjs --diff ref",
+    "test:glass-pixels:save": "electron scripts/glass-pixel-diff.cjs --save ref",
     "electron:dev": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder --mac --config electron-builder.yml"
   },

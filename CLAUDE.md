@@ -38,6 +38,35 @@ those three together and run the two suites above.
 
 Test suites exit with code 1 if below target.
 
+## Liquid glass — treat as pixel-frozen
+
+`src/lib/liquid-glass-worker.ts` (per-pixel displacement-map math) and
+`src/lib/liquid-glass-filter.ts` (SVG filter chain) are performance-tuned under
+a hard **zero-visual-change** constraint. The look is signed off; do not retune
+blur, bezel, refraction, or saturation while optimising.
+
+Three harnesses prove a change is invisible. Run all three:
+
+```
+npm run test:glass-exact     # map bytes vs a frozen copy of the original math
+npm run test:glass-fuzz      # same, over 1200 randomised geometries
+npm run dev                  # then, in another shell:
+npm run test:glass-pixels    # real-Chromium screenshot diff of /glass-verify.html
+```
+
+`test:glass-pixels` needs a reference first (`npm run test:glass-pixels:save`
+on the unmodified code). `scripts/liquid-glass-baseline.ts` is that frozen
+oracle — **never** "fix" or update it to match new behaviour; it exists to
+disagree. Before trusting a pass, confirm the harness can fail: perturb
+`BEZEL_PX` by 1 and watch it go red.
+
+Two properties the fast paths depend on, both verified empirically, both easy
+to break by "simplifying":
+- `Math.hypot(a, 0) === Math.abs(a)` exactly — but `Math.sqrt(a*a) !== Math.abs(a)`
+  for subnormals (~5% of random inputs), so never swap hypot for that.
+- `image/webp` at quality 1.0 is lossless, but PNG encodes 5-7x faster and
+  2-4x smaller for these maps and decodes to identical pixels.
+
 ## Renderer chat commands — when to use which
 
 The renderer chat in the app handles these slash commands. Use this decision table when the user asks about novel writing or which command to run:

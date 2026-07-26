@@ -11,16 +11,25 @@
  *    SDF (correct curved-corner refraction).
  *  • Bezel height profile is the convex squircle h(t) = (1−(1−t)⁴)^¼.
  *
- *  Progressive blur: edges stay sharp so the rim refraction reads as a
- *  lens; interior crossfades into a stronger blur. The blur mix factor is
- *  baked into the displacement map's blue channel (the displacement map
- *  reads only R and G), then extracted via feColorMatrix and used to mask
- *  a blurred copy of the displaced backdrop. Single extra blur pass +
- *  three composite primitives — efficient on the GPU.
+ *  Progressive blur: the worker bakes a rim-sharp → interior-blurred mix
+ *  factor into the displacement map's BLUE channel (feDisplacementMap itself
+ *  reads only R and G). Note that the current filter chain does not consume
+ *  it — the blur below is applied uniformly to the displaced backdrop, and
+ *  the blue channel survives only because it also keeps the map's bilinear
+ *  sampling well-behaved at the rim (see the pre-fill in the worker). An
+ *  earlier revision extracted it via feColorMatrix to mask a blurred copy;
+ *  that is gone. Do not describe the chain as progressive-blurring.
+ *
+ *  Chain: feImage(map) → [feGaussianBlur(map AA, knobs only)] →
+ *         feDisplacementMap → [feGaussianBlur(blur)] → [feColorMatrix(sat)]
+ *  The bracketed passes are omitted when they would be identity transforms,
+ *  since an identity pass still costs a full filter-region raster per frame.
  *
  *  Performance: filter generation is deferred to requestIdleCallback so
  *  panel-open / chapter-switch animations are not blocked. Until the JS
- *  filter is ready, the CSS fallback (a uniform blur) shows.
+ *  filter is ready, the CSS fallback (a uniform blur) shows. The per-pixel
+ *  map math lives in the worker — see its header for the cost structure and
+ *  for the two harnesses that prove a change is pixel-identical.
  */
 
 const SVG_ID = "lg-filter-svg";
@@ -38,7 +47,7 @@ const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freez
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
 const DISP_PX = 40;        // max refraction shift, pixels
-const BLUR_DEFAULT = 4;    // backdrop blur for unclassified elements, pixels
+const BLUR_DEFAULT = 5;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
 
 // Bezel width (refraction radius) default lives in liquid-glass-worker.ts as
@@ -52,7 +61,7 @@ const SATURATE = "1.8";
 const LENS_REFRACTION        = 20;   // refraction strength — px the backdrop shifts at the rim
 const LENS_REFRACTION_RADIUS = 20;  // refraction radius   — bezel width (px) the lens bends over
 const LENS_BLUR              = 0.2;     // blur radius         — px (0 = pure refraction, no frost)
-const LENS_SUPERSAMPLE       = 5;     // supersampling — renders the filter + displacement map at
+const LENS_SUPERSAMPLE       = 4;     // supersampling — renders the filter + displacement map at
                                       // this multiple of the base size so the CSS scale-up stays
                                       // smooth (no ridges). Raise it if the CSS scale grows.
 const LENS_SATURATE          = 1;     // saturation of the refracted backdrop. The global glass uses
@@ -195,10 +204,10 @@ function readBlur(el: Element): number {
   if (el.classList.contains("liquid-glass-lens")) return LENS_BLUR;
   if (el.classList.contains("liquid-glass-control-knob")) return 0.2;
   if (el.matches(".glass-range-knob, .glass-toggle-knob")) return 0;
-  if (el.classList.contains("toolbar")) return 1.5;
-  if (el.classList.contains("settings-panel")) return 4;
-  if (el.matches(".analysis-tab, .analysis-action-group")) return 1;
-  if (el.classList.contains("status-pill")) return 2;
+  if (el.classList.contains("toolbar")) return 1.2;
+  if (el.classList.contains("settings-panel")) return 3;
+  if (el.matches(".analysis-tab, .analysis-action-group")) return 1.2;
+  if (el.classList.contains("status-pill")) return 1.2;
   if (el.matches(".annotation-popover, .annotation-panel")) return 2;
   return BLUR_DEFAULT;
 }
@@ -252,6 +261,27 @@ function readFilterResConfig(preset: MapPreset): { scale: number; min: number } 
   }
   return { scale: FILTER_RES_SCALE, min: FILTER_RES_MIN };
 }
+
+// ── KNOWN, DELIBERATELY UNTAKEN OPTIMISATION ──────────────────────────────
+//
+// The filter region below is sized `disp + blur*2 + 4`, which is exactly the
+// largest shift feDisplacementMap can produce (`scale * (channel/255 - 0.5)`
+// with the worker's `128 + v*127*gain` packing) *at gain 1*, plus the blur's
+// reach and a little slack.
+//
+// It does NOT account for CHANNEL_GAIN. The knob presets pack at 0.35 / 0.24,
+// so they displace at most 14.1px / 9.7px rather than 40px, which makes their
+// filter region 5.9x / 10.3x larger in AREA than the refraction can ever
+// reach — and since those presets build their map at 16x oversample, the empty
+// margin dominates: a 20x14 range knob rasterises a 1728x1632 map that is 97%
+// untouched padding.
+//
+// Correcting it is a large win (~4x less knob map work) but it is NOT free:
+// the region feeds `filterRes`, so shrinking it moves the raster grid and
+// scripts/glass-pixel-diff.cjs measures 1108 changed pixels (max channel
+// delta 53) on the two knobs. That is sub-pixel, knob-only, and arguably more
+// correct — but it is a visual change, so it stays untaken here.
+// Revisit only with explicit sign-off on the knob rendering.
 
 function buildFilterEl(
   id: string,
@@ -328,18 +358,38 @@ function buildFilterEl(
     }),
   );
 
-  filter.append(
-    createElNS("feGaussianBlur", {
-      in: "displaced",
-      stdDeviation: String(blur),
-      result: "blurred",
-    }),
-    createElNS("feColorMatrix", {
-      in: "blurred",
-      type: "saturate",
-      values: String(saturate),
-    }),
-  );
+  // Both tail primitives are identity transforms at their neutral values, and
+  // an identity pass still costs the compositor a full filter-region raster on
+  // every frame the backdrop changes. Per spec a zero stdDeviation "disables
+  // the effect of the given filter primitive (i.e. the result is the filter
+  // input image)", and saturate(1) is the identity matrix — so dropping them is
+  // *defined* to be a no-op (and is verified pixel-identical by
+  // scripts/glass-pixel-diff.cjs). Each case fires for a real preset: the
+  // range/toggle knobs run blur 0, and the loading lens — the largest glass
+  // surface in the app, blown up 7x — runs saturate 1.
+  //
+  // If both are dropped the chain ends at feDisplacementMap, whose output is
+  // then the filter result (the last primitive's always is).
+  let tail = "displaced";
+  if (blur > 0) {
+    filter.append(
+      createElNS("feGaussianBlur", {
+        in: tail,
+        stdDeviation: String(blur),
+        result: "blurred",
+      }),
+    );
+    tail = "blurred";
+  }
+  if (saturate !== 1) {
+    filter.append(
+      createElNS("feColorMatrix", {
+        in: tail,
+        type: "saturate",
+        values: String(saturate),
+      }),
+    );
+  }
 
   return filter;
 }
