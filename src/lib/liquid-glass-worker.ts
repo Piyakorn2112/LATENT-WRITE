@@ -42,17 +42,46 @@
  * constant margin.
  *
  * Any change here must stay byte-identical. Two harnesses prove it:
- *   · unit        — scratchpad lg-verify.ts byte-compares buildMapPixels
- *                   against a frozen copy of the original math.
+ *   · unit        — scripts/test-liquid-glass-exact.ts byte-compares
+ *                   buildMapPixels against the frozen baseline copy
+ *                   (scripts/liquid-glass-baseline.ts).
  *   · integration — scripts/glass-pixel-diff.cjs screenshots
  *                   /glass-verify.html in real Chromium and compares pixels.
  * Verify a harness can FAIL (perturb BEZEL_PX by 1) before trusting a pass.
+ * The baseline was re-frozen ONCE, deliberately, at the fold-free refraction
+ * rewrite (owner-mandated look change); the discipline continues from there.
  */
 
 // Air → glass.
 const N1 = 1;
 const N2 = 1.5;
 type MapPreset = "default" | "control-knob" | "toggle-control-knob";
+/**
+ * How the displacement magnitude falls off across the bezel.
+ *
+ *  "foldfree" — the DEFAULT since the refraction rewrite. Analytic profile
+ *      g(t) = (1−t)³ (t = 0 at the rim, 1 at the bezel's inner end). Its
+ *      normalised slope is bounded (|g′| ≤ 3), so as long as the caller caps
+ *      the peak displacement at FOLD_SAFE·bezel/3 (see the main thread's
+ *      dispEff), the sampling x′ = x + Δ(d) stays MONOTONE: the rim magnifies
+ *      (up to ~6.7x at the very edge) but can never fold over and mirror.
+ *
+ *  "snell" — the original physical model: Snell's-law lateral displacement of
+ *      the convex squircle h(t) = (1−(1−t)⁴)^¼. The squircle's slope is
+ *      SINGULAR at t = 0, so Δ′ < −1 near the rim on every shape whose peak
+ *      displacement exceeds what its bezel can absorb — the sampling folds
+ *      and the rim shows a MIRRORED copy of interior content (rings on
+ *      circles, doubled bars on pills; the diagnostic in glass-direction.html
+ *      makes them obvious). No reference implementation mirrors — see the
+ *      liquid-glass research notes — so only the loading lens, whose look was
+ *      tuned around this model, still requests it.
+ */
+type MapProfile = "snell" | "foldfree";
+// CHANNEL_GAIN — a pre-foldfree relic, kept only for the "snell" profile. The
+// knob presets used it to tame the old chaotic fold-over refraction (0.35 /
+// 0.24); with the fold-free profile the per-shape displacement cap does that
+// job correctly, so foldfree maps always pack the full ±127 range (gain 1) and
+// the main thread scales displacement with the feDisplacementMap `scale` attr.
 const CHANNEL_GAIN: Record<MapPreset, number> = {
   default: 1,
   "control-knob": 0.35,
@@ -171,25 +200,35 @@ function sdSharpQ(qx: number, qy: number, r: number): number {
 // discontinuity along the qx=qy diagonal (45° from each corner center).
 // On pill shapes this line falls outside the bezel; on large rectangles
 // with small corner radii it cuts through, producing a visible diagonal
-// refraction seam. The smooth variant blends the gradient over ±GRAD_K
+// refraction seam. The smooth variant blends the gradient over ±k
 // element-pixels around that diagonal, eliminating the seam.
 // Used ONLY for gradient direction — the sharp SDF drives distance.
-const GRAD_K = 40;
-function sdSmoothQ(qx: number, qy: number, r: number): number {
+//
+// ★ k must be SHAPE-RELATIVE (see gradKFor). The old fixed k = 40 was larger
+// than the knobs' entire q-range (±10 on a 20x14 pill), so the blend region
+// swallowed the whole surface and warped the gradient field into eddy pairs —
+// the "two vortex eyes" the direction diagnostic showed on every knob. A pill
+// (r = halfShorter) has NO in-bezel diagonal seam to hide: its sharp-max jump
+// line degenerates to a point, so it wants k → minimum, while big rectangles
+// with small radii keep the full 40.
+const GRAD_K_MAX = 40;
+function gradKFor(insetX: number, insetY: number): number {
+  return Math.min(Math.max(Math.min(insetX, insetY), 1), GRAD_K_MAX);
+}
+function sdSmoothQ(qx: number, qy: number, r: number, k: number): number {
   const outside = hypot2(qx > 0 ? qx : 0, qy > 0 ? qy : 0);
-  const d = Math.max(GRAD_K - Math.abs(qx - qy), 0) / GRAD_K;
-  const inside = Math.min(Math.max(qx, qy) + d * d * GRAD_K * 0.25, 0);
+  const d = Math.max(k - Math.abs(qx - qy), 0) / k;
+  const inside = Math.min(Math.max(qx, qy) + d * d * k * 0.25, 0);
   return outside + inside - r;
 }
 
 // Finite-difference probe offset for the gradient, in element pixels.
 const GRAD_EPS = 0.5;
-// Where one axis leads the other by at least this much, all three smooth-SDF
+// Where one axis leads the other by at least gradK + 1, all three smooth-SDF
 // probes have d = 0 (smooth ≡ sharp) even after the ±GRAD_EPS shift, and the
 // normalised gradient is exactly (0, ±1) or (±1, 0) — a per-row or per-column
 // constant instead of three SDF evaluations plus a hypot per pixel.
-// GRAD_K + 1 because the probe can move a q value by at most GRAD_EPS.
-const GRAD_FLAT = GRAD_K + 1;
+// (+1 because the probe can move a q value by at most GRAD_EPS.)
 
 // ── Per-distance scalars ─────────────────────────────────────────────────
 // Everything between the SDF and the gradient — edge coverage, the blur mask,
@@ -214,6 +253,7 @@ function scalarsFor(
   blurRimEnd: number,
   bezel: number,
   eta: number,
+  profile: MapProfile,
 ): void {
   const edgeCoverage = edgeAaWidth > 0
     ? clamp01(0.5 + distToEdge / edgeAaWidth)
@@ -246,10 +286,19 @@ function scalarsFor(
     return;
   }
 
-  // ── Snell displacement from the bezel profile ────────────────────────
+  // ── Displacement magnitude from the bezel profile ────────────────────
+  // foldfree: g(t) = (1−t)³ — bounded slope, so with the main thread's
+  // dispEff cap the rim magnifies but never mirrors. snell: the legacy
+  // singular-slope model (the lens only).
   const t = Math.min(Math.max(distToEdge, 0), bezel) / bezel;
-  const slope = Math.min(dh(t), 5.0);
-  const disp = snellDisp(slope, eta);
+  let disp: number;
+  if (profile === "snell") {
+    const slope = Math.min(dh(t), 5.0);
+    disp = snellDisp(slope, eta);
+  } else {
+    const u = 1 - t;
+    disp = u * u * u;
+  }
 
   if (disp < 1e-6) {
     S_flag = S_MASK_ONLY;
@@ -297,6 +346,8 @@ interface MapRequest {
    * provably free of visual change; see `padX`/`padY` on the response.
    */
   mapPad?: number | null;
+  /** Displacement falloff model; undefined → "foldfree". See MapProfile. */
+  profile?: MapProfile;
 }
 
 interface MapResponse {
@@ -430,7 +481,10 @@ export function buildMapPixels(req: MapRequest): MapPixels {
     : req.preset === "control-knob"
       ? "control-knob"
       : "default";
-  const channelGain = CHANNEL_GAIN[preset];
+  const profile: MapProfile = req.profile === "snell" ? "snell" : "foldfree";
+  // foldfree packs the full channel range; displacement strength lives in the
+  // filter's `scale` attribute (dispEff), not in the map bytes.
+  const channelGain = profile === "snell" ? CHANNEL_GAIN[preset] : 1;
   // Supersample boosts the map's pixel resolution so a CSS scale-up of the
   // element (the lens) stays smooth instead of revealing stair-step ridges.
   const ss = Math.max(1, req.superSample ?? 1);
@@ -504,6 +558,8 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   // identical floats — but the abs/subtract now runs O(w + h) times.
   const insetX = halfW - r;
   const insetY = halfH - r;
+  const gradK = gradKFor(insetX, insetY);
+  const gradFlat = gradK + 1;
 
   const QX = new Float64Array(mwElem);
   const QXE = new Float64Array(mwElem);
@@ -532,7 +588,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const colGx = new Float64Array(mwElem);
   for (let px = 0; px < mwElem; px++) {
     const qx = QX[px];
-    scalarsFor(r - qx, edgeAaWidth, baselineMask, blurRimEnd, bezel, eta);
+    scalarsFor(r - qx, edgeAaWidth, baselineMask, blurRimEnd, bezel, eta, profile);
     colFlag[px] = S_flag;
     colMask[px] = S_mask;
     colDisp[px] = S_disp;
@@ -551,7 +607,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const rowGy = new Float64Array(mhElem);
   for (let py = 0; py < mhElem; py++) {
     const qy = QY[py];
-    scalarsFor(r - qy, edgeAaWidth, baselineMask, blurRimEnd, bezel, eta);
+    scalarsFor(r - qy, edgeAaWidth, baselineMask, blurRimEnd, bezel, eta, profile);
     rowFlag[py] = S_flag;
     rowMask[py] = S_mask;
     rowDisp[py] = S_disp;
@@ -613,7 +669,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
       let cov: number;
       if (qx > 0 && qy > 0) {
         // Corner arc — genuinely two-dimensional, solve per pixel.
-        scalarsFor(-sdSharpQ(qx, qy, r), edgeAaWidth, baselineMask, blurRimEnd, bezel, eta);
+        scalarsFor(-sdSharpQ(qx, qy, r), edgeAaWidth, baselineMask, blurRimEnd, bezel, eta, profile);
         flag = S_flag;
         maskV = S_mask;
         disp = S_disp;
@@ -644,16 +700,16 @@ export function buildMapPixels(req: MapRequest): MapPixels {
       // identical on straight edges and corners.
       let gx: number;
       let gy: number;
-      if (qy - qx >= GRAD_FLAT && qx <= -GRAD_EPS) {
+      if (qy - qx >= gradFlat && qx <= -GRAD_EPS) {
         gx = 0;
         gy = rGy;
-      } else if (qx - qy >= GRAD_FLAT && qy <= -GRAD_EPS) {
+      } else if (qx - qy >= gradFlat && qy <= -GRAD_EPS) {
         gx = colGx[px];
         gy = 0;
       } else {
-        const d0 = sdSmoothQ(qx, qy, r);
-        const rawGx = sdSmoothQ(QXE[px], qy, r) - d0;
-        const rawGy = sdSmoothQ(qx, qye, r) - d0;
+        const d0 = sdSmoothQ(qx, qy, r, gradK);
+        const rawGx = sdSmoothQ(QXE[px], qy, r, gradK) - d0;
+        const rawGy = sdSmoothQ(qx, qye, r, gradK) - d0;
         const len = hypot2(rawGx, rawGy);
         if (len < 1e-6) {
           gx = 0;

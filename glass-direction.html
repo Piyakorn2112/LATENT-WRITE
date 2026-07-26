@@ -1,0 +1,60 @@
+<!doctype html>
+<!-- Dev-only refraction DIRECTION diagnostic. Not part of the app build.
+     Open http://localhost:5173/glass-direction.html
+
+     Left half: vertical stripes (any HORIZONTAL displacement of the backdrop
+     is visible as stripe shift; vertical displacement is invisible).
+     Right half: horizontal stripes (the transpose).
+     One rounded panel and one circle over each field. Under a correct,
+     normal-directed refraction the stripes must stay mirror-symmetric:
+     left edge mirrors right, top mirrors bottom. Any "stripes lean left at
+     the top and right at the bottom" is a tangential (swirl) component. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Liquid glass — refraction direction diagnostic</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #101014; }
+      body { width: 1200px; height: 900px; overflow: hidden; }
+
+      .field { position: absolute; top: 0; bottom: 0; }
+      /* vertical stripes with a red registration line every 48px */
+      .field-v {
+        left: 0; width: 600px;
+        background:
+          repeating-linear-gradient(90deg, #f43 0 2px, transparent 2px 48px),
+          repeating-linear-gradient(90deg, #000 0 6px, #fff 6px 12px);
+      }
+      /* horizontal stripes with a red registration line every 48px */
+      .field-h {
+        left: 600px; width: 600px;
+        background:
+          repeating-linear-gradient(180deg, #f43 0 2px, transparent 2px 48px),
+          repeating-linear-gradient(180deg, #000 0 6px, #fff 6px 12px);
+      }
+
+      .spec {
+        position: absolute;
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+      }
+      /* thin outline drawn OUTSIDE the element so the glass boundary is
+         visible in screenshots without entering the backdrop */
+      .spec::after {
+        content: "";
+        position: absolute;
+        inset: -2px;
+        border: 2px solid #0af;
+        border-radius: inherit;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="field field-v"></div>
+    <div class="field field-h"></div>
+    <div id="specimens"></div>
+    <script type="module" src="/src/glass-direction.ts"></script>
+  </body>
+</html>

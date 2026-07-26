@@ -46,9 +46,38 @@ const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freez
 
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
-const DISP_PX = 40;        // max refraction shift, pixels
+const DISP_PX = 40;        // requested max refraction shift, pixels (see dispEff)
 const BLUR_DEFAULT = 5;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
+
+// ── Fold-free displacement cap ───────────────────────────────────────────
+// The map's falloff is g(t) = (1−t)³ across the bezel (worker profile
+// "foldfree"), whose steepest normalised slope is PROFILE_SLOPE at the rim.
+// Sampling stays monotone — the rim MAGNIFIES but can never fold over and
+// mirror interior content — iff peak displacement ≤ bezel / PROFILE_SLOPE.
+// FOLD_SAFE keeps a margin under that bound; at 0.85 the rim's peak
+// magnification is 1/(1−0.85) ≈ 6.7x. The corner term caps displacement at
+// the corner radius so corner sampling never crosses the arc centre (which
+// mirrors a blob into the corner); the 0.3·edge floor keeps near-sharp
+// rectangles from losing the effect entirely.
+// The old model had NO cap: 40px of displacement into e.g. the toolbar's
+// 17.6px bezel guaranteed fold-over — the mirrored bars/rings/vortex-eyes
+// the glass-direction.html diagnostic shows on every pre-rewrite shape.
+const FOLD_SAFE = 0.85;
+const PROFILE_SLOPE = 3;
+// Mirror of the worker's BEZEL_PX / RADIUS_FLOOR + bezel cap — keep in sync.
+const BEZEL_PX_MAIN = 120;
+function effectiveDisp(
+  disp: number, w: number, h: number, radius: number, bezelOverride: number | null, profile: "snell" | "foldfree",
+): number {
+  if (profile === "snell") return disp;
+  const halfShorter = Math.min(w, h) / 2;
+  const bezel = Math.min(bezelOverride ?? BEZEL_PX_MAIN, halfShorter * 0.8);
+  const r = Math.min(Math.max(radius, 1), halfShorter);
+  const edgeCap = (FOLD_SAFE * bezel) / PROFILE_SLOPE;
+  const cornerCap = Math.max(FOLD_SAFE * r, 0.3 * edgeCap);
+  return Math.min(disp, edgeCap, cornerCap);
+}
 
 // Blue channel of the map's neutral margin: (BLUR_EDGE_MIN * 255 + 0.5) | 0
 // with BLUR_EDGE_MIN = 0.85 in liquid-glass-worker.ts. Keep in sync — feFlood
@@ -161,6 +190,7 @@ function buildMapInWorker(
   bezel: number | null,
   superSample: number,
   mapPad: number | null,
+  profile: "snell" | "foldfree",
 ): Promise<BuiltMap | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
@@ -168,7 +198,7 @@ function buildMapInWorker(
     const id = `req-${++reqCounter}`;
     pendingBlob.set(id, ({ blob, padX, padY }) =>
       resolve({ url: URL.createObjectURL(blob), padX, padY }));
-    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad });
+    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad, profile });
   });
 }
 
@@ -248,6 +278,13 @@ function readDisp(el: Element): number {
   return DISP_PX;
 }
 
+// Displacement falloff model. The loading lens keeps the legacy Snell/squircle
+// profile its look was tuned around (fold-over included); everything else uses
+// the fold-free profile — see FOLD_SAFE above and MapProfile in the worker.
+function readProfile(el: Element): "snell" | "foldfree" {
+  return el.classList.contains("liquid-glass-lens") ? "snell" : "foldfree";
+}
+
 // Refraction radius (bezel width) override; null → the worker's BEZEL_PX.
 function readBezel(el: Element): number | null {
   if (el.classList.contains("liquid-glass-lens")) return LENS_REFRACTION_RADIUS;
@@ -287,31 +324,27 @@ function readDispMapAntialias(preset: MapPreset): number {
 
 function readFilterResConfig(preset: MapPreset): { scale: number; min: number } {
   if (preset === "control-knob" || preset === "toggle-control-knob") {
-    return { scale: 2, min: 160 };
+    // ★ 4, not 2. The knobs are the one glass that renders under a CSS scale
+    // while active — the range knob at 1.62x, the toggle at 2x — and the
+    // filter rasterises at THIS density before that scale is applied. At 2
+    // texels/element-px on a 2x display the pressed knob was showing a ~2x
+    // magnified raster: the "pixelated knob" complaint. 4 covers the worst
+    // case (2 CSS x 2 dpr). The region cost stays flat because dispEff also
+    // shrank the knob filter region to what the refraction can actually reach.
+    return { scale: 4, min: 160 };
   }
   return { scale: FILTER_RES_SCALE, min: FILTER_RES_MIN };
 }
 
-// ── KNOWN, DELIBERATELY UNTAKEN OPTIMISATION ──────────────────────────────
-//
-// The filter region below is sized `disp + blur*2 + 4`, which is exactly the
-// largest shift feDisplacementMap can produce (`scale * (channel/255 - 0.5)`
-// with the worker's `128 + v*127*gain` packing) *at gain 1*, plus the blur's
-// reach and a little slack.
-//
-// It does NOT account for CHANNEL_GAIN. The knob presets pack at 0.35 / 0.24,
-// so they displace at most 14.1px / 9.7px rather than 40px, which makes their
-// filter region 5.9x / 10.3x larger in AREA than the refraction can ever
-// reach — and since those presets build their map at 16x oversample, the empty
-// margin dominates: a 20x14 range knob rasterises a 1728x1632 map that is 97%
-// untouched padding.
-//
-// Correcting it is a large win (~4x less knob map work) but it is NOT free:
-// the region feeds `filterRes`, so shrinking it moves the raster grid and
-// scripts/glass-pixel-diff.cjs measures 1108 changed pixels (max channel
-// delta 53) on the two knobs. That is sub-pixel, knob-only, and arguably more
-// correct — but it is a visual change, so it stays untaken here.
-// Revisit only with explicit sign-off on the knob rendering.
+// The filter region is sized `ceil(dispEff) + blur*2 + 4` — the largest shift
+// feDisplacementMap can actually produce for THIS element (scale = dispEff*2
+// over a full-range ±127 map), plus the blur's reach and a little slack. An
+// earlier revision sized every region for the global 40px maximum, which made
+// the knob regions 5.9-10.3x larger in area than their refraction could ever
+// reach; the fold-free dispEff made the true reach per-element and the region
+// followed. (This superseded a comment here describing that shrink as a
+// deliberately untaken optimisation pending sign-off on the knob rendering —
+// the refraction rewrite was that sign-off.)
 
 function buildFilterEl(
   id: string,
@@ -503,12 +536,13 @@ async function ensureFilter(
   bezel: number | null,
   superSample: number,
   saturate: number,
+  profile: "snell" | "foldfree",
 ): Promise<string | null> {
   ensureSvgRoot();
   const w = snap(elemW);
   const h = snap(elemH);
   const r = snap(radius);
-  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}-d${disp}-z${bezel ?? "def"}${superSample > 1 ? `-s${superSample}` : ""}-q${saturate}`;
+  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}-d${disp}-z${bezel ?? "def"}${superSample > 1 ? `-s${superSample}` : ""}-q${saturate}-p${profile === "snell" ? "s" : "f"}`;
 
   const cached = filterCache.get(id);
   if (cached) {
@@ -522,11 +556,12 @@ async function ensureFilter(
   if (existing) return existing;
 
   const promise = (async () => {
-    const overflow = disp + blur * 2 + 4;
-    const map = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX);
+    const dispEff = effectiveDisp(disp, w, h, r, bezel, profile);
+    const overflow = Math.ceil(dispEff) + blur * 2 + 4;
+    const map = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX, profile);
     if (!map) return null;
 
-    const filter = buildFilterEl(id, w, h, overflow, map, blur, preset, disp, superSample, saturate);
+    const filter = buildFilterEl(id, w, h, overflow, map, blur, preset, dispEff, superSample, saturate);
     defs!.append(filter);
     filterCache.set(id, { filter, blobUrl: map.url, refCount: 0 });
     evictLRU();
@@ -669,10 +704,11 @@ function applyTo(element: HTMLElement) {
     const bezel = readBezel(element);
     const superSample = readSuperSample(element);
     const saturate = readSaturate(element);
-    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}-d${disp}-z${bezel ?? "def"}-s${superSample}-q${saturate}`;
+    const profile = readProfile(element);
+    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}-d${disp}-z${bezel ?? "def"}-s${superSample}-q${saturate}-p${profile}`;
     if (lastSize.get(element) === key) return;
     lastSize.set(element, key);
-    const id = await ensureFilter(w, h, r, blur, preset, disp, bezel, superSample, saturate);
+    const id = await ensureFilter(w, h, r, blur, preset, disp, bezel, superSample, saturate, profile);
     if (!id) return; // worker dead → CSS fallback stays
     if (glassPaused) return;
     if (lastSize.get(element) !== key) return;

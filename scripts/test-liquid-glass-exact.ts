@@ -23,29 +23,52 @@ const live = (await import(
 
 // ── The real shapes ───────────────────────────────────────────────────────
 // Each entry mirrors what liquid-glass-filter.ts computes for that element:
-//   overflow = disp + blur * 2 + 4
-const ovf = (disp: number, blur: number) => disp + blur * 2 + 4;
+//   dispEff  = effectiveDisp(disp, w, h, r, bezel, profile)   (fold-free cap)
+//   overflow = ceil(dispEff) + blur * 2 + 4
+// Keep this mirror in sync with FOLD_SAFE / PROFILE_SLOPE / BEZEL_PX_MAIN.
+const FOLD_SAFE = 0.85;
+const PROFILE_SLOPE = 3;
+const BEZEL_MAIN = 120;
+function dispEff(
+  disp: number, w: number, h: number, radius: number, bezel: number | null, profile: "snell" | "foldfree",
+): number {
+  if (profile === "snell") return disp;
+  const halfShorter = Math.min(w, h) / 2;
+  const bz = Math.min(bezel ?? BEZEL_MAIN, halfShorter * 0.8);
+  const r = Math.min(Math.max(radius, 1), halfShorter);
+  const edgeCap = (FOLD_SAFE * bz) / PROFILE_SLOPE;
+  const cornerCap = Math.max(FOLD_SAFE * r, 0.3 * edgeCap);
+  return Math.min(disp, edgeCap, cornerCap);
+}
+interface Geo { w: number; h: number; r: number; bezel?: number | null; profile?: "snell" | "foldfree" }
+function mk(label: string, g: Geo, disp: number, blur: number, preset: MapRequest["preset"], superSample = 1): Case {
+  const profile = g.profile ?? "foldfree";
+  const overflow = Math.ceil(dispEff(disp, g.w, g.h, g.r, g.bezel ?? null, profile)) + blur * 2 + 4;
+  return { label, id: "c", elemW: g.w, elemH: g.h, radius: g.r, overflow, preset, bezel: g.bezel ?? null, superSample, profile };
+}
 
 interface Case extends MapRequest { label: string }
 const CASES: Case[] = [
-  { label: "range knob        20x14   ", id: "c", elemW: 20, elemH: 14, radius: 999, overflow: ovf(40, 0), preset: "control-knob", bezel: null, superSample: 1 },
-  { label: "toggle knob       32x24   ", id: "c", elemW: 32, elemH: 24, radius: 999, overflow: ovf(40, 0), preset: "toggle-control-knob", bezel: null, superSample: 1 },
-  { label: "loading lens     100x100  ", id: "c", elemW: 100, elemH: 100, radius: 50, overflow: ovf(20, 0.2), preset: "default", bezel: 20, superSample: 4 },
-  { label: "toolbar         1100x44   ", id: "c", elemW: 1100, elemH: 44, radius: 22, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
-  { label: "analysis tab     160x36   ", id: "c", elemW: 160, elemH: 36, radius: 18, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
-  { label: "status pill      120x28   ", id: "c", elemW: 120, elemH: 28, radius: 14, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
-  { label: "annot. popover   320x180  ", id: "c", elemW: 320, elemH: 180, radius: 14, overflow: ovf(40, 2), preset: "default", bezel: null, superSample: 1 },
-  { label: "annot. panel     300x520  ", id: "c", elemW: 300, elemH: 520, radius: 16, overflow: ovf(40, 2), preset: "default", bezel: null, superSample: 1 },
-  { label: "settings panel   420x620  ", id: "c", elemW: 420, elemH: 620, radius: 18, overflow: ovf(40, 3), preset: "default", bezel: null, superSample: 1 },
-  { label: "wide panel       900x700  ", id: "c", elemW: 900, elemH: 700, radius: 18, overflow: ovf(40, 5), preset: "default", bezel: null, superSample: 1 },
-  { label: "square-ish       260x260  ", id: "c", elemW: 260, elemH: 260, radius: 24, overflow: ovf(40, 5), preset: "default", bezel: null, superSample: 1 },
-  { label: "tiny pill         48x20   ", id: "c", elemW: 48, elemH: 20, radius: 10, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
+  mk("range knob        20x14   ", { w: 20, h: 14, r: 999 }, 40, 0, "control-knob"),
+  mk("toggle knob       32x24   ", { w: 32, h: 24, r: 999 }, 40, 0, "toggle-control-knob"),
+  mk("loading lens     100x100  ", { w: 100, h: 100, r: 50, bezel: 20, profile: "snell" }, 20, 0.2, "default", 4),
+  mk("toolbar         1100x44   ", { w: 1100, h: 44, r: 22 }, 40, 1.2, "default"),
+  mk("analysis tab     160x36   ", { w: 160, h: 36, r: 18 }, 40, 1.2, "default"),
+  mk("status pill      120x28   ", { w: 120, h: 28, r: 14 }, 40, 1.2, "default"),
+  mk("annot. popover   320x180  ", { w: 320, h: 180, r: 14 }, 40, 2, "default"),
+  mk("annot. panel     300x520  ", { w: 300, h: 520, r: 16 }, 40, 2, "default"),
+  mk("settings panel   420x620  ", { w: 420, h: 620, r: 18 }, 40, 3, "default"),
+  mk("wide panel       900x700  ", { w: 900, h: 700, r: 18 }, 40, 5, "default"),
+  mk("square-ish       260x260  ", { w: 260, h: 260, r: 24 }, 40, 5, "default"),
+  mk("tiny pill         48x20   ", { w: 48, h: 20, r: 10 }, 40, 1.2, "default"),
   // Edge cases: radius 0, radius = half (circle), thin sliver, bezel > halfShorter
-  { label: "sharp corners    200x120 r0", id: "c", elemW: 200, elemH: 120, radius: 0, overflow: ovf(40, 5), preset: "default", bezel: null, superSample: 1 },
-  { label: "circle           140x140  ", id: "c", elemW: 140, elemH: 140, radius: 70, overflow: ovf(40, 5), preset: "default", bezel: null, superSample: 1 },
-  { label: "sliver           600x8    ", id: "c", elemW: 600, elemH: 8, radius: 4, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
-  { label: "big+divisor10   1000x400  ", id: "c", elemW: 1000, elemH: 400, radius: 20, overflow: ovf(40, 5), preset: "default", bezel: null, superSample: 1 },
-  { label: "odd frac      333.5x77.5  ", id: "c", elemW: 333.5, elemH: 77.5, radius: 15.5, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
+  mk("sharp corners    200x120 r0", { w: 200, h: 120, r: 0 }, 40, 5, "default"),
+  mk("circle           140x140  ", { w: 140, h: 140, r: 70 }, 40, 5, "default"),
+  mk("sliver           600x8    ", { w: 600, h: 8, r: 4 }, 40, 1.2, "default"),
+  mk("big+divisor10   1000x400  ", { w: 1000, h: 400, r: 20 }, 40, 5, "default"),
+  mk("odd frac      333.5x77.5  ", { w: 333.5, h: 77.5, r: 15.5 }, 40, 1.2, "default"),
+  // The legacy profile must keep working for arbitrary defaults too.
+  mk("snell panel      320x180  ", { w: 320, h: 180, r: 14, profile: "snell" }, 40, 2, "default"),
 ];
 
 function time(fn: () => MapPixels, warm: number, runs: number) {
