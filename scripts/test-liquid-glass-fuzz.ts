@@ -1,18 +1,42 @@
 /**
  * Randomised byte-exactness fuzz for the liquid-glass map.
  *
- * The fixed case list in lg-verify.ts covers the shapes the app uses; this
- * hunts for the shapes it doesn't — extreme aspect ratios, radius exactly at
- * the pill/circle boundary, bezel larger than the element, fractional sizes —
- * because the row-narrowing and the axis-table branches are the kind of
- * optimisation that fails only on a geometry nobody thought to try.
+ * Two independent invariants, over the same random geometries:
+ *
+ *  1. MATH — the live per-pixel map equals a frozen copy of the original
+ *     algorithm, byte for byte. The fixed case list in
+ *     test-liquid-glass-exact.ts covers the shapes the app uses; this hunts the
+ *     ones it doesn't (extreme aspect ratios, radius exactly at the pill/circle
+ *     boundary, bezel larger than the element, fractional sizes), because the
+ *     row narrowing and the axis-table branches fail only on a geometry nobody
+ *     thought to try. That is how the AA-skirt gap in the row span was caught.
+ *
+ *  2. MARGIN SHRINK — when a smaller neutral margin is baked in (mapPad), the
+ *     element's own pixels must be untouched, the collar must be exactly the
+ *     neutral value the main thread floods with, and the reported padX/padY
+ *     must reproduce the map's authored scale. Otherwise <feImage> samples the
+ *     refraction at the wrong scale, which the map bytes alone would not catch.
  */
 
 import { buildMapPixels as baseline, type MapRequest, type MapPreset } from "./liquid-glass-baseline.ts";
 (globalThis as any).self = { onmessage: null };
+interface Built {
+  data: Uint8ClampedArray;
+  mw: number;
+  mh: number;
+  outW: number;
+  outH: number;
+  padX: number;
+  padY: number;
+}
 const live = (await import(
   "../src/lib/liquid-glass-worker.ts"
-)) as { buildMapPixels: (req: MapRequest) => { data: Uint8ClampedArray; mw: number; mh: number } };
+)) as { buildMapPixels: (req: MapRequest & { mapPad?: number | null }) => Built };
+
+/** Blue channel of the neutral margin — must match MAP_NEUTRAL_MASK in liquid-glass-filter.ts. */
+const NEUTRAL_MASK = 217;
+/** Element px of collar the main thread asks for. */
+const MAP_PAD = 4;
 
 // mulberry32 — deterministic, so a failure is reproducible.
 function rng(seed: number) {
@@ -30,6 +54,7 @@ const N = Number(process.argv[2] ?? 400);
 let fails = 0;
 let checked = 0;
 let maxPx = 0;
+let shrunk = 0;
 
 for (let i = 0; i < N; i++) {
   const rand = rng(i * 2654435761);
@@ -103,11 +128,75 @@ for (let i = 0; i < N; i++) {
       `   ${JSON.stringify(req)}`,
     );
     fails++;
+    continue;
+  }
+
+  // ── Invariant 2: the shrunk-margin map ──────────────────────────────────
+  const padded = live.buildMapPixels({ ...req, mapPad: MAP_PAD });
+  if (padded.padX >= overflow) {
+    // Fell back to the full margin (the scale would not have been preserved).
+    // Then it must be byte-identical to the unpadded build.
+    if (padded.mw !== b.mw || padded.mh !== b.mh) {
+      console.log(`✗ seed ${i}: fallback changed dims  ${JSON.stringify(req)}`);
+      fails++;
+    }
+    continue;
+  }
+  shrunk++;
+
+  // The authored scale must survive: texels per element px, both axes.
+  const scaleX = padded.outW / (w + 2 * padded.padX);
+  const scaleY = padded.outH / (h + 2 * padded.padY);
+  const fullScaleX = b.outW / (w + 2 * overflow);
+  const fullScaleY = b.outH / (h + 2 * overflow);
+  if (scaleX !== fullScaleX || scaleY !== fullScaleY) {
+    console.log(
+      `✗ seed ${i}: SCALE moved ${fullScaleX}/${fullScaleY} -> ${scaleX}/${scaleY}\n` +
+      `   ${JSON.stringify(req)}`,
+    );
+    fails++;
+    continue;
+  }
+
+  // The element's pixels must be identical, and the collar must be exactly the
+  // neutral value the main thread floods the rest of the region with.
+  const scale = padded.mw / (w + 2 * padded.padX); // render-resolution scale
+  const elemW = Math.round(padded.mw - 2 * padded.padX * scale);
+  const elemH = Math.round(padded.mh - 2 * padded.padY * scale);
+  const padTexX = Math.round(padded.padX * scale);
+  const padTexY = Math.round(padded.padY * scale);
+  const fullPadTexX = Math.round((b.mw - elemW) / 2);
+  const fullPadTexY = Math.round((b.mh - elemH) / 2);
+
+  let elemBad = 0;
+  let collarBad = 0;
+  for (let y = 0; y < elemH; y++) {
+    for (let x = 0; x < elemW; x++) {
+      const pi = ((y + padTexY) * padded.mw + (x + padTexX)) * 4;
+      const fi = ((y + fullPadTexY) * b.mw + (x + fullPadTexX)) * 4;
+      for (let c = 0; c < 4; c++) if (padded.data[pi + c] !== b.data[fi + c]) elemBad++;
+    }
+  }
+  // Sample the collar: the outermost ring of the shrunk map.
+  for (let x = 0; x < padded.mw; x++) {
+    for (const y of [0, padded.mh - 1]) {
+      const p = (y * padded.mw + x) * 4;
+      if (padded.data[p] !== 128 || padded.data[p + 1] !== 128 ||
+          padded.data[p + 2] !== NEUTRAL_MASK || padded.data[p + 3] !== 255) collarBad++;
+    }
+  }
+  if (elemBad || collarBad) {
+    console.log(
+      `✗ seed ${i}: pad path — ${elemBad} element bytes differ, ${collarBad} collar px not neutral\n` +
+      `   ${JSON.stringify(req)}`,
+    );
+    fails++;
   }
 }
 
 console.log(
-  `\n${checked} random shapes checked (largest map ${(maxPx / 1e6).toFixed(1)}Mpx) — ` +
+  `\n${checked} random shapes checked (largest map ${(maxPx / 1e6).toFixed(1)}Mpx, ` +
+  `${shrunk} took the shrunk-margin path) — ` +
   (fails === 0 ? "ALL BYTE-IDENTICAL ✓" : `${fails} FAILED ✗`),
 );
 process.exit(fails ? 1 : 0);

@@ -52,7 +52,14 @@ npm run test:glass-exact     # map bytes vs a frozen copy of the original math
 npm run test:glass-fuzz      # same, over 1200 randomised geometries
 npm run dev                  # then, in another shell:
 npm run test:glass-pixels    # real-Chromium screenshot diff of /glass-verify.html
+npm run bench:glass-gpu      # real-GPU cost per frame, per scene (needs a real GPU)
 ```
+
+`bench:glass-gpu` is a measurement, not a gate. It needs the dev server and a
+real GPU — it refuses to report on software compositing, because those numbers
+would describe the CPU rasteriser instead. Note that a backdrop-filter only
+costs anything when its backdrop *changes*, which is why the bench page animates
+a canvas behind the glass; benchmarking a static page measures nothing.
 
 `test:glass-pixels` needs a reference first (`npm run test:glass-pixels:save`
 on the unmodified code). `scripts/liquid-glass-baseline.ts` is that frozen

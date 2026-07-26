@@ -1,0 +1,32 @@
+<!doctype html>
+<!-- Dev-only GPU benchmark for the liquid-glass engine. Not part of the build.
+     Driven by scripts/glass-gpu-bench.cjs (needs a real GPU + vsync off).
+
+     The point of this page: a backdrop-filter only costs the compositor when
+     the backdrop CHANGES. A static page caches the filtered result and measures
+     nothing. So a canvas animates behind the glass every single frame, which is
+     what scrolling text under a panel actually does.
+
+     ?scene=<name>  chooses which glass surfaces are mounted.
+     ?glass=off     mounts the same DOM with no backdrop-filter (the floor). -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Liquid glass — GPU benchmark</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #101014; overflow: hidden; }
+      #bg { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .spec { position: absolute; background: transparent; border: 0; }
+      #hud {
+        position: absolute; right: 8px; bottom: 8px; z-index: 99;
+        font: 12px monospace; color: #0f0; background: #000a; padding: 4px 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="bg"></canvas>
+    <div id="specimens"></div>
+    <div id="hud">measuring…</div>
+    <script type="module" src="/src/glass-gpu-bench.ts"></script>
+  </body>
+</html>

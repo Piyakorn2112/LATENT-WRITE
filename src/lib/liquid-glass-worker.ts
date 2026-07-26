@@ -267,11 +267,27 @@ interface MapRequest {
   fullQuality?: boolean;
   /** Supersample factor for the displacement-map resolution (1 = normal). */
   superSample?: number;
+  /**
+   * Element px of neutral margin to BAKE into the map, when that is less than
+   * `overflow`. The map only needs real data inside the element — the rest of
+   * the filter region is a constant, which the caller can supply with an
+   * feFlood instead of storing it in a texture. Only honoured when it is
+   * provably free of visual change; see `padX`/`padY` on the response.
+   */
+  mapPad?: number | null;
 }
 
 interface MapResponse {
   id: string;
   blob: Blob;
+  /**
+   * Element px of margin actually baked in, per axis. The caller MUST place
+   * <feImage> at exactly (−padX, −padY, elemW + 2·padX, elemH + 2·padY), and
+   * flood the rest of the region, or the map will be sampled at the wrong
+   * scale. Equals `overflow` when the full-margin map was used.
+   */
+  padX: number;
+  padY: number;
 }
 
 function computeMapSize(
@@ -327,12 +343,63 @@ export interface MapPixels {
   outW: number;
   outH: number;
   needsDownscale: boolean;
+  /** Element px of margin baked in, per axis (see MapResponse.padX). */
+  padX: number;
+  padY: number;
+}
+
+/**
+ * Decide how much neutral margin to bake into the map.
+ *
+ * The map only carries real data inside the element; the rest of the filter
+ * region is one constant colour. Storing that constant as texture is what makes
+ * the knob maps enormous — a 20x14 range knob bakes a 1296x1224 map of which
+ * 97% by area is padding — and Chromium re-samples the whole feImage every
+ * frame the backdrop changes, so it is a *per-frame GPU* cost, not just memory.
+ * Measured on an M1 Pro: two knobs cost 13.31 ms/frame, and shrinking the map
+ * (nothing else) took that to 0.40 ms.
+ *
+ * ★ THE CONSTRAINT. <feImage> stretches the map onto its rect, so the map's
+ * texels-per-element-px must not change or the refraction is resampled and the
+ * look shifts. Deriving the rect from the texel margin makes the new scale
+ * exactly `elemWidth / elemW` algebraically — but that is only a no-op if the
+ * CURRENT full-margin map already sits at that same scale. It does for the knob
+ * presets (12.000000, because their overflow x oversample lands on an integer)
+ * and it does NOT for the toolbar (0.999329) or the lens (4.005376), whose
+ * maps are very slightly stretched today. That stretch is part of how they
+ * render right now, so those keep the full-margin map untouched.
+ *
+ * Hence: shrink only when the current scale is *exactly* the element scale on
+ * both axes. The check is here, next to the arithmetic it guards, rather than
+ * duplicated in the main thread.
+ */
+function resolveMapPad(
+  elemW: number, elemH: number, overflow: number,
+  divisor: number, mapOversample: number, requested: number | null | undefined,
+): number {
+  if (requested == null || !(requested < overflow)) return overflow;
+
+  const full = computeMapSize(elemW, elemH, overflow, divisor, mapOversample);
+  // Scale the map is sampled at today, vs the scale its element portion is
+  // authored at. Must match bit-for-bit on both axes.
+  const currentScaleX = full.width / (elemW + 2 * overflow);
+  const currentScaleY = full.height / (elemH + 2 * overflow);
+  if (currentScaleX !== full.elemWidth / elemW) return overflow;
+  if (currentScaleY !== full.elemHeight / elemH) return overflow;
+
+  // And the shrunk map must still round to a whole texel margin cleanly, so
+  // the rect the caller derives lands back on exactly `requested`.
+  const small = computeMapSize(elemW, elemH, requested, divisor, mapOversample);
+  if ((small.overflowX * elemW) / small.elemWidth !== requested) return overflow;
+  if ((small.overflowY * elemH) / small.elemHeight !== requested) return overflow;
+
+  return requested;
 }
 
 /**
  * Pure per-pixel map computation — no canvas, no encode. Exported so the
  * zero-visual-change harness can byte-compare it against the frozen baseline
- * (scratchpad/lg-verify.ts) in Node.
+ * (scripts/liquid-glass-baseline.ts) in Node.
  */
 export function buildMapPixels(req: MapRequest): MapPixels {
   const { elemW, elemH, radius, overflow } = req;
@@ -353,8 +420,9 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const divisor = req.fullQuality
     ? MAP_DIVISOR
     : Math.min(elemW, elemH) > MAP_DIVISOR_BREAK ? MAP_DIVISOR_LARGE : MAP_DIVISOR;
-  const renderSize = computeMapSize(elemW, elemH, overflow, divisor, renderOversample);
-  const outputSize = computeMapSize(elemW, elemH, overflow, divisor, mapOversample);
+  const pad = resolveMapPad(elemW, elemH, overflow, divisor, mapOversample, req.mapPad);
+  const renderSize = computeMapSize(elemW, elemH, pad, divisor, renderOversample);
+  const outputSize = computeMapSize(elemW, elemH, pad, divisor, mapOversample);
   const mwElem = renderSize.elemWidth;
   const mhElem = renderSize.elemHeight;
   const ovX = renderSize.overflowX;
@@ -620,11 +688,16 @@ export function buildMapPixels(req: MapRequest): MapPixels {
     outW: outputSize.width,
     outH: outputSize.height,
     needsDownscale: renderOversample > mapOversample + 0.01,
+    // When the full margin was kept, report `overflow` verbatim rather than
+    // re-deriving it — the derivation rounds, and for the stretched presets
+    // that rounding would move <feImage> off its current rect.
+    padX: pad === overflow ? overflow : (outputSize.overflowX * elemW) / outputSize.elemWidth,
+    padY: pad === overflow ? overflow : (outputSize.overflowY * elemH) / outputSize.elemHeight,
   };
 }
 
-async function buildMapBlob(req: MapRequest): Promise<Blob> {
-  const { data, mw, mh, outW, outH, needsDownscale } = buildMapPixels(req);
+async function buildMapBlob(req: MapRequest): Promise<{ blob: Blob; padX: number; padY: number }> {
+  const { data, mw, mh, outW, outH, needsDownscale, padX, padY } = buildMapPixels(req);
 
   const canvas = new OffscreenCanvas(mw, mh);
   const ctx = canvas.getContext("2d")!;
@@ -639,16 +712,16 @@ async function buildMapBlob(req: MapRequest): Promise<Blob> {
     finalCtx.imageSmoothingEnabled = true;
     finalCtx.imageSmoothingQuality = "high";
     finalCtx.drawImage(canvas, 0, 0, outW, outH);
-    return await encodeCanvas(finalCanvas);
+    return { blob: await encodeCanvas(finalCanvas), padX, padY };
   }
 
-  return await encodeCanvas(canvas);
+  return { blob: await encodeCanvas(canvas), padX, padY };
 }
 
 self.onmessage = async (e: MessageEvent<MapRequest>) => {
   try {
-    const blob = await buildMapBlob(e.data);
-    const resp: MapResponse = { id: e.data.id, blob };
+    const { blob, padX, padY } = await buildMapBlob(e.data);
+    const resp: MapResponse = { id: e.data.id, blob, padX, padY };
     (self as unknown as Worker).postMessage(resp);
   } catch (err) {
     // If the worker fails (unlikely — pure math + OffscreenCanvas), the

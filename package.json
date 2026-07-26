@@ -27,6 +27,7 @@
     "test:glass-fuzz": "tsx scripts/test-liquid-glass-fuzz.ts 1200",
     "test:glass-pixels": "electron scripts/glass-pixel-diff.cjs --diff ref",
     "test:glass-pixels:save": "electron scripts/glass-pixel-diff.cjs --save ref",
+    "bench:glass-gpu": "electron scripts/glass-gpu-bench.cjs",
     "electron:dev": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder --mac --config electron-builder.yml"
   },

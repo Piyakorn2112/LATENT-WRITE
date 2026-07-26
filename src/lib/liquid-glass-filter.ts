@@ -50,6 +50,19 @@ const DISP_PX = 40;        // max refraction shift, pixels
 const BLUR_DEFAULT = 5;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
 
+// Blue channel of the map's neutral margin: (BLUR_EDGE_MIN * 255 + 0.5) | 0
+// with BLUR_EDGE_MIN = 0.85 in liquid-glass-worker.ts. Keep in sync — feFlood
+// uses it to extend a shrunk map across the rest of the filter region, and a
+// mismatch would draw a visible step at the map's edge.
+const MAP_NEUTRAL_MASK = 217;
+
+// Element px of neutral margin to bake into the map, for presets where that is
+// provably free of visual change (the worker's resolveMapPad decides, and falls
+// back to the full margin otherwise). Only needs to be wide enough that the
+// map's own edge is already neutral where it meets the feFlood; the knob maps
+// oversample 12-16x, so 4 element px is a 48-64 texel collar.
+const MAP_PAD_PX = 4;
+
 // Bezel width (refraction radius) default lives in liquid-glass-worker.ts as
 // BEZEL_PX (120). Per-element overrides (the lens) are passed to the worker;
 // a null override means "use the worker's BEZEL_PX".
@@ -100,7 +113,13 @@ const FILTER_CACHE_LIMIT = 32;
 
 let worker: Worker | null = null;
 let workerDead = false;
-const pendingBlob = new Map<string, (blob: Blob) => void>();
+/** What the worker built: the map blob plus the margin actually baked into it. */
+interface BuiltMap {
+  url: string;
+  padX: number;
+  padY: number;
+}
+const pendingBlob = new Map<string, (map: { blob: Blob; padX: number; padY: number }) => void>();
 type MapPreset = "default" | "control-knob" | "toggle-control-knob";
 
 function ensureWorker(): Worker | null {
@@ -111,12 +130,12 @@ function ensureWorker(): Worker | null {
       new URL("./liquid-glass-worker.ts", import.meta.url),
       { type: "module" },
     );
-    worker.onmessage = (e: MessageEvent<{ id: string; blob: Blob }>) => {
-      const { id, blob } = e.data;
+    worker.onmessage = (e: MessageEvent<{ id: string; blob: Blob; padX: number; padY: number }>) => {
+      const { id, blob, padX, padY } = e.data;
       const resolver = pendingBlob.get(id);
       if (resolver) {
         pendingBlob.delete(id);
-        resolver(blob);
+        resolver({ blob, padX, padY });
       }
     };
     worker.onerror = (err) => {
@@ -141,13 +160,15 @@ function buildMapInWorker(
   preset: MapPreset,
   bezel: number | null,
   superSample: number,
-): Promise<string | null> {
+  mapPad: number | null,
+): Promise<BuiltMap | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
   return new Promise((resolve) => {
     const id = `req-${++reqCounter}`;
-    pendingBlob.set(id, (blob) => resolve(URL.createObjectURL(blob)));
-    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample });
+    pendingBlob.set(id, ({ blob, padX, padY }) =>
+      resolve({ url: URL.createObjectURL(blob), padX, padY }));
+    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad });
   });
 }
 
@@ -288,7 +309,7 @@ function buildFilterEl(
   w: number,
   h: number,
   overflow: number,
-  mapUrl: string,
+  map: BuiltMap,
   blur: number,
   preset: MapPreset,
   disp: number,
@@ -324,17 +345,50 @@ function buildFilterEl(
     filterRes: filterResStr,
   }) as SVGFilterElement;
 
+  // The map covers the element plus `padX/padY` of neutral margin — which is
+  // the whole filter region for most presets, but a thin collar for the knobs
+  // (see resolveMapPad in the worker: their map would otherwise be 97% padding
+  // by area, and Chromium re-samples the entire feImage every frame the
+  // backdrop changes, which measured 13.31 ms/frame for two knobs on an M1 Pro).
+  //
+  // When the map is smaller than the region, feFlood supplies the same neutral
+  // value everywhere else. That matters: outside an feImage's extent the result
+  // is transparent black, and feDisplacementMap would read R=G=0 as a full
+  // negative shift rather than "no shift". The flood must therefore match the
+  // worker's pre-fill byte for byte — rgb(128,128,217), where 217 is
+  // (BLUR_EDGE_MIN * 255 + 0.5) | 0 — and the seam is safe because the map's
+  // own collar is already that exact colour, so any blend across it is a blend
+  // of two identical values.
+  const mapCoversRegion = map.padX >= overflow && map.padY >= overflow;
+  const mapImageResult = mapCoversRegion ? "dispMap" : "dispMapImg";
+
   filter.append(
     createElNS("feImage", {
-      href: mapUrl,
-      x: String(-overflow),
-      y: String(-overflow),
-      width: String(w + 2 * overflow),
-      height: String(h + 2 * overflow),
+      href: map.url,
+      x: String(-map.padX),
+      y: String(-map.padY),
+      width: String(w + 2 * map.padX),
+      height: String(h + 2 * map.padY),
       preserveAspectRatio: "none",
-      result: "dispMap",
+      result: mapImageResult,
     }),
   );
+
+  if (!mapCoversRegion) {
+    filter.append(
+      createElNS("feFlood", {
+        "flood-color": `rgb(128,128,${MAP_NEUTRAL_MASK})`,
+        "flood-opacity": "1",
+        result: "dispMapPad",
+      }),
+      createElNS("feComposite", {
+        in: mapImageResult,
+        in2: "dispMapPad",
+        operator: "over",
+        result: "dispMap",
+      }),
+    );
+  }
 
   if (dispMapAntialias > 0) {
     filter.append(
@@ -460,12 +514,12 @@ async function ensureFilter(
 
   const promise = (async () => {
     const overflow = disp + blur * 2 + 4;
-    const mapUrl = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample);
-    if (!mapUrl) return null;
+    const map = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX);
+    if (!map) return null;
 
-    const filter = buildFilterEl(id, w, h, overflow, mapUrl, blur, preset, disp, superSample, saturate);
+    const filter = buildFilterEl(id, w, h, overflow, map, blur, preset, disp, superSample, saturate);
     defs!.append(filter);
-    filterCache.set(id, { filter, blobUrl: mapUrl, refCount: 0 });
+    filterCache.set(id, { filter, blobUrl: map.url, refCount: 0 });
     evictLRU();
     inFlightFilter.delete(id);
     return id;
