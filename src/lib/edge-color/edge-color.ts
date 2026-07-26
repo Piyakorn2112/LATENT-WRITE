@@ -135,11 +135,14 @@ const DEFAULTS: Required<EdgeColorOptions> = {
   //     over already-bright glass goes harsh immediately — it reads as a sharp
   //     stroke rather than light caught on a curve. screen's compression toward
   //     white is exactly the softness wanted here.
-  //   · Brightness/intensity stay near 1. Pushing them (2.4 / 1.9 was tried)
-  //     turns the catch into a hard outline.
-  rimWidth: 0.55,
-  rimIntensity: 1.0,
-  rimBrightness: 1.5,
+  //   · Brightness/intensity stay BELOW 1. Pushing them (2.4/1.9, then 1.5/1.0)
+  //     turns the catch into a bright outline. The colour should be a tint the
+  //     eye reads as the edge picking something up, not a lit stroke.
+  //   · rimWidth is the HAIRLINE, ~1px. The softness comes from RIM_FALLOFF's
+  //     stops, not from thickening this — a thicker core reads as a border.
+  rimWidth: 1,
+  rimIntensity: 0.5,
+  rimBrightness: 1.12,
   rimBlend: "screen",
   blendMode: "normal",
   minChroma: 0.05,
@@ -153,18 +156,23 @@ const RADIUS_FLOOR = 1;
 
 /**
  * Exponential inward falloff for the specular rim, as [blurMultiple, alphaMultiple]
- * of `rimWidth`. Each stop roughly triples in width and drops to about a third of
- * the alpha, which approximates e^-x far better than any single gradient stop —
- * the first stop is the bright hairline sitting exactly ON the edge, and the rest
- * are the light diffusing into the material.
+ * of `rimWidth`. The first stop is the hairline sitting exactly ON the edge; the
+ * rest are the light diffusing into the material. Stacked blurs approximate e^-x
+ * far better than any single gradient stop.
  *
  * Stacked inset shadows are why this works at all: each one follows the element's
  * `border-radius`, so the whole falloff bends around a corner together.
+ *
+ * ★ The TAIL is what decides whether this reads as a rim or as a glow. An earlier
+ * curve ran out to 9x width at 0.11 alpha, and that far stop — not the core — is
+ * what made the catch look thick and prominent: a wide low-alpha halo is
+ * perceived as the edge being fat rather than as light falling off. Keep the tail
+ * short and steep. Widening it is the single easiest way to lose the effect.
  */
 const RIM_FALLOFF: ReadonlyArray<readonly [number, number]> = [
-  [1.0, 1.0],
-  [3.2, 0.34],
-  [9.0, 0.11],
+  [1.0, 1.0],   // the hairline itself, sitting on the edge
+  [2.4, 0.20],  // immediate soft halo
+  [5.5, 0.05],  // a whisper, and no further
 ];
 
 type Mode = "fixed" | "flow";
@@ -494,8 +502,12 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       // ★ Cap the fan-out. Each band is another background layer to composite
       // on every repaint, and weighting the edges instead of picking one winner
       // made a source emit up to four. A corner is bounded by exactly TWO sides,
-      // so two is all the blend ever needs. Measured for the whole glow layer:
-      // 0.51 ms/frame unbounded → 0.11 ms capped at two.
+      // so two is all the blend ever needs. Unbounded fan-out measured ~0.5 ms
+      // for the glow layer; capped it sits in the 0.1-0.35 ms range.
+      // ⚠ Treat single glow measurements with suspicion: repeat runs of
+      // `npm run profile:glass-app` swing this layer by ~±0.2 ms, which is the
+      // same size as the effect. Only differences well above that (the knobs'
+      // 13 ms, say) are real from one sample.
       edgeWeights.sort((p, q) => q[1] - p[1]);
       if (edgeWeights.length > 2) edgeWeights.length = 2;
 
@@ -577,7 +589,12 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
         // "rim" floods half the surface instead of hugging the edge. A couple of
         // band-widths biases the ring toward the source while keeping it a rim.
         const w0 = Math.max(0.35, opt.rimWidth);
-        const push = w0 * 2.6;
+        // ★ Keep the bias to about one hairline. This offset is also what smears
+        // the catch off the edge: every px of it thickens the lit side, so a
+        // larger push trades precision for reach and the rim stops looking like
+        // it is ON the contour. One width is enough to tell which side the colour
+        // is coming from.
+        const push = w0 * 1.1;
         const ox = (-nx * push).toFixed(2), oy = (-ny * push).toFixed(2);
 
         // ★ Exponential falloff: brightest hairline exactly AT the edge, then
