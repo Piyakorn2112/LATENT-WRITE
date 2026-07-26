@@ -1,0 +1,92 @@
+<!doctype html>
+<!-- Dev-only harness for the liquid-glass edge-colour layer. Not part of the
+     build. Run `npm run dev`, then open /edge-color-dev.html. Drag the glass
+     cards over the coloured blocks: a sibling overlay just under each card is
+     refracted by it and catches the colour behind it, masked to the card shape. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edge colour-catching — dev harness</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
+      body { background: #0e0e10; color: #ddd; }
+      #root { position: fixed; inset: 0; }
+
+      .block {
+        position: absolute;
+        border-radius: 26px;
+        filter: saturate(1.05);
+      }
+
+      /* The opt-in glass surface. `liquid-glass-color` is the engine selector.
+         Fixed so the refracted body-glow sibling re-syncs while dragging. */
+      .glass {
+        position: fixed;
+        width: 300px;
+        height: 190px;
+        border-radius: 30px;
+        background: rgba(255, 255, 255, 0.1);
+        -webkit-backdrop-filter: blur(10px) saturate(1.25);
+        backdrop-filter: blur(10px) saturate(1.25);
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        box-shadow: 0 10px 50px rgba(0, 0, 0, 0.35);
+        cursor: grab;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 13px;
+        letter-spacing: 0.02em;
+      }
+      .glass:active { cursor: grabbing; }
+
+      .panel {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        z-index: 10;
+        background: rgba(20, 20, 24, 0.82);
+        backdrop-filter: blur(8px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 14px;
+        padding: 14px 16px;
+        width: 230px;
+        font-size: 12px;
+      }
+      .panel h1 { font-size: 13px; margin: 0 0 4px; font-weight: 600; }
+      .panel p { margin: 0 0 12px; color: #999; line-height: 1.4; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; }
+      .row label { color: #bbb; }
+      .row output { color: #fff; width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
+      input[type="range"] { width: 110px; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <div class="panel">
+      <h1>Edge colour</h1>
+      <p>Drag a glass card over the blocks. A refracted sibling under the card lights up with a shape-aware, edge-weighted mesh glow; a bright conic rim catches the nearest colours on the very edge.</p>
+      <div class="row"><label>Saturate</label><input id="saturate" type="range" min="1" max="8" step="0.1" value="1" /><output id="saturate-v">1</output></div>
+      <div class="row"><label>Brightness</label><input id="brightness" type="range" min="0.5" max="3" step="0.1" value="1" /><output id="brightness-v">1</output></div>
+      <div class="row"><label>Opacity</label><input id="opacity" type="range" min="0" max="1" step="0.05" value="0.3" /><output id="opacity-v">0.3</output></div>
+      <div class="row"><label>Glow depth</label><input id="glowRadius" type="range" min="8" max="140" step="2" value="60" /><output id="glowRadius-v">60</output></div>
+      <div class="row"><label>Edge bias</label><input id="edgeBias" type="range" min="0" max="0.95" step="0.05" value="0.55" /><output id="edgeBias-v">0.55</output></div>
+      <div class="row"><label>Resolution</label><input id="resolutionScale" type="range" min="0.2" max="1" step="0.05" value="0.5" /><output id="resolutionScale-v">0.5</output></div>
+      <div class="row"><label>Reach</label><input id="reach" type="range" min="20" max="220" step="5" value="100" /><output id="reach-v">100</output></div>
+      <div class="row"><label>Rim width</label><input id="rimWidth" type="range" min="0" max="8" step="0.5" value="2" /><output id="rimWidth-v">2</output></div>
+      <div class="row"><label>Rim intensity</label><input id="rimIntensity" type="range" min="0" max="3" step="0.1" value="1.2" /><output id="rimIntensity-v">1.2</output></div>
+      <div class="row"><label>Rim bright</label><input id="rimBrightness" type="range" min="1" max="3" step="0.1" value="1.7" /><output id="rimBrightness-v">1.7</output></div>
+      <div class="row"><label>Blend</label>
+        <select id="blend">
+          <option value="normal" selected>normal</option>
+          <option value="color">color</option>
+          <option value="screen">screen</option>
+          <option value="plus-lighter">plus-lighter</option>
+        </select>
+      </div>
+    </div>
+    <script type="module" src="/src/edge-color-dev.ts"></script>
+  </body>
+</html>

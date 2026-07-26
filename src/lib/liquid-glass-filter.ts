@@ -223,8 +223,17 @@ function readBlur(el: Element): number {
   // The loading lens pulls pure refraction — displacement only, no blur — so
   // it reads as a clear glass lens over the scrolling text, not a frosted disc.
   if (el.classList.contains("liquid-glass-lens")) return LENS_BLUR;
-  if (el.classList.contains("liquid-glass-control-knob")) return 0.2;
+  // ★ ORDER MATTERS. The range/toggle knobs carry BOTH `glass-*-knob` AND
+  // `liquid-glass-control-knob`, so this specific test has to come first. It
+  // used to sit below the generic control-knob branch, which made it dead code:
+  // the knobs silently got 0.2px of blur instead of the 0 intended here (and
+  // stated by their CSS fallback, `backdrop-filter: blur(0px) saturate(1.45)`).
+  // On a 20x14 element 0.2px is enough to smear the refraction into mush, which
+  // is what read as the knobs looking soft/pixelated. At 0 the tail
+  // feGaussianBlur is also dropped entirely (see buildFilterEl), so the knobs
+  // get a sharper result AND one less filter pass per frame.
   if (el.matches(".glass-range-knob, .glass-toggle-knob")) return 0;
+  if (el.classList.contains("liquid-glass-control-knob")) return 0.2;
   if (el.classList.contains("toolbar")) return 1.2;
   if (el.classList.contains("settings-panel")) return 3;
   if (el.matches(".analysis-tab, .analysis-action-group")) return 1.2;
