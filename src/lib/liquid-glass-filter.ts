@@ -51,29 +51,53 @@ const BLUR_DEFAULT = 5;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
 
 // ── Fold-free displacement cap ───────────────────────────────────────────
-// The map's falloff is g(t) = (1−t)² across the bezel (worker profile
-// "foldfree"), whose steepest normalised slope is PROFILE_SLOPE at the rim.
-// Sampling stays monotone — the rim MAGNIFIES but can never fold over and
-// mirror interior content — iff peak displacement ≤ bezel / PROFILE_SLOPE.
-// FOLD_SAFE keeps a margin under that bound; at 0.9 the rim's peak
-// magnification is 1/(1−0.9) = 10x.
-// The corner constraint (sampling inward past the corner-arc centre mirrors
-// a blob into the corner) is NOT a term here any more: it is applied LOCALLY
-// inside the map's corner-arc quadrants (worker, MapRequest.dispPx), so
-// straight edges run at the full edge cap. A global corner term was what
-// read as "refraction too small" — it dragged whole panels from 40px to ~20.
-// The pre-rewrite model had NO cap at all: 40px of displacement into the
-// toolbar's 17.6px bezel guaranteed the mirrored-bar fold-over.
-const FOLD_SAFE = 0.9;
-const PROFILE_SLOPE = 2;
-// Mirror of the worker's BEZEL_PX + bezel cap — keep in sync.
+//
+// ★★ WHAT THIS PREVENTS, measured, on the real toolbar (1100x44, bezel 17.6,
+// 40px peak — i.e. the model this app shipped before the cap existed):
+//
+//     y    G    displacement    y' = y + disp   (the row it samples FROM)
+//     0   254      39.69           39.69
+//     1   219      28.71           29.71   <-- DECREASING
+//     4   164      11.45           15.45   <-- DECREASING
+//     8   138       3.29           11.29   <-- DECREASING
+//     9   135       2.35           11.35
+//
+// y′ must increase with y or the image folds. It fell for 8 of the first 22
+// rows: 28.4px of backdrop was squeezed, REVERSED, into the top ~8px of the
+// bar, and the same happened mirrored at the bottom. Over body text the two
+// bands land on different lines, each crushed ~3.5:1, which is what reads as
+// "the top edge leans left and the bottom edge leans right". It is not a
+// rotational field — a 16px grating behind the same toolbar measures
+// dx(y) = 0.000 at every row (scripts/glass-shear.cjs).
+//
+// Sampling stays monotone iff peak displacement ≤ bezel / PROFILE_SLOPE, since
+// the profile's steepest normalised slope is PROFILE_SLOPE. FOLD_SAFE keeps a
+// margin under that bound and sets the rim's peak magnification, 1/(1−0.85)
+// ≈ 6.7x.
+//
+// The corner constraint (sampling inward past the corner-arc centre mirrors a
+// blob into the corner) is NOT a term here: it is applied LOCALLY inside the
+// map's corner-arc quadrants (worker, MapRequest.dispPx), so straight edges
+// run at the full edge cap. A global corner term was what read as "refraction
+// too small" — it dragged whole panels from 40px down to ~20.
+//
+// With PROFILE_EXP 1.25 and BEZEL_FRAC 1 the panels are NOT limited by this at
+// all — their bezel is wide enough that they sit on DISP_PX and keep the full
+// original 40px. Only chrome thinner than ~2·PROFILE_SLOPE·DISP_PX/FOLD_SAFE
+// is capped, and there the cap is arithmetic: a 44px-tall bar cannot carry
+// 40px of fold-free pull no matter what the profile is (the ceiling is the
+// half-height, 22px).
+const FOLD_SAFE = 0.85;
+// Mirror of the worker's PROFILE_EXP / BEZEL_PX / BEZEL_FRAC — keep in sync.
+const PROFILE_SLOPE = 1.25;
 const BEZEL_PX_MAIN = 120;
+const BEZEL_FRAC_MAIN = 1;
 function effectiveDisp(
   disp: number, w: number, h: number, bezelOverride: number | null, profile: "snell" | "foldfree",
 ): number {
   if (profile === "snell") return disp;
   const halfShorter = Math.min(w, h) / 2;
-  const bezel = Math.min(bezelOverride ?? BEZEL_PX_MAIN, halfShorter * 0.8);
+  const bezel = Math.min(bezelOverride ?? BEZEL_PX_MAIN, halfShorter * BEZEL_FRAC_MAIN);
   return Math.min(disp, (FOLD_SAFE * bezel) / PROFILE_SLOPE);
 }
 

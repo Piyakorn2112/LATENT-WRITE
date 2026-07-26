@@ -57,6 +57,8 @@ const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
 };
 
 const BEZEL_PX = 120;
+const BEZEL_FRAC = 1;
+const PROFILE_EXP = 1.25;
 
 const BLUR_EDGE_MIN = 0.85;
 const BLUR_TRANSITION_PCT = 0.25;
@@ -201,7 +203,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const halfShorter = Math.min(halfW, halfH);
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
-  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
+  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * BEZEL_FRAC);
   const dispPx = profile === "foldfree" ? Math.max(0, req.dispPx ?? 0) : 0;
   const cornerF = dispPx > 0 ? Math.min(1, (FOLD_SAFE_W * r) / dispPx) : 1;
   const cornerW = Math.min(16, Math.max(1, r * 0.5));
@@ -273,8 +275,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
         const slope = Math.min(dh(t), 5.0);
         disp = snellDisp(slope, eta);
       } else {
-        const u = 1 - t;
-        disp = u * u;
+        disp = Math.pow(1 - t, PROFILE_EXP);
       }
 
       if (disp < 1e-6) continue;

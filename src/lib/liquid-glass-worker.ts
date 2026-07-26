@@ -131,7 +131,29 @@ const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
 };
 
 // Visual bezel thickness in element pixels (must match main-thread filter).
+// Capped to BEZEL_FRAC of the half-shorter side. ★ BEZEL_FRAC is 1, not 0.8:
+// the bezel is the budget the fold-free cap divides by, so every 0.1 taken off
+// it is 10% of the refraction strength thrown away on exactly the thin chrome
+// (toolbar, tabs, pills) that has the least to spare. At 1 the bezel runs from
+// the rim to the centre line, which on a 44px toolbar is the whole bar — and
+// that is correct: a bar that thin IS all bezel.
 const BEZEL_PX = 120;
+const BEZEL_FRAC = 1;
+
+// Falloff exponent of the fold-free profile g(t) = (1−t)^PROFILE_EXP, so
+// max|g′| = PROFILE_EXP and the fold-free peak is FOLD_SAFE·bezel/PROFILE_EXP.
+//
+// ★★ THIS EXPONENT IS THE STRENGTH DIAL, and lower is stronger. A profile can
+// only spend `bezel` worth of total slope before the sampling folds, so the
+// flatter its slope profile the more displacement it buys:
+//   exp 2.00  (the first fold-free cut) → toolbar  7.9px — owner: "too small"
+//   exp 1.25  (here)                    → toolbar 15.0px
+//   exp 1.00  (linear, the theoretical max) → 18.7px, but Δ′ jumps to 0 at the
+//             bezel's inner end, which draws a visible line where the
+//             magnified band stops. 1.25 keeps Δ′ → 0 smoothly there.
+// Panels are not limited by this at all: their bezel is wide enough that they
+// sit on the DISP_PX cap and keep the full original 40px.
+const PROFILE_EXP = 1.25;
 
 // Mirror of the main thread's FOLD_SAFE — keep in sync. Used here only for
 // the local corner attenuation (see MapRequest.dispPx).
@@ -305,8 +327,7 @@ function scalarsFor(
     const slope = Math.min(dh(t), 5.0);
     disp = snellDisp(slope, eta);
   } else {
-    const u = 1 - t;
-    disp = u * u;
+    disp = Math.pow(1 - t, PROFILE_EXP);
   }
 
   if (disp < 1e-6) {
@@ -530,7 +551,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const halfShorter = Math.min(halfW, halfH);
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
-  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
+  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * BEZEL_FRAC);
   // Local corner attenuation (foldfree only): constant factor per shape,
   // blended in over cornerW px inside the corner-arc quadrant. 1 = no-op.
   const dispPx = profile === "foldfree" ? Math.max(0, req.dispPx ?? 0) : 0;

@@ -1,0 +1,43 @@
+<!doctype html>
+<!-- Dev-only SHEAR diagnostic. Not part of the app build.
+     Open http://localhost:5173/glass-shear.html
+
+     A precise 16px-period grating of vertical lines sits behind glass
+     specimens. Because the grating is a pure horizontal sinusoid-like signal,
+     the HORIZONTAL displacement of the backdrop at any row can be recovered
+     sub-pixel from the phase of its first Fourier coefficient — see
+     scripts/glass-shear.cjs, which drives this page and prints dx(y) for every
+     row inside each specimen.
+
+     A correct rounded-rect refraction has dx(y) ≈ 0 along the top and bottom
+     edges (the normal there is purely vertical). Any systematic dx that
+     changes sign from the top edge to the bottom edge is a SHEAR / rotational
+     component, which is what "content leans left at the top and right at the
+     bottom" means. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Liquid glass — shear diagnostic</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #fff; }
+      body { width: 1200px; height: 900px; overflow: hidden; }
+      /* 16px period, hard edges: maximum energy in the first harmonic.
+         ?dir=h rotates it so the same phase method measures dy instead of dx —
+         a grating is blind to displacement ALONG its own lines, so both runs
+         are needed to see the whole field. */
+      .grating {
+        position: absolute; inset: 0;
+        background: repeating-linear-gradient(90deg, #000 0 8px, #fff 8px 16px);
+      }
+      body[data-dir="h"] .grating {
+        background: repeating-linear-gradient(180deg, #000 0 8px, #fff 8px 16px);
+      }
+      .spec { position: absolute; background: transparent; border: 0; box-shadow: none; }
+    </style>
+  </head>
+  <body>
+    <div class="grating"></div>
+    <div id="specimens"></div>
+    <script type="module" src="/src/glass-shear.ts"></script>
+  </body>
+</html>

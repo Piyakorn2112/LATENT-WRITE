@@ -27,15 +27,15 @@ const live = (await import(
 //   overflow = ceil(dispEff) + blur * 2 + 4
 //   dispPx   = dispEff (drives the map's local corner attenuation)
 // Keep this mirror in sync with FOLD_SAFE / PROFILE_SLOPE / BEZEL_PX_MAIN.
-const FOLD_SAFE = 0.9;
-const PROFILE_SLOPE = 2;
+const FOLD_SAFE = 0.85;
+const PROFILE_SLOPE = 1.25;
 const BEZEL_MAIN = 120;
 function dispEff(
   disp: number, w: number, h: number, bezel: number | null, profile: "snell" | "foldfree",
 ): number {
   if (profile === "snell") return disp;
   const halfShorter = Math.min(w, h) / 2;
-  const bz = Math.min(bezel ?? BEZEL_MAIN, halfShorter * 0.8);
+  const bz = Math.min(bezel ?? BEZEL_MAIN, halfShorter * 1);
   return Math.min(disp, (FOLD_SAFE * bz) / PROFILE_SLOPE);
 }
 interface Geo { w: number; h: number; r: number; bezel?: number | null; profile?: "snell" | "foldfree" }

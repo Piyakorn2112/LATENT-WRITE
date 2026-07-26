@@ -114,14 +114,14 @@ const DEFAULTS: Required<EdgeColorOptions> = {
   reach: 100,
   glowRadius: 20,
   maxSources: 8,
-  intensity: 1.3,
-  saturate: 1.4,
+  intensity: 1.5,
+  saturate: 1.5,
   brightness: 1.2,
   // The body wash stays at full strength. The rim carries the colour IDENTITY,
   // but the body is what gives the surface its depth — pulling it back left the
   // glass looking flat, so it keeps its original presence.
-  opacity: 0.5,
-  opacityLarge: 0.5,
+  opacity: 0.62,
+  opacityLarge: 0.62,
   largeThreshold: 500,
   refract: true,
   edgeBias: 0.4,
@@ -149,8 +149,8 @@ const DEFAULTS: Required<EdgeColorOptions> = {
   //   · rimWidth is the HAIRLINE, ~1px. The softness comes from RIM_FALLOFF's
   //     stops, not from thickening this — a thicker core reads as a border.
   rimWidth: 1,
-  rimIntensity: 0.5,
-  rimBrightness: 1.12,
+  rimIntensity: 0.66,
+  rimBrightness: 1.2,
   rimBlend: "screen",
   blendMode: "normal",
   minChroma: 0.05,
