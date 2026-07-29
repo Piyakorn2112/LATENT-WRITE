@@ -32,6 +32,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   projectLoadState:   (key)                => ipcRenderer.invoke('project:loadState', key),
   projectReopenLast:  ()                   => ipcRenderer.invoke('project:reopenLast'),
 
+  // ── Edge colour-catch ──
+  edgeColorCapture:   ()  => ipcRenderer.invoke('edge-color:capture'),
+
   // ── Renderer workspace window ──
   workspaceOpenWindow:    ()  => ipcRenderer.invoke('workspace:open'),
   workspaceFocusWindow:   ()  => ipcRenderer.invoke('workspace:focus'),

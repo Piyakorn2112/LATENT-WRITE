@@ -29,7 +29,20 @@ npx tsx scripts/test-prose-segments.ts      # prose primitives: tokenizer/quotes
 npx tsx scripts/test-auto-format.ts         # auto-paragraph + auto-scene-break (≥90%)
 npx tsx scripts/test-tension-scene.ts       # chapter tension scanner + scene labels (calm/elevated ≥85%)
 npx tsx scripts/test-cast-roles.ts          # cast influence roles + chapter-role direction (clear cases)
+npx tsx scripts/test-known-names.ts         # cold-start name resolution ranking (100% — regression lock)
+npx tsx scripts/test-chapter-observation.ts # panel entry-point sentence templates (100%)
+npx tsx scripts/ood-language-audit.ts       # OUT-OF-DISTRIBUTION audit: real manuscripts, label-free (~4 min)
 ```
+
+**Held-out audit rule:** the curated suites above hand `knownNames` in explicitly, so
+they can never catch a failure in the extraction that produces those names (this
+exact blind spot shipped a 0%-cast-recall bug). `ood-language-audit.ts` runs the
+real pipeline over two full manuscripts (Hollow Iris = in-distribution, The Root
+Crown = held out) and reports UNKNOWN rate, mean confidence, and default↔high
+disagreement (a label-free accuracy lower bound). Run it after any change to
+`world-data.ts` extraction/ranking or `speech-detect.ts` attribution. Reference
+numbers post-fix (2026-07-29): UNKNOWN@default 3.9% / 4.7%, mean conf 0.79 / 0.78,
+default↔high conflict 3.6% / 14.3% (Hollow Iris / Root Crown, cold-start condition A).
 
 `auto-paragraph.ts` and `auto-scene-break.ts` are the two one-shot formatting
 passes; both build on the shared `prose-segments.ts` primitives (sentence

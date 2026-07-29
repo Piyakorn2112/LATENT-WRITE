@@ -283,7 +283,17 @@ body {
      blur strength JS uses, so the upgrade is seamless. */
   backdrop-filter: blur(6px) saturate(1.45);
   -webkit-backdrop-filter: blur(6px) saturate(1.45);
-  transition: box-shadow 0.2s ease;
+  /* The idle path swaps the SVG liquid-glass composite for a plain backdrop
+     blur to save work. That swap used to be an instant cut; crossing it on a
+     short transition makes it a fade instead. Kept quick (0.22s) on purpose —
+     the point is to remove the snap, not to make the app feel laggy coming
+     back from idle. Both spellings transition, or WebKit cuts while the
+     standard property fades. */
+  transition:
+    box-shadow 0.2s ease,
+    background 0.22s ease,
+    backdrop-filter 0.22s ease,
+    -webkit-backdrop-filter 0.22s ease;
 }
 
 
@@ -480,7 +490,21 @@ body.scroll-edge-idle .scroll-edge-right {
 /* Idle glass relief — switch liquid-glass surfaces back to the normal CSS
    backdrop blur fallback while the app is idle. This keeps the visual look
    close to the focused state while dropping the heavier SVG liquid-glass
-   composite work across the app until the next user interaction. */
+   composite work across the app until the next user interaction.
+   The surfaces below carry a short transition on background/backdrop-filter
+   so this swap FADES in both directions rather than cutting. */
+.app .analysis-tab,
+.app .analysis-action-group,
+.app .annotation-popover,
+.app .annotation-panel,
+.app .word-count,
+.app .debug-panel,
+.app .liquid-glass-control-knob {
+  transition:
+    background 0.22s ease,
+    backdrop-filter 0.22s ease,
+    -webkit-backdrop-filter 0.22s ease;
+}
 body.scroll-edge-idle .app .liquid-glass {
   background: var(--bg-glass-strong) !important;
   -webkit-backdrop-filter: blur(2px) !important;
@@ -1432,6 +1456,66 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 }
 .widget-list--exiting .widget-card {
   animation: widgetExit 0.14s ease-in forwards;
+}
+
+/* ── Chapter observation ───────────────────────────────────────────────────
+   The panel's entry point: ONE sentence about the chapter, with a location,
+   synthesised from the settled analysis (chapter-observation.ts). It sits
+   on its OWN liquid-glass surface, like the panel's other chrome (the tab
+   rail, the action group, the settings panel), so it reads as a distinct
+   thing the panel is telling you rather than a caption stuck above the
+   widgets. The radius matches that chrome (16px); the background, blur and
+   specular ring all come from `.liquid-glass`, and the scroll-adaptive
+   attribute enrols it in the same refraction pass as the other panels. */
+.chapter-observation {
+  padding: 12px 14px 13px;
+  margin-bottom: 14px;
+  border-radius: 16px;
+}
+
+.chapter-observation-eyebrow {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.chapter-observation-text {
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-body);
+  margin: 0;
+}
+
+.chapter-observation-jump {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-radius: var(--btn-radius);
+  padding: 2px 8px;
+  margin-left: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.chapter-observation-jump:hover {
+  background: rgba(255, 156, 0, 0.08);
+}
+
+.chapter-observation-jump:active {
+  transform: scale(0.96);
+}
+
+@media (hover: none) {
+  .chapter-observation-jump:hover { background: transparent; }
 }
 
 .widget-list-stack {
@@ -4141,7 +4225,10 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   display: inline;
   font-style: inherit;
   font-weight: inherit;
-  color: var(--text-entity-tag);
+  /* Quiet treatment: the hue moves from a solid fill into the TEXT, over a
+     light wash of the same hue. Reads clearly as a highlight without the
+     shout of a filled pill on every mention (hues unchanged). */
+  color: var(--entity-color, var(--text-body));
   position: relative;
   z-index: 11;
   pointer-events: auto;
@@ -4149,29 +4236,45 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   border-radius: 10px;
   padding: 4px;
   margin: -4px;
+  /* Two stacked flat fills replace the old absolutely-positioned bg divs
+     (2 fewer DOM nodes per mention): hue wash over a page-colour underlay,
+     so an action wash behind a name never sums with the badge fill. Flat
+     colours as single-stop gradients — same idiom as the mask trick. */
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--entity-color, #888) 13%, transparent) 0 0),
+    linear-gradient(var(--bg) 0 0);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
-  transition: padding 0.12s ease, margin 0.12s ease, border-radius 0.12s ease;
+  transition: padding 0.12s ease, margin 0.12s ease, border-radius 0.12s ease,
+              background-image 0.12s ease;
 }
 
-.entity-tag-bg {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: color-mix(in srgb, var(--entity-color, #888) 100%, transparent);
-  z-index: 10;
-  z-index: -1;
-  pointer-events: none;
+.entity-tag:hover {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--entity-color, #888) 24%, transparent) 0 0),
+    linear-gradient(var(--bg) 0 0);
 }
 
-.entity-tag-bg-sub{
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: var(--bg);
-  z-index: 10;
-  z-index: -1;
-  pointer-events: none;
+@media (hover: none) {
+  .entity-tag:hover {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--entity-color, #888) 13%, transparent) 0 0),
+      linear-gradient(var(--bg) 0 0);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  /* Dark surfaces need a denser wash before a 13% tint reads at all. */
+  .entity-tag {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--entity-color, #888) 20%, transparent) 0 0),
+      linear-gradient(var(--bg) 0 0);
+  }
+  .entity-tag:hover {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--entity-color, #888) 32%, transparent) 0 0),
+      linear-gradient(var(--bg) 0 0);
+  }
 }
 
 /* ─── Entity type modifiers ────────────────────────────────────────────────
@@ -4236,7 +4339,10 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   z-index: 2;
   /* Default neutral grey when no actor is attributed */
   --ap-color: rgba(140, 140, 140, 0.45);
-  background: color-mix(in srgb, var(--ap-color) 20%, transparent);
+  /* 12% (was 20%): action sentences cover most of a narration-heavy page,
+     so their wash sets the page's noise floor — quieter, still clearly a
+     tinted band attributing the actor (hue unchanged). */
+  background: color-mix(in srgb, var(--ap-color) 12%, transparent);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
@@ -4244,6 +4350,7 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 @media (prefers-color-scheme: dark) {
   .action-phrase {
     --ap-color: rgba(180, 180, 180, 0.40);
+    background: color-mix(in srgb, var(--ap-color) 16%, transparent);
   }
 }
 
@@ -4824,6 +4931,15 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 @property --orb-b { syntax: "<color>"; inherits: true; initial-value: #888; }
 @property --orb-c { syntax: "<color>"; inherits: true; initial-value: #888; }
 
+/* Converged-and-quiet: no phase lean, the orb sits on its own equal cycle
+   with a saturation lift so the resting state reads a touch more alive than
+   the working states. Must restate the base blur/contrast (filter is one
+   property); the existing `filter 0.5s ease` transition makes the lift and
+   its release seamless. */
+.intel-btn--vivid .intel-mesh-dot {
+  filter: blur(2.5px) contrast(120%) saturate(1.3) brightness(1.05);
+}
+
 /* Default cycle — equal time on each palette (used when resolved level isn't set yet) */
 .intel-mesh-dot[data-mode="auto"] {
   animation: autoFrontCycleEqual 12s ease-in-out infinite;
@@ -5069,9 +5185,13 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   100% { transform: translate(calc(-50% + 3px), calc(-50% + 4px)); }
 }
 
+/* Unfocused: the orb steps back, it does not disappear. It used to shrink
+   to 0.72 at 0.18 opacity, which reads as the graphic being switched off
+   rather than the window losing focus — a barely-there scale change and a
+   gentle dim says the same thing without erasing the mark. */
 body.electron-window-unfocused .intel-btn .intel-orb-live {
-  transform: scale(0.72);
-  opacity: 0.18;
+  transform: scale(0.94);
+  opacity: 0.6;
   filter: saturate(0.92);
 }
 
@@ -10609,6 +10729,27 @@ body.scroll-edge-idle .toolbar-ambient-orb {
 
 .speech-annotatable:hover {
   text-decoration-color: rgba(59, 130, 246, 0.55);
+}
+
+/* ── Speech confidence bands (confidence-bands.ts) ──
+   The layer only asserts what the engine can stand behind:
+   certain → speaker-coloured text, no underline (full assertion)
+   likely  → ink text + speaker-hued underline (hedged claim; hue arrives
+             as an inline text-decoration-color from HighlightLayer)
+   unsure  → ink text + faint neutral dotted underline (open question —
+             never rendered as an assertion) */
+.speech-band-likely {
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.speech-band-unsure {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
 }
 
 /* Action spans annotatable — same underline approach */

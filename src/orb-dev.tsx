@@ -16,7 +16,12 @@ createRoot(document.getElementById("root")!).render(
         <b>{m}</b>
         <OrbEngine mode={m} size={20} />
         <OrbEngine mode={m} size={140} flowScale={0.6} />
-        {m === "default" && <OrbEngine mode={m} size={20} analyzing />}
+        {m === "auto" && <OrbEngine mode={m} size={20} analyzing />}
+        {m === "auto" && <OrbEngine mode={m} size={20} vibrance={0.9} />}
+        {m === "auto" && <OrbEngine mode={m} size={64} aberration={0.45} />}
+        {/* the working state at a size worth judging: the size
+            disagreement and the off-centre throw only read big */}
+        {m === "auto" && <OrbEngine mode={m} size={140} flowScale={0.6} analyzing />}
       </div>
     ))}
   </div>

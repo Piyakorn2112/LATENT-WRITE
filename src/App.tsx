@@ -49,8 +49,8 @@ import { ToolImportOverlay } from "./components/ToolImportOverlay";
 import type { ToolHighlight } from "./lib/tool-runner";
 import type { StoryGraph, ReviewResult } from "./types";
 import { useAnalysis } from "./lib/use-analysis";
-import { lightweightPrescan } from "./lib/auto-intel";
-import { renameInBook, renameInText } from "./lib/world-data";
+import { emptyWorldData, isWorldDataEmpty, renameInBook, renameInText } from "./lib/world-data";
+import { CastConfirmOverlay } from "./components/CastConfirmOverlay";
 import {
   loadPrefs, savePrefs, todayKey, loadDailyTotal, saveDailyTotal,
   FONT_STACKS, type Preferences,
@@ -298,7 +298,14 @@ export default function App() {
   // can read different labels.
   const [sceneBreaking, setSceneBreaking] = useState(false);
   const [savedVisible, setSavedVisible] = useState(false);
-  const [intelMode, setIntelMode] = useState<"off" | "fast" | "default" | "high" | "auto">(() => loadPrefs().intelMode ?? "auto");
+  // Intelligence is a toggle: on ("auto", kept as the stored value for pref
+  // compatibility) or off. The old fast/default/high tier choice is gone —
+  // analysis now CONVERGES instead: a fast pass on every edit, then a deep
+  // pass that replaces it when the writer pauses (see useAnalysis converge).
+  // Legacy stored tiers all map to "on".
+  const [intelMode, setIntelMode] = useState<"off" | "auto">(
+    () => (loadPrefs().intelMode === "off" ? "off" : "auto"),
+  );
   const [findOpen, setFindOpen] = useState(false);
   const [projectSearchOpen, setProjectSearchOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
@@ -328,6 +335,11 @@ export default function App() {
 
   // Inline entity popover — opened by clicking a highlighted name in the editor.
   const [entityPopover, setEntityPopover] = useState<{ name: string; anchor: DOMRect } | null>(null);
+
+  // Cold-start cast confirmation — shown at most once per manuscript, and
+  // only at safe moments (app load, .txt import), never mid-typing.
+  const [castConfirmOpen, setCastConfirmOpen] = useState(false);
+  const castPromptOfferedRef = useRef(false);
 
   // ── Chapter derivations ────────────────────────────────────────────────
   const chapters = novel.chapters;
@@ -488,14 +500,9 @@ export default function App() {
   }, []);
   const [renameTask, setRenameTask] = useState<StatusTask | null>(null);
   const cycleIntel = useCallback(() => {
-    setIntelMode((m) => {
-      if (tier === "free") {
-        return m === "off" ? "auto" : "off";
-      }
-      const order = ["auto", "default", "high", "fast", "off"] as const;
-      return order[(order.indexOf(m) + 1) % order.length];
-    });
-  }, [tier]);
+    // One decision the writer can actually make: intelligence on or off.
+    setIntelMode((m) => (m === "off" ? "auto" : "off"));
+  }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const firstRunRef = useRef(true);
   const hideTimerRef = useRef<number | null>(null);
@@ -585,29 +592,18 @@ export default function App() {
   useEffect(() => { savePrefs(prefs); }, [prefs]);
   useEffect(() => { setPrefs((p) => ({ ...p, intelMode })); }, [intelMode]);
 
-  const autoResolvedLevel = useMemo<"fast" | "default" | "high">(() => {
-    if (intelMode !== "auto") return "default";
-    const chapter = novel.chapters.find((c) => c.id === activeChapterId);
-    if (!chapter) return "default";
-    const paragraphs = chapter.content.split(/\n{2,}|\n/).map((l) => l.trim()).filter(Boolean);
-    return lightweightPrescan(paragraphs);
-  }, [intelMode, novel.chapters, activeChapterId]);
-
-  const effectiveLevel: "fast" | "default" | "high" =
-    intelMode === "auto" ? autoResolvedLevel
-    : intelMode === "off" ? "default"
-    : intelMode;
-
   const {
     result: analysisResult,
     isAnalyzing: analysisRunning,
+    isRefining: analysisRefining,
+    resultLevel: analysisResultLevel,
     knownNames,
     entityNameMap,
     prevResult: prevAnalysisResult,
     nextResult: nextAnalysisResult,
   } = useAnalysis(novel, activeChapterId, {
     debounceMs: analysisDebounceMs,
-    level: effectiveLevel,
+    converge: intelMode !== "off",
     learnedBias: learnedBias ?? undefined,
     adaptiveContext: annotationStore.corrections.length > 0 ? adaptiveContext : undefined,
     collectPredictionDetails,
@@ -853,6 +849,44 @@ export default function App() {
     setNovel((n) => ({ ...n, worldData: next }));
   }, []);
 
+  // ── Cold-start cast confirmation ────────────────────────────────────────
+
+  /** The prompt is worth showing only for a real manuscript with no curated
+   *  world data that hasn't already been asked about. */
+  const castPromptNeeded = useCallback((n: Novel) => {
+    if (n.worldData?.castReviewed) return false;
+    if (!isWorldDataEmpty(n.worldData)) return false;
+    return totalWordsInNovel(n) >= 2000;
+  }, []);
+
+  // Offer once per session at mount (deferred while onboarding is up so the
+  // first-launch flow stays: welcome → editor → cast question).
+  useEffect(() => {
+    if (onboardingOpen || castPromptOfferedRef.current) return;
+    if (castPromptNeeded(novel)) {
+      castPromptOfferedRef.current = true;
+      setCastConfirmOpen(true);
+    }
+    // Intentionally NOT keyed on `novel` — reruns only when onboarding
+    // closes, so the prompt can never pop mid-typing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingOpen]);
+
+  const handleCastConfirm = useCallback((wd: WorldData) => {
+    setNovel((n) => ({ ...n, worldData: wd }));
+    setCastConfirmOpen(false);
+  }, []);
+
+  const handleCastSkip = useCallback(() => {
+    // Record the answer so the question is never re-asked for this book;
+    // empty buckets keep every other code path on its auto-extract fallback.
+    setNovel((n) => ({
+      ...n,
+      worldData: { ...(n.worldData ?? emptyWorldData()), castReviewed: true },
+    }));
+    setCastConfirmOpen(false);
+  }, []);
+
   const handleEntityPredictionFeedback = useCallback((
     scopeId: string,
     decisions: Array<{ prediction: AdaptivePredictionTrace; correctedLabel: string | null }>,
@@ -925,7 +959,11 @@ export default function App() {
   const statusTask: StatusTask | null = lensActive
     ? null
     : renameTask
-      ?? (analysisRunning ? { kind: "analyzing", label: "Analysing chapter…" } : null);
+      ?? (analysisRunning
+        ? { kind: "analyzing", label: "Analysing chapter…" }
+        : analysisRefining
+          ? { kind: "analyzing", label: "Refining attribution…" }
+          : null);
 
   // Initialize secondaryId when entering split mode
   useEffect(() => {
@@ -1185,7 +1223,25 @@ export default function App() {
     saveCurrentChapterId(nextChapterId, parsed.chapters[0] ?? null);
     saveAnnotationStore(clearedAnnotations);
     saveAdaptiveStore(clearedAdaptiveStore);
-  }, []);
+    // A freshly imported manuscript is the cast prompt's best moment: the
+    // writer just handed us a whole book and no world data exists yet.
+    if (castPromptNeeded(parsed)) {
+      castPromptOfferedRef.current = true;
+      setCastConfirmOpen(true);
+    }
+  }, [castPromptNeeded]);
+
+  // Jump from the panel's chapter observation to the paragraph it names.
+  // Resolves the paragraph's offset in the live chapter text and reuses the
+  // search-hit jump (scroll + select) below.
+  const handleJumpToParagraph = useCallback((paragraphIndex: number) => {
+    const target = activeChapter;
+    const paraText = analysisResult?.paragraphs[paragraphIndex];
+    if (!target || !paraText) return;
+    const offset = target.content.indexOf(paraText);
+    if (offset < 0) return; // text changed since analysis — no stale jump
+    handleProjectJump(target.id, offset, Math.min(paraText.length, 160));
+  }, [activeChapter, analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Jump to a search hit: open the chapter, then scroll to the offset and
   // select the hit. Uses the chapter's *fresh* content (looked up from
@@ -1430,15 +1486,32 @@ export default function App() {
   // Mirrors the WorldDataView ORB_COLOR map exactly so the auto-scan
   // orb in the world panel and the auto-paragraph orb in the editor
   // share the same per-mode tint identity.
-  const orbColor = (() => {
-    const m = intelMode === "auto" ? autoResolvedLevel : intelMode;
-    switch (m) {
-      case "off":     return "#888888";
-      case "fast":    return "#DC7B19";
-      case "high":    return "#A828B8";
-      case "default": default: return "#1071D8";
-    }
-  })();
+  // The orb keeps the app's AUTO identity (blue-led cycle) at all times and
+  // only LEANS with the converge phase, riding the pre-built resolved-level
+  // cycles and their 1.4s @property colour handoffs:
+  //   fast pass running / on screen → warm lean ("fast" cycle)
+  //   deep pass refining (+ a short glow tail so the 50-150ms worker run
+  //   reads as a visible violet breath) → violet lean ("high" cycle)
+  //   converged and quiet → no lean: the original equal cycle, more vivid.
+  const [refineGlow, setRefineGlow] = useState(false);
+  useEffect(() => {
+    if (analysisRefining) { setRefineGlow(true); return; }
+    if (!refineGlow) return;
+    const t = window.setTimeout(() => setRefineGlow(false), 1200);
+    return () => window.clearTimeout(t);
+  }, [analysisRefining, refineGlow]);
+
+  const intelPhase: "fast" | "high" | undefined =
+    intelMode === "off" ? undefined
+    : analysisRefining || refineGlow ? "high"
+    : analysisRunning || analysisResultLevel !== "high" ? "fast"
+    : undefined; // converged idle — pure auto cycle, vivid
+
+  const orbColor =
+    intelMode === "off" ? "#888888"
+    : intelPhase === "high" ? "#A828B8"
+    : intelPhase === "fast" ? "#DC7B19"
+    : "#2747E6"; // the auto cycle's logo-blue anchor
 
   // Apply typography prefs to CSS custom properties on the editor tree.
   const editorStyle = useMemo<CSSProperties>(() => ({
@@ -1476,9 +1549,10 @@ export default function App() {
         onOpenProject={handleOpenProject}
         hasChapter={!!current}
         intelMode={intelMode}
-        intelResolvedLevel={intelMode === "auto" ? autoResolvedLevel : undefined}
+        intelResolvedLevel={intelPhase}
+        intelVivid={intelMode !== "off" && !intelPhase}
         onCycleIntel={cycleIntel}
-        isAnalyzing={analysisRunning}
+        isAnalyzing={analysisRunning || analysisRefining}
         funMode={prefs.funMode}
         groupTools={!!prefs.groupTools}
         annotationMode={annotationMode}
@@ -1625,6 +1699,14 @@ export default function App() {
         />
       )}
 
+      {castConfirmOpen && (
+        <CastConfirmOverlay
+          novel={novel}
+          onConfirm={handleCastConfirm}
+          onSkip={handleCastSkip}
+        />
+      )}
+
       {entityPopover && (
         <EntityPopover
           initialName={entityPopover.name}
@@ -1714,7 +1796,8 @@ export default function App() {
         nextResult={nextAnalysisResult}
         isAnalyzing={analysisRunning}
         intelMode={intelMode}
-        onSetIntelMode={setIntelMode}
+        onSetIntelMode={(m) => setIntelMode(m === "off" ? "off" : "auto")}
+        onJumpToParagraph={handleJumpToParagraph}
         tier={tier}
         onTierChange={handleTierChange}
         prefs={prefs}

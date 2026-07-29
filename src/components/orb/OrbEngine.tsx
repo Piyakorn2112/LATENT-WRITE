@@ -2,21 +2,28 @@
    OrbEngine — self-contained WebGL intelligence orb.
 
    Replaces the legacy 18-dot blurred-DOM orb (Toolbar.tsx IntelBtn /
-   Onboarding.tsx HeroOrb) with a single tiny fragment-shader canvas:
+   Onboarding.tsx HeroOrb) with a single tiny fragment-shader canvas.
 
-     · a flowing aurora ribbon with a sharp white-hot core over soft colour
-       spill — the "depth of field" read of the Siri orb reference
-     · angular rim light that brightens where the ribbon meets the edge
-     · soft lobed plasma halo just past the silhouette (stays circular)
-     · palette interpolation in OKLab + additive blending and tonemapping
-       in linear space, so colours blend vividly instead of going muddy
+   The look — six FLAT petals in a ring, under an invisible lens:
+     · solid colour, hard (antialiased) edges, no gradient, glow, outline
+       or shadow anywhere; the petals composite PREMULTIPLIED, which is
+       what keeps antialiased edges from darkening into a fake outline
+     · the motion is a separate pure engine (orbPhysics.ts): each petal
+       reaches out and swells then comes back, offset around the ring, on
+       springs — the renderer only draws where the rig says
+     · a spherical lens (1−√(1−d²)) bends the petals near the rim, with a
+       whisper of per-channel dispersion. It has no body of its own, so
+       all you ever see of it is the petals bending inside it.
+     · the palette is FIXED. Nothing cycles; the only colour change in the
+       whole engine is the eased drain to grey when intelligence is off.
 
    GPU budget — the app is already compositing-heavy, so the engine is
    deliberately frugal:
      · one quad, one draw call, ~30×30 css px canvas in the toolbar
      · powerPreference "low-power", no depth/stencil/antialias
-     · 30 fps cap; drops to 8 fps under body.scroll-edge-idle; fully
-       stops on document.hidden and body.electron-window-unfocused-orb-paused
+     · 30 fps cap; eases to 20 under body.scroll-edge-idle (idle is not
+       frozen — the ring keeps turning); fully stops on document.hidden and
+       body.electron-window-unfocused-orb-paused
      · prefers-reduced-motion → renders exactly one frame per state change
 
    Reversibility — every legacy CSS class (.intel-mesh-dot etc.) is left
@@ -25,6 +32,9 @@
    flags at the call sites flip the whole feature off in one line.
    ───────────────────────────────────────────────────────────────────────── */
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { OrbWorld, PETAL_COUNT } from "./orbPhysics";
+import { PETAL_RGB, OFF_GREY_LIGHT, OFF_GREY_DARK } from "./orbColors";
+import { LENS, LENS_FALLOFF_GLSL } from "./orbLens";
 import "./orb-engine.css";
 
 export type OrbEngineMode = "off" | "fast" | "default" | "high" | "auto";
@@ -40,96 +50,21 @@ const STATIC_COLORS: Record<OrbEngineLevel, OrbPalette> = {
   high:    { a: "#A02BF5", b: "#E04DFF", c: "#FFA6F0" },
 };
 
-const OFF_COLORS_LIGHT: OrbPalette = { a: "#b9b9be", b: "#dcdce2", c: "#97979e" };
-const OFF_COLORS_DARK: OrbPalette  = { a: "#56565e", b: "#79798a", c: "#45454d" };
-
-// Auto mode — blue-led cycle through violet and pink, tuned a step more
-// vivid than the legacy autoFrontCycle hues. The resolved level picks
-// which family the middle stop leans toward.
-const AUTO_CYCLE: Record<OrbEngineLevel, OrbPalette[]> = {
-  default: [
-    { a: "#2B4BFF", b: "#7E5BFF", c: "#D9B4FF" },
-    { a: "#3A52FF", b: "#A94DFF", c: "#FF8FE5" },
-    { a: "#2356FF", b: "#4E9BFF", c: "#9BE9FF" },
-  ],
-  fast: [
-    { a: "#2B4BFF", b: "#7E5BFF", c: "#D9B4FF" },
-    { a: "#4452FF", b: "#C44DFF", c: "#FF9DC9" },
-    { a: "#2E55FF", b: "#7E7BFF", c: "#FFC9A8" },
-  ],
-  high: [
-    { a: "#2B47FF", b: "#8A4BFF", c: "#E0A8FF" },
-    { a: "#3A47FF", b: "#A93BFF", c: "#FF7BF0" },
-    { a: "#2450FF", b: "#6E66FF", c: "#C0B4FF" },
-  ],
-};
-
-const AUTO_SEGMENT_SECONDS = 4.2;
-
-// Complementary fringe colours per mode — the "chromatic aberration" tint
-// the twin lets bleed in at the cloud's edge, kept opposite the mode's
-// hue family so it reads as lens fringing, not a palette change.
-const COMP_COLORS: Record<OrbEngineLevel, string> = {
-  fast:    "#4FB6FF", // amber/coral → sky blue
-  default: "#FF9D8A", // blue/cyan   → warm peach
-  high:    "#8AF5E3", // violet/pink → mint ice
-};
-const AUTO_COMP = "#FFD9A8";       // blue-violet cycle → soft gold
-const OFF_COMP_LIGHT = "#c8c8cc";
-const OFF_COMP_DARK = "#66666e";
-
 const IDLE_BODY_CLASS = "scroll-edge-idle";
 const PAUSED_BODY_CLASS = "electron-window-unfocused-orb-paused";
 
-/* ── OKLab colour math — palettes interpolate here so blends stay vivid
-      (sRGB lerp drags blue→pink mixes through grey mud). ─────────────── */
-type Lab = [number, number, number];
-
-function hexToRgb(hex: string): [number, number, number] {
-  const h = hex.replace("#", "");
-  return [
-    parseInt(h.slice(0, 2), 16) / 255,
-    parseInt(h.slice(2, 4), 16) / 255,
-    parseInt(h.slice(4, 6), 16) / 255,
-  ];
+/** Fill `out` (6 × rgb floats). `off` eases 0 → 1 as intelligence is
+ *  switched off, so the drain to grey is a transition, not a cut. */
+function petalPalette(off: number, dark: boolean, out: Float32Array) {
+  const greys = dark ? OFF_GREY_DARK : OFF_GREY_LIGHT;
+  for (let i = 0; i < PETAL_COUNT; i++) {
+    const c = PETAL_RGB[i];
+    const g = greys[i];
+    out[i * 3] = c[0] + (g - c[0]) * off;
+    out[i * 3 + 1] = c[1] + (g - c[1]) * off;
+    out[i * 3 + 2] = c[2] + (g - c[2]) * off;
+  }
 }
-
-const s2l = (c: number) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-const l2s = (c: number) => (c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055);
-const cbrt = Math.cbrt;
-
-function rgbToOklab([r, g, b]: [number, number, number]): Lab {
-  const lr = s2l(r), lg = s2l(g), lb = s2l(b);
-  const l = cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
-  const m = cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
-  const s = cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
-  return [
-    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
-    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
-    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-  ];
-}
-
-function oklabToRgb([L, A, B]: Lab): [number, number, number] {
-  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
-  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
-  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
-  const clamp = (v: number) => Math.min(1, Math.max(0, v));
-  return [
-    clamp(l2s(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s)),
-    clamp(l2s(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s)),
-    clamp(l2s(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)),
-  ];
-}
-
-const hexToLab = (hex: string): Lab => rgbToOklab(hexToRgb(hex));
-
-function mixLab(x: Lab, y: Lab, t: number): Lab {
-  return [x[0] + (y[0] - x[0]) * t, x[1] + (y[1] - x[1]) * t, x[2] + (y[2] - x[2]) * t];
-}
-
-type LabPalette = [Lab, Lab, Lab];
-const paletteToLab = (p: OrbPalette): LabPalette => [hexToLab(p.a), hexToLab(p.b), hexToLab(p.c)];
 
 /* ── Shader ──────────────────────────────────────────────────────────── */
 const VERT = `attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }`;
@@ -137,90 +72,102 @@ const VERT = `attribute vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }
 const FRAG = `
 precision mediump float;
 uniform vec2  u_res;
-uniform float u_t;      // flow phase (speed-warped in JS, wrapped)
 uniform float u_e;      // energy 0..1 (idle → analyzing)
-uniform float u_light;  // 1 = light colour scheme
-uniform vec3  u_a;      // dominant
-uniform vec3  u_b;      // complement
-uniform vec3  u_c;      // highlight
-uniform vec3  u_d;      // chromatic-fringe complementary
-uniform float u_ab;     // fringe amount (0 = off)
 uniform float u_vib;    // extra vibrance (0 = neutral)
+uniform float u_ab;     // lens dispersion boost (0 = base)
+uniform float u_px;     // one backing pixel in p-units (edge antialiasing)
+// The six petals, straight from the rig:
+uniform vec4  u_pa[6];  // cx, cy, cos(rot), sin(rot)
+uniform vec2  u_pb[6];  // semi-major, semi-minor
+uniform vec3  u_pc[6];  // colour
 
-vec3 lin(vec3 c) { return c * c; } // cheap sRGB→linear, inverse is sqrt
+/* ── Six FLAT petals under an invisible lens. ──────────────────────────
+   Flat is the whole point: solid colour, a hard (antialiased) edge, no
+   gradient, no glow, no outline and no shadow. The orb used to be a
+   translucent cloud, and a translucent mid-dark colour composited over a
+   light page ALWAYS leaves a grey penumbra — that was the "dark shadow
+   outside" the shapes. Opaque coverage cannot produce one.
 
-// soft gaussian blob — the WebGL analogue of one blurred mesh dot
-float g(vec2 q, float s) { return exp(-dot(q, q) / s); }
+   The lens is a real refraction and nothing else: a spherical falloff
+   (1 - sqrt(1 - d²), zero at the centre, strongest at the rim) displaces
+   the point we sample the petals at, per channel so the rim disperses
+   slightly. It has no body of its own — no tint, no rim light, no
+   shadow — so all you can see of it is the petals bending inside it. */
 
-// ── Faithful to the original orb: six soft colour dots (two per palette
-//    slot) drifting on offset orbits, merging additively into a gooey
-//    glowing cloud with NO silhouette — alpha is purely the gaussian
-//    tails fading to nothing. The WebGL upgrade over the CSS original is
-//    the blending (linear-space additive + tonemap, OKLab palette drift)
-//    and a faint tighter kernel inside three of the dots, which gives the
-//    cloud an in-focus inner shimmer (depth of field) without ever
-//    introducing an edge.
+/* The lens profile, injected from orbLens.ts so the shader and the SVG
+   exporter cannot describe different curves. */
+${LENS_FALLOFF_GLSL}
+
+/** the petal field, evaluated at one (already refracted) point.
+    Returns PREMULTIPLIED colour. This matters more than it looks: mixing
+    straight colours toward a black backdrop and carrying coverage
+    separately darkens every antialiased edge to half strength, which is
+    exactly what a dark outline around each shape looks like. Compositing
+    premultiplied — src·a over dst·(1−a) — is the only version where a
+    half-covered edge pixel is the petal's own colour at half alpha. */
+vec4 petals(vec2 q) {
+  vec4 acc = vec4(0.0);
+  for (int i = 0; i < 6; i++) {
+    vec4 A = u_pa[i];
+    vec2 v = q - A.xy;
+    // into the ellipse's own frame
+    vec2 e = vec2(v.x * A.z + v.y * A.w, -v.x * A.w + v.y * A.z);
+    vec2 ab = u_pb[i];
+    float d = length(vec2(e.x / ab.x, e.y / ab.y));
+    // antialias in normalised units: one pixel is worth more on a small axis
+    float aa = max(u_px / min(ab.x, ab.y), 0.004) * 1.4;
+    float c = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, d);
+    // painter's order — opaque shapes stacking, never additive light
+    acc.rgb = u_pc[i] * c + acc.rgb * (1.0 - c);
+    acc.a = c + acc.a * (1.0 - c);
+  }
+  return acc;
+}
+
 void main() {
   vec2 p = ((gl_FragCoord.xy / u_res) * 2.0 - 1.0) / 0.72;
-  if (length(p) > 1.5) { gl_FragColor = vec4(0.0); return; }
-  float t = u_t;
+  float r = length(p);
+  if (r > 1.30) { gl_FragColor = vec4(0.0); return; }
 
-  vec3 A = lin(u_a), B = lin(u_b), C = lin(u_c);
+  // ── the invisible lens (profile in orbLens.ts). Spherical falloff, zero
+  //    at the centre, strongest toward the rim, TAPERED back to nothing past
+  //    the petals' reach: an untapered rim keeps displacing where there is
+  //    no glass left to see, which drags a petal tip out as a sliver.
+  float k = lensFalloff(r);
+  vec2 dir = r > 1e-4 ? p / r : vec2(0.0);
+  float bend = (${LENS.BEND_BASE} + ${LENS.BEND_ENERGY} * u_e) * k;
+  float disp = (${LENS.DISP_BASE} + ${LENS.DISP_AB} * u_ab) * k;
 
-  // slow whole-cloud breath, a touch wider when energised
-  p *= 1.0 - 0.04 * sin(t * 0.5) - 0.10 * u_e;
+  vec4 fg = petals(p - dir * bend);
+  float a = fg.a;
+  if (a <= 0.0) { gl_FragColor = vec4(0.0); return; }
 
-  // orbit periods echo the legacy keyframes (~2.9–3.8 s at speed 1);
-  // the second dot of each colour runs counter-phase like the legacy
-  // "reverse" animations, so the cloud never collapses to one side
-  vec2 c1 = vec2(sin(t * 1.9),       cos(t * 1.5 + 1.3)) * 0.30;
-  vec2 c2 = vec2(sin(t * 1.6 + 2.1), cos(t * 2.0 + 4.0)) * 0.34;
-  vec2 c3 = vec2(sin(t * 2.2 + 4.2), cos(t * 1.7 + 2.2)) * 0.27;
-  vec2 c4 = vec2(sin(-t * 1.7 + 3.6), cos(-t * 1.4 + 0.6)) * 0.32;
-  vec2 c5 = vec2(sin(-t * 1.5 + 5.0), cos(-t * 1.9 + 2.8)) * 0.36;
-  vec2 c6 = vec2(sin(-t * 2.1 + 1.1), cos(-t * 1.3 + 5.5)) * 0.25;
+  // Dispersion rides the MIDDLE sample's coverage: alpha comes from it
+  // alone, so no pixel can be opaque where the shape itself is not, and a
+  // channel whose own sample misses falls back to the middle colour rather
+  // than to black — that fallback is what keeps the fringe from turning
+  // into a dark notch at the tips.
+  vec3 mid = fg.rgb / a;
+  vec4 fr = petals(p - dir * (bend + disp));
+  vec4 fb = petals(p - dir * (bend - disp));
+  vec3 col = vec3(
+    fr.a > 0.004 ? fr.r / fr.a : mid.r,
+    mid.g,
+    fb.a > 0.004 ? fb.b / fb.a : mid.b
+  ) * a;
 
-  vec3 acc = vec3(0.0);
-  acc += A * (g(p - c1, 0.150) * 0.62 + g(p - c4, 0.180) * 0.55);
-  acc += B * (g(p - c2, 0.135) * 0.60 + g(p - c5, 0.165) * 0.52);
-  acc += C * (g(p - c3, 0.115) * 0.58 + g(p - c6, 0.150) * 0.48);
-
-  // in-focus kernels — small bright centres breathing inside the blur,
-  // the "defined" layer; they ride the same orbits so they always sit
-  // inside colour, never on empty ground
-  float k = 0.24 + 0.40 * u_e;
-  acc += mix(C, vec3(1.0), 0.38) * g(p - c3, 0.022) * k * (0.75 + 0.25 * sin(t * 1.7));
-  acc += mix(B, vec3(1.0), 0.30) * g(p - c2, 0.028) * k * (0.75 + 0.25 * sin(t * 1.3 + 2.0));
-  acc += mix(A, vec3(1.0), 0.24) * g(p - c1, 0.034) * k * (0.75 + 0.25 * sin(t * 1.5 + 4.1));
-
-  // chromatic fringe — two complementary ghost blobs riding just off the
-  // B-dot orbits, the offset slowly circling so the fringe wanders around
-  // the cloud's edge like lens aberration; faint by design
-  vec2 ab = vec2(cos(t * 0.6), sin(t * 0.6)) * 0.16;
-  vec3 D = lin(u_d);
-  acc += D * (g(p - c2 - ab, 0.085) * 0.30 + g(p - c5 + ab, 0.105) * 0.24) * u_ab;
-
-  acc *= (0.85 + 0.65 * u_e) * (1.0 + 0.10 * u_light + 0.12 * u_vib);
-
-  // Tonemap (soft-clips additive overlaps into luminous cores, never
-  // hard white) + gentle saturation pop.
-  vec3 col = 1.0 - exp(-acc * 1.15);
+  // brightness/saturation live on the flat colour itself — no bloom, no
+  // tonemap, nothing that could bleed past the edge. Scaling premultiplied
+  // colour is safe; the saturation mix uses the same premultiplied domain.
+  // NOTE: orbLens.ts shadeColor mirrors these three lines, so the SVG
+  // export ships the colour that is actually on screen, not the raw hex.
+  // (No backticks in here: this whole shader is a template literal.)
+  col *= 0.94 + 0.1 * u_e;
   float lum = dot(col, vec3(0.299, 0.587, 0.114));
-  col = clamp(mix(vec3(lum), col, 1.24 + 0.14 * u_vib), 0.0, 1.0);
+  col = mix(vec3(lum), col, 1.0 + 0.12 * u_vib) * (1.0 + 0.06 * u_vib);
+  col = clamp(col, 0.0, a); // never brighter than its own coverage
 
-  // Coverage follows brightness only — gaussian tails dissolve the cloud
-  // into the toolbar glass with no boundary of its own. Crucially this is
-  // measured in LINEAR light, before the sqrt below: the sRGB transfer
-  // lifts a 1% tail to ~10%, which painted a grey veil out to the canvas
-  // edge when alpha was derived after conversion.
-  float aCov = clamp(max(max(col.r, col.g), col.b) * 1.55 - 0.015, 0.0, 1.0);
-  // On light glass a translucent colour cloud can only darken the white
-  // behind it, so wide tails read as a grey penumbra — tighten the alpha
-  // falloff in light mode only; dark mode keeps the full soft bloom.
-  aCov = pow(aCov, 1.0 + 0.6 * u_light);
-
-  col = sqrt(col);
-  gl_FragColor = vec4(col * aCov, aCov); // premultiplied
+  gl_FragColor = vec4(col, a); // premultiplied
 }
 `;
 
@@ -240,7 +187,9 @@ function LegacyOrb({ mode, resolvedLevel }: { mode: OrbEngineMode; resolvedLevel
     <span
       className={cls}
       data-mode={mode}
-      data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
+      // No lean when no phase is set — the glow twin must sit on the same
+      // equal cycle as the button orb, or the two drift apart at idle.
+      data-resolved={isAuto && resolvedLevel ? resolvedLevel : undefined}
       style={vars}
       aria-hidden="true"
     >
@@ -331,7 +280,7 @@ function initGL(canvas: HTMLCanvasElement): EngineGL | null {
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
 
   const uniforms: EngineGL["uniforms"] = {};
-  for (const name of ["u_res", "u_t", "u_e", "u_light", "u_a", "u_b", "u_c", "u_d", "u_ab", "u_vib"]) {
+  for (const name of ["u_res", "u_e", "u_vib", "u_ab", "u_px", "u_pa", "u_pb", "u_pc"]) {
     uniforms[name] = gl.getUniformLocation(prog, name);
   }
   return { gl, uniforms };
@@ -341,7 +290,7 @@ export function OrbEngine({
   mode, resolvedLevel, analyzing = false, size = 20, flowScale = 1,
   resolutionScale = 2, maxFps = 30, vibrance = 0, aberration = 0, className,
 }: OrbEngineProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const hostRef = useRef<HTMLSpanElement>(null);
   const [fallback, setFallback] = useState(false);
 
   // Live props readable from the render loop without restarting it.
@@ -355,10 +304,22 @@ export function OrbEngine({
 
   useEffect(() => {
     if (fallback) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const host = hostRef.current;
+    if (!host) return;
+
+    // The canvas is created HERE, one fresh element per effect run — never
+    // rendered by React. loseContext() below is permanent for a canvas, and
+    // under StrictMode's dev double-mount the second effect run would get
+    // the same dead context back from the same element and fail to compile
+    // (silently falling back to the legacy orb). A fresh element = a fresh
+    // context, every time.
+    const canvas = document.createElement("canvas");
+    canvas.className = "orb-engine-canvas";
+    host.appendChild(canvas);
 
     const cssSize = size * 1.5;
+    canvas.style.width = `${cssSize}px`;
+    canvas.style.height = `${cssSize}px`;
     // resolutionScale=2 supersamples on top of dpr — the cloud's kernel
     // detail lives at sub-css-pixel scale on a 20px orb. The behind-glass
     // twin passes 1: backdrop blur erases anything finer. Capped — at
@@ -376,25 +337,29 @@ export function OrbEngine({
     const { gl, uniforms } = engine;
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.uniform2f(uniforms.u_res, canvas.width, canvas.height);
+    // one backing pixel in p-units — the petal edges antialias against
+    // this, so they stay equally crisp at 20px and at hero size
+    gl.uniform1f(uniforms.u_px, 2 / (0.72 * backing));
 
     let raf = 0;
     let disposed = false;
     let lost = false;
 
-    // ── animation state
-    let phase = Math.random() * 100;       // flow clock (speed-warped)
-    let autoT = Math.random() * 100;       // auto palette clock
-    let energy = 0.55;
+    // ── animation state (energy lives in the rig, which springs it)
+    let offAmt = mode === "off" ? 1 : 0;   // eased drain to grey
+    let vib = 0;                           // smoothed vibrance
     let lastNow = performance.now();
     let pending = 0;                       // time accrued since last draw
     let lastWake = wakeRef.current;
 
-    // palette smoothing — current chases target in OKLab
-    const seed: OrbPalette = mode === "fast" || mode === "default" || mode === "high"
-      ? STATIC_COLORS[mode]
-      : AUTO_CYCLE.default[0];
-    const current: LabPalette = paletteToLab(seed);
-    let currentComp: Lab = hexToLab(AUTO_COMP);
+    // ── the motion: the petal rig, warmed before the first frame so the
+    //    orb arrives as a composed flower rather than mid-gesture. A
+    //    per-instance seed keeps two orbs on screen out of lockstep.
+    const world = new OrbWorld((Math.random() * 0x7fffffff) | 0);
+    world.warm();
+    const pa = new Float32Array(PETAL_COUNT * 4);
+    const pb = new Float32Array(PETAL_COUNT * 2);
+    const pc = new Float32Array(PETAL_COUNT * 3);
 
     // ── environment state (power saving)
     const darkMq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -409,64 +374,39 @@ export function OrbEngine({
     });
     bodyObserver.observe(document.body, { attributes: true, attributeFilter: ["class"] });
 
-    const targetPalette = (): LabPalette => {
-      const { mode: m, resolvedLevel: lvl } = propsRef.current;
-      if (m === "off") {
-        return paletteToLab(darkMq.matches ? OFF_COLORS_DARK : OFF_COLORS_LIGHT);
-      }
-      if (m === "auto") {
-        const stops = AUTO_CYCLE[lvl ?? "default"];
-        const seg = autoT / AUTO_SEGMENT_SECONDS;
-        const i = Math.floor(seg) % stops.length;
-        const j = (i + 1) % stops.length;
-        let f = seg - Math.floor(seg);
-        f = f * f * (3 - 2 * f); // smoothstep between stops
-        const sa = paletteToLab(stops[i]);
-        const sb = paletteToLab(stops[j]);
-        return [mixLab(sa[0], sb[0], f), mixLab(sa[1], sb[1], f), mixLab(sa[2], sb[2], f)];
-      }
-      return paletteToLab(STATIC_COLORS[m]);
-    };
-
-    const targetComp = (): Lab => {
-      const { mode: m, resolvedLevel: lvl } = propsRef.current;
-      if (m === "off") return hexToLab(darkMq.matches ? OFF_COMP_DARK : OFF_COMP_LIGHT);
-      if (m === "auto") return hexToLab(lvl && lvl !== "default" ? COMP_COLORS[lvl] : AUTO_COMP);
-      return hexToLab(COMP_COLORS[m]);
-    };
-
     const drawFrame = (dt: number) => {
       const { mode: m, analyzing: busy } = propsRef.current;
       const idle = bodyIdle && !busy;
 
-      const targetEnergy = m === "off" ? 0.08 : busy ? 1.0 : idle ? 0.28 : 0.55;
-      energy += (targetEnergy - energy) * Math.min(1, dt * 3.0);
+      // The rig owns the transition: hand it the TARGET and it springs
+      // there itself, so every amplitude — the sizing wave, the spin, the
+      // throw, the ring's growth — moves on one timeline. Nothing here
+      // eases, and nothing in CSS animates the working state either.
+      world.target = m === "off" ? 0.08 : busy ? 1.0 : idle ? 0.28 : 0.55;
+      world.step(dt * propsRef.current.flowScale);
+      const energy = world.energy;
+      vib += (propsRef.current.vibrance - vib) * Math.min(1, dt * 2.2);
 
-      const speed = (0.45 + 1.65 * energy * energy) * propsRef.current.flowScale;
-      phase = (phase + dt * speed) % 6283.18;
-      autoT = (autoT + dt * (0.8 + 0.4 * energy)) % (AUTO_SEGMENT_SECONDS * 3);
+      // Fixed colours; the only easing is the drain to grey when
+      // intelligence is switched off.
+      offAmt += ((m === "off" ? 1 : 0) - offAmt) * Math.min(1, dt * 2.6);
+      petalPalette(offAmt, darkMq.matches, pc);
+      for (let i = 0; i < PETAL_COUNT; i++) {
+        const t = world.petals[i];
+        pa[i * 4] = t.x;
+        pa[i * 4 + 1] = t.y;
+        pa[i * 4 + 2] = Math.cos(t.rot);
+        pa[i * 4 + 3] = Math.sin(t.rot);
+        pb[i * 2] = t.a;
+        pb[i * 2 + 1] = t.b;
+      }
 
-      const tgt = targetPalette();
-      const k = Math.min(1, dt * 2.4);
-      current[0] = mixLab(current[0], tgt[0], k);
-      current[1] = mixLab(current[1], tgt[1], k);
-      current[2] = mixLab(current[2], tgt[2], k);
-      currentComp = mixLab(currentComp, targetComp(), k);
-
-      const [ra, ga, ba] = oklabToRgb(current[0]);
-      const [rb, gb, bb] = oklabToRgb(current[1]);
-      const [rc, gc, bc] = oklabToRgb(current[2]);
-      const [rd, gd, bd] = oklabToRgb(currentComp);
-
-      gl.uniform1f(uniforms.u_t, phase);
       gl.uniform1f(uniforms.u_e, energy);
-      gl.uniform1f(uniforms.u_light, darkMq.matches ? 0 : 1);
-      gl.uniform3f(uniforms.u_a, ra, ga, ba);
-      gl.uniform3f(uniforms.u_b, rb, gb, bb);
-      gl.uniform3f(uniforms.u_c, rc, gc, bc);
-      gl.uniform3f(uniforms.u_d, rd, gd, bd);
       gl.uniform1f(uniforms.u_ab, propsRef.current.aberration);
-      gl.uniform1f(uniforms.u_vib, propsRef.current.vibrance);
+      gl.uniform1f(uniforms.u_vib, vib);
+      gl.uniform4fv(uniforms.u_pa, pa);
+      gl.uniform2fv(uniforms.u_pb, pb);
+      gl.uniform3fv(uniforms.u_pc, pc);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     };
 
@@ -474,8 +414,17 @@ export function OrbEngine({
       if (lost || bodyPaused || document.hidden) return 0;
       if (motionMq.matches) return 0;
       const { mode: m, analyzing: busy, maxFps: cap } = propsRef.current;
-      if (bodyIdle && !busy) return Math.min(cap, 8);
-      if (m === "off") return Math.min(cap, 14);
+      // Throttle on what the simulation is DOING, not on a timer: a
+      // settled cluster is nearly static so a few frames a second is
+      // plenty, while a pop always gets the full rate. Low-fps motion
+      // only chops when there is real speed behind it.
+      // Idle does NOT mean frozen. Dropping to a few frames a second read
+      // as a stalled graphic rather than a resting one, so the idle floor
+      // is a real frame rate — still a saving over the active cap, but the
+      // ring visibly keeps turning while the app sits quiet.
+      const quiet = world.activity() < 0.06;
+      if (bodyIdle && !busy) return quiet ? Math.min(cap, 20) : cap;
+      if (m === "off") return quiet ? Math.min(cap, 6) : cap;
       return cap;
     };
 
@@ -541,6 +490,7 @@ export function OrbEngine({
       canvas.removeEventListener("webglcontextrestored", onRestored);
       bodyObserver.disconnect();
       gl.getExtension("WEBGL_lose_context")?.loseContext();
+      canvas.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fallback, size, resolutionScale]);
@@ -553,64 +503,12 @@ export function OrbEngine({
 
   return (
     <span
+      ref={hostRef}
       className={`orb-engine${className ? ` ${className}` : ""}`}
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      {fallback
-        ? <LegacyOrb mode={mode} resolvedLevel={resolvedLevel} />
-        : (
-          <canvas
-            ref={canvasRef}
-            className="orb-engine-canvas"
-            style={{ width: size * 1.5, height: size * 1.5 }}
-          />
-        )}
-    </span>
-  );
-}
-
-/* ── OrbBackGlow — the refraction layer behind the toolbar glass ───────
-   Mounted as a *sibling painted before* the liquid-glass pill, so the
-   pill's backdrop-filter genuinely refracts everything in it. It carries
-   a real WebGL orb (OrbEngine) pinned to the exact position of the
-   toolbar's orb button — a twin sitting *behind* the glass, refracted by
-   it, while the original CSS orb renders on top inside the button. The
-   bloom/spectral layers stay as faint supporting light; all CSS
-   animation is transform/opacity only — compositor-cheap. */
-export function OrbBackGlow({
-  mode, resolvedLevel, analyzing,
-}: { mode: OrbEngineMode; resolvedLevel?: OrbEngineLevel; analyzing?: boolean }) {
-  const palette = mode === "fast" || mode === "default" || mode === "high"
-    ? STATIC_COLORS[mode]
-    : undefined;
-  return (
-    <span
-      className="orb-backglow"
-      data-mode={mode}
-      data-resolved={mode === "auto" ? (resolvedLevel ?? "default") : undefined}
-      data-analyzing={analyzing ? "true" : undefined}
-      style={palette ? legacyVars(palette) : undefined}
-      aria-hidden="true"
-    >
-      <span className="orb-backglow-bloom" />
-      <span className="orb-backglow-spectral" />
-      <span className="orb-backglow-orb">
-        {/* Twin budget: behind blur(6px) glass, dpr-only resolution and
-            20 fps are visually indistinguishable from the full-rate
-            engine — ~6× less fragment work. The fringe + vibrance lift
-            survives the blur and is what reads through the glass. */}
-        <OrbEngine
-          mode={mode}
-          resolvedLevel={resolvedLevel}
-          analyzing={analyzing}
-          size={26}
-          resolutionScale={1}
-          maxFps={20}
-          vibrance={1}
-          aberration={1}
-        />
-      </span>
+      {fallback && <LegacyOrb mode={mode} resolvedLevel={resolvedLevel} />}
     </span>
   );
 }

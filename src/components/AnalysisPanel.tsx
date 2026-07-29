@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
+import { buildChapterObservation } from "../lib/chapter-observation";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
@@ -86,16 +87,18 @@ interface Props {
   onNovelRefresh?: (novel: import("../types").Novel | null) => void;
   onImportTools?: () => void;
   onToolHighlights?: (highlights: import("../lib/tool-runner").ToolHighlight[]) => void;
+  /** Scrolls the editor to a paragraph — wired to the chapter observation. */
+  onJumpToParagraph?: (paragraphIndex: number) => void;
   tier: Tier;
   onTierChange: (t: Tier) => void;
 }
 
+// Converge-on-idle removed the tier choice: a fast pass runs while typing
+// and a deep pass replaces it when the writer pauses. The only decision left
+// to make is whether the layer is on at all.
 const INTEL_LEVELS: { value: IntelMode; label: string; desc: string; color: string }[] = [
-  { value: "off",     label: "Off",     desc: "No highlighting",            color: "#888888" },
-  { value: "auto",    label: "Auto",    desc: "Pre-reads each chapter and picks the right depth", color: IOS_COLORS.indigo.text },
-  { value: "fast",    label: "Fast",    desc: "Lightweight pass for quick drafting feedback", color: IOS_COLORS.orange.text },
-  { value: "default", label: "Balanced", desc: "Everyday analysis with richer context tracking", color: IOS_COLORS.blue.text   },
-  { value: "high",    label: "High",    desc: "Max accuracy",               color: IOS_COLORS.purple.text },
+  { value: "off",  label: "Off", desc: "No highlighting",                                        color: "#888888" },
+  { value: "auto", label: "On",  desc: "Fast pass while typing, deep pass refines when you pause", color: IOS_COLORS.indigo.text },
 ];
 
 interface SettingsProps {
@@ -149,7 +152,9 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
       <p className="settings-section-label">Intelligence</p>
       <div className="settings-intel-grid">
         {INTEL_LEVELS.map(({ value, label, desc, color }) => {
-          const isLocked = tier === "free" && value !== "auto" && value !== "off";
+          // Both remaining choices (On / Off) are free-tier — converge gives
+          // everyone the deep pass; Pro differentiates on renderer/tools.
+          const isLocked = false;
           return (
             <button
               key={value}
@@ -588,7 +593,7 @@ export function AnalysisPanel({
   onAutoSceneBreak, sceneBreaking, onOpenChange,
   storyGraph, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
-  onImportTools, onToolHighlights,
+  onImportTools, onToolHighlights, onJumpToParagraph,
   tier, onTierChange,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
@@ -743,6 +748,13 @@ export function AnalysisPanel({
 
   const isOpen = view !== null;
   const hasContent = displayed && displayed.paragraphs.length > 0;
+
+  // One sentence about the chapter, with a location — the panel's entry
+  // point. The widgets below remain the deep-dive (see chapter-observation.ts).
+  const observation = useMemo(
+    () => (displayed ? buildChapterObservation(displayed, prevResult) : null),
+    [displayed, prevResult],
+  );
 
   useLayoutEffect(() => {
     onOpenChange?.(isOpen);
@@ -930,6 +942,27 @@ export function AnalysisPanel({
         {view === "widgets" && (
           <div className={`analysis-inner ${isAnalyzing ? "analysis-inner--analyzing" : ""}`}>
             {hasContent ? (
+              <>
+              {observation && (
+                <div
+                  className="chapter-observation liquid-glass"
+                  data-liquid-glass-scroll-adaptive="panel"
+                >
+                  <span className="chapter-observation-eyebrow">This chapter</span>
+                  <p className="chapter-observation-text">
+                    {observation.text}
+                    {observation.paragraphIndex !== undefined && onJumpToParagraph && (
+                      <button
+                        type="button"
+                        className="chapter-observation-jump"
+                        onClick={() => onJumpToParagraph(observation.paragraphIndex!)}
+                      >
+                        Go to ¶{observation.paragraphIndex + 1}
+                      </button>
+                    )}
+                  </p>
+                </div>
+              )}
               <div className="widget-list-stack">
                 {exiting && (
                   <div className="widget-list widget-list--exiting" aria-hidden>
@@ -983,6 +1016,7 @@ export function AnalysisPanel({
                   </button>
                 </div>
               </div>
+              </>
             ) : (
               <div className="widget-list" key={`placeholder-${placeholderVariant}`}>
                 <PlaceholderWidget variant={placeholderVariant} intelMode={intelMode} />

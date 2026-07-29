@@ -8,6 +8,7 @@ import type { GrammarSuggestion } from "../lib/grammar-check";
 import type { ToolHighlight } from "../lib/tool-runner";
 import type { AnnotationTarget, AdaptivePredictionTrace } from "../types";
 import type { EntityNameMap } from "../lib/world-data";
+import { bandFor } from "../lib/confidence-bands";
 
 // Type marker icons shown at the top-right of non-character entity badges.
 // Characters are already identified by their per-name colour, so they stay
@@ -71,6 +72,21 @@ function sceneTagStyle(tension: "calm" | "rising" | "high"): CSSProperties {
 
 function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// findActionSentences is a pure function of paragraph text, but the snapshot
+// plan re-runs it for EVERY paragraph on every rebuild (analysis settle,
+// annotation override, palette change). Cache by text so unchanged paragraphs
+// are free; the cap bounds memory across chapter switches.
+const _actionSpanCache = new Map<string, ActionSpan[]>();
+
+function cachedActionSentences(para: string): ActionSpan[] {
+  const hit = _actionSpanCache.get(para);
+  if (hit) return hit;
+  if (_actionSpanCache.size > 800) _actionSpanCache.clear();
+  const spans = findActionSentences(para);
+  _actionSpanCache.set(para, spans);
+  return spans;
 }
 
 let _lastSpeakerNames: string[] | null = null;
@@ -177,8 +193,6 @@ function renderInline(
             onEntityClick(canonical, rect);
           } : undefined}
         >
-          <div className="entity-tag-bg-sub" />
-          <div className="entity-tag-bg" />
           {matched}
           {ENTITY_TYPE_ICON[entityType] && (
             <span className="entity-tag-icon" aria-hidden="true">
@@ -535,7 +549,7 @@ function HighlightLayerImpl({
       const meta      = speechResults[pi]?.meta;
 
       // Action sentences are detected paragraph-locally (offsets relative to para).
-      const paraActions = findActionSentences(para);
+      const paraActions = cachedActionSentences(para);
       // Grammar for THIS paragraph, shifted to para-relative.
       const paraGrammar = pos.matched ? sliceGrammar(grammarSuggestions, paraStart, paraEnd) : [];
       const paraToolHL = pos.matched ? sliceToolHighlights(toolHighlights, paraStart, paraEnd) : [];
@@ -613,12 +627,23 @@ function HighlightLayerImpl({
         if (seg.type === "speech" && seg.confidence >= 0.65) {
           carryingSpeaker = (effectiveSpeaker ?? seg.speaker) || carryingSpeaker;
         }
+        // Confidence band — the display only asserts what the engine can
+        // stand behind. A manual override is always "certain"; an unknown
+        // speaker is always "unsure" (it used to paint orange, a confident
+        // look for a non-answer).
+        const band =
+          seg.type === "speech"
+            ? bandFor(seg.confidence, !!effectiveSpeaker, !!annotationOverrides?.has(speechOverrideKey))
+            : "certain";
+        const speakerHue = effectiveSpeaker
+          ? getSpeakerColor(palette, effectiveSpeaker).text
+          : null;
         const color =
           seg.type === "narrative"
             ? NARRATIVE_COLOR
-            : effectiveSpeaker
-            ? getSpeakerColor(palette, effectiveSpeaker).text
-            : ACTION_TEXT;
+            : band === "certain" && speakerHue
+            ? speakerHue
+            : BASE_COLOR;
 
         const segText = para.slice(seg.start, seg.end);
         const isAnnotatable = seg.type === "speech" || seg.type === "narrative";
@@ -627,6 +652,18 @@ function HighlightLayerImpl({
           fontStyle: seg.type === "narrative" ? "italic" : undefined,
           cursor: annotationMode && isAnnotatable ? "pointer" : undefined,
         };
+        // Hedged claim: speaker-hued underline carries the guess without
+        // painting the prose (applied on the outer segment span so the
+        // decoration runs under every inline child). Open question: the
+        // band class draws a neutral dotted underline, no inline colour.
+        const bandClass =
+          seg.type === "speech" && band !== "certain" ? ` speech-band-${band}` : "";
+        const outerSegStyle: CSSProperties | undefined =
+          seg.type === "speech"
+            ? band === "likely" && speakerHue
+              ? { color, textDecorationColor: `color-mix(in srgb, ${speakerHue} 62%, transparent)` }
+              : { color }
+            : undefined;
         const segGrammar = clipGrammar(paraGrammar, seg.start, seg.end);
         // Build speech/narrative annotation click handler
         const segSpeechOnClick =
@@ -652,7 +689,10 @@ function HighlightLayerImpl({
         paraNodes.push(
           <React.Fragment key={`sggrp${seg.start}`}>
             <span
-              className={`${annotationMode && isAnnotatable ? "speech-annotatable" : ""}${hasOverride ? " annotation-tagged" : ""}${speechPrediction?.needsReview ? " prediction-needs-review" : ""}`}
+              className={`${annotationMode && isAnnotatable ? "speech-annotatable" : ""}${hasOverride ? " annotation-tagged" : ""}${speechPrediction?.needsReview ? " prediction-needs-review" : ""}${seg.type === "speech" ? " edge-color-src" : ""}${bandClass}`}
+              // edge-color-src + readable colour lets the liquid-glass edge-colour
+              // layer pick up the speaker hue (inner spans already carry it).
+              style={outerSegStyle}
               onClick={segSpeechOnClick ? segSpeechOnClick(segIndex) : undefined}
             >
               {renderInline(segText, speakerNames, palette, segStyle,

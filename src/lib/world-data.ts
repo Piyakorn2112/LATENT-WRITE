@@ -524,9 +524,16 @@ function autoExtractKnownNamesFast(novel: Novel, minFreq = 2, max = 30): string[
   if (!allText) return [];
   const freq = collectTitleCaseCandidates(allText, 3);
 
+  // Rank by occurrence count (relevance), never by name length. A
+  // length-descending sort here silently becomes the selection policy the
+  // moment slice(0, max) follows it: every short protagonist name loses to
+  // thirty longer institutional nouns, and speech attribution downstream
+  // starves (measured: 0% cast recall, ~53% of dialogue unattributed).
+  // Longest-first ordering for regex alternation is buildEntityPattern's
+  // job — it re-sorts internally.
   return [...freq.entries()]
     .filter(([name, n]) => n >= minFreq && computeIDF(name) >= MIN_IDF_SOLO)
-    .sort((a, b) => b[0].length - a[0].length || b[1] - a[1])
+    .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
     .slice(0, max)
     .map(([name]) => name);
 }

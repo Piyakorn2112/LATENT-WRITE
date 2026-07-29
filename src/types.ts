@@ -48,6 +48,12 @@ export interface WorldData {
   places: WorldPlace[];
   factions: WorldFaction[];
   entities?: WorldGenericEntity[];
+  /**
+   * True once the writer has answered (or explicitly skipped) the cold-start
+   * cast confirmation for this manuscript. Persisted with the novel so the
+   * prompt is asked at most once per book.
+   */
+  castReviewed?: boolean;
 }
 
 export interface Novel {

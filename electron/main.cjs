@@ -182,7 +182,7 @@ function buildMenu() {
           click: () => sendMenuCommand('focus-mode'),
         },
         {
-          label: 'Cycle Intelligence',
+          label: 'Toggle Intelligence',
           accelerator: 'CmdOrCtrl+Shift+I',
           click: () => sendMenuCommand('cycle-intel'),
         },
@@ -418,6 +418,27 @@ function registerWorkspaceWindow() {
   });
   ipcMain.handle('workspace:isOpen', () => !!(_workspaceWindow && !_workspaceWindow.isDestroyed()));
 }
+
+// ── Edge colour-catch — downscaled window capture ───────────────────────────
+// The surround-catch layer reads the real on-screen colours around each glass
+// element (incl. the pointer-events:none highlight layer, which DOM hit-testing
+// can't see). One downscaled capturePage per tick; the renderer samples only
+// the small ring around each element from it.
+ipcMain.handle('edge-color:capture', async (event) => {
+  try {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win.isDestroyed()) return null;
+    const img = await win.webContents.capturePage();
+    const full = img.getSize();
+    if (!full.width || !full.height) return null;
+    const targetW = Math.min(640, full.width);
+    const small = targetW < full.width ? img.resize({ width: targetW, quality: 'good' }) : img;
+    const size = small.getSize();
+    return { width: size.width, height: size.height, data: small.toBitmap() };
+  } catch {
+    return null;
+  }
+});
 
 // ── Narrative LM — sentence embedding (MiniLM via onnxruntime-node) ──────────
 // Runs in the Node.js main process via onnxruntime-node (native binaries).

@@ -44,6 +44,14 @@ interface UseAnalysisOptions {
   debounceMs?: number;
   /** Intelligence tier — falls through directly to speech-detect. */
   level?: IntelligenceLevel;
+  /**
+   * Converge-on-idle: the debounced pass runs at "fast" for responsiveness,
+   * then, if the writer stays idle, the same content re-runs at "high" and
+   * the deep result replaces the fast one. The writer never picks a tier —
+   * the display simply converges on the best answer available. When set,
+   * `level` is ignored.
+   */
+  converge?: boolean;
   /** Learned biases derived from user annotation corrections. */
   learnedBias?: LearnedBias;
   /** Adaptive online ranker + memory layer layered on top of deterministic rules. */
@@ -52,9 +60,16 @@ interface UseAnalysisOptions {
   collectPredictionDetails?: boolean;
 }
 
+/** How long after the fast result lands before the deep pass starts. */
+const CONVERGE_IDLE_MS = 1600;
+
 interface UseAnalysisReturn {
   result: ChapterAnalysisResult | null;
   isAnalyzing: boolean;
+  /** True while the idle "high" refinement pass is in flight (converge mode). */
+  isRefining: boolean;
+  /** Which tier produced the currently displayed result (null = none yet). */
+  resultLevel: IntelligenceLevel | null;
   /** All entity names (all types) — exposed so HighlightLayer can highlight all entities. */
   knownNames: string[];
   /** Type-structured entity names — characters only go to speech-detect; the highlight
@@ -78,11 +93,17 @@ export function useAnalysis(
   currentChapterId: string | null,
   options: UseAnalysisOptions = {},
 ): UseAnalysisReturn {
-  const { debounceMs = 1000, level = "default" } = options;
+  const { debounceMs = 1000, converge = false } = options;
+  // Under converge the first pass is always fast and the refinement is always
+  // high; the caller's level applies only to the classic single-pass path.
+  const level = converge ? "fast" : (options.level ?? "default");
+  const refineLevel: IntelligenceLevel = "high";
   const adaptiveSpeechVersion = options.adaptiveContext?.store.models.speech.version ?? 0;
   const adaptiveActionVersion = options.adaptiveContext?.store.models.action.version ?? 0;
   const [result, setResult] = useState<ChapterAnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isRefining, setIsRefining] = useState(false);
+  const [resultLevel, setResultLevel] = useState<IntelligenceLevel | null>(null);
   // Bumped when background adjacent-chapter scans complete so the
   // prevResult/nextResult memo re-derives from the updated cache.
   const [adjacentReady, setAdjacentReady] = useState(0);
@@ -164,6 +185,7 @@ export function useAnalysis(
 
     setIsAnalyzing(true);
     let cancelled = false;
+    let refineTimer: number | null = null;
 
     const timer = window.setTimeout(() => {
       void (async () => {
@@ -203,7 +225,35 @@ export function useAnalysis(
           if (cancelled) return;
           cache.current.set(currentChapterId, fresh);
           setResult(fresh);
+          setResultLevel(level);
           resultChapterId.current = currentChapterId;
+
+          // Converge-on-idle: the fast answer is on screen; if the writer
+          // stays idle, quietly replace it with the deep one. Any edit or
+          // chapter switch re-runs this effect, whose cleanup cancels both
+          // the timer and an in-flight refinement commit.
+          if (converge) {
+            refineTimer = window.setTimeout(() => {
+              void (async () => {
+                setIsRefining(true);
+                try {
+                  const refineStart = performance.now();
+                  const refineInput = { ...input, level: refineLevel };
+                  const refined = await runChapterAnalysisInWorker(refineInput)
+                    .catch(() => runChapterAnalysis(refineInput));
+                  logPerfEvent("analysis.refine", performance.now() - refineStart, 8, {
+                    chapterId: chapter.id,
+                  });
+                  if (cancelled) return;
+                  cache.current.set(currentChapterId, refined);
+                  setResult(refined);
+                  setResultLevel(refineLevel);
+                } finally {
+                  if (!cancelled) setIsRefining(false);
+                }
+              })();
+            }, CONVERGE_IDLE_MS);
+          }
         } finally {
           if (!cancelled) setIsAnalyzing(false);
         }
@@ -213,8 +263,10 @@ export function useAnalysis(
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      if (refineTimer !== null) window.clearTimeout(refineTimer);
+      setIsRefining(false);
     };
-  }, [novel.chapters, currentChapterId, debounceMs, level, knownNames, options.learnedBias, adaptiveSpeechVersion, adaptiveActionVersion, options.collectPredictionDetails]);
+  }, [novel.chapters, currentChapterId, debounceMs, level, converge, knownNames, options.learnedBias, adaptiveSpeechVersion, adaptiveActionVersion, options.collectPredictionDetails]);
 
   // High-mode background pre-scan: when intelligence is set to "high" and an
   // adjacent chapter hasn't been visited yet, run its analysis in the background
@@ -222,7 +274,9 @@ export function useAnalysis(
   // Runs after the current chapter's result lands (result dep), deferred by a
   // short timeout so it doesn't compete with the in-flight main analysis render.
   useEffect(() => {
-    if (level !== "high") return;
+    // Adjacent pre-analysis runs whenever the deep tier is in play — either
+    // the classic "high" setting or converge mode (whose refinement is high).
+    if (level !== "high" && !converge) return;
     if (!currentChapterId) return;
 
     let cancelled = false;
@@ -280,7 +334,7 @@ export function useAnalysis(
             prevContext: prevCtx,
             siblingStats: buildSiblings(prevChapter.id),
             knownNames: characterNames,
-            level,
+            level: converge ? refineLevel : level,
             learnedBias: options.learnedBias,
           };
           const fresh = await runChapterAnalysisInWorker(input).catch(() => runChapterAnalysis(input));
@@ -298,7 +352,7 @@ export function useAnalysis(
             prevContext: currentCached.endContext,
             siblingStats: buildSiblings(nextChapter.id),
             knownNames: characterNames,
-            level,
+            level: converge ? refineLevel : level,
             learnedBias: options.learnedBias,
           };
           const fresh = await runChapterAnalysisInWorker(input).catch(() => runChapterAnalysis(input));
@@ -335,5 +389,5 @@ export function useAnalysis(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [novel.chapters, currentChapterId, result, adjacentReady]);
 
-  return { result, isAnalyzing, knownNames, entityNameMap, prevResult, nextResult };
+  return { result, isAnalyzing, isRefining, resultLevel, knownNames, entityNameMap, prevResult, nextResult };
 }

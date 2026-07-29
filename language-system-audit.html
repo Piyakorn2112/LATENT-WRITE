@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Latent Write — Language System Audit</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #eeeeee;
+  --surface-1: #f7f7f5;
+  --surface-2: #fbfbfa;
+  --ink: #16150f;
+  --ink-2: #55534a;
+  --ink-3: #86847a;
+  --rule: rgba(20,19,12,.12);
+  --rule-soft: rgba(20,19,12,.07);
+  --accent: #ff9c00;
+  --accent-deep: #ff7100;
+  --accent-wash: rgba(255,156,0,.10);
+  --s1: #2a78d6;
+  --s2: #eb6834;
+  --s3: #1baf7a;
+  --bad: #cc3b3a;
+  --good: #0d8a5c;
+  --card-radius: 22px;
+  --font-body: Georgia, "Iowan Old Style", serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --bg: #111110;
+    --surface-1: #1a1a18;
+    --surface-2: #201f1d;
+    --ink: #f2f1ea;
+    --ink-2: #b3b1a6;
+    --ink-3: #7d7b72;
+    --rule: rgba(242,241,234,.14);
+    --rule-soft: rgba(242,241,234,.07);
+    --accent-wash: rgba(255,156,0,.14);
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --bad: #e66767;
+    --good: #35b184;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110;
+  --surface-1: #1a1a18;
+  --surface-2: #201f1d;
+  --ink: #f2f1ea;
+  --ink-2: #b3b1a6;
+  --ink-3: #7d7b72;
+  --rule: rgba(242,241,234,.14);
+  --rule-soft: rgba(242,241,234,.07);
+  --accent-wash: rgba(255,156,0,.14);
+  --s1: #3987e5;
+  --s2: #d95926;
+  --s3: #199e70;
+  --bad: #e66767;
+  --good: #35b184;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px 140px; }
+
+/* ── Type ─────────────────────────────────────────── */
+.eyebrow {
+  font-family: var(--font-ui);
+  font-size: 10px; font-weight: 500;
+  letter-spacing: .3em; text-transform: uppercase;
+  color: var(--accent-deep);
+  margin: 0 0 14px;
+}
+h1 {
+  font-weight: 200; letter-spacing: -.03em; line-height: 1.05;
+  font-size: clamp(2.4rem, 6vw, 4.1rem);
+  margin: 0 0 22px;
+}
+h2 {
+  font-weight: 200; letter-spacing: -.022em; line-height: 1.12;
+  font-size: clamp(1.55rem, 3.6vw, 2.35rem);
+  margin: 0 0 8px;
+}
+h3 {
+  font-family: var(--font-ui);
+  font-weight: 600; font-size: 1rem; letter-spacing: -.005em;
+  margin: 0 0 10px; color: var(--ink);
+}
+h4 {
+  font-family: var(--font-ui);
+  font-size: 11px; font-weight: 600; letter-spacing: .13em;
+  text-transform: uppercase; color: var(--ink-3);
+  margin: 0 0 12px;
+}
+p { margin: 0 0 18px; color: var(--ink-2); max-width: 68ch; }
+p.lede { font-size: 1.16rem; color: var(--ink); max-width: 62ch; }
+strong { color: var(--ink); font-weight: 600; }
+a { color: var(--accent-deep); }
+code, .mono {
+  font-family: var(--font-mono);
+  font-size: .85em;
+  background: var(--accent-wash);
+  padding: .12em .4em; border-radius: 5px;
+  color: var(--ink);
+}
+
+/* ── Layout ───────────────────────────────────────── */
+header.masthead { padding: 96px 0 60px; border-bottom: 1px solid var(--rule); }
+.meta-row {
+  display: flex; flex-wrap: wrap; gap: 10px 30px;
+  font-family: var(--font-ui); font-size: 12px; color: var(--ink-3);
+  margin-top: 30px;
+}
+.meta-row b { color: var(--ink-2); font-weight: 500; }
+
+section { padding: 76px 0 0; scroll-margin-top: 20px; }
+.section-head { margin-bottom: 34px; }
+.section-head p { margin-top: 12px; }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--card-radius);
+  padding: 30px 32px;
+  margin: 26px 0;
+}
+.card.flush { padding: 0; overflow: hidden; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(310px,1fr)); gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 18px; }
+
+/* ── Verdict tiles ────────────────────────────────── */
+.tile {
+  background: var(--surface-1);
+  border: 1px solid var(--rule-soft);
+  border-radius: 18px; padding: 24px 24px 22px;
+}
+.tile .n {
+  font-family: var(--font-ui); font-weight: 250;
+  font-size: clamp(2.1rem, 5vw, 3rem); line-height: 1;
+  letter-spacing: -.04em; color: var(--ink);
+  display: block; margin-bottom: 10px;
+}
+.tile .n.bad { color: var(--bad); }
+.tile .n.good { color: var(--good); }
+.tile .lbl {
+  font-family: var(--font-ui); font-size: 12.5px; line-height: 1.5;
+  color: var(--ink-2);
+}
+.tile .sub {
+  font-family: var(--font-ui); font-size: 11px; color: var(--ink-3);
+  margin-top: 8px; display: block;
+}
+
+/* ── Charts ───────────────────────────────────────── */
+.chart { margin: 4px 0 8px; }
+.chart-title {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 600;
+  color: var(--ink); margin-bottom: 3px;
+}
+.chart-sub {
+  font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-3);
+  margin-bottom: 20px;
+}
+.legend {
+  display: flex; flex-wrap: wrap; gap: 8px 20px;
+  font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-2);
+  margin-bottom: 20px;
+}
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+
+.bars { display: flex; flex-direction: column; gap: 20px; }
+.bargroup-label {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+  margin-bottom: 9px;
+}
+.bar-row {
+  display: grid; grid-template-columns: 132px 1fr;
+  align-items: center; gap: 14px; margin-bottom: 7px;
+}
+.bar-row .name {
+  font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-2);
+  text-align: right; line-height: 1.3;
+}
+.bar-track {
+  position: relative; height: 22px;
+  background: var(--rule-soft); border-radius: 4px;
+}
+.bar-fill {
+  position: absolute; inset: 0 auto 0 0;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: flex-end;
+  padding-right: 8px;
+}
+/* a zero value draws no mark at all, only its label */
+.bar-fill.zero { padding-right: 0; }
+.bar-val {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600;
+  color: #fff; white-space: nowrap;
+}
+.bar-val.outside {
+  position: absolute; left: calc(100% + 8px);
+  color: var(--ink-2);
+}
+
+/* stacked provenance bar */
+.stack { display: flex; height: 34px; border-radius: 6px; overflow: hidden; gap: 2px; }
+.stack div { display: flex; align-items: center; justify-content: center; }
+.stack .seg-lbl {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600; color: #fff;
+}
+
+/* ── Tables ───────────────────────────────────────── */
+.tbl-scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-family: var(--font-ui); font-size: 12.5px; }
+th {
+  text-align: left; font-weight: 600; font-size: 10.5px;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+  padding: 0 16px 10px 0; border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+td {
+  padding: 10px 16px 10px 0; color: var(--ink-2);
+  border-bottom: 1px solid var(--rule-soft); vertical-align: top;
+}
+td.num { font-variant-numeric: tabular-nums; }
+td b { color: var(--ink); }
+tr.hl td { background: var(--accent-wash); }
+
+.pill {
+  display: inline-block; font-family: var(--font-ui);
+  font-size: 10px; font-weight: 600; letter-spacing: .06em;
+  padding: 3px 9px; border-radius: 99px; text-transform: uppercase;
+  white-space: nowrap;
+}
+.pill.pass { background: rgba(13,138,92,.14); color: var(--good); }
+.pill.warn { background: rgba(255,156,0,.18); color: var(--accent-deep); }
+.pill.fail { background: rgba(204,59,58,.15); color: var(--bad); }
+.pill.env  { background: var(--rule-soft); color: var(--ink-3); }
+
+/* ── Findings ─────────────────────────────────────── */
+.finding {
+  border-left: 2px solid var(--accent);
+  padding: 2px 0 2px 26px;
+  margin: 40px 0;
+}
+.finding .tag {
+  font-family: var(--font-ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .16em; text-transform: uppercase;
+  color: var(--accent-deep); display: block; margin-bottom: 8px;
+}
+.finding h3 { font-size: 1.18rem; margin-bottom: 12px; }
+
+.chain {
+  font-family: var(--font-ui); font-size: 12px;
+  background: var(--surface-2); border: 1px solid var(--rule-soft);
+  border-radius: 14px; padding: 20px 22px; margin: 22px 0;
+  color: var(--ink-2); line-height: 2;
+}
+.chain b { color: var(--ink); }
+.chain .arrow { color: var(--accent); padding: 0 6px; }
+
+pre {
+  background: var(--surface-2); border: 1px solid var(--rule-soft);
+  border-radius: 12px; padding: 18px 20px; overflow-x: auto;
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.75;
+  color: var(--ink-2); margin: 20px 0;
+}
+pre .del { color: var(--bad); }
+pre .add { color: var(--good); }
+pre .cmt { color: var(--ink-3); }
+
+ul.clean { list-style: none; padding: 0; margin: 0; }
+ul.clean li {
+  padding: 11px 0 11px 24px; position: relative;
+  border-bottom: 1px solid var(--rule-soft);
+  color: var(--ink-2); font-family: var(--font-ui); font-size: 13px; line-height: 1.6;
+}
+ul.clean li:last-child { border-bottom: none; }
+ul.clean li::before {
+  content: ""; position: absolute; left: 4px; top: 20px;
+  width: 5px; height: 5px; border-radius: 99px; background: var(--accent);
+}
+ul.clean li b { color: var(--ink); }
+
+.idea {
+  background: var(--surface-1); border: 1px solid var(--rule-soft);
+  border-radius: 18px; padding: 26px 28px; margin-bottom: 18px;
+}
+.idea .rank {
+  font-family: var(--font-ui); font-size: 10px; font-weight: 700;
+  letter-spacing: .16em; color: var(--accent-deep); text-transform: uppercase;
+  display: block; margin-bottom: 9px;
+}
+.idea h3 { font-size: 1.1rem; }
+.idea p { font-family: var(--font-body); font-size: .97rem; }
+.idea p:last-child { margin-bottom: 0; }
+
+.mock {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.85;
+  background: var(--surface-2); border: 1px solid var(--rule-soft);
+  border-radius: 12px; padding: 18px 20px; margin: 18px 0 6px;
+  color: var(--ink-2); white-space: pre; overflow-x: auto;
+}
+.mock .u { color: var(--accent-deep); }
+.mock .g { color: var(--ink-3); }
+
+.callout {
+  background: var(--accent-wash);
+  border-radius: 16px; padding: 22px 26px; margin: 26px 0;
+}
+.callout p { color: var(--ink); margin-bottom: 0; font-size: 1.02rem; }
+
+.toggle {
+  position: fixed; top: 20px; right: 20px; z-index: 50;
+  font-family: var(--font-ui); font-size: 11px; font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase;
+  background: var(--surface-1); color: var(--ink-2);
+  border: 1px solid var(--rule); border-radius: 99px;
+  padding: 9px 16px; cursor: pointer;
+}
+.toggle:hover { color: var(--ink); }
+
+.footnote {
+  font-family: var(--font-ui); font-size: 11.5px; color: var(--ink-3);
+  line-height: 1.7; margin-top: 14px; max-width: 72ch;
+}
+hr.div { border: none; border-top: 1px solid var(--rule); margin: 70px 0 0; }
+</style>
+</head>
+<body>
+<button class="toggle" id="themeBtn">Theme</button>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">Latent Write / Glass Editor</p>
+  <h1>The language system,<br>measured against<br>real manuscripts.</h1>
+  <p class="lede">Sixteen test suites pass. The system still fails the writer on more than half the dialogue in a real book. This report explains the gap, names the one line of code that causes most of it, and proposes what the app should become.</p>
+  <div class="meta-row">
+    <span><b>Audited</b> 29 July 2026</span>
+    <span><b>Corpora</b> Hollow Iris (122,795 w) · The Root Crown (111,836 w)</span>
+    <span><b>Suites run</b> 18</span>
+    <span><b>New harness</b> scripts/ood-language-audit.ts</span>
+  </div>
+</header>
+
+<!-- ══════════ VERDICT ══════════ -->
+<section id="verdict">
+  <div class="section-head">
+    <p class="eyebrow">01 — Verdict</p>
+    <h2>The engine is real. The wiring into it is broken.</h2>
+    <p>Latent Write is not a gimmick. Underneath it is a genuine prose-analysis engine, roughly 400 KB of hand-written linguistic code with a real test culture around it. But on a manuscript it has not been hand-fed, it spends most of its time saying nothing, and the writer is never told that is what is happening.</p>
+  </div>
+
+  <div class="grid-3">
+    <div class="tile">
+      <span class="n bad">52.9%</span>
+      <span class="lbl">of dialogue gets <b>no speaker at all</b> on a real 40-chapter manuscript, in the default mode, in the state the app actually ships in.</span>
+      <span class="sub">Hollow Iris, 650 dialogue segments</span>
+    </div>
+    <div class="tile">
+      <span class="n bad">0%</span>
+      <span class="lbl">of the <b>main cast</b> is found by the name extractor that feeds speech detection. Not one protagonist, in either novel.</span>
+      <span class="sub">Iris, Nora, Mira, Gareth all missed</span>
+    </div>
+    <div class="tile">
+      <span class="n good">1 line</span>
+      <span class="lbl">of code causes it. Changing one sort comparator takes UNKNOWN from <b>52.9% to 5.2%</b>.</span>
+      <span class="sub">world-data.ts:529</span>
+    </div>
+  </div>
+
+  <div class="callout">
+    <p><strong>The headline.</strong> Every accuracy number the project reports is measured with the correct character names handed in by the test harness. No user ever hands them in. The gap between "84% accurate" and what a writer experiences on day one is not a tuning problem, it is a plumbing problem, and it is cheap to fix.</p>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ CURRENT STATE ══════════ -->
+<section id="state">
+  <div class="section-head">
+    <p class="eyebrow">02 — Current state</p>
+    <h2>What actually exists today</h2>
+    <p>The README describes eight subsystems. All eight are real and running. This is an unusually complete piece of software for a solo project, and the analysis is genuinely local, deterministic, and fast enough to run while typing.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h4>The language engine</h4>
+      <ul class="clean">
+        <li><b>speech-detect.ts</b> (116 KB) speaker attribution across four intelligence tiers, with cross-paragraph threading and dialogue alternation inference</li>
+        <li><b>chapter-analysis.ts</b> (100 KB) tension, register, rhythm, pacing, sensory balance, scene labelling</li>
+        <li><b>world-data.ts</b> (51 KB) entity extraction and classification into characters, places, factions</li>
+        <li><b>grammar-check, repetition, prose-profile, continuity, character-voice, chapter-dna, paragraph-risk, chapter-diff, local-review</b></li>
+        <li><b>prose-segments.ts</b> shared tokenizer, apostrophe-safe quote analyser, discourse-marker taxonomy</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h4>What sits on top</h4>
+      <ul class="clean">
+        <li><b>29 widget components</b> feeding an Intelligence Panel</li>
+        <li><b>Adaptive layer</b> that learns speaker attribution from writer corrections</li>
+        <li><b>Story graph and timeline</b> accumulated per chapter after analysis settles</li>
+        <li><b>Renderer</b>, a full Claude Code session bound to the project directory with eight slash commands</li>
+        <li><b>Export</b> to TXT, Markdown, DOCX, EPUB and a six-preset typeset PDF</li>
+        <li><b>Liquid glass</b> compositing layer, pixel-frozen and separately benchmarked</li>
+      </ul>
+    </div>
+  </div>
+
+  <p class="footnote">Note on the May market-readiness plan: it is now partly stale in the app's favour. Markdown, DOCX and EPUB export all exist in <code>text-export.ts</code>. Split view exists in preferences. Dark styling exists (68 <code>prefers-color-scheme</code> blocks) but there is still no in-app theme toggle, since nothing keys off a <code>data-theme</code> attribute.</p>
+
+  <h3 style="margin-top:46px">The test battery, run today</h3>
+  <p>Every suite named in CLAUDE.md was executed against the current tree. Results are current, not remembered.</p>
+
+  <div class="card flush">
+    <div style="padding:26px 30px 6px" class="tbl-scroll">
+    <table>
+      <thead><tr><th>Suite</th><th>Result</th><th>Target</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><b>accuracy-suite</b> speech, fast</td><td class="num">168/217 &nbsp;77%</td><td>60–78%</td><td><span class="pill pass">in range</span></td></tr>
+        <tr><td><b>accuracy-suite</b> speech, default</td><td class="num">182/217 &nbsp;84%</td><td>75–92%</td><td><span class="pill pass">in range</span></td></tr>
+        <tr><td><b>accuracy-suite</b> speech, high</td><td class="num">210/217 &nbsp;97%</td><td>90–100%</td><td><span class="pill pass">in range</span></td></tr>
+        <tr><td>scan-accuracy-suite</td><td class="num">120/120 &nbsp;100%</td><td>recall ≥70, prec ≥80</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-prose-segments</td><td class="num">48/48 &nbsp;100%</td><td>≥95%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-auto-format</td><td class="num">33/33 &nbsp;100%</td><td>≥90%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-chapter-analysis</td><td class="num">27/27 &nbsp;100%</td><td>≥85%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-repetition</td><td class="num">22/22 &nbsp;100%</td><td>≥85%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-prose-profile</td><td class="num">23/23 &nbsp;100%</td><td>≥85%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-grammar-check</td><td class="num">51/51 &nbsp;100%</td><td>≥85%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-continuity-voice</td><td class="num">32/32 &nbsp;100%</td><td>≥85%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-chapter-dna</td><td class="num">77/77 &nbsp;100%</td><td>100%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-paragraph-risk</td><td class="num">32/32 &nbsp;100%</td><td>≥80% recall</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-chapter-diff</td><td class="num">41/41 &nbsp;100%</td><td>100%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-cast-roles</td><td class="num">7/7 &nbsp;100%</td><td>clear cases</td><td><span class="pill pass">pass</span></td></tr>
+        <tr><td>test-tension-scene</td><td class="num">5/5 assertions · calm-vs-elevated 14/16 &nbsp;88%</td><td>≥85%</td><td><span class="pill pass">pass</span></td></tr>
+        <tr class="hl"><td>test-name-bucket-accuracy</td><td class="num">48/49 &nbsp;98%</td><td>—</td><td><span class="pill env">1 threw, env</span></td></tr>
+        <tr class="hl"><td>test-entity-scan</td><td class="num">did not run</td><td>—</td><td><span class="pill env">env</span></td></tr>
+        <tr class="hl"><td>test-event-labels</td><td class="num">LM relabelled <b>0/7</b> and <b>0/3</b> events</td><td>improve labels</td><td><span class="pill warn">no effect</span></td></tr>
+        <tr><td>test-analysis-responsiveness</td><td class="num">fast 8.2 ms · default 24.4 ms · high 91.8 ms</td><td>fast ≤21 ms</td><td><span class="pill pass">pass</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <p class="footnote">The two <span class="pill env">env</span> rows are environmental, not logic regressions. Both load <code>@xenova/transformers</code>, which pulls a native <code>sharp</code> binary that is not built in this tree. That is still worth noting for a shipped Electron app: the semantic-assist path has a native dependency that can silently vanish, and it is already hard-disabled outside Electron.</p>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ ACCURACY ══════════ -->
+<section id="accuracy">
+  <div class="section-head">
+    <p class="eyebrow">03 — Accuracy, honestly</p>
+    <h2>Why sixteen green suites do not mean the writer is served</h2>
+    <p>The suites answer the question "does this function still behave the way it behaved when I wrote the test". They do not answer "does a novelist opening this app get correct answers". Those are different questions, and the second one had never been measured. So I built a harness to measure it.</p>
+  </div>
+
+  <div class="card">
+    <h4>The new harness</h4>
+    <p style="font-family:var(--font-ui);font-size:13px;margin-bottom:14px">
+      <code>scripts/ood-language-audit.ts</code> runs the real pipeline over two complete manuscripts and reports metrics that need no hand-labelling.</p>
+    <ul class="clean">
+      <li><b>Hollow Iris</b>, in-distribution. 22 of the 37 speech test cases were taken from this novel.</li>
+      <li><b>The Root Crown</b>, genuinely held out. A different novel in a different register, mycopunk-gothic rather than political science fiction. No suite has ever been tuned against it.</li>
+      <li><b>Metrics.</b> UNKNOWN rate, mean confidence, cast recall, and the rate at which the default and high modes name a <em>different</em> speaker for the same quote. That last one is an accuracy lower bound requiring no ground truth. If two modes disagree, one of them is wrong.</li>
+    </ul>
+  </div>
+
+  <!-- FINDING 1 -->
+  <div class="finding">
+    <span class="tag">Finding 1 · root cause · confirmed</span>
+    <h3>The name extractor ranks candidates by string length, then keeps the top 30</h3>
+    <p>There are two entity extractors in <code>world-data.ts</code>, sitting forty lines apart. One is correct. The writer-facing path uses the other one.</p>
+
+<pre><span class="cmt">// line 500 — autoExtractEntities, EXPORTED, feeds the World Data scan UI</span>
+  .sort((a, b) =&gt; candidateSortScore(b.n, b.idf, b.signals)
+                - candidateSortScore(a.n, a.idf, a.signals))   <span class="add">← relevance</span>
+  .slice(0, max)
+
+<span class="cmt">// line 522 — autoExtractKnownNamesFast, private, feeds resolveKnownNames()</span>
+<span class="cmt">//            → speech detection AND the live highlight layer</span>
+  .sort((a, b) =&gt; <span class="del">b[0].length - a[0].length</span> || b[1] - a[1])       <span class="del">← STRING LENGTH</span>
+  .slice(0, max)   <span class="cmt">// max = 30</span></pre>
+
+    <p>Sorting longest-first is correct for building the highlight regex, so that "Iris Vale" matches before "Iris". It is catastrophic as a ranking for truncation. A four-letter protagonist can never reach the top 30 of a list ordered by name length, because every novel contains thirty longer proper nouns. The sort-for-rendering is being used as a sort-for-selection.</p>
+
+    <h4 style="margin-top:30px">Proof: same corpus, same 30-name cap, only the comparator differs</h4>
+    <div class="chart">
+      <div class="chart-title">Main cast found by each extractor</div>
+      <div class="chart-sub">Percentage of the novel's principal speakers present in the resolved name list</div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--s2)"></i> length-ranked (ships today)</span>
+        <span><i class="swatch" style="background:var(--s3)"></i> relevance-ranked (already in the codebase)</span>
+      </div>
+      <div class="bars">
+        <div>
+          <div class="bargroup-label">Hollow Iris</div>
+          <div class="bar-row"><span class="name">length-ranked</span>
+            <div class="bar-track"><div class="bar-fill zero" style="width:0;background:var(--s2)"><span class="bar-val outside">0%</span></div></div></div>
+          <div class="bar-row"><span class="name">relevance-ranked</span>
+            <div class="bar-track"><div class="bar-fill" style="width:57.1%;background:var(--s3)"><span class="bar-val">57.1%</span></div></div></div>
+        </div>
+        <div>
+          <div class="bargroup-label">The Root Crown (held out)</div>
+          <div class="bar-row"><span class="name">length-ranked</span>
+            <div class="bar-track"><div class="bar-fill zero" style="width:0;background:var(--s2)"><span class="bar-val outside">0%</span></div></div></div>
+          <div class="bar-row"><span class="name">relevance-ranked</span>
+            <div class="bar-track"><div class="bar-fill" style="width:100%;background:var(--s3)"><span class="bar-val">100%</span></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2" style="margin-top:26px">
+      <div class="card" style="margin:0">
+        <h4>What the writer's app knows today</h4>
+        <p class="mono" style="background:none;padding:0;font-size:11px;line-height:1.9;color:var(--ink-2)">The Distributed Authority Framework<br>The Informed Continuity Act<br>The Eschatological Division<br>The Sovereignty Collective<br>The Free Alignment Compact<br>The Administrative Shell</p>
+        <p class="footnote" style="margin-top:12px">Mean name length 21.4 characters. Not one person.</p>
+      </div>
+      <div class="card" style="margin:0">
+        <h4>What the other extractor finds</h4>
+        <p class="mono" style="background:none;padding:0;font-size:11px;line-height:1.9;color:var(--ink-2)">Nora<br>Iris<br>Meridian<br>Assembly<br>Gradient<br>Council</p>
+        <p class="footnote" style="margin-top:12px">Mean name length 6.8 characters. The protagonists, ranked first.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINDING 2 -->
+  <div class="finding">
+    <span class="tag">Finding 2 · impact · measured</span>
+    <h3>The cost to the writer: half the dialogue loses its speaker</h3>
+    <p>A wrong name list does not merely mislabel. It cascades. Confidence collapses below the gates that carry a speaker forward, so each unattributed quote makes the next one harder.</p>
+
+    <div class="chain">
+      <b>candidates sorted by length</b><span class="arrow">→</span>name list contains institutions, no people
+      <span class="arrow">→</span>attribution confidence falls to <b>0.35</b>
+      <span class="arrow">→</span>below the <b>0.65</b> carry gate in <code>HighlightLayer</code> and <code>chapter-analysis-runner</code>
+      <span class="arrow">→</span>no carrying speaker is ever established
+      <span class="arrow">→</span>the next quote is also UNKNOWN<span class="arrow">→</span><b>52.9% of dialogue unattributed</b>
+    </div>
+
+    <div class="chart" style="margin-top:32px">
+      <div class="chart-title">Dialogue with no speaker attributed, default mode</div>
+      <div class="chart-sub">Lower is better. 40 chapters per novel, dialogue segments only.</div>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--s2)"></i> A · as shipped</span>
+        <span><i class="swatch" style="background:var(--s3)"></i> B · one-line comparator fix</span>
+        <span><i class="swatch" style="background:var(--s1)"></i> C · hand-curated cast</span>
+      </div>
+      <div class="bars">
+        <div>
+          <div class="bargroup-label">Hollow Iris</div>
+          <div class="bar-row"><span class="name">A as shipped</span>
+            <div class="bar-track"><div class="bar-fill" style="width:52.9%;background:var(--s2)"><span class="bar-val">52.9%</span></div></div></div>
+          <div class="bar-row"><span class="name">B comparator fix</span>
+            <div class="bar-track"><div class="bar-fill" style="width:5.2%;background:var(--s3)"><span class="bar-val outside">5.2%</span></div></div></div>
+          <div class="bar-row"><span class="name">C curated cast</span>
+            <div class="bar-track"><div class="bar-fill" style="width:9.1%;background:var(--s1)"><span class="bar-val outside">9.1%</span></div></div></div>
+        </div>
+        <div>
+          <div class="bargroup-label">The Root Crown (held out)</div>
+          <div class="bar-row"><span class="name">A as shipped</span>
+            <div class="bar-track"><div class="bar-fill" style="width:39.9%;background:var(--s2)"><span class="bar-val">39.9%</span></div></div></div>
+          <div class="bar-row"><span class="name">B comparator fix</span>
+            <div class="bar-track"><div class="bar-fill" style="width:6.1%;background:var(--s3)"><span class="bar-val outside">6.1%</span></div></div></div>
+          <div class="bar-row"><span class="name">C curated cast</span>
+            <div class="bar-track"><div class="bar-fill" style="width:26.2%;background:var(--s1)"><span class="bar-val outside">26.2%</span></div></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tbl-scroll" style="margin-top:30px">
+      <table>
+        <thead><tr><th>Condition</th><th>Cast recall</th><th>UNKNOWN, default</th><th>UNKNOWN, high</th><th>Mean confidence</th><th>Modes conflict</th></tr></thead>
+        <tbody>
+          <tr><td colspan="6" style="padding-top:16px"><b>Hollow Iris</b> · in-distribution · 40 ch · 122,795 w</td></tr>
+          <tr><td>A as shipped</td><td class="num">0.0%</td><td class="num"><b>52.9%</b></td><td class="num">30.9%</td><td class="num">0.35</td><td class="num">17.5%</td></tr>
+          <tr><td>B comparator fix</td><td class="num">57.1%</td><td class="num"><b>5.2%</b></td><td class="num">1.1%</td><td class="num">0.78</td><td class="num">5.2%</td></tr>
+          <tr><td>C curated cast</td><td class="num">100%</td><td class="num">9.1%</td><td class="num">2.1%</td><td class="num">0.75</td><td class="num">2.1%</td></tr>
+          <tr><td colspan="6" style="padding-top:16px"><b>The Root Crown</b> · held out · 40 ch · 111,836 w</td></tr>
+          <tr><td>A as shipped</td><td class="num">0.0%</td><td class="num"><b>39.9%</b></td><td class="num">25.3%</td><td class="num">0.46</td><td class="num">19.7%</td></tr>
+          <tr><td>B comparator fix</td><td class="num">100%</td><td class="num"><b>6.1%</b></td><td class="num">1.8%</td><td class="num">0.76</td><td class="num">16.4%</td></tr>
+          <tr><td>C curated cast</td><td class="num">100%</td><td class="num">26.2%</td><td class="num">14.4%</td><td class="num">0.59</td><td class="num">6.3%</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="footnote">Read condition C carefully. It is not a true ceiling, it is a six-name hand-list, and on The Root Crown that shortlist is too small to cover the speaking cast, which is why it underperforms the automatic 30-name list. The honest conclusion is the useful one: <b>the relevance-ranked extractor already in the codebase beats a hand-curated shortlist.</b> The fix is not "make the user do the work", it is "call the function that already works".</p>
+  </div>
+
+  <!-- FINDING 3 -->
+  <div class="finding">
+    <span class="tag">Finding 3 · methodology</span>
+    <h3>The suites are regression locks, not accuracy measurements</h3>
+    <p>Fourteen of the sixteen suites report <em>exactly</em> 100% against targets of 85%. That pattern is not evidence of quality, it is the signature of tests written to describe the implementation's current behaviour. They are valuable, they will catch a regression tomorrow, but they cannot tell you whether the system is right.</p>
+
+    <div class="chart" style="margin-top:26px">
+      <div class="chart-title">Where the 37 speech-detection test cases come from</div>
+      <div class="chart-sub">The 84% and 97% headline figures are measured on this mix</div>
+      <div class="stack">
+        <div style="flex:22;background:var(--s2)"><span class="seg-lbl">22 · Hollow Iris</span></div>
+        <div style="flex:6;background:var(--s1)"><span class="seg-lbl">6 · synthetic</span></div>
+        <div style="flex:6;background:var(--ink-3)"><span class="seg-lbl">6 · stress</span></div>
+        <div style="flex:3;background:var(--s3)"><span class="seg-lbl">3</span></div>
+      </div>
+      <div class="legend" style="margin-top:14px">
+        <span><i class="swatch" style="background:var(--s2)"></i> chapters of the author's own novel</span>
+        <span><i class="swatch" style="background:var(--s1)"></i> synthetic probes of internal parameters (extCtxDepth, maxRecentSpeakers)</span>
+        <span><i class="swatch" style="background:var(--ink-3)"></i> stress cases</span>
+        <span><i class="swatch" style="background:var(--s3)"></i> cross-genre</span>
+      </div>
+    </div>
+
+    <p style="margin-top:26px">Three of thirty-seven cases test prose outside the author's own voice, and those three were themselves written to be tested. Six cases test internal tuning parameters by name, which means the suite is partly measuring whether the implementation still has the shape it had when the tests were written.</p>
+    <p><strong>This is not a criticism of the discipline, which is genuinely strong.</strong> It is a statement about what the discipline currently covers. The suites lock behaviour. Nothing measures generalisation, and the generalisation gap turned out to be enormous.</p>
+  </div>
+
+  <!-- FINDING 4 -->
+  <div class="finding">
+    <span class="tag">Finding 4 · the residual problem</span>
+    <h3>Even after the fix, one attributed quote in six changes identity when the mode changes</h3>
+    <p>The intelligence dial is presented as a speed and depth control. It is not. It changes the <em>facts the app asserts</em>. On held-out prose with the name list fixed, default and high name a different person for the same quote 16.4% of the time. Both cannot be right, and the writer has no way to know which reading they are looking at.</p>
+
+    <div class="chart" style="margin-top:26px">
+      <div class="chart-title">Quotes where default and high name a different speaker</div>
+      <div class="chart-sub">Both modes attributed the quote, but to different people. A label-free accuracy lower bound.</div>
+      <div class="bars">
+        <div class="bar-row"><span class="name">Hollow Iris, as shipped</span>
+          <div class="bar-track"><div class="bar-fill" style="width:87.5%;background:var(--s2)"><span class="bar-val">17.5%</span></div></div></div>
+        <div class="bar-row"><span class="name">Hollow Iris, fixed</span>
+          <div class="bar-track"><div class="bar-fill" style="width:26%;background:var(--s3)"><span class="bar-val">5.2%</span></div></div></div>
+        <div class="bar-row"><span class="name">Root Crown, as shipped</span>
+          <div class="bar-track"><div class="bar-fill" style="width:98.5%;background:var(--s2)"><span class="bar-val">19.7%</span></div></div></div>
+        <div class="bar-row"><span class="name">Root Crown, fixed</span>
+          <div class="bar-track"><div class="bar-fill" style="width:82%;background:var(--s3)"><span class="bar-val">16.4%</span></div></div></div>
+      </div>
+      <p class="footnote">Bars scaled to a 20% axis. Fixing the names removes two thirds of the conflict on in-distribution prose and only a sixth of it on held-out prose, which is the real measure of how much of the engine's skill is tuned to one novel.</p>
+    </div>
+
+    <p style="margin-top:22px">There is a second detail worth naming. In the shipped cold-start state, <b>fast and default produce identical attribution</b> on both manuscripts, 650 and 923 segments respectively, with identical UNKNOWN counts. When the name list is wrong, everything the default tier adds over the fast tier buys nothing at all. The user is choosing between two settings that do the same thing, and paying three times the latency for one of them.</p>
+  </div>
+
+  <!-- FINDING 5 -->
+  <div class="finding">
+    <span class="tag">Finding 5 · smaller, still real</span>
+    <h3>Four more things worth knowing</h3>
+    <ul class="clean">
+      <li><b>Confidence policy has no owner.</b> Eight different thresholds are hard-coded across eight modules: 0.50, 0.55, 0.58, 0.60, 0.65, 0.68, 0.70, 0.85. Nothing documents why they differ or what a change to one does to the others. The cold-start mean confidence of 0.35 sits below every single one of them, which is exactly why the failure cascades rather than degrading gracefully.</li>
+      <li><b>The LM enrichment pass changes nothing.</b> <code>test-event-labels</code> reports 0 of 7 and 0 of 3 events relabelled. Whatever the narrative language model is contributing to story-graph event labels, it is not measurably improving them, while still costing a background pass.</li>
+      <li><b>The tension scanner reads vocabulary, not function.</b> This is already documented and accepted, and the numbers hold it honestly at 88% on calm-versus-elevated. It cannot see dread carried by subtext rather than word choice, which is precisely the register a literary novelist works in most.</li>
+      <li><b>The semantic assist has a native dependency that can vanish.</b> <code>@xenova/transformers</code> pulls <code>sharp</code>, which is currently unbuilt in this tree and takes two suites down with it. In a packaged Electron build that is a silent-degradation risk on the one path meant to improve entity classification.</li>
+    </ul>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ WRITER BENEFIT ══════════ -->
+<section id="benefit">
+  <div class="section-head">
+    <p class="eyebrow">04 — Real-world benefit</p>
+    <h2>What actually helps a novelist, and what is decoration</h2>
+    <p>The gimmick question deserves a direct answer, feature by feature. The test is simple. Would a working novelist change a sentence because of this, and would they have found the problem without it?</p>
+  </div>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th style="width:24%">Feature</th><th>Verdict</th><th style="width:34%">Why</th></tr></thead>
+      <tbody>
+        <tr><td><b>Renderer</b> (Claude in the project)</td><td><span class="pill pass">earns its keep</span></td><td>The strongest thing in the app. A persistent session with the manuscript's real files and a chapter-aware context packet is materially better than pasting into a chat window.</td></tr>
+        <tr><td><b>Repetition, grammar, prose profile</b></td><td><span class="pill pass">earns its keep</span></td><td>Catch things the eye slides over on the twentieth read. Deterministic, local, instant. This is what a writing tool should do.</td></tr>
+        <tr><td><b>Auto-paragraph, auto-scene-break</b></td><td><span class="pill pass">earns its keep</span></td><td>Deliberately high-precision, built to under-split rather than guess. Correct engineering judgement for a tool that edits the writer's text.</td></tr>
+        <tr><td><b>PDF and DOCX export</b></td><td><span class="pill pass">earns its keep</span></td><td>Six typeset presets is real work, and DOCX is the format an agent or editor actually asks for.</td></tr>
+        <tr><td><b>Speaker attribution</b></td><td><span class="pill warn">broken, not shallow</span></td><td>The idea is excellent and the engine is capable. Today it is unplumbed, so the writer mostly sees nothing. Finding 1 is the whole gap.</td></tr>
+        <tr><td><b>Adaptive learning</b></td><td><span class="pill warn">unreachable</span></td><td>A real learning loop exists, keyed on writer corrections. But corrections happen in an annotation mode that onboarding never mentions, so the loop almost never starts.</td></tr>
+        <tr><td><b>Story graph and timeline</b></td><td><span class="pill warn">interesting, not actionable</span></td><td>Beautiful, and it tells you what you already know about your own book. It does not yet surface a decision.</td></tr>
+        <tr><td><b>The 29-widget panel</b></td><td><span class="pill fail">closest to gimmick</span></td><td>Not because the metrics are fake. They are real. Because twenty-nine simultaneous unexplained numbers is a dashboard, and a novelist did not come here to read a dashboard.</td></tr>
+        <tr><td><b>Sensory Balance, Cross-Arc, Register, Texture</b></td><td><span class="pill fail">closest to gimmick</span></td><td>No writer has a mental model for what a good score is. Without a target, a number is decoration.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <p><strong>The pattern.</strong> Everything that names a specific problem at a specific location earns its keep. Everything that reports a score without a target does not. The app currently produces far more measurement than judgement, and judgement is the thing a writer is short of at 11pm on chapter forty.</p>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ UX ══════════ -->
+<section id="ux">
+  <div class="section-head">
+    <p class="eyebrow">05 — UX problems</p>
+    <h2>Six problems, in the order they hurt</h2>
+  </div>
+
+  <ul class="clean" style="font-size:13.5px">
+    <li><b>1. The app never says when it is unsure.</b> This is the most damaging one, and it is a design problem rather than a code problem. A speaker attributed at confidence 0.35 renders with exactly the same visual authority as one at 0.95. A writer therefore learns, correctly, that the highlighting cannot be trusted, and then stops looking at all of it, including the 95% that was right.</li>
+    <li><b>2. There is no cold-start moment.</b> Import a manuscript and the app silently decides who the characters are, gets it wrong, and never asks. The single highest-leverage screen in the product does not exist.</li>
+    <li><b>3. The intelligence dial exposes an implementation detail as a user choice.</b> Fast, Default, High, Auto, Off. A novelist cannot possibly know which to pick, and as measured above, the choice silently changes who the app says is speaking.</li>
+    <li><b>4. Twenty-nine widgets, two help affordances.</b> Only <code>CrossArcWidget</code> and <code>SensoryBalanceWidget</code> mention help or explanation anywhere in their source, and five of twenty-nine have an empty state. A writer opens the panel, sees a wall, and closes it.</li>
+    <li><b>5. The learning loop is behind an unmarked door.</b> Annotation mode is the thing that makes attribution improve, and it appears in no onboarding page.</li>
+    <li><b>6. The analysis lives in a different column from the prose.</b> Writing is a single-column activity. Every glance sideways to a panel costs the sentence being held in the head.</li>
+  </ul>
+
+  <p class="footnote" style="margin-top:22px">Smaller and already known: no in-app theme toggle despite 68 dark-mode style blocks, preferences buried below the widget list, and no snapshot or checkpoint before a destructive rewrite, although <code>chapter-diff.ts</code> is written and tested and has no UI attached to it.</p>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ BREAKTHROUGH ══════════ -->
+<section id="ideas">
+  <div class="section-head">
+    <p class="eyebrow">06 — What it should become</p>
+    <h2>Seven changes, ordered by how much they change the product</h2>
+    <p>The first four are the ones that turn this from an impressive engine into an app a novelist would refuse to give up.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">01 · the breakthrough</span>
+    <h3>Ink only what you are sure of</h3>
+    <p>Stop rendering all attributions identically. Use the confidence number that already exists. Certain attributions get the full treatment. Likely ones get a lighter, unfilled treatment. Anything below the gate is not asserted at all, it is offered as a question the writer can answer in one keystroke.</p>
+    <div class="mock">Certain    <span class="u">Nora</span>  "What's the governance bandwidth doing?"
+Likely     <span class="g">Nora?</span> "Since when?"
+Unsure     <span class="g">who?</span>  "That's interesting."          <span class="g">← ⏎ to name</span></div>
+    <p>This single change does four things at once. It makes the system honest. It converts the 53% failure from an invisible defect into a visible invitation. It gives the adaptive learner the correction stream it was built for and never receives. And it earns back trust in the highlighting that was already correct, which is most of it.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">02</span>
+    <h3>Turn the cold start into the best moment in the product</h3>
+    <p>After import, before anything else, show the cast the app believes it found and ask one question. Not a form. A list of faces with counts and a first line of dialogue each.</p>
+    <div class="mock">I found these people in your manuscript.
+
+  <span class="u">Mira</span>      412 mentions   "I'll go with him."          <span class="g">✓</span>
+  <span class="u">Gareth</span>    288 mentions   "The valley knows already."   <span class="g">✓</span>
+  <span class="u">Tessa</span>    193 mentions   "Not before the loaves."      <span class="g">✓</span>
+  <span class="g">Greythorn</span> 87 mentions    <span class="g">— a place, not a person</span>    <span class="g">✗</span>
+
+               <span class="u">[ Yes, that's my cast ]</span></div>
+    <p>Thirty seconds of the writer's time replaces an unsolvable inference problem with ground truth, and it is the moment the app proves it has actually read the book. Fix Finding 1 first so the list is right, then this screen is a delight rather than an apology.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">03</span>
+    <h3>Delete the intelligence dial. Converge instead.</h3>
+    <p>Run the fast tier on every keystroke and the high tier when typing stops. Show the fast answer immediately, then let the deep answer replace it, and mark the few places where it changed its mind. The writer never picks a tier, and the 16% mode conflict stops being a hidden coin flip and becomes visible information, which is what it always was.</p>
+    <p>Keep Off. Off is a real preference. Fast, Default, High and Auto are the engine's vocabulary, not the writer's.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">04</span>
+    <h3>One margin rail instead of twenty-nine cards</h3>
+    <p>Move analysis out of the panel and into the margin beside the line it is about, the way a copy editor's pencil marks sit next to the sentence. A repetition flag belongs next to the repeated word, not in a card three hundred pixels away that says "Repetition: 4".</p>
+    <p>The panel does not have to die. It becomes the place you go deliberately, and the default surface becomes the margin, which is where writers have accepted editorial marks for four hundred years.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">05</span>
+    <h3>One observation per chapter, not twenty-nine metrics</h3>
+    <p>The system already computes everything needed to say something like "tension peaks at 73% and never releases, and this is the third chapter in a row that ends on the same beat". Say that. Put the twenty-nine widgets behind "show me everything". A number without a target is decoration, and a sentence with a location is an edit.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">06</span>
+    <h3>Attach a UI to chapter-diff, which is already built and tested</h3>
+    <p>41 of 41 tests pass on a paragraph-level differ that nothing in the app surfaces. Two features fall straight out of it. Named snapshots before a rewrite, which is Scrivener's most-loved feature and the answer to the trust problem with destructive edits. And a revision view that says what changed since the last review pass and whether it addressed what was flagged.</p>
+  </div>
+
+  <div class="idea">
+    <span class="rank">07</span>
+    <h3>Make the held-out harness a permanent gate</h3>
+    <p><code>scripts/ood-language-audit.ts</code> is now in the repo. Run it in CI alongside the curated suites and track UNKNOWN rate and mode conflict on a manuscript that nothing is tuned against. The curated suites answer "did I break it". This one answers "does it work for someone else", and that question had no owner before today.</p>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ ARCHITECTURE ══════════ -->
+<section id="arch">
+  <div class="section-head">
+    <p class="eyebrow">07 — Architecture</p>
+    <h2>Four places where the structure caused the bug</h2>
+    <p>Framed as deepening opportunities, in the sense of more behaviour behind a smaller interface, with the change concentrated in one place.</p>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <h3>1. Cast resolution has no owner</h3>
+      <p style="font-family:var(--font-ui);font-size:12.5px">Two extractors with divergent ranking, and the private one feeds the writer-facing path. That is not a bug that happened, it is a bug the structure invited.</p>
+      <p style="font-family:var(--font-ui);font-size:12.5px"><b>Deepen into</b> one <code>Cast</code> module. It owns extraction, ranking, aliasing and provenance, so every name carries whether it was curated, inferred or confirmed by the writer. Two adapters already exist, so this is a real seam, not a hypothetical one.</p>
+      <p style="font-family:var(--font-ui);font-size:12.5px"><b>Deletion test</b> passes. Remove it and the divergence reappears across every caller.</p>
+    </div>
+    <div class="card">
+      <h3>2. Confidence policy is smeared across eight modules</h3>
+      <p style="font-family:var(--font-ui);font-size:12.5px">Eight magic thresholds, no documentation of their relationship. You cannot reason about a change to one.</p>
+      <p style="font-family:var(--font-ui);font-size:12.5px"><b>Deepen into</b> a module that owns the bands, certain, likely and guess, and the policy for what each band is allowed to assert. The interface becomes the test surface, so you can finally test what the writer sees rather than what number came out.</p>
+      <p style="font-family:var(--font-ui);font-size:12.5px">Idea 01 above is not implementable cleanly until this exists.</p>
+    </div>
+    <div class="card">
+      <h3>3. Tier policy is interleaved through the detector</h3>
+      <p style="font-family:var(--font-ui);font-size:12.5px"><code>speech-detect.ts</code> is 116 KB with <code>level === 'high'</code> guards threaded through it. Adding a tier means editing the detector, and the detector cannot be tested independently of tier policy.</p>
+      <p style="font-family:var(--font-ui);font-size:12.5px"><b>Deepen into</b> a level-agnostic detector plus a policy module that composes passes. Idea 03, converging rather than choosing, becomes a policy change instead of surgery.</p>
+    </div>
+    <div class="card">
+      <h3>4. The evaluation seam is missing</h3>
+      <p style="font-family:var(--font-ui);font-size:12.5px">Every suite shares one shape, curated cases with hand-supplied names, so every suite shares one blind spot. Nothing could have caught Finding 1, because every test hands in the answer the extractor was supposed to produce.</p>
+      <p style="font-family:var(--font-ui);font-size:12.5px"><b>Deepen into</b> a second suite shape, whole-manuscript and label-free. That harness now exists. Making it a gate closes the blind spot permanently.</p>
+    </div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- ══════════ NEXT ══════════ -->
+<section id="next">
+  <div class="section-head">
+    <p class="eyebrow">08 — Next</p>
+    <h2>What I would do, in this order</h2>
+  </div>
+
+  <div class="tbl-scroll">
+    <table>
+      <thead><tr><th style="width:6%">#</th><th style="width:36%">Action</th><th style="width:16%">Effort</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td class="num"><b>1</b></td><td><b>Change the comparator</b> at <code>world-data.ts:529</code>, or delete the function and call <code>autoExtractEntities</code></td><td>one line</td><td>UNKNOWN 52.9% → 5.2%. Confidence 0.35 → 0.78. The largest single quality gain available in this codebase.</td></tr>
+        <tr><td class="num"><b>2</b></td><td>Add a regression test that asserts a short protagonist name survives extraction</td><td>small</td><td>Locks the fix at the seam where the bug actually lives, rather than at the detector that was never at fault.</td></tr>
+        <tr><td class="num"><b>3</b></td><td>Wire <code>ood-language-audit.ts</code> into the suite list and CLAUDE.md</td><td>small</td><td>The blind spot never returns.</td></tr>
+        <tr><td class="num"><b>4</b></td><td>Confidence-aware rendering, idea 01</td><td>medium</td><td>Honesty, plus it starts the adaptive loop that has never had input.</td></tr>
+        <tr><td class="num"><b>5</b></td><td>Cast confirmation screen, idea 02</td><td>medium</td><td>Turns the weakest moment in the product into the one that proves it read the book.</td></tr>
+        <tr><td class="num"><b>6</b></td><td>Collapse the intelligence dial to converge-on-idle, idea 03</td><td>medium</td><td>Removes a choice the writer cannot make and 16% of silent contradiction.</td></tr>
+        <tr><td class="num"><b>7</b></td><td>Margin rail, then one observation per chapter, ideas 04 and 05</td><td>large</td><td>The change from analytics tool to writing instrument.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout">
+    <p><strong>One closing note on the numbers in this report.</strong> Nothing here was taken from memory or from the README. Every suite was executed today, and the manuscript figures come from a new harness that runs the real pipeline over 234,631 words across two novels. The harness is committed at <code>scripts/ood-language-audit.ts</code> and reruns in about four minutes.</p>
+  </div>
+</section>
+
+</div>
+
+<script>
+(function () {
+  var btn = document.getElementById('themeBtn');
+  var root = document.documentElement;
+  btn.addEventListener('click', function () {
+    var cur = root.getAttribute('data-theme');
+    if (!cur) {
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      cur = prefersDark ? 'dark' : 'light';
+    }
+    root.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
+  });
+})();
+</script>
+</body>
+</html>

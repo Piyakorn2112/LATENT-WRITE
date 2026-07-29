@@ -35,6 +35,7 @@ export function parseNovel(raw: string): Novel {
           if (Array.isArray(parsed.places)) worldData.places = parsed.places;
           if (Array.isArray(parsed.factions)) worldData.factions = parsed.factions;
           if (Array.isArray(parsed.entities)) worldData.entities = parsed.entities;
+          if (parsed.castReviewed === true) worldData.castReviewed = true;
         } catch {
           /* malformed JSON — silently drop, novel still loads */
         }
@@ -81,7 +82,8 @@ export function parseNovel(raw: string): Novel {
   flush();
   const novel: Novel = { meta, chapters };
   if (
-    worldData.characters.length || worldData.places.length || worldData.factions.length || (worldData.entities?.length ?? 0) > 0
+    worldData.characters.length || worldData.places.length || worldData.factions.length || (worldData.entities?.length ?? 0) > 0 ||
+    worldData.castReviewed === true
   ) {
     novel.worldData = worldData;
   }
@@ -95,9 +97,11 @@ export function serializeNovel(novel: Novel): string {
   if (novel.meta.author) out.push("===AUTHOR===", novel.meta.author, "");
   if (novel.meta.description) out.push("===DESCRIPTION===", novel.meta.description, "");
 
-  // World data — embedded as a JSON block so the .txt round-trips losslessly
+  // World data — embedded as a JSON block so the .txt round-trips losslessly.
+  // Also emitted when only castReviewed is set: the "writer skipped the cast
+  // prompt" answer must survive reload or the question re-asks every session.
   const wd = novel.worldData;
-  if (wd && (wd.characters?.length || wd.places?.length || wd.factions?.length || wd.entities?.length)) {
+  if (wd && (wd.characters?.length || wd.places?.length || wd.factions?.length || wd.entities?.length || wd.castReviewed)) {
     out.push("===WORLD-DATA===");
     out.push(JSON.stringify(
       {
@@ -105,6 +109,7 @@ export function serializeNovel(novel: Novel): string {
         places: wd.places ?? [],
         factions: wd.factions ?? [],
         entities: wd.entities ?? [],
+        ...(wd.castReviewed ? { castReviewed: true } : {}),
       },
       null,
       2,

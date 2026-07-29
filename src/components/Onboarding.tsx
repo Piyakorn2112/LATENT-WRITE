@@ -9,7 +9,7 @@ import { OrbEngine } from "./orb/OrbEngine";
 
 // Mirrors the flag in Toolbar.tsx — flip to false to restore the legacy
 // CSS mesh-dot hero orb below, which is left fully intact.
-const USE_ORB_ENGINE: boolean = false;
+const USE_ORB_ENGINE: boolean = true;
 
 // Each "mode" reuses the production orb's pre-saturated palette. Keeps the
 // welcome experience visually identical to the toolbar orb users see later.
@@ -439,8 +439,9 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               <h1 className="onb-title onb-title--small">Intelligence that adapts</h1>
               <p className="onb-subtitle">
                 The intelligence layer highlights speech, actions, and named entities in real time.
-                Use <strong>Auto</strong> to let the app choose the right depth per chapter —
-                or pin a mode when you need deep analysis.
+                A <strong>fast pass</strong> runs as you type; when you pause, a{" "}
+                <strong>deeper pass</strong> quietly refines it. Click the orb to switch
+                the layer off when you want a plain page.
               </p>
             </OnbPage>
 

@@ -5,27 +5,33 @@ import {
   PlusIcon, DownloadIcon, UploadIcon, UsersIcon, FileTextIcon, AnnotateIcon, FolderIcon,
   MoreHorizontalIcon, UndoIcon, RedoIcon,
 } from "./Icon";
-import { OrbEngine, OrbBackGlow } from "./orb/OrbEngine";
+import { OrbEngine } from "./orb/OrbEngine";
 
 // ── Orb engine switch ──
-// false → the original CSS mesh-dot orb renders in the toolbar button
-//         (fully intact below and in styles.css).
-// The OrbBackGlow refraction layer is independent of this flag: it mounts
-// a WebGL orb *behind* the toolbar glass at the same position, so the
-// pill's liquid glass refracts it while the original orb stays on top.
-const USE_ORB_ENGINE: boolean = false;
+// true → the WebGL sheet-glass orb (OrbEngine) renders in the toolbar
+//        button. false restores the original CSS mesh-dot orb, which
+//        stays fully intact below and in styles.css.
+// The orb draws itself only — there is no longer a glow layer behind the
+// toolbar glass (removed on request; it also carried the app's single
+// most expensive filter, a live canvas re-rasterised through blur).
+const USE_ORB_ENGINE: boolean = true;
 
 export type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
 type OrbPalette = { a: string; b: string; c: string };
 type ResolvedIntelMode = Exclude<IntelMode, "off" | "auto">;
 
+// Converge-on-idle: the orb keeps its AUTO identity (the blue-led cycle) the
+// whole time intelligence is on, and only LEANS with the phase via the
+// resolved-level cycles: warm while the fast pass is current, violet while
+// the deep pass runs, back to the plain equal cycle (vivid) once converged.
+// "fast"/"high" here are phase copy for that lean, not pickable modes.
 const INTEL_MODE_COPY: Record<IntelMode, { label: string; description: string }> = {
   off:     { label: "Off",      description: "no highlighting" },
-  auto:    { label: "Auto",     description: "chooses the right depth per chapter" },
-  fast:    { label: "Fast",     description: "lightweight drafting feedback" },
-  default: { label: "Balanced", description: "everyday context-aware analysis" },
-  high:    { label: "High",     description: "deepest chapter analysis" },
+  auto:    { label: "On",       description: "live pass while typing, deep pass on pause" },
+  fast:    { label: "Live",     description: "fast pass shown, deepens when you pause" },
+  default: { label: "On",       description: "live pass while typing, deep pass on pause" },
+  high:    { label: "Refined",  description: "deep analysis is on screen" },
 };
 
 // 60 : 30 : 10 feel — a=dominant, b=complement, c=highlight accent.
@@ -63,8 +69,10 @@ const IDLE_PASSIVE_ORB_BODY_CLASS = "scroll-edge-idle";
 
 interface IntelBtnProps {
   mode: IntelMode;
-  /** When mode === "auto", the level the prescan currently resolves to. */
+  /** Converge phase lean — undefined means the pure equal cycle. */
   resolvedLevel?: ResolvedIntelMode;
+  /** Converged idle: equal cycle with a saturation lift. */
+  vivid?: boolean;
   onClick: () => void;
   analyzing: boolean;
   /** When true, overlays the bouncy gooey-eyes easter egg on the orb. */
@@ -77,6 +85,7 @@ interface IntelBtnProps {
 function IntelBtn({
   mode,
   resolvedLevel,
+  vivid,
   onClick,
   analyzing,
   funMode,
@@ -102,17 +111,18 @@ function IntelBtn({
   const underStyleVars = paletteStyleVars(!isAuto ? (underPalette ?? resolvedPalette) : underPalette);
   const accentStyleVars = paletteStyleVars(!isAuto ? (accentPalette ?? resolvedAccentPalette) : accentPalette);
   const fallbackStyleVars = topStyleVars;
-  const resolvedMode = resolvedLevel ?? "default";
   const activeModeCopy = INTEL_MODE_COPY[mode];
-  const resolvedModeCopy = INTEL_MODE_COPY[resolvedMode];
+  // Phase copy rides the lean: Live while the fast pass is current, Refined
+  // while/after the deep pass. No lean = converged idle, mode copy alone.
+  const phaseCopy = resolvedLevel ? INTEL_MODE_COPY[resolvedLevel] : null;
 
-  const ariaLabel = isAuto
-    ? `Intelligence mode: ${activeModeCopy.label} - ${activeModeCopy.description} (resolved to ${resolvedModeCopy.label})${analyzing ? " (analyzing)" : ""}`
-    : `Intelligence mode: ${activeModeCopy.label} - ${activeModeCopy.description}${analyzing ? " (analyzing)" : ""}`;
+  const ariaLabel = isAuto && phaseCopy
+    ? `Intelligence: ${activeModeCopy.label} - ${phaseCopy.description}${analyzing ? " (analyzing)" : ""}`
+    : `Intelligence: ${activeModeCopy.label} - ${activeModeCopy.description}${analyzing ? " (analyzing)" : ""}`;
 
-  const titleText = isAuto
-    ? `Intelligence: ${activeModeCopy.label} -> ${resolvedModeCopy.label} - ${activeModeCopy.description} (click to cycle)`
-    : `Intelligence: ${activeModeCopy.label} - ${activeModeCopy.description} (click to cycle)`;
+  const titleText = isAuto && phaseCopy
+    ? `Intelligence: ${activeModeCopy.label} · ${phaseCopy.label} - ${phaseCopy.description} (click to toggle)`
+    : `Intelligence: ${activeModeCopy.label} - ${activeModeCopy.description} (click to toggle)`;
 
   useEffect(() => {
     const body = document.body;
@@ -138,7 +148,7 @@ function IntelBtn({
 
   return (
     <button
-      className={`icon-btn intel-btn ${mode !== "off" ? "icon-btn-active" : ""} ${analyzing ? "intel-btn--analyzing" : ""} ${passiveOrbActive ? "intel-btn--passive-orb-active" : ""}`}
+      className={`icon-btn intel-btn ${mode !== "off" ? "icon-btn-active" : ""} ${analyzing ? "intel-btn--analyzing" : ""} ${vivid ? "intel-btn--vivid" : ""} ${passiveOrbActive ? "intel-btn--passive-orb-active" : ""}`}
       onClick={onClick}
       aria-label={ariaLabel}
       title={titleText}
@@ -146,11 +156,16 @@ function IntelBtn({
       <span className="intel-btn-inner">
         {USE_ORB_ENGINE ? (
           <span className="intel-orb-live intel-orb-live--engine">
+            {/* vibrance carries the converged-idle "vivid" lift (the JS
+                loop eases it, so the lift breathes in rather than snaps);
+                aberration sets the lens's dispersion depth. */}
             <OrbEngine
               mode={mode}
               resolvedLevel={resolvedLevel}
               analyzing={analyzing}
-              size={20}
+              size={26}
+              vibrance={vivid ? 0.9 : 0}
+              aberration={0.45}
             />
             {funMode && <IntelEyes />}
           </span>
@@ -163,7 +178,7 @@ function IntelBtn({
           <span
             className="intel-mesh-dot"
             data-mode={mode}
-            data-resolved={isAuto ? resolvedMode : undefined}
+            data-resolved={isAuto && resolvedLevel ? resolvedLevel : undefined}
             style={topStyleVars}
           >
             {renderOrbs()}
@@ -171,7 +186,7 @@ function IntelBtn({
           <span
             className="intel-mesh-dot intel-mesh-dot--accent"
             data-mode={mode}
-            data-resolved={isAuto ? resolvedMode : undefined}
+            data-resolved={isAuto && resolvedLevel ? resolvedLevel : undefined}
             style={accentStyleVars}
             aria-hidden="true"
           >
@@ -180,7 +195,7 @@ function IntelBtn({
           <span
             className="intel-mesh-dot intel-mesh-dot--ghost"
             data-mode={mode}
-            data-resolved={isAuto ? resolvedMode : undefined}
+            data-resolved={isAuto && resolvedLevel ? resolvedLevel : undefined}
             style={underStyleVars}
             aria-hidden="true"
           >
@@ -193,7 +208,7 @@ function IntelBtn({
         <span
           className="intel-mesh-fallback"
           data-mode={mode}
-          data-resolved={isAuto ? resolvedMode : undefined}
+          data-resolved={isAuto && resolvedLevel ? resolvedLevel : undefined}
           style={fallbackStyleVars}
           aria-hidden="true"
         >
@@ -235,7 +250,7 @@ function ToolbarOrbAmbient({
       <span
         className="toolbar-ambient-orb"
         data-mode={mode}
-        data-resolved={isAuto ? (resolvedLevel ?? "default") : undefined}
+        data-resolved={isAuto && resolvedLevel ? resolvedLevel : undefined}
         data-analyzing={analyzing ? "true" : undefined}
         style={ambientStyleVars}
       />
@@ -348,8 +363,11 @@ interface Props {
   onOpenProject: () => void;
   hasChapter: boolean;
   intelMode: IntelMode;
-  /** When intelMode === "auto", the level the prescan currently resolves to. */
+  /** Converge phase lean: "fast" while the live pass is current, "high"
+   *  while the deep pass runs; undefined = converged idle (no lean). */
   intelResolvedLevel?: "fast" | "default" | "high";
+  /** Converged-and-quiet: the orb sits on its own equal cycle, more vivid. */
+  intelVivid?: boolean;
   onCycleIntel: () => void;
   isAnalyzing: boolean;
   /** Fun-mode easter egg — overlays bouncy gooey eyes on the intel orb. */
@@ -391,7 +409,7 @@ export function Toolbar({
   currentIndex, totalChapters,
   onPrev, onNext, onOpenIndex, onOpenWorld, onAddChapter,
   onImport, onExport, onExportPdf, onOpenProject, hasChapter,
-  intelMode, intelResolvedLevel, onCycleIntel, isAnalyzing, funMode,
+  intelMode, intelResolvedLevel, intelVivid, onCycleIntel, isAnalyzing, funMode,
   groupTools = false,
   annotationMode, onToggleAnnotation,
   canUndo, canRedo, onUndo, onRedo,
@@ -550,14 +568,12 @@ export function Toolbar({
     <div ref={shellRef} className={`toolbar-shell${groupTools ? " toolbar-shell--grouped" : ""}`}>
       {groupTools ? (
         <div className="toolbar-grouped-layout">
-          {/* Painted before the glass pills → caught by their backdrop
-              filter, i.e. genuinely refracted by the glass. */}
-          <OrbBackGlow mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
           <div className="toolbar toolbar-group liquid-glass" data-liquid-glass-transient="true">
               {/*<ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />*/}
               <IntelBtn
                 mode={intelMode}
                 resolvedLevel={intelResolvedLevel}
+                vivid={intelVivid}
                 onClick={onCycleIntel}
                 analyzing={isAnalyzing}
                 funMode={funMode}
@@ -755,13 +771,12 @@ export function Toolbar({
         </div>
       ) : (
         <div className="toolbar-frame">
-          {/* Painted before the glass pill → refracted by its backdrop. */}
-          <OrbBackGlow mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} />
           <div className="toolbar liquid-glass">
             {/*<ToolbarOrbAmbient mode={intelMode} resolvedLevel={intelResolvedLevel} analyzing={isAnalyzing} /> */}
             <IntelBtn
               mode={intelMode}
               resolvedLevel={intelResolvedLevel}
+              vivid={intelVivid}
               onClick={onCycleIntel}
               analyzing={isAnalyzing}
               funMode={funMode}
