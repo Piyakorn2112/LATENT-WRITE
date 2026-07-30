@@ -470,6 +470,23 @@ function findVerb(words: string[]): VerbHit | null {
     if (PRE_VERB.has(w)) continue;
     // A determiner means we have walked into a noun phrase; the verb is behind
     // us and we failed to recognise it. Give up rather than guess.
+    //
+    // ★ This bail-out is the largest remaining loss in the whole narration path:
+    // it is why 345 of 590 entity subjects find no verb, almost all of them a
+    // subject carrying a prepositional post-modifier — "The register OF HIS
+    // BURIAL was signed", "The mention OF MARLEY'S FUNERAL brings me back". The
+    // verb really is still ahead there, so crossing the modifier looks like free
+    // recall.
+    //
+    // IT IS NOT, AND THIS WAS MEASURED, so do not re-derive it. A conservative
+    // skip (stop at any punctuation or relativiser, look ahead at most five
+    // tokens) recovered 17 entity subjects and 2 emitted events, of which ZERO
+    // landed on a gold event: precision 28.9% -> 28.6%, precision@4 and
+    // major-in-top-4 both unchanged. The pattern is real and the events are not.
+    // "The X of Y verbed" is overwhelmingly descriptive prose — Dickens
+    // inventories a room, Shelley describes a season — rather than something
+    // happening. Reverted; the code was ~40 lines and a false-attachment risk for
+    // no measured gain.
     if (DETERMINER.has(w)) return null;
     if (i > 0 && DETERMINER.has(stripTrailingPunct(words[i - 1]))) return null;
     if (!looksVerbal(raw)) {
@@ -585,6 +602,9 @@ const NP_BOUNDARY = new Set([
   "and", "or", "but", "nor", "so", "yet", "that", "which", "who", "whom",
   "whose", "where", "when", "while", "because", "if", "though", "although",
   "as", "unless", "whether",
+  // A pronoun opens a reduced relative clause, not more of the subject:
+  // "The hands she was thinking about" gave the head "she" without this.
+  "she", "he", "they", "it", "we", "i", "you", "him", "them", "her", "us", "me",
   // A second determiner or possessive opens a NEW noun phrase.
   "the", "a", "an", "this", "these", "those", "his", "her", "its", "their",
   "my", "our", "your", "some", "any", "no",
@@ -672,6 +692,11 @@ function findEntitySubject(clause: string): AgentHit | null {
     if (!bare || NP_BOUNDARY.has(bare)) break;
     // A verb-shaped token after at least one noun word IS the predicate starting.
     if (np.length > 0 && looksVerbal(bare)) break;
+    // The FIRST token is not checked the same way, because plenty of good heads
+    // look verbal to a suffix test ("The records", "The operations"). But an
+    // UNAMBIGUOUS verb form is never a noun, and letting those through produced
+    // subjects like "were dark" and "shook".
+    if (np.length === 0 && (IRREGULAR_PAST[bare] || STATE_VERBS.has(bare))) return null;
     np.push(bare);
     end = t.index + raw.length;
     // Trailing punctuation closes the phrase: "The fair girl, with a laugh…".
