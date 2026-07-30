@@ -50,8 +50,9 @@ do not extend it.
 
 Two suites, and they do different jobs:
 
-- `test:event-detect` scores **279 hand-annotated events across 41 chapters of
-  NINE books by eight authors** with ±1 paragraph tolerance.
+- `test:event-detect` scores **410 hand-annotated events across 66 chapters of
+  FOURTEEN books by thirteen authors** with ±1 paragraph tolerance, spanning
+  Victorian British, American modernist, Canadian YA and adventure registers.
   This is what you tune against. `--detail` prints every miss and false positive;
   `FLOOR=0.4` sweeps the operating point.
 - `audit:ood-events` reports label-free health over both whole manuscripts, split
@@ -78,8 +79,8 @@ moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@BUDGET**, where the budget
 is `TIMELINE_CHIP_BUDGET` in `narrative-events.ts` — currently 3. Current, on the
-nine-book set: precision@3 53.8%, major events SHOWN 20.9%, major events found
-anywhere 46.3%, overall precision 33.8%. Quote precision@3, and never quote a
+FOURTEEN-book set: precision@3 49.7%, major events SHOWN 22.4%, major events
+found anywhere 44.3%, overall precision 31.7%. Quote precision@3, and never quote a
 figure without saying which gold set produced it. Every smaller set was
 flattering: 1 author / 22 events gave precision 57.1%, and it meant nothing.
 

@@ -62,6 +62,13 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 //   67 events, 15 chapters, 4 books     precision 35.6%  major recall 35.9%  F1 33.3%
 //  103 events, 19 chapters, 8 BOOKS     precision 28.4%  major recall 27.1%  F1 26.2%
 //  279 events, 41 chapters, 9 BOOKS     precision 33.1%  major recall 39.6%  F1 34.9%
+//  410 events, 66 chapters, 14 BOOKS    precision 31.7%  major recall 44.3%  F1 35.7%
+//
+// The 14-book set is the first that changes the KIND of prose rather than adding
+// more of the same: Fitzgerald 1925, Cather 1918, Chopin 1899, Montgomery 1908
+// (Canadian YA) and Stevenson 1883 (adventure) against a set that had been 84%
+// 19th-century BRITISH. precision@3 fell 53.8% -> 49.7% and major-events-SHOWN
+// ROSE 20.9% -> 22.4%. Nothing regressed; the corpus stopped flattering.
 //
 // The 2026-07-31 expansion (2.7x, agent-annotated and machine-verified) moved
 // precision@3 50.9% -> 46.1% and major-events-SHOWN 22.0% -> 17.2% WITHOUT ANY
@@ -108,16 +115,16 @@ const TARGETS = {
    * numbers were gated, which meant the suite could stay green through a change
    * that made the visible output worse.
    */
-  precisionAtBudget: 0.51,
+  precisionAtBudget: 0.47,
   /** Of the events a chapter summary would mention, how many are actually SHOWN.
    *  The weakest number here by a distance, and the one the goal is about. */
-  majorInBudget: 0.19,
+  majorInBudget: 0.21,
   /** Of the events a chapter summary would mention, how many are found at all. */
-  majorRecall: 0.44,
+  majorRecall: 0.42,
   /** Of everything emitted, how much corresponds to a real event. Still the
    *  weakest number here, and expected to be: the engine deliberately emits more
    *  than the timeline shows and lets the ranking do the selecting. */
-  precision: 0.32,
+  precision: 0.30,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };

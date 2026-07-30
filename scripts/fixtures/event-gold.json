@@ -41,6 +41,510 @@
   },
   "chapters": [
     {
+      "book": "anne",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "Mrs. Rachel Lynde notices Matthew Cuthbert dressed in his best clothes and driving off unexpectedly, and when she visits Green Gables that evening to find out why, Marilla reveals that she and Matthew are adopting an orphan boy from Nova Scotia, a decision Rachel loudly condemns even as Marilla defends it.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "Matthew drives off dressed in his best clothes, an unheard-of departure from routine",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "introduction",
+          "evidence": "he wore a white collar and his best suit of clothes"
+        },
+        {
+          "paragraph": 6,
+          "summary": "Mrs. Rachel resolves to visit Green Gables to learn where Matthew has gone",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I’ll just step over to Green Gables after tea and find out"
+        },
+        {
+          "paragraph": 17,
+          "summary": "Marilla reveals that she and Matthew are adopting a boy from an orphan asylum",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "We’re getting a little boy from an orphan asylum in Nova Scotia"
+        },
+        {
+          "paragraph": 26,
+          "summary": "Mrs. Rachel confronts Marilla, condemning the adoption as reckless",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "I think you’re doing a mighty foolish thing"
+        },
+        {
+          "paragraph": 28,
+          "summary": "Marilla holds her ground, explaining she gave in because Matthew was set on it",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Matthew was terrible set on it"
+        }
+      ]
+    },
+    {
+      "book": "anne",
+      "chapter": 2,
+      "eventfulness": "moderate",
+      "whatHappens": "Matthew goes to meet the orphan boy at Bright River station and learns from the stationmaster that Mrs. Spencer left a girl instead, so, unable to leave her stranded, he decides to bring her home and let Marilla sort out the mistake.",
+      "events": [
+        {
+          "paragraph": 10,
+          "summary": "The stationmaster tells Matthew there has been a mistake: a girl was sent, not a boy",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Mrs. Spencer came off the train with that girl"
+        },
+        {
+          "paragraph": 18,
+          "summary": "Matthew decides to take Anne home rather than explain the mistake at the station",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "he would take her home and let Marilla do that"
+        }
+      ]
+    },
+    {
+      "book": "anne",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "Marilla is stunned to find Matthew has brought home a girl instead of a boy; Anne realizes they don't want her and bursts into tears, and Matthew unexpectedly argues that they should keep her, but Marilla firmly refuses and resolves to send Anne back.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "Marilla is astonished to see a girl instead of the expected boy",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Where is the boy?"
+        },
+        {
+          "paragraph": 9,
+          "summary": "Anne realizes they don't want her because she isn't a boy and bursts into tears",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "confrontation",
+          "evidence": "You don’t want me because I’m not a boy"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Marilla decides Anne may stay the night while the mistake is investigated",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "You’ll have to stay here until we investigate this affair"
+        },
+        {
+          "paragraph": 61,
+          "summary": "Matthew unexpectedly argues that they ought to keep Anne",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "We might be some good to her"
+        },
+        {
+          "paragraph": 66,
+          "summary": "Marilla firmly refuses and decides Anne must be sent back to the asylum",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I’m not going to keep her"
+        }
+      ]
+    },
+    {
+      "book": "anne",
+      "chapter": 4,
+      "eventfulness": "quiet",
+      "whatHappens": "Anne wakes delighted by Green Gables but refuses to go outside and explore for fear of loving a place she must leave; Marilla confirms she will drive Anne to White Sands that afternoon to settle the matter with Mrs. Spencer, and as they depart Matthew quietly hires a boy for the farm, hinting he still hopes to keep Anne.",
+      "events": [
+        {
+          "paragraph": 32,
+          "summary": "Anne refuses to go outside, afraid of loving Green Gables before being sent away",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I don’t dare go out"
+        },
+        {
+          "paragraph": 41,
+          "summary": "Marilla confirms she will drive Anne to White Sands that afternoon to settle the mistake",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I’m going to drive over to White Sands and settle this thing"
+        },
+        {
+          "paragraph": 44,
+          "summary": "Matthew reveals he has hired a boy for the summer, hinting he still hopes to keep Anne",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I told him I guessed I’d hire him for the summer"
+        }
+      ]
+    },
+    {
+      "book": "anne",
+      "chapter": 5,
+      "eventfulness": "quiet",
+      "whatHappens": "During the drive to White Sands, Anne recounts her loveless, itinerant childhood among indifferent guardians, and Marilla, reading between the lines, begins to feel pity that makes her reconsider sending Anne back.",
+      "events": [
+        {
+          "paragraph": 22,
+          "summary": "Marilla begins to feel pity for Anne and reconsiders sending her away",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Pity was suddenly stirring in her heart for the child"
+        }
+      ]
+    },
+    {
+      "book": "antonia",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "In a frame introduction, the narrator and her old friend Jim Burden agree to each write down what they remember of a Bohemian girl named Ántonia, and months later Jim arrives with his own finished manuscript, titled 'My Ántonia', which the narrator never matched with one of her own.",
+      "events": [
+        {
+          "paragraph": 8,
+          "summary": "The narrator agrees to write down her memories of Ántonia if Jim does the same",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "introduction",
+          "evidence": "I would set down on paper all that I remembered of Ántonia"
+        },
+        {
+          "paragraph": 11,
+          "summary": "Jim arrives at the narrator's apartment with his finished manuscript about Ántonia",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "Jim Burden arrived at my apartment one stormy winter afternoon"
+        },
+        {
+          "paragraph": 13,
+          "summary": "The narrator admits her own account never progressed beyond a few notes",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "mine had not gone beyond a few straggling notes"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Jim titles his manuscript 'My Ántonia'",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "prefixed another word, making it “My Ántonia.”"
+        }
+      ]
+    },
+    {
+      "book": "antonia",
+      "chapter": 2,
+      "eventfulness": "quiet",
+      "whatHappens": "Ten-year-old Jim Burden, newly orphaned, travels west by train to live with his grandparents in Nebraska; on the way a conductor tells him of an immigrant family with a girl his age bound for the same district, and after the train reaches Black Hawk at night, the hired man Otto Fuchs meets Jim and Jake to drive them the rest of the way to the farm.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "A conductor tells Jim about an immigrant girl near his own age heading to the same district",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "introduction",
+          "evidence": "She’s not much older than you, twelve or thirteen"
+        },
+        {
+          "paragraph": 7,
+          "summary": "The train reaches Black Hawk at night and Jim disembarks into the darkness",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "when we reached Black Hawk"
+        },
+        {
+          "paragraph": 8,
+          "summary": "Otto Fuchs meets Jim and Jake at the station to drive them to the farm",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "I’m Mr. Burden’s hired man, and I’m to drive you out."
+        }
+      ]
+    },
+    {
+      "book": "antonia",
+      "chapter": 3,
+      "eventfulness": "moderate",
+      "whatHappens": "Jim arrives at his grandparents' Nebraska farm and is welcomed by his grandmother and grandfather; his grandmother tells him a new Bohemian family will be their nearest neighbors, Otto Fuchs reveals a pony has been bought for him, and Jim chooses to spend his first morning alone in the garden, overtaken by a strange contentment.",
+      "events": [
+        {
+          "paragraph": 1,
+          "summary": "Jim arrives at his grandfather's farm and wakes to meet his grandmother",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "our arrival at my grandfather’s farm sometime before daybreak"
+        },
+        {
+          "paragraph": 7,
+          "summary": "Grandmother tells Jim the new Bohemian family will be their nearest neighbors",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "introduction",
+          "evidence": "she said they were to be our nearest neighbours"
+        },
+        {
+          "paragraph": 11,
+          "summary": "Otto reveals that a pony has been bought for Jim",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "transition",
+          "evidence": "about a pony down in the barn that had been bought"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Jim chooses to stay alone in the garden rather than go back with grandmother",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I would like to stay up there in the garden awhile"
+        }
+      ]
+    },
+    {
+      "book": "antonia",
+      "chapter": 4,
+      "eventfulness": "eventful",
+      "whatHappens": "The Burden household visits their new Bohemian neighbors, the Shimerdas, bringing provisions; Jim meets Ántonia and her family, discovers her brother Marek's webbed hands, refuses Ántonia's offered ring, and the chapter closes with Mr. Shimerda begging grandmother to teach his daughter English.",
+      "events": [
+        {
+          "paragraph": 9,
+          "summary": "The Burdens arrive at the Shimerdas' dugout and meet the family for the first time",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "a woman and a girl of fourteen ran out and looked up"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Jim discovers that Ántonia's brother Marek has webbed fingers",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "his fingers, which were webbed to the first knuckle"
+        },
+        {
+          "paragraph": 16,
+          "summary": "Ántonia takes Jim's hand and the two run off together, beginning their friendship",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "introduction",
+          "evidence": "Ántonia came up to me and held out her hand coaxingly"
+        },
+        {
+          "paragraph": 21,
+          "summary": "Jim refuses Ántonia's offer of her silver ring",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I repulsed her quite sternly."
+        },
+        {
+          "paragraph": 23,
+          "summary": "Mr. Shimerda begs grandmother to teach Ántonia English",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "Te-e-ach, te-e-ach my Ántonia!"
+        }
+      ]
+    },
+    {
+      "book": "awakening",
+      "chapter": 1,
+      "eventfulness": "quiet",
+      "whatHappens": "Mr. Pontellier heads off to Klein's Hotel to gamble and play billiards, leaving his wife Edna on the porch with young Robert Lebrun, who chooses to stay and talk with her instead of joining him.",
+      "events": [
+        {
+          "paragraph": 13,
+          "summary": "Robert declines to join Mr. Pontellier at billiards, choosing to stay and talk with Edna",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "he preferred to stay where he was and talk to Mrs. Pontellier"
+        },
+        {
+          "paragraph": 16,
+          "summary": "Mr. Pontellier leaves for Klein's Hotel, uncertain whether he will return for dinner",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "perhaps he would return for the early dinner and perhaps he would not"
+        }
+      ]
+    },
+    {
+      "book": "awakening",
+      "chapter": 2,
+      "eventfulness": "quiet",
+      "whatHappens": "Edna and Robert spend the afternoon talking on the porch, sharing their backgrounds, and Edna reads a letter announcing that her sister has become engaged.",
+      "events": [
+        {
+          "paragraph": 8,
+          "summary": "Edna reads a letter revealing that her sister has become engaged to be married",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "who had engaged herself to be married"
+        }
+      ]
+    },
+    {
+      "book": "awakening",
+      "chapter": 3,
+      "eventfulness": "quiet",
+      "whatHappens": "Mr. Pontellier comes home late from gambling and, wrongly convinced their son has a fever, scolds Edna for neglecting the children; the next morning he leaves for the city, gives her half his winnings, and later sends a box of gifts from New Orleans.",
+      "events": [
+        {
+          "paragraph": 1,
+          "summary": "Mr. Pontellier returns from Klein's late at night and wakes Edna",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "It was eleven o’clock that night when Mr. Pontellier returned from Klein’s hotel."
+        },
+        {
+          "paragraph": 6,
+          "summary": "Mr. Pontellier reproaches Edna for neglecting the children, wrongly convinced their son Raoul has a fever",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "He reproached his wife with her inattention, her habitual neglect of the children."
+        },
+        {
+          "paragraph": 13,
+          "summary": "Mr. Pontellier departs the next morning for the city, not to return until Saturday",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "they would not see him again at the Island till the coming Saturday"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Mr. Pontellier gives Edna half of his winnings from Klein's before leaving",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Mr. Pontellier gave his wife half of the money which he had brought away from Klein’s hotel"
+        },
+        {
+          "paragraph": 18,
+          "summary": "A box of delicacies arrives for Edna from her husband a few days later",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "A few days later a box arrived for Mrs. Pontellier from New Orleans."
+        }
+      ]
+    },
+    {
+      "book": "awakening",
+      "chapter": 10,
+      "eventfulness": "moderate",
+      "whatHappens": "Out on the porch late at night, Edna repeatedly refuses her husband Léonce's orders to come inside, and rather than force her he waits her out with wine and cigars until she finally rises and goes in at dawn of her own accord.",
+      "events": [
+        {
+          "paragraph": 16,
+          "summary": "Edna defies her husband's repeated commands, refusing to come inside from the hammock",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "I mean to stay out here. I don’t wish to go in, and I don’t intend to."
+        },
+        {
+          "paragraph": 17,
+          "summary": "Rather than force the issue, Mr. Pontellier settles onto the gallery to drink wine and smoke, waiting her out",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "He drank a glass of the wine and went out on the gallery"
+        },
+        {
+          "paragraph": 20,
+          "summary": "At dawn, Edna finally rises from the hammock and goes inside on her own terms",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "Edna arose, cramped from lying so long and still in the hammock."
+        }
+      ]
+    },
+    {
+      "book": "awakening",
+      "chapter": 16,
+      "eventfulness": "eventful",
+      "whatHappens": "At dinner, Edna admits she skipped her reception day without excuse, provoking Léonce's rebuke about social convention; when the meal displeases him he storms out to dine at his club, and alone afterward Edna tears off her wedding ring and smashes a vase in a rage, though she quietly puts the ring back on when the maid retrieves it.",
+      "events": [
+        {
+          "paragraph": 10,
+          "summary": "Edna admits she deliberately went out on her reception day instead of receiving callers",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I simply felt like going out, and I went out."
+        },
+        {
+          "paragraph": 13,
+          "summary": "Léonce reproaches Edna for not observing social conventions on her reception day",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "we’ve got to observe _les convenances_ if we ever expect to get on and keep up with the procession"
+        },
+        {
+          "paragraph": 28,
+          "summary": "Dissatisfied with the dinner, Léonce gets up without eating and leaves for the club",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "climax",
+          "evidence": "I’m going to get my dinner at the club. Good night."
+        },
+        {
+          "paragraph": 31,
+          "summary": "Alone, Edna tears off her wedding ring and flings it to the floor, trying to crush it",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "taking off her wedding ring, flung it upon the carpet"
+        },
+        {
+          "paragraph": 32,
+          "summary": "In a rage, Edna seizes a glass vase and smashes it on the hearth",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "she seized a glass vase from the table and flung it upon the tiles of the hearth"
+        },
+        {
+          "paragraph": 36,
+          "summary": "Edna takes the ring back from the maid and slips it back onto her finger",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "taking the ring, slipped it upon her finger"
+        }
+      ]
+    },
+    {
       "book": "carol",
       "chapter": 1,
       "eventfulness": "moderate",
@@ -1345,6 +1849,286 @@
       ]
     },
     {
+      "book": "gatsby",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "Nick has dinner with Tom and Daisy Buchanan and meets Jordan Baker, learns during the evening that Tom has a mistress in New York, hears Daisy's bitter confession about her marriage, and afterward glimpses his neighbor Gatsby reaching toward a green light across the bay before he disappears.",
+      "events": [
+        {
+          "paragraph": 19,
+          "summary": "Nick drives to East Egg for dinner with the Buchanans",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "I drove over to East Egg to see two old friends"
+        },
+        {
+          "paragraph": 61,
+          "summary": "Jordan tells Nick he must know Gatsby, startling Daisy",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "introduction",
+          "evidence": "You must know Gatsby."
+        },
+        {
+          "paragraph": 92,
+          "summary": "Tom is called away and abruptly goes inside after a word from the butler",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "Tom frowned, pushed back his chair, and without a word went inside."
+        },
+        {
+          "paragraph": 101,
+          "summary": "Jordan reveals that Tom has a mistress in New York",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Tom’s got some woman in New York."
+        },
+        {
+          "paragraph": 119,
+          "summary": "Daisy confesses her disillusionment, recalling she wished her newborn daughter would be a fool",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I hope she’ll be a fool"
+        },
+        {
+          "paragraph": 130,
+          "summary": "Nick recognizes Miss Baker as the golfer Jordan Baker and recalls an unpleasant scandal about her",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I had heard some story of her too, a critical, unpleasant story"
+        },
+        {
+          "paragraph": 149,
+          "summary": "Nick denies the rumor that he is engaged to a girl out West",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "transition",
+          "evidence": "It’s a libel. I’m too poor."
+        },
+        {
+          "paragraph": 154,
+          "summary": "Nick watches Gatsby reach toward a green light across the water before he vanishes",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "climax",
+          "evidence": "he stretched out his arms toward the dark water in a curious way"
+        }
+      ]
+    },
+    {
+      "book": "gatsby",
+      "chapter": 2,
+      "eventfulness": "moderate",
+      "whatHappens": "Tom takes Nick to New York, where Nick meets Tom's mistress Myrtle Wilson and joins a raucous party at the apartment Tom keeps for her; the evening ends when Tom breaks Myrtle's nose after she taunts him with Daisy's name.",
+      "events": [
+        {
+          "paragraph": 5,
+          "summary": "Tom pulls Nick off the train to introduce him to his mistress, Myrtle Wilson",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "I want you to meet my girl."
+        },
+        {
+          "paragraph": 18,
+          "summary": "Tom secretly arranges to meet Myrtle on the next train to New York, in front of her unwitting husband",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Get on the next train."
+        },
+        {
+          "paragraph": 81,
+          "summary": "Catherine tells Nick the rumor that Gatsby is a nephew or cousin of Kaiser Wilhelm, the source of his wealth",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "they say he’s a nephew or a cousin of Kaiser Wilhelm’s"
+        },
+        {
+          "paragraph": 98,
+          "summary": "Nick realizes Catherine's claim about Daisy's Catholicism is an invented lie",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Daisy was not a Catholic, and I was a little shocked at the elaborateness of the lie."
+        },
+        {
+          "paragraph": 125,
+          "summary": "Tom and Myrtle argue over whether she has any right to say Daisy's name",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "whether Mrs. Wilson had any right to mention Daisy’s name"
+        },
+        {
+          "paragraph": 127,
+          "summary": "Tom breaks Myrtle's nose with a blow after she keeps shouting Daisy's name",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "Tom Buchanan broke her nose with his open hand"
+        }
+      ]
+    },
+    {
+      "book": "gatsby",
+      "chapter": 3,
+      "eventfulness": "moderate",
+      "whatHappens": "At one of Gatsby's parties, Nick finally meets his mysterious host face to face and watches him pulled away for a private word with Jordan Baker that leaves her stunned; spending more time with Jordan afterward, Nick discovers she is fundamentally dishonest.",
+      "events": [
+        {
+          "paragraph": 8,
+          "summary": "Gatsby sends Nick a formal written invitation to his party",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "introduction",
+          "evidence": "the honour would be entirely Gatsby’s, it said, if I would attend his"
+        },
+        {
+          "paragraph": 73,
+          "summary": "The man Nick has been talking to all evening reveals that he is Gatsby",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "“I’m Gatsby,” he said suddenly."
+        },
+        {
+          "paragraph": 77,
+          "summary": "Gatsby is called away from the party to take a phone call from Chicago",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "a butler hurried toward him with the information that Chicago was calling him on the wire"
+        },
+        {
+          "paragraph": 96,
+          "summary": "Gatsby's butler summons Jordan to speak with Gatsby alone",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Mr. Gatsby would like to speak to you alone."
+        },
+        {
+          "paragraph": 113,
+          "summary": "Jordan emerges from her private talk with Gatsby, stunned by what she has just heard",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I’ve just heard the most amazing thing"
+        },
+        {
+          "paragraph": 123,
+          "summary": "A car that just left Gatsby's party crashes in a ditch outside the gate",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "scene-break",
+          "evidence": "rested a new coupé which had left Gatsby’s drive not two minutes before"
+        },
+        {
+          "paragraph": 160,
+          "summary": "Nick catches Jordan in a lie about a rain-damaged borrowed car and realizes she is fundamentally dishonest",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "she left a borrowed car out in the rain with the top down, and then lied about it"
+        },
+        {
+          "paragraph": 171,
+          "summary": "Jordan deliberately shifts her relationship with Nick, saying she likes him because he is careful",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "she had deliberately shifted our relations"
+        }
+      ]
+    },
+    {
+      "book": "gatsby",
+      "chapter": 4,
+      "eventfulness": "eventful",
+      "whatHappens": "Gatsby takes Nick to lunch in New York, telling him an elaborate life story and introducing him to the gambler Meyer Wolfshiem, who fixed the 1919 World Series; Nick then meets Tom Buchanan by chance, and later hears from Jordan Baker that Gatsby and Daisy were young lovers in Louisville, that Daisy nearly called off her wedding to Tom in a drunken panic, and that Gatsby bought his mansion just to be near her again and now wants Nick to invite her to tea.",
+      "events": [
+        {
+          "paragraph": 43,
+          "summary": "Nick is momentarily convinced that Gatsby's account of his wealthy background and war heroics is true",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "introduction",
+          "evidence": "Then it was all true."
+        },
+        {
+          "paragraph": 53,
+          "summary": "A motorcycle policeman stops Gatsby for speeding but waves him on after recognizing him",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Know you next time, Mr. Gatsby. Excuse me!"
+        },
+        {
+          "paragraph": 81,
+          "summary": "Wolfshiem mistakes Nick for someone seeking a business connection through Gatsby",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I understand you’re looking for a business gonnegtion."
+        },
+        {
+          "paragraph": 115,
+          "summary": "Gatsby reveals that his associate Wolfshiem is the gambler who fixed the 1919 World Series",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "He’s the man who fixed the World’s Series back in 1919."
+        },
+        {
+          "paragraph": 127,
+          "summary": "Nick introduces Gatsby to Tom Buchanan, and the two men meet for the first time",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "introduction",
+          "evidence": "a strained, unfamiliar look of embarrassment came over Gatsby’s face"
+        },
+        {
+          "paragraph": 138,
+          "summary": "Jordan's story reveals that the young officer Daisy loved in Louisville in 1917 was Gatsby",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "His name was Jay Gatsby, and I didn’t lay eyes on him again for over four years"
+        },
+        {
+          "paragraph": 145,
+          "summary": "Drunk the night before her wedding, Daisy tries to give back Tom's pearls and call off the marriage",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "Take ’em downstairs and give ’em back to whoever they belong to."
+        },
+        {
+          "paragraph": 157,
+          "summary": "Jordan reveals that Gatsby bought his mansion solely to be near Daisy and wants Nick to invite her to tea",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Gatsby bought that house so that Daisy would be just across the bay."
+        },
+        {
+          "paragraph": 174,
+          "summary": "Nick draws Jordan close and kisses her as they drive through the park",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "so I drew her up again closer, this time to my face"
+        }
+      ]
+    },
+    {
       "book": "hollow-iris",
       "chapter": 1,
       "eventfulness": "quiet",
@@ -2349,6 +3133,470 @@
           "type": "departure",
           "legacyType": "climax",
           "evidence": "from the window we could see Mr. James Windibank running at the top of his speed down the road"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "An old, secretive sea captain takes lodging at the Admiral Benbow, pays Jim to watch for a one-legged seaman, and one night draws a knife on Dr. Livesey before backing down under threat of the gallows.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "The old sea captain arrives at the inn and takes lodging",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "came plodding to the inn door, his sea-chest following behind him"
+        },
+        {
+          "paragraph": 8,
+          "summary": "Captain declares he'll stay and pays with gold coins on account",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I’ll stay here a bit"
+        },
+        {
+          "paragraph": 10,
+          "summary": "Captain pays Jim to watch for a one-legged seafaring man",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "revelation",
+          "evidence": "keep my “weather-eye open for a seafaring man with one leg”"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Captain draws a knife and threatens to pin the doctor to the wall",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "threatened to pin the doctor to the wall"
+        },
+        {
+          "paragraph": 22,
+          "summary": "Captain backs down, puts away his knife, and returns to his seat",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the captain soon knuckled under, put up his weapon"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "A stranger called Black Dog corners the ailing captain at the inn; the two fight with cutlasses until Black Dog flees wounded, and the shock brings on a stroke that Dr. Livesey treats, warning the captain that more rum will kill him.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "A pale stranger (Black Dog) enters the inn asking for the captain",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "a man stepped in on whom I had never set my eyes"
+        },
+        {
+          "paragraph": 18,
+          "summary": "Captain turns pale and sick with fear on seeing Black Dog",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "all the brown had gone out of his face"
+        },
+        {
+          "paragraph": 29,
+          "summary": "Captain and Black Dog fight with cutlasses; Black Dog is wounded",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "the captain hotly pursuing, both with drawn cutlasses"
+        },
+        {
+          "paragraph": 30,
+          "summary": "Black Dog escapes over the hill despite his wound",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "disappeared over the edge of the hill in half a minute"
+        },
+        {
+          "paragraph": 34,
+          "summary": "The captain collapses, felled by a stroke, after the fight",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "beheld the captain lying full length upon the floor"
+        },
+        {
+          "paragraph": 36,
+          "summary": "Dr. Livesey arrives just as the stricken captain needs help",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "the door opened and Doctor Livesey came in"
+        },
+        {
+          "paragraph": 46,
+          "summary": "Doctor warns the captain that more rum will kill him",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "if you don’t break off short, you’ll die"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "The dying captain confides to Jim that he was Flint's first mate and guards a treasure secret; Jim's father dies that night; the next day a blind beggar forces his way in and delivers the black spot, and the shock kills the captain on the spot.",
+      "events": [
+        {
+          "paragraph": 7,
+          "summary": "Jim agrees to bring the captain just one glass of rum",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I’ll get you one glass, and no more"
+        },
+        {
+          "paragraph": 17,
+          "summary": "Captain reveals he was old Flint's first mate and knows the treasure's secret",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I was first mate, I was, old Flint’s first mate"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Jim's father dies suddenly that evening",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "my poor father died quite suddenly that evening"
+        },
+        {
+          "paragraph": 22,
+          "summary": "A blind beggar appears on the road outside the inn",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "He was plainly blind, for he tapped before him with a stick"
+        },
+        {
+          "paragraph": 28,
+          "summary": "Blind man threatens to break Jim's arm unless led to the captain",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "Take me in straight or I’ll break your arm."
+        },
+        {
+          "paragraph": 34,
+          "summary": "Blind man secretly presses the black spot into the captain's hand",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "into the palm of the captain’s, which closed upon it instantly"
+        },
+        {
+          "paragraph": 35,
+          "summary": "Blind man slips away as swiftly as he came",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "skipped out of the parlour and into the road"
+        },
+        {
+          "paragraph": 39,
+          "summary": "The captain dies of a sudden stroke (apoplexy)",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "The captain had been struck dead by thundering apoplexy"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 4,
+      "eventfulness": "eventful",
+      "whatHappens": "With the neighbours too frightened to help, Jim and his mother return alone to the inn, find the black spot's deadline and the chest's key, and discover gold and a papers packet in the captain's chest before fleeing just ahead of returning smugglers, hiding under a bridge when Jim's mother faints.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "Villagers refuse to help defend the inn against the smugglers",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "no soul would consent to return with us to the Admiral Benbow"
+        },
+        {
+          "paragraph": 5,
+          "summary": "Jim's mother resolves that she and Jim will go back to the inn alone",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "We’ll have that chest open, if we die for it."
+        },
+        {
+          "paragraph": 10,
+          "summary": "The black spot's message reveals a ten o'clock deadline",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "You have till ten tonight."
+        },
+        {
+          "paragraph": 15,
+          "summary": "They find the captain's chest key hidden on a string around his neck",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "hanging to a bit of tarry string"
+        },
+        {
+          "paragraph": 19,
+          "summary": "They discover an oilcloth packet of papers and a bag of gold in the chest",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "revelation",
+          "evidence": "a bundle tied up in oilcloth, and looking like papers"
+        },
+        {
+          "paragraph": 22,
+          "summary": "The blind man tries the bolted door but fails to get in",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "confrontation",
+          "evidence": "the handle being turned and the bolt rattling"
+        },
+        {
+          "paragraph": 26,
+          "summary": "Jim grabs the oilskin packet as they flee the inn",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I’ll take this to square the count"
+        },
+        {
+          "paragraph": 29,
+          "summary": "Jim's mother faints; he drags her under a bridge to hide from the pursuers",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "drag her down the bank and a little way under the arch"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 5,
+      "eventfulness": "eventful",
+      "whatHappens": "Buccaneers led by the blind Pew break into the inn and find the treasure item already gone; a warning signal scatters them, and Pew is trampled to death by arriving revenue officers, who then chase the smugglers' lugger to Kitt's Hole but let it escape after being fired on.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "Blind man orders the buccaneers to break down the inn door",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "Down with the door!"
+        },
+        {
+          "paragraph": 10,
+          "summary": "Buccaneers discover the treasure item ('Flint's fist') is missing from the chest",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "they’ve been before us. Someone’s turned the chest out alow and aloft."
+        },
+        {
+          "paragraph": 21,
+          "summary": "A warning whistle sounds twice, signalling danger to the buccaneers",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "a signal to warn them of approaching danger"
+        },
+        {
+          "paragraph": 28,
+          "summary": "Pew, enraged, strikes his own men with his stick",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "he struck at them right and left in his blindness"
+        },
+        {
+          "paragraph": 30,
+          "summary": "The buccaneers panic and scatter, abandoning Pew",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "the buccaneers turned at once and ran, separating in every direction"
+        },
+        {
+          "paragraph": 31,
+          "summary": "Riders (revenue officers) appear, galloping down the slope",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "four or five riders came in sight in the moonlight"
+        },
+        {
+          "paragraph": 33,
+          "summary": "Pew is trampled under the horses and dies",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "He fell on his side, then gently collapsed upon his face"
+        },
+        {
+          "paragraph": 35,
+          "summary": "The lugger escapes after firing a shot near Supervisor Dance",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "a bullet whistled close by his arm"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 12,
+      "eventfulness": "moderate",
+      "whatHappens": "The Hispaniola sights Treasure Island; Silver, recognizing the place, conceals his disappointment that the captain's chart omits the treasure markings; Jim secretly warns Dr. Livesey, then reveals Silver's mutiny plot to the officers, who realize they are outnumbered and decide to wait rather than risk open conflict.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "The crew sights land: the hills of Treasure Island",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "we saw two low hills, about a couple of miles apart"
+        },
+        {
+          "paragraph": 10,
+          "summary": "Silver hides his disappointment that the chart lacks the treasure markings",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Silver had the strength of mind to hide it"
+        },
+        {
+          "paragraph": 16,
+          "summary": "Jim secretly asks Dr. Livesey to arrange a private meeting, hinting at terrible news",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I have terrible news."
+        },
+        {
+          "paragraph": 20,
+          "summary": "Captain announces a toast as pretext to gather the officers in the cabin",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "he and I and the doctor are going below to the cabin"
+        },
+        {
+          "paragraph": 27,
+          "summary": "Jim reveals the full details of Silver's mutiny plot to the officers",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "told the whole details of Silver’s conversation"
+        },
+        {
+          "paragraph": 30,
+          "summary": "The squire admits he was wrong and defers to the captain",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "you were right, and I was wrong"
+        },
+        {
+          "paragraph": 42,
+          "summary": "Captain decides they must wait and avoid open conflict for now",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "Lay to, and whistle for a wind, that’s my view."
+        },
+        {
+          "paragraph": 45,
+          "summary": "They realize only seven of twenty-six aboard can be trusted",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "the grown men on our side were six to their nineteen"
+        }
+      ]
+    },
+    {
+      "book": "treasure",
+      "chapter": 14,
+      "eventfulness": "eventful",
+      "whatHappens": "Jim secretly watches Silver try to win over the honest hand Tom, who refuses and, after hearing a scream that signals a shipmate's murder, openly renounces Silver; Silver clubs Tom down with his crutch and finishes him with a knife, then whistles for reinforcements as Jim flees in terror.",
+      "events": [
+        {
+          "paragraph": 15,
+          "summary": "Tom refuses to join Silver's mutiny despite the danger",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "I’d sooner lose my hand"
+        },
+        {
+          "paragraph": 16,
+          "summary": "A horrible scream from the marsh signals that Alan has been killed",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "then one horrid, long-drawn scream"
+        },
+        {
+          "paragraph": 23,
+          "summary": "Tom openly renounces Silver and turns to walk away",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "you’re mate of mine no more"
+        },
+        {
+          "paragraph": 24,
+          "summary": "Silver hurls his crutch, striking Tom down with a stunning blow",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "struck poor Tom, point foremost, and with stunning violence"
+        },
+        {
+          "paragraph": 25,
+          "summary": "Silver finishes Tom off, stabbing him twice with his knife",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "twice buried his knife up to the hilt"
+        },
+        {
+          "paragraph": 28,
+          "summary": "Silver blows a whistle to summon more of the crew",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "brought out a whistle, and blew upon it several modulated blasts"
+        },
+        {
+          "paragraph": 29,
+          "summary": "Jim flees the hiding place, running as fast as he can",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "I ran as I never ran before"
         }
       ]
     },
