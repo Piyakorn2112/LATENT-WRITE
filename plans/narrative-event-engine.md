@@ -289,6 +289,42 @@ of these numbers should be quoted as generalisation.
 
 ---
 
+## 4a · STATUS CORRECTIONS (this document went stale within one commit)
+
+Read this before section 5. An architecture pass caught the doc describing its
+own unfinished work as future when it had already shipped, which is exactly how a
+plan file becomes misleading.
+
+**The LM salience pass is DONE, not future.** `refineEventSalience` is in
+`narrative-events.ts` and wired through `story-graph.ts`. It took precision from
+32.8% to 41.7% on the set current at the time.
+
+**The numbers throughout this document are from a ONE-AUTHOR gold set and are
+optimistic.** The current measurement, on 103 events across 19 chapters of EIGHT
+books by seven authors:
+
+| | value |
+|---|---|
+| major events found anywhere | 40.7% |
+| major events reaching the top four chips | **22.0%** |
+| precision over all output | 25.5% |
+| precision@4, what a writer sees | 31.1% |
+| labels fitting the timeline uncut | 100% |
+
+**The named next defect is the RANKING, not precision or recall.** Major-event
+coverage in the top four (22.0%) is about half what the engine finds overall
+(40.7%), so confidence is close to uninformative about correctness and the engine
+buries real events under false ones. Until that is fixed, further recall work
+barely reaches the writer.
+
+**One performance fact this document should have carried.** The intelligence
+tier dial described in the README no longer exists. `intelMode` is off/auto, and
+auto CONVERGES: a fast pass on every edit, then the `high` pass replaces it when
+the writer pauses (`src/App.tsx:306`, `src/lib/use-analysis.ts:96-100`). So the
+expensive tier is the default on every pause, and event detection rides that
+pipeline. The one-entry memo in `detectNarrativeEvents` means unchanged content is
+free, but an edit followed by a pause re-detects the whole chapter.
+
 ## 5 · The LLM path, and why it is not in this change
 
 The brief was to try the heuristic route first. That is what shipped. This is the
