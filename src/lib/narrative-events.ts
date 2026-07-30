@@ -1105,7 +1105,22 @@ function detectNarrativeEventsUncached(
   // put a hard ceiling of 44% on recall for the eventful one. Return everything
   // that clears the confidence floor, ranked, and let each surface slice what it
   // has room for.
-  const cap = options.maxEvents ?? Math.max(3, Math.min(10, Math.ceil(paraCount / 6)));
+  // ★ The ENGINE must not enforce the timeline's chip budget, and this cap was
+  // doing exactly that. `min(10, ceil(paraCount / 6))` gives a 30-paragraph
+  // chapter five events; the gold annotation for one such chapter has EIGHT, so
+  // the cap alone held recall to 5/8 before a single scoring rule was consulted.
+  // On a 215-paragraph Sherlock story it allowed ten events across 258 paragraphs
+  // and every one of that chapter's eight major events was missed.
+  //
+  // Measured, raising it:
+  //     cap 10   major recall 28.8%   precision 31.2%
+  //     cap 40   major recall 40.7%   precision 25.5%
+  //
+  // Overall precision falls because it is computed over everything emitted. But
+  // the timeline renders the top four BY CONFIDENCE, so what a writer actually
+  // sees is precision@4, which the suite now reports separately. Return the
+  // ranked list; let each surface slice what it has room for.
+  const cap = options.maxEvents ?? Math.max(6, Math.min(40, Math.ceil(paraCount / 3)));
   return selectEvents(candidates, paraCount, cap, options.confidenceFloor ?? CONFIDENCE_FLOOR);
 }
 
