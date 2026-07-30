@@ -567,6 +567,24 @@ function findDirectName(
     const invRe = cache ? cache.getDirectInvRe(name) : new RegExp(`\\b${SPEECH_VERB_PAT}\\b[^.!?\u201c\u201d\u201e\u2018\u2019"']{0,70}\\b${esc(name)}\\b(?!['’]s)`, 'i');
     if (invRe.test(text)) return name;
   }
+  // ★ PRECEDENCE NOTE, MEASURED. Generic speakers resolve AFTER known names, so a
+  // named character anywhere in the 120-char forward / 70-char inverse window
+  // beats the words actually touching the speech verb. That looks like the cause
+  // of HIGH mode being the worst of the three on definite descriptions (33 wrong
+  // vs fast's 16 on the 16-book corpus) — high reads six paragraphs of context
+  // where fast reads one, so it finds more distant names to prefer.
+  //
+  // Putting an ADJACENT generic match first was tried and LOST in every mode:
+  // correct 176 -> 173, wrong 16 -> 19 (fast) and 33 -> 36 (high), and it cost a
+  // bulk easy-case answer too. The rule fires on "the doctor said" where the
+  // doctor IS a named character, which is common. Reverted.
+  //
+  // So the ordering is not the bug, or not the whole bug. The remaining suspects
+  // are high-only and upstream of here: extCtxDepth 6 vs fast's 1,
+  // maxRecentSpeakers 10 vs 3, and pronounMinScore 12 vs 16 — all of which make
+  // high attribute where fast stays silent. Its extra WRONG answers and its
+  // extra CORRECT answers on accuracy-suite's hard cases come from the same
+  // machinery, so the fix has to separate them rather than turn it down.
   // Generic speakers — use pre-computed arrays (no RegExp allocation per call)
   for (let gi = 0; gi < GENERIC_SPEAKERS.length; gi++) {
     if (GENERIC_FWD_RES[gi].test(text)) return cap(GENERIC_SPEAKERS[gi]);
