@@ -319,7 +319,10 @@ async function main() {
   const bookFilterIdx = args.indexOf("--book");
   const bookFilter = bookFilterIdx >= 0 ? args[bookFilterIdx + 1] : undefined;
   const showSamples = args.includes("--samples");
-  const level: IntelligenceLevel = "default";
+  // MODE=fast|default|high — the three modes drive the highlight layer directly,
+  // and they must be compared on the SAME corpus, not on the 217 hand cases where
+  // high already scores 97% and has nowhere visible to improve.
+  const level = (process.env.MODE ?? "default") as IntelligenceLevel;
 
   const keys = bookFilter ? [bookFilter] : ALL_BOOK_KEYS;
 
