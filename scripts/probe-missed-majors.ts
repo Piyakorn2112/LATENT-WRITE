@@ -34,7 +34,7 @@ async function main() {
   ) as { chapters: Array<{ book: string; chapter: number; events: GoldEvent[] }> };
 
   const cache = new Map<string, Novel>();
-  const missed: Array<{ book: string; ch: number; g: GoldEvent; para: string }> = [];
+  const missed: Array<{ book: string; ch: number; g: GoldEvent; para: string; block: string }> = [];
   let totalMajor = 0;
 
   for (const gc of gold.chapters) {
@@ -55,7 +55,16 @@ async function main() {
       if (g.salience !== "major") continue;
       totalMajor++;
       const found = events.some((e) => Math.abs(g.paragraph - 1 - e.paragraphIndex) <= TOLERANCE);
-      if (!found) missed.push({ book: gc.book, ch: gc.chapter, g, para: paragraphs[g.paragraph - 1] ?? "" });
+      if (found) continue;
+      // For a missed DIALOGUE event, why is it missed? Attribution and
+      // classification are different modules with different fixes, and they are
+      // indistinguishable from the outside.
+      const seg = speech[g.paragraph - 1]?.segments?.find((x) => x.type === "speech");
+      const block = !seg ? "not-dialogue"
+        : !seg.speaker ? "no-speaker"
+        : seg.confidence < 0.5 ? "low-confidence-speaker"
+        : "classified-not-an-event";
+      missed.push({ book: gc.book, ch: gc.chapter, g, para: paragraphs[g.paragraph - 1] ?? "", block });
     }
   }
 
@@ -89,6 +98,22 @@ async function main() {
     for (const g of list.slice(0, Number(process.env.LIMIT ?? 6))) {
       console.log(`     ${g.type.padEnd(13)} ${g.evidence.slice(0, 96)}`);
     }
+    console.log("");
+  }
+
+  const byBlock = new Map<string, number>();
+  for (const m of missed) byBlock.set(m.block, (byBlock.get(m.block) ?? 0) + 1);
+  console.log(`WHY each missed major is missed:`);
+  for (const [b, n] of [...byBlock].sort((a, b2) => b2[1] - a[1] * 0 - b2[1] + b2[1] - a[1])) {
+    console.log(`  ${b.padEnd(26)} ${String(n).padStart(3)}  (${((n / missed.length) * 100).toFixed(0)}%)`);
+  }
+  console.log("");
+
+  const focus = process.env.BLOCK;
+  if (focus) {
+    const list = missed.filter((m) => m.block === focus);
+    console.log(`── all ${list.length} missed majors blocked by "${focus}" ──`);
+    for (const m of list) console.log(`  [${m.g.type}] ${m.g.evidence.slice(0, 104)}`);
     console.log("");
   }
 

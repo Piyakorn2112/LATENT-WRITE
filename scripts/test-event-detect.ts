@@ -108,16 +108,16 @@ const TARGETS = {
    * numbers were gated, which meant the suite could stay green through a change
    * that made the visible output worse.
    */
-  precisionAtBudget: 0.47,
+  precisionAtBudget: 0.48,
   /** Of the events a chapter summary would mention, how many are actually SHOWN.
    *  The weakest number here by a distance, and the one the goal is about. */
-  majorInBudget: 0.17,
+  majorInBudget: 0.18,
   /** Of the events a chapter summary would mention, how many are found at all. */
-  majorRecall: 0.38,
+  majorRecall: 0.41,
   /** Of everything emitted, how much corresponds to a real event. Still the
    *  weakest number here, and expected to be: the engine deliberately emits more
    *  than the timeline shows and lets the ranking do the selecting. */
-  precision: 0.30,
+  precision: 0.31,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };

@@ -78,8 +78,8 @@ moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@BUDGET**, where the budget
 is `TIMELINE_CHIP_BUDGET` in `narrative-events.ts` — currently 3. Current, on the
-nine-book set: precision@3 50.4%, major events SHOWN 18.7%, major events found
-anywhere 41.0%, overall precision 33.1%. Quote precision@3, and never quote a
+nine-book set: precision@3 51.3%, major events SHOWN 19.4%, major events found
+anywhere 44.0%, overall precision 33.4%. Quote precision@3, and never quote a
 figure without saying which gold set produced it. Every smaller set was
 flattering: 1 author / 22 events gave precision 57.1%, and it meant nothing.
 
@@ -143,6 +143,16 @@ that gate entirely yielded ONE extra candidate. One funnel run found the real
 loss: 425 of 523 entity subjects (81.3%) failed to find a verb, because the
 noun-phrase walk had carried the search past it. A rate says something is wrong;
 a funnel says where.
+
+**★ NORMALISE TYPOGRAPHY BEFORE PATTERN-MATCHING DIALOGUE.** Two bugs, one
+character each, both invisible on reading and both costing real recall.
+Detection runs per SENTENCE, so a multi-sentence utterance leaves the caller's
+quote regex unable to find a closing quote and the string reaching
+`classifyUtterance` keeps its opening `“` — every `^`-anchored rule then fails.
+And real books are typeset with `’` (U+2019), so every contraction written as
+`I'll` / `don't` / `weren't` silently never matched. Fixing both:
+major recall 41.0% → 44.0%, precision@3 50.4% → 51.3%. Both fixes belong at the
+top of `classifyUtterance`, not in each pattern.
 
 **A first-person utterance is an event only when its verb is PERFORMATIVE.**
 Austin's distinction, and it is load-bearing here. "I promise", "I refuse",

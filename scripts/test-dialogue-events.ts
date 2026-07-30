@@ -97,6 +97,31 @@ const SHOULD_DETECT: Case[] = [
   },
 ];
 
+const MORE: Case[] = [
+  {
+    name: "a threat of violence",
+    from: "expectations ch1 — the convict threatens Pip",
+    paragraphs: [
+      "A fearful man, all in coarse grey, with a great iron on his leg.",
+      "“Keep still, you little devil, or I’ll cut your throat!” said the man.",
+      "He tilted me back as far as he could hold me.",
+    ],
+    target: 1,
+    speakers: ["Pip", "the man"],
+  },
+  {
+    name: "a departure reported as accomplished",
+    from: "pride ch19 — Caroline reports the party has left Netherfield",
+    paragraphs: [
+      "Jane read the letter through and handed it to Elizabeth without a word.",
+      "“The whole party have left Netherfield by this time, and are on their way to town,” said Jane.",
+      "Elizabeth folded the paper slowly.",
+    ],
+    target: 1,
+    speakers: ["Jane", "Elizabeth"],
+  },
+];
+
 /**
  * KNOWN GAPS — reported every run, NOT gated.
  *
@@ -105,6 +130,20 @@ const SHOULD_DETECT: Case[] = [
  * kept visible because a gap nobody can see is a gap nobody fixes.
  */
 const KNOWN_GAPS: Case[] = [
+  {
+    name: "an arrangement announced as ended",
+    from: "sherlock ch2 — the Red-Headed League is dissolved. BLOCKED ON "
+      + "ATTRIBUTION: the tag is “said Mr. Wilson” and the honorific defeats name "
+      + "resolution, so no speaker is found. The classifier rule for termination "
+      + "announcements is already in place and correct.",
+    paragraphs: [
+      "He read the card aloud, and I could hear the dismay in his voice.",
+      "“THE RED-HEADED LEAGUE IS DISSOLVED. October 9, 1890,” said Mr. Wilson.",
+      "We stared at the little card and at the rueful face behind it.",
+    ],
+    target: 1,
+    speakers: ["Mr. Wilson", "Holmes"],
+  },
   {
     name: "announced arrival with a purpose",
     from: "carol ch2 — Fan arrives to take Scrooge home. BLOCKED ON ATTRIBUTION: "
@@ -223,11 +262,15 @@ function check(c: Case, want: boolean) {
 async function main() {
   console.log("\n══ Utterances that ARE events (currently missed MAJOR gold events) ══");
   for (const c of SHOULD_DETECT) check(c, true);
+  for (const c of MORE) check(c, true);
 
   console.log("\n══ Utterances that are NOT events (the flood, pinned) ══");
   for (const c of SHOULD_NOT_DETECT) check(c, false);
 
   console.log("\n══ Known gaps (reported, not gated) ══");
+  console.log("   BOTH are speech-detect attribution failures, not classification:");
+  console.log("   a definite description (“the child”) and an honorific (“Mr. Wilson”).");
+  console.log("   The classifier rules for both utterances are already in place.");
   for (const c of KNOWN_GAPS) {
     const { found, why } = detectAt(c);
     console.log(`  ${found ? "✓ NOW PASSES — promote it into SHOULD_DETECT" : "· still open"}  ${c.name}`);

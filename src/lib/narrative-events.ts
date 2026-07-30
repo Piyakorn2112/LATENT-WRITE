@@ -367,7 +367,16 @@ function classifyUtterance(inner: string): NarrativeEventType {
   // and the anchoring is deliberate (unanchored patterns produced the three
   // highest-confidence false positives on the gold set), so the fix belongs here
   // rather than in each pattern.
-  const u = inner.trim().replace(/^["“”'‘’\s]+/, "");
+  // ★★ AND NORMALISE THE APOSTROPHE. Real books are typeset with ’ (U+2019), not
+  // the ASCII '. Every contraction in every rule below — I'll, I'm, I've, don't,
+  // won't, weren't — was written with the straight form and therefore silently
+  // failed on the actual corpus. "or I’ll cut your throat!" did not match a rule
+  // written precisely for it. This is the same bug as the leading quote above,
+  // one character over, and it was invisible for the same reason: the patterns
+  // look correct when read.
+  const u = inner.trim()
+    .replace(/^["“”'‘’\s]+/, "")
+    .replace(/[’‘ʼ]/g, "'");
   const words = u.split(/\s+/).length;
 
   // Too short to carry a claim, or asking rather than asserting.
@@ -458,6 +467,36 @@ function classifyUtterance(inner: string): NarrativeEventType {
   // physical act while "I release you" is a social one.
   if (words >= 3 && /\bI\s+(?:release|free|forgive|pardon|absolve|disown|renounce|resign|withdraw|dismiss)\b/i.test(u)) {
     return "decision";
+  }
+
+  // ── A THREAT. The speaker undertakes to do harm.
+  //
+  // "Keep still, you little devil, or I'll cut your throat!" — a missed MAJOR
+  // gold event, and a speech act the classifier had no rule for at all. It is a
+  // commissive like a promise, but its content is violence, so none of the
+  // performative verbs reach it.
+  //
+  // Carried by a closed set of HARM verbs, not by "I'll", which is far too common
+  // alone: "I'll call tomorrow" is not a threat and "I'll cut your throat" is.
+  if (/\b(?:I'?ll|I\s+will|we'?ll|we\s+will)\s+(?:\w+\s+){0,2}(?:kill|murder|cut|shoot|strangle|hang|throttle|beat|thrash|break|tear|smash|ruin|destroy|finish)\b/i.test(u)
+      || /\bI'?ll\s+have\s+your\s+(?:heart|liver|throat|life|blood|hide)\b/i.test(u)) {
+    return "confrontation";
+  }
+
+  // ── AN ARRANGEMENT ANNOUNCED AS ENDED, or a party reported gone.
+  //
+  // "THE RED-HEADED LEAGUE IS DISSOLVED" and "The whole party have left
+  // Netherfield by this time" — both missed MAJOR gold events. Neither is about
+  // the speaker, so every first-person rule above is blind to them: the utterance
+  // reports that something in the world has stopped.
+  //
+  // Closed on the TERMINATION word, which is what stops it firing on ordinary
+  // reportage.
+  if (/\b(?:is|are|was|were|has\s+been|have\s+been)\s+(?:dissolved|disbanded|broken\s+off|cancelled|canceled|terminated|abolished|over|ended|at\s+an\s+end)\b/i.test(u)) {
+    return "state-change";
+  }
+  if (/\b(?:has|have|had)\s+(?:left|quitted|departed|fled|vanished|disappeared)\b/i.test(u)) {
+    return "departure";
   }
 
   // ── A PROHIBITION, which is a directive with the verb left out.
