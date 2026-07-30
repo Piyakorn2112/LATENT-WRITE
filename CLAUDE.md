@@ -76,7 +76,7 @@ moderate type agreement is a property of the domain, not a bug.
 **The number that describes the PRODUCT is precision@4**, because the timeline
 renders four chips. Current, on the eight-book set: precision@4 50.0%, major
 events reaching the top four 30.5%, major events found anywhere 45.8%, overall
-precision 28.9%. Quote precision@4, and never quote a figure without saying which
+precision 33.3%. Quote precision@4, and never quote a figure without saying which
 gold set produced it. Every smaller set was flattering: 1 author / 22 events gave
 precision 57.1%, and it meant nothing.
 
@@ -110,9 +110,22 @@ loss: 425 of 523 entity subjects (81.3%) failed to find a verb, because the
 noun-phrase walk had carried the search past it. A rate says something is wrong;
 a funnel says where.
 
-**Known weakness, deliberately left:** `action` is 54.0% of events on the held-out
-manuscript. It is the widest verb class and a domestic novel is made of people
-opening doors. See the plan's section 4.
+**A first-person utterance is an event only when its verb is PERFORMATIVE.**
+Austin's distinction, and it is load-bearing here. "I promise", "I refuse",
+"I confess" change the situation between two people; "I am tired", "I saw him",
+"I think so" do not, however fluent they are. The rule was twice written as a
+frequency list of common first-person verbs and twice collapsed on a
+dialogue-heavy author, because that list is precisely the vocabulary
+conversation is made of: Austen ran to 84.4% then 64.9% "revelation", with a
+chip on lines like "I do not cough for my own amusement". Performative verbs are
+a small CLOSED class, which is why the cut generalises to registers unlike
+Austen's. Narrowing to it: precision 28.9% → 33.3%, F1 35.7% → 39.2%, Austen
+entropy 0.57 → 0.78, Doyle 0.66 → 0.81, and it *gained* a gold match while
+removing 19 false positives.
+
+**Previous known weakness, now closed:** `action` was 54.0% of events on the
+held-out manuscript. It is 29.4% in-distribution / 36.2% held-out today, and no
+corpus has a dominant type above 44% or entropy below 0.78.
 
 **Held-out audit rule:** the curated suites above hand `knownNames` in explicitly, so
 they can never catch a failure in the extraction that produces those names (this

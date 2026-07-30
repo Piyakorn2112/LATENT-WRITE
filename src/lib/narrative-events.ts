@@ -364,8 +364,12 @@ function classifyUtterance(inner: string): NarrativeEventType {
     return "revelation";
   }
 
-  // First person plus a knowledge verb: an admission.
-  if (/\bI\s*(?:'ve|'d)?\s*(?:know|knew|noticed|saw|realised|realized|understood|remember|remembered|thought|believed|felt)\b/i.test(u)) {
+  // First person plus a knowledge verb: an admission. Restricted to verbs that
+  // report ACQUIRING knowledge or asserting it. "saw", "thought", "believed" and
+  // "felt" were here and are gone: "I saw him at the ball", "I thought he was
+  // handsome", "I felt tired" are conversation, and Austen's dialogue is built
+  // out of them.
+  if (/\bI\s*(?:'ve|'d)?\s*(?:know|knew|noticed|realised|realized|understood|remember|remembered|discovered|learned|learnt)\b/i.test(u)) {
     return "revelation";
   }
 
@@ -394,13 +398,27 @@ function classifyUtterance(inner: string): NarrativeEventType {
   // 84.4% of every detected event in the book was typed "revelation". Sherlock
   // was 67.5%. Austen's dialogue is almost entirely first-person declaratives.
   //
-  // The verb now has to actually carry a claim about knowledge, state or
-  // commitment. An utterance that is merely first-person and fluent is
-  // conversation, not an event, and returning `unclassified` here means the
-  // dialogue channel declines it rather than inventing a type for it.
-  const FIRST_PERSON_CLAIM =
-    /\bI\s*(?:'m|'ve|'d|'ll)?\s*(?:am|was|have|had|been|do|did|see|saw|find|found|hear|heard|feel|felt|mean|meant|think|thought|hope|wish|fear|doubt|admit|admitted|confess|confessed|owe|owed|swear|swore|refuse|refused|agree|agreed|decided|chose|promise|promised|told|tell|say|said|beg|assure|declare|intend)\b/i;
-  if (words >= 4 && FIRST_PERSON_CLAIM.test(u)) return "revelation";
+  // ★★ NARROWING IT ONCE WAS NOT ENOUGH, and the second pass is the interesting
+  // one. The replacement list still held `am was have had been do did see saw
+  // find found hear heard feel felt mean meant think thought hope wish` — which
+  // is, almost exactly, the vocabulary ordinary conversation is MADE of. Austen
+  // stayed at 64.9% revelation, and reading the output made the real problem
+  // visible: these were not mistyped events, they were not events. "I do not
+  // cough for my own amusement", "I am not afraid", "I wish you had been there"
+  // were each getting a chip.
+  //
+  // The principled cut is Austin's: an utterance is an ACT when its verb is
+  // PERFORMATIVE — saying it is doing it — and not when the verb merely reports a
+  // state or a perception. "I promise", "I refuse", "I confess" change the
+  // situation between two people. "I am tired", "I saw him", "I think so" do not,
+  // however fluent they are.
+  //
+  // This generalises better than a frequency list because performative verbs are
+  // a small CLOSED class in English, so the rule carries to an author whose
+  // conversational register is nothing like Austen's.
+  const PERFORMATIVE =
+    /\bI\s*(?:'m|'ve|'d|'ll)?\s*(?:admit|admitted|confess|confessed|promise|promised|swear|swore|refuse|refused|decline|declined|agree|agreed|decide|decided|assure|declare|insist|insisted|beg|owe|owed|intend|vow|vowed|apologise|apologize|accept|accepted|forbid|deny|denied|grant|granted|consent)\b/i;
+  if (words >= 4 && PERFORMATIVE.test(u)) return "revelation";
 
   return "unclassified";
 }

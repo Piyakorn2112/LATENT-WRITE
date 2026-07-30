@@ -78,7 +78,7 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // aspirations. They are raised whenever a change is banked, so that the next
 // change has to keep the ground already taken. Measured on the eight-book set at
 // the time of writing: precision@4 50.0%, major-in-top-4 30.5%, major recall
-// 45.8%, precision 28.9%, label fit 100%.
+// 45.8%, precision 33.3%, label fit 100%.
 const TARGETS = {
   /**
    * ★ THE NUMBER THAT DESCRIBES THE PRODUCT. The timeline renders four chips, so
@@ -95,7 +95,7 @@ const TARGETS = {
   /** Of everything emitted, how much corresponds to a real event. Still the
    *  weakest number here, and expected to be: the engine deliberately emits more
    *  than the timeline shows and lets the ranking do the selecting. */
-  precision: 0.26,
+  precision: 0.30,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };
