@@ -564,6 +564,32 @@ interface AgentHit {
   kind: "named" | "pronoun" | "entity";
 }
 
+/**
+ * Words that CLOSE a subject noun phrase. Everything after one of these belongs
+ * to a different phrase, so the head is whatever came before it.
+ *
+ * Deliberately separate from `OBJECT_TERMINATOR`, which is the same idea applied
+ * to objects but must NOT contain the core prepositions — "the smell of the
+ * interior" is one object, while a subject walk that crosses "of" lands its head
+ * on the wrong noun.
+ */
+const NP_BOUNDARY = new Set([
+  // Prepositions.
+  "of", "in", "on", "at", "to", "from", "with", "by", "for", "into", "onto",
+  "over", "under", "through", "across", "against", "between", "among", "about",
+  "before", "after", "during", "within", "without", "behind", "beside",
+  "beneath", "above", "below", "near", "past", "upon", "toward", "towards",
+  "around", "along", "off", "inside", "outside", "like", "than", "since",
+  "until", "despite", "besides",
+  // Coordinators and clause openers.
+  "and", "or", "but", "nor", "so", "yet", "that", "which", "who", "whom",
+  "whose", "where", "when", "while", "because", "if", "though", "although",
+  "as", "unless", "whether",
+  // A second determiner or possessive opens a NEW noun phrase.
+  "the", "a", "an", "this", "these", "those", "his", "her", "its", "their",
+  "my", "our", "your", "some", "any", "no",
+]);
+
 /** Heads that are pure abstraction and make a useless label subject. */
 const WEAK_HEADS = new Set([
   "thing", "things", "way", "ways", "moment", "moments", "time", "times",
@@ -608,26 +634,59 @@ function isSpecified(text: string): boolean {
  * the label cannot come out as "The thing begins".
  */
 function findEntitySubject(clause: string): AgentHit | null {
-  // ★ Two bugs lived in this pattern. It was LAZY (`{0,3}?`), so on "The total
-  // affected population reached seventy-eight thousand" it captured just "total"
-  // and the verb search then started at "affected" and gave up. And it required a
-  // capitalised determiner, so "one more peripheral body went dark" — mid-
-  // paragraph, lowercase — never matched at all. Both were missed MAJOR gold
-  // events. Greedy, and case-insensitive on the determiner.
-  const m = clause.match(
-    /^\s*(?:the|a|an|one|two|three|another|each|every|both)\s+((?:[\w-]+\s+){0,3}[A-Za-z][\w-]*)\b/i,
-  );
-  if (!m) return null;
-  const phrase = m[1].trim();
-  const words = phrase.split(/\s+/);
-  const head = stripTrailingPunct(words[words.length - 1]);
-  if (!head || head.length < 3 || WEAK_HEADS.has(head)) return null;
-  // A verb-shaped head means the match ran past the subject into the predicate.
+  // ★ Three bugs have lived in this one pattern, and the third was by far the
+  // most expensive.
+  //
+  // It was LAZY (`{0,3}?`), so "The total affected population reached
+  // seventy-eight thousand" captured just "total" and the verb search started at
+  // "affected" and gave up. It required a CAPITALISED determiner, so "one more
+  // peripheral body went dark" never matched at all. Both were missed MAJOR gold
+  // events, and both were fixed by making the quantifier greedy.
+  //
+  // Greedy then overshot in the other direction, and that is the bug being fixed
+  // here. `(?:[\w-]+\s+){0,3}` happily eats prepositions and conjunctions, so the
+  // head landed on whatever word sat four tokens in:
+  //
+  //   "The coffee machine in the corner hummed."            head → "the"
+  //   "The records from the outermost settlements survived" head → "outermost"
+  //   "A serene sky and verdant fields filled me"           head → "verdant"
+  //
+  // Measured consequence: of 523 entity subjects found across the gold chapters,
+  // 425 — 81.3% — then failed to find a verb, because `end` had already been
+  // carried past the verb into the predicate. Entity subjects are the strongest
+  // major-event predictor in the engine (+33.7pp) and this is what was starving
+  // them. `isSpecified`, long assumed to be the throttle, kills exactly one.
+  //
+  // So walk tokens and stop at a real noun-phrase boundary instead.
+  const det = clause.match(/^\s*(?:the|a|an|one|two|three|another|each|every|both)\s+/i);
+  if (!det) return null;
+
+  const np: string[] = [];
+  let end = det[0].length;
+  const tok = /\S+/g;
+  tok.lastIndex = det[0].length;
+  let t: RegExpExecArray | null;
+  while (np.length < 4 && (t = tok.exec(clause)) !== null) {
+    const raw = t[0];
+    const bare = stripTrailingPunct(raw);
+    if (!bare || NP_BOUNDARY.has(bare)) break;
+    // A verb-shaped token after at least one noun word IS the predicate starting.
+    if (np.length > 0 && looksVerbal(bare)) break;
+    np.push(bare);
+    end = t.index + raw.length;
+    // Trailing punctuation closes the phrase: "The fair girl, with a laugh…".
+    if (/[^A-Za-z']$/.test(raw)) break;
+  }
+  if (!np.length) return null;
+
+  const head = np[np.length - 1];
+  if (head.length < 3 || WEAK_HEADS.has(head)) return null;
+  // A verb-shaped head means the walk never found a noun at all.
   if (looksVerbal(head)) return null;
   // Keep at most two words so the label stays inside its budget: "The Axiom
   // Spire" survives, "The total affected population" becomes "population".
-  const kept = words.length > 2 ? head : phrase;
-  return { name: kept, end: (m.index ?? 0) + m[0].length, kind: "entity" };
+  const kept = np.length > 2 ? head : np.join(" ");
+  return { name: kept, end, kind: "entity" };
 }
 
 /**
@@ -897,6 +956,47 @@ function buildLabel(agent: string | undefined, verb: string, object: string | nu
 
 // ─── Candidate construction ───────────────────────────────────────────────────
 
+/**
+ * ─── DIAGNOSTIC: where do entity-subject candidates die? ──────────────────────
+ *
+ * Kept, not temporary, and it earned that. Entity subjects are the strongest
+ * signal in the engine, and for four rounds the standing hypothesis was that
+ * `isSpecified` was throttling them. Removing that gate entirely produced ONE
+ * extra candidate. Counting the funnel instead found the real loss in a single
+ * run: 425 of 523 entity subjects — 81.3% — were failing to find a verb, because
+ * the noun-phrase walk had already carried the search past it.
+ *
+ * A rate tells you something is wrong; a funnel tells you where. Cost is a dozen
+ * integer increments per sentence, and the sample arrays are capped so a long
+ * editing session cannot grow them without bound.
+ *
+ * Read it with `npx tsx scripts/probe-entity-funnel.ts`.
+ */
+export const _funnel = {
+  sentences: 0,
+  agentNamedOrPronoun: 0,
+  entityTried: 0,
+  entityFound: 0,
+  entityNoVerb: 0,
+  entityVerbNotChange: 0,
+  entityWrongType: 0,
+  entityUnspecified: 0,
+  entityArrivalDeparture: 0,
+  entityActionWeakObject: 0,
+  entityAmbient: 0,
+  entitySurvived: 0,
+};
+const FUNNEL_SAMPLE_CAP = 300;
+export const _funnelSamples: { noVerb: string[]; notChange: string[] } = { noVerb: [], notChange: [] };
+function sample(bucket: string[], line: string) {
+  if (bucket.length < FUNNEL_SAMPLE_CAP) bucket.push(line);
+}
+export function _resetFunnel() {
+  for (const k of Object.keys(_funnel)) (_funnel as Record<string, number>)[k] = 0;
+  _funnelSamples.noVerb.length = 0;
+  _funnelSamples.notChange.length = 0;
+}
+
 interface Candidate {
   paragraphIndex: number;
   sentenceIndex: number;
@@ -909,6 +1009,8 @@ interface Candidate {
   type: NarrativeEventType;
   object: string | null;
   mood: MoodFlags;
+  /** Entity subject that named or counted nothing — see the entity path. */
+  unspecifiedEntity?: boolean;
   score: number;
   why: string[];
 }
@@ -1042,78 +1144,91 @@ function detectNarrativeEventsUncached(
 
       // ─── WEIGHTS FITTED TO MEASURED LIFT, NOT TO INTUITION ─────────────────
       //
-      // ★ Every bonus in the previous version of this block was ANTI-PREDICTIVE,
-      // and the ranking was therefore inverted: over 205 candidates on the
-      // 19-chapter gold set, the top third by confidence hit 19.1% while the
-      // BOTTOM third hit 33.8%. Separation -14.7pp. The most confident events
-      // were the least likely to be real, which is why raising the floor never
-      // helped, why reweighting the LM salience term never helped, and why only
-      // 22.0% of major events reached the top four chips while the engine found
-      // 40.7% of them somewhere.
+      // ★ Every bonus in the FIRST version of this block was anti-predictive and
+      // the ranking was inverted: top third by confidence hit 19.1%, bottom third
+      // 33.8%, separation -14.7pp. Fitting to measured lift took precision@4 from
+      // 31.1% to 45.9%. That history is why nothing here is set by intuition.
       //
-      // `npx tsx scripts/analyse-event-signals.ts` measures, for each signal, the
-      // hit rate of candidates where it fired against those where it did not.
-      // The lifts, in percentage points, base rate 26.8%:
+      // ★★ These weights have now been refitted a SECOND time, and the reason is
+      // the standing warning at the bottom of this comment: the lifts are
+      // conditional on which candidates survive the gates. Fixing the noun-phrase
+      // walk in `findEntitySubject` changed the candidate population from 205 to
+      // 243, and the previously-fitted weights immediately stopped separating
+      // (8.1pp -> 1.2pp). Several signals CHANGED SIGN between the two fits:
       //
-      //     -habitual          +11.6      consequential-object   -19.3
-      //     pronoun-agent       +8.8      dialogue-act           -18.1
-      //     -no-echo            +8.0      named-agent            -13.9
-      //     -trivial-object     +6.8      tension-rise            -7.7
-      //     -pronoun-object     +5.9      transitive              -3.5
-      //     -pluperfect         +2.8      -no-content             -2.0
+      //                     fit #1 (n=205)   fit #2 (n=243)
+      //     pronoun-agent        +8.8            -4.4
+      //     -habitual           +11.6            -0.0
+      //     -no-echo             +8.0            -1.4
+      //     -pronoun-object      +5.9           -13.3
+      //     -pluperfect          +2.8            -4.4
       //
-      // Read the left column carefully: those are PENALTIES that correlate with
-      // being right. Penalising habitual mood was backwards. So was penalising a
-      // clause whose vocabulary never recurs. And a pronoun subject beats a named
-      // one, which inverts the assumption the whole agent hierarchy was built on.
+      // Do not read that as either fit being wrong. A signal's value depends on
+      // what it is competing against, and the population it competes in is now
+      // materially different. It does mean a weight is only valid for the gates it
+      // was fitted under, which is a property worth stating out loud.
       //
-      // Weights below are set proportional to measured lift and rounded coarse on
-      // purpose. This is 205 samples against 16 features, so precise coefficients
-      // would be fitting noise; the SIGN and the rough magnitude are what the data
-      // supports. Re-run the analyser after any change to the gates, because these
-      // lifts are conditional on which candidates survive them.
+      // Fit #2, base rate 30.0% any / 18.9% major, n=243:
+      //
+      //     entity-subject     +28.4  (+24.2 major)   dialogue-act      -16.2
+      //     -trivial-object     +8.0   (+6.5 major)   -pronoun-object   -13.3
+      //     -modal              +1.8                  named-agent       -12.6
+      //     tension-rise        +0.5                  refusal            -6.7
+      //                                               pronoun-agent      -4.4
+      //                                               -pluperfect        -4.4
+      //
+      // Weights are lift ÷ ~25, rounded coarse ON PURPOSE. 243 samples against 16
+      // features means precise coefficients would be fitting noise; the SIGN and
+      // rough magnitude are what the data supports. Signals firing fewer than ~10
+      // times are recorded and not scored, however large their apparent lift.
+      //
+      // Re-run `npx tsx scripts/analyse-event-signals.ts` after ANY change to the
+      // gates. It also reports nested signals separately — a feature that can only
+      // fire inside another one has a confounded raw lift, and weighting on that
+      // raw number double-counts the parent.
 
       // The verb class still identifies WHAT KIND of event a clause describes,
       // which the type channel needs, but it does not predict whether the clause
       // is a real event, so it no longer moves the ranking.
       if (cand.type !== "unclassified") why.push(`verb:${cand.type}`);
 
-      // ─── Agent kind, weighted for MAJOR-ness rather than for any hit ────────
+      // ─── Agent kind ────────────────────────────────────────────────────────
       //
-      // These two objectives point in OPPOSITE directions and the product only
-      // cares about one of them. Measured lift, base rates 26.8% any / 17.2% major:
+      // ENTITY SUBJECT IS NOW THE STRONGEST SIGNAL IN THE ENGINE, on both axes:
+      // +28.4pp for finding any event and +24.2pp for finding a MAJOR one, at a
+      // 53.7% hit rate against a 30.0% base. Which makes sense once stated: a
+      // major event is usually the WORLD changing, not a person making a gesture.
+      // "The council adopted the resolution", "The Axiom Spire departed".
       //
-      //                    hits ANY event    hits a MAJOR event
-      //   entity-subject        (rare)            +33.7pp
-      //   named-agent          -13.9pp             +3.6pp
-      //   pronoun-agent         +8.8pp             -8.0pp
+      // It was already the best major predictor at the previous fit, and it was
+      // useless anyway, because it fired on 6 of 205 candidates and no weight can
+      // reach that far. Reweighting it was tried then and moved nothing. What
+      // moved it was fixing WHY there were only six: the noun-phrase walk in
+      // `findEntitySubject` was overshooting the head into prepositional phrases,
+      // so 81.3% of entity subjects then failed to find a verb. It now fires 41
+      // times, and the weight has somewhere to act.
       //
-      // A pronoun subject is good at finding events and bad at finding the ones
-      // that matter; an entity subject is the single strongest major predictor in
-      // the whole analysis, at 50.0% against a 17.2% base. Which makes sense once
-      // stated: a major event is usually the WORLD changing, not a person making a
-      // gesture. "The council adopted the resolution", "The total affected
-      // population reached seventy-eight thousand", "The Axiom Spire departed".
-      //
-      // ★ TUNING THESE FOR MAJOR-NESS WAS TRIED AND MOVED NOTHING. Weighting
-      // entity-subject to +0.8 and flattening the others left precision@4 at
-      // 47.5% and major-in-top-4 at 25.4%, unchanged, while costing 0.6 points of
-      // F1. The reason is the sample: entity-subject fires on only 6 of 205
-      // candidates, so no weight on it can reach far. Reverted to the weights that
-      // maximise hit rate.
-      //
-      // THE FINDING IS STILL THE MOST USEFUL THING HERE, because it says where the
-      // ceiling actually is: entity subjects are the best major-event predictor
-      // available and the engine barely produces any. They are heavily gated by
-      // `isSpecified` on the entity path. Loosening that gate, rather than
-      // reweighting its output, is the lever with room in it.
-      if (cand.agentKind === "pronoun") { score += 0.35; why.push("pronoun-agent"); }
-      else if (cand.agentKind === "entity") { score += 0.35; why.push("entity-subject"); }
-      else if (cand.agentKind === "named") { score -= 0.55; why.push("named-agent"); }
+      // Note that a pronoun subject has gone from the best any-hit agent signal to
+      // a mild negative. It did not get worse; it stopped being the only thing in
+      // the room.
+      if (cand.agentKind === "entity") { score += 1.15; why.push("entity-subject"); }
+      else if (cand.agentKind === "pronoun") { score -= 0.2; why.push("pronoun-agent"); }
+      else if (cand.agentKind === "named") { score -= 0.5; why.push("named-agent"); }
+
+      // An entity subject that named or counted nothing. This USED TO BE A GATE
+      // that returned null, on the reasoning that a change to the world worth
+      // reporting arrives with a name or a number attached. Measured, that was
+      // wrong: these candidates hit at 47.4% and reach a major event 36.8% of the
+      // time, both far above base. Within entity subjects they are worth -11.7pp
+      // (nested lift, not the confounded raw +18.8pp), so they are worse than a
+      // specified one and much better than nothing. A penalty, not a gate.
+      if (cand.unspecifiedEntity) { score -= 0.45; why.push("unspecified-entity"); }
 
       // Dialogue was the largest source of false positives once measured. It is
       // still where many real events live, so this is a penalty and not a gate.
-      if (cand.channel === "dialogue") { score -= 0.7; why.push("dialogue-act"); }
+      if (cand.channel === "dialogue") { score -= 0.65; why.push("dialogue-act"); }
+      // Nested within dialogue-act: -4.6pp for any hit but +2.5pp for a major one.
+      // Small and contradictory, so it stays small.
       if (cand.channel === "dialogue" && !cand.object) { score -= 0.1; why.push("-no-content"); }
 
       // Object class, inverted from the previous version. A "consequential"
@@ -1122,24 +1237,28 @@ function detectNarrativeEventsUncached(
       {
         const head = cand.object?.split(/\s+/).pop()?.toLowerCase() ?? "";
         if (head && CONSEQUENTIAL_OBJECTS.has(head)) { score -= 0.75; why.push("consequential"); }
-        else if (head && TRIVIAL_OBJECTS.has(head)) { score += 0.25; why.push("-trivial-object"); }
-        if (head && PRONOUN_HEADS.has(head)) { score += 0.2; why.push("-pronoun-object"); }
+        else if (head && TRIVIAL_OBJECTS.has(head)) { score += 0.3; why.push("-trivial-object"); }
+        // Flipped sign at fit #2: +5.9pp then, -13.3pp now, on 42 firings.
+        if (head && PRONOUN_HEADS.has(head)) { score -= 0.55; why.push("-pronoun-object"); }
       }
 
-      // Mood. All three of these were penalties and all three are positively
-      // associated with being right, most strongly habitual.
-      if (mood.habitual)   { score += 0.45; why.push("-habitual"); }
-      if (mood.pluperfect) { score += 0.1;  why.push("-pluperfect"); }
+      // Mood. Habitual was the strongest bonus at fit #1 (+11.6pp) and measures
+      // exactly 0.0pp now, so it is recorded and no longer scored — the realis
+      // gate it comes from is doing its work at extraction instead. Pluperfect
+      // went positive to negative; modal stayed negligible either way.
+      if (mood.habitual)   { why.push("-habitual"); }
+      if (mood.pluperfect) { score -= 0.2;  why.push("-pluperfect"); }
       if (mood.modal)      { score += 0.05; why.push("-modal"); }
       if (mood.gnomic)     { why.push("-general-truth"); }
-      if (mood.negated)    { why.push("refusal"); }
+      // Negation measures -6.7pp any / -9.7pp major on 29 firings. A clause about
+      // something NOT happening is usually a character's reflection on it.
+      if (mood.negated)    { score -= 0.25; why.push("refusal"); }
       if (mood.interrogative && cand.channel === "dialogue") { why.push("-question"); }
 
-      // Recurrence, also inverted. A clause whose vocabulary never returns is
-      // MORE likely to be a real event, not less: a singular happening does not
-      // get discussed again in the same chapter.
+      // Recurrence. Also went from +8.0pp to -1.4pp between fits, which is now
+      // inside the noise on 62 firings. Recorded, not scored.
       const persist = persistence(contentWords(text), suffixCounts[pi]);
-      if (persist < 0.08) { score += 0.3; why.push("-no-echo"); }
+      if (persist < 0.08) { why.push("-no-echo"); }
 
       // Tension rise measured NEGATIVE, so it is recorded and not scored. The
       // three-level ordinal signal it derives from is probably too coarse to
@@ -1151,7 +1270,7 @@ function detectNarrativeEventsUncached(
       // Chapter edges. Retained as penalties: both measured strongly negative,
       // but on only four candidates each, far too few to invert on.
       const pos = pi / Math.max(1, paraCount - 1);
-      if (pos < 0.04) { score -= 0.6; why.push("-chapter-open"); }
+      if (pos < 0.04) { score -= 0.8; why.push("-chapter-open"); }
       if (pos > 0.98) { score -= 0.3; why.push("-chapter-close"); }
 
       candidates.push({ ...cand, score, why });
@@ -1194,20 +1313,32 @@ function narrationCandidate(
   recurringCaps: Set<string>,
 ): Candidate | null {
   // A named character or pronoun first; failing that, a definite noun phrase.
-  const agent = findAgent(text, nameRe, carried, recurringCaps) ?? findEntitySubject(text);
+  _funnel.sentences++;
+  const primary = findAgent(text, nameRe, carried, recurringCaps);
+  if (primary) _funnel.agentNamedOrPronoun++; else _funnel.entityTried++;
+  const agent = primary ?? findEntitySubject(text);
   if (!agent) return null;
+  const ENT = agent.kind === "entity";
+  if (ENT) _funnel.entityFound++;
+  let unspecifiedEntity = false;
 
   const after = text.slice(agent.end);
   const words = after.split(/\s+/).filter(Boolean);
 
   const verb = findVerb(words);
-  if (!verb) return null;
+  if (!verb) {
+    if (ENT) { _funnel.entityNoVerb++; sample(_funnelSamples.noVerb, `[${agent.name}] ⟩⟩ ${after.trim().slice(0, 90)}`); }
+    return null;
+  }
 
   // An unrecognised verb is not evidence of an event. Emitting it as
   // `unclassified` was how "She thinks about hands" and "Helia feels" reached
   // the timeline at confidence 0.7+; those are descriptions of a mind, and a
   // chip that says one is worse than no chip.
-  if (!verb.base || !CHANGE_VERBS[verb.base]) return null;
+  if (!verb.base || !CHANGE_VERBS[verb.base]) {
+    if (ENT) { _funnel.entityVerbNotChange++; sample(_funnelSamples.notChange, `[${agent.name}] ⟩⟩ ${verb.base ?? "?"} ⟩⟩ ${text.slice(0, 80)}`); }
+    return null;
+  }
 
   const verbBase = verb.base;
   const type = CHANGE_VERBS[verbBase];
@@ -1229,9 +1360,10 @@ function narrationCandidate(
   // with a name or a number attached; a mood does not.
   if (agent.kind === "entity") {
     if (type !== "state-change" && type !== "action" && type !== "departure" && type !== "arrival") {
+      _funnel.entityWrongType++;
       return null;
     }
-    if (!isSpecified(text)) return null;
+    if (!isSpecified(text)) { _funnel.entityUnspecified++; unspecifiedEntity = true; } // PROBE A: gate → signal
   }
 
   // ── Motion is not an event unless it changes the situation.
@@ -1241,7 +1373,10 @@ function narrationCandidate(
   // these, and none of them is a thing that happened. Arrival and departure earn
   // a chip only when the clause says WHERE or WHO, which is the difference
   // between crossing a room and crossing a border.
-  if ((type === "arrival" || type === "departure") && !isSpecified(text)) return null;
+  if ((type === "arrival" || type === "departure") && !isSpecified(text)) {
+    if (ENT) _funnel.entityArrivalDeparture++;
+    return null;
+  }
 
   // ── A physical act is not an event unless it acts on something.
   //
@@ -1268,7 +1403,7 @@ function narrationCandidate(
     if (!head || WEAK_HEADS.has(head) || TRIVIAL_OBJECTS.has(head)) {
       // No object, or one that carries nothing. Only survives if the clause names
       // or counts something, which is what a consequential act does.
-      if (!isSpecified(text)) return null;
+      if (!isSpecified(text)) { if (ENT) _funnel.entityActionWeakObject++; return null; }
     }
   }
 
@@ -1279,8 +1414,10 @@ function narrationCandidate(
   // door open" and "The thing below hears differently…", both real major events
   // whose subjects only sound incidental.
   if (agent.kind === "entity" && AMBIENT_SUBJECTS.has(agent.name.split(/\s+/).pop()!.toLowerCase())) {
+    _funnel.entityAmbient++;
     return null;
   }
+  if (ENT) _funnel.entitySurvived++;
 
   return {
     paragraphIndex: pi,
@@ -1294,6 +1431,7 @@ function narrationCandidate(
     type,
     object,
     mood,
+    unspecifiedEntity,
     score: 0,
     why: [],
   };

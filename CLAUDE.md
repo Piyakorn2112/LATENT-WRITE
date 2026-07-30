@@ -34,6 +34,8 @@ npx tsx scripts/test-chapter-observation.ts # "This chapter" brief: contract, no
 npx tsx scripts/test-event-detect.ts        # EVENT DETECTION vs the hand-annotated gold set (gated)
 npx tsx scripts/ood-language-audit.ts       # OUT-OF-DISTRIBUTION audit: speech, label-free (~4 min)
 npx tsx scripts/ood-event-audit.ts          # OUT-OF-DISTRIBUTION audit: events, label-free
+npx tsx scripts/analyse-event-signals.ts    # per-signal LIFT — run before any weight change
+npx tsx scripts/probe-entity-funnel.ts      # where entity-subject candidates die
 ```
 
 ## Event detection — read the plan before touching it
@@ -72,9 +74,9 @@ reached Krippendorff's α of only 0.57-0.75 on a coarser scheme than this one, s
 moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@4**, because the timeline
-renders four chips. Current, on the eight-book set: precision@4 45.9%, major
-events reaching the top four 25.4%, major events found anywhere 39.0%, overall
-precision 26.6%. Quote precision@4, and never quote a figure without saying which
+renders four chips. Current, on the eight-book set: precision@4 50.0%, major
+events reaching the top four 30.5%, major events found anywhere 45.8%, overall
+precision 28.9%. Quote precision@4, and never quote a figure without saying which
 gold set produced it. Every smaller set was flattering: 1 author / 22 events gave
 precision 57.1%, and it meant nothing.
 
@@ -82,9 +84,31 @@ precision 57.1%, and it meant nothing.
 measures, per signal, the hit rate of candidates where that signal fired against
 those where it did not. That measurement found every bonus in the scorer to be
 ANTI-predictive and the ranking inverted: top third by confidence hit 19.1%,
-bottom third 33.8%. Weights are now fitted to measured lift, and the lifts are
-conditional on which candidates survive the gates, so re-run it after any gate
-change.
+bottom third 33.8%. Weights are fitted to measured lift. Three things it now
+reports that are easy to misread:
+
+- **Lifts are conditional on the gates.** Re-run after ANY gate change. Fixing
+  the noun-phrase walk moved the candidate pool 205 → 243 and five signals
+  changed sign, including `pronoun-agent` (+8.8 → −4.4) and `-habitual`
+  (+11.6 → −0.0). Neither fit was wrong; a signal's value depends on what it
+  competes against.
+- **Nested signals have confounded raw lift.** A feature that can only fire
+  inside another (`unspecified-entity` inside `entity-subject`) shows the
+  parent's strength, not its own. The analyser detects ≥90% containment
+  automatically and reports the within-parent number. Weight on that one.
+- **Read the TOP-4 separation, not the median split.** They came apart:
+  precision@4 rose 47.5% → 50.0% while the median split stayed flat at 1.8pp,
+  because the ranking is sharp at the top and noisy through the middle. Only the
+  top-4 cut costs a writer anything. Top 4 currently separates by 22.3pp.
+
+**When a rate looks wrong, count the funnel — don't hypothesise.**
+`npm run probe:entity-funnel` exists because four rounds of reasoning blamed the
+wrong gate. Entity subjects are the engine's strongest signal and it produced six
+of them; the standing theory was that `isSpecified` throttled them, and removing
+that gate entirely yielded ONE extra candidate. One funnel run found the real
+loss: 425 of 523 entity subjects (81.3%) failed to find a verb, because the
+noun-phrase walk had carried the search past it. A rate says something is wrong;
+a funnel says where.
 
 **Known weakness, deliberately left:** `action` is 54.0% of events on the held-out
 manuscript. It is the widest verb class and a domestic novel is made of people

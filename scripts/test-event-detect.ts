@@ -74,15 +74,28 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // of its labels fit the timeline. So the rebuild is worth about 2x on finding the
 // events that matter and is the difference between a usable type/label channel
 // and none. It is still a long way from trustworthy.
+// Targets are REGRESSION LOCKS set just under the measured value, not
+// aspirations. They are raised whenever a change is banked, so that the next
+// change has to keep the ground already taken. Measured on the eight-book set at
+// the time of writing: precision@4 50.0%, major-in-top-4 30.5%, major recall
+// 45.8%, precision 28.9%, label fit 100%.
 const TARGETS = {
-  /** Of the events a chapter summary would mention, how many are found.
-   *  Measured 60.0% on the 45-event set with the LM re-rank on. */
-  majorRecall: 0.25,
-  /** Of what is emitted, how much corresponds to a real event. Measured 41.7%.
-   *  Still the weakest number here. The sync engine alone cannot move it — its
-   *  false positives score as high as its true ones — which is why the LM
-   *  salience pass exists. */
-  precision: 0.24,
+  /**
+   * ★ THE NUMBER THAT DESCRIBES THE PRODUCT. The timeline renders four chips, so
+   * this is the share of what a writer actually sees that is real. It went
+   * ungated for a long time while three lesser numbers were gated, which meant
+   * the suite could stay green through a change that made the visible output
+   * worse. Gated now.
+   */
+  precisionAt4: 0.44,
+  /** Of the events a chapter summary would mention, how many reach the top four. */
+  majorInTop4: 0.25,
+  /** Of the events a chapter summary would mention, how many are found at all. */
+  majorRecall: 0.40,
+  /** Of everything emitted, how much corresponds to a real event. Still the
+   *  weakest number here, and expected to be: the engine deliberately emits more
+   *  than the timeline shows and lets the ranking do the selecting. */
+  precision: 0.26,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };
@@ -442,7 +455,11 @@ function report(name: string, t: Totals): { f1: number; majorRecall: number; pre
   console.log(`  chips rendered              ${String(t.topEmitted).padStart(4)}`);
   console.log(`  precision@4               ${pct(t.topMatched, t.topEmitted)}`);
   console.log(`  major events in the top 4 ${pct(t.topMajorMatched, t.goldMajor)}`);
-  return { f1, majorRecall, precision, fit, precisionAt4: t.topEmitted ? t.topMatched / t.topEmitted : 0 };
+  return {
+    f1, majorRecall, precision, fit,
+    precisionAt4: t.topEmitted ? t.topMatched / t.topEmitted : 0,
+    majorInTop4: t.goldMajor ? t.topMajorMatched / t.goldMajor : 0,
+  };
 }
 
 async function main() {
@@ -570,6 +587,9 @@ async function main() {
 
   console.log(`\n── gate ────────────────────────────────────────────────`);
   const checks: Array<[string, number, number]> = [
+    // ★ First, because it is the only one a writer experiences directly.
+    ["precision@4 (what is SHOWN)", newEngine.precisionAt4, TARGETS.precisionAt4],
+    ["major events in the top 4", newEngine.majorInTop4, TARGETS.majorInTop4],
     ["recall on major events", newEngine.majorRecall, TARGETS.majorRecall],
     ["precision", newEngine.precision, TARGETS.precision],
     ["label fit rate", newEngine.fit, TARGETS.labelFitRate],

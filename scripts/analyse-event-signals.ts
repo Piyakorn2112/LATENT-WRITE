@@ -155,6 +155,48 @@ async function main() {
   const majBase = samples.filter((s) => s.hitMajor).length / total;
   console.log(`base MAJOR hit rate: ${(majBase * 100).toFixed(1)}%`);
 
+  // ── Nested signals, whose raw lift above is CONFOUNDED.
+  //
+  // `unspecified-entity` can only fire on a candidate that already has
+  // `entity-subject`, so its raw lift mostly re-reports how good entity subjects
+  // are, and reading it as its own effect would double-count: an unspecified
+  // entity would score higher than a specified one, which is backwards.
+  //
+  // Detected automatically rather than special-cased, because "signal X only
+  // fires inside subgroup Y" is a shape that recurs every time a gate is turned
+  // into a scored feature. Any signal whose firings are ≥90% contained in
+  // another signal's is re-measured WITHIN that parent only.
+  const containment: Array<{ child: string; parent: string; lift: number; majLift: number; n: number }> = [];
+  for (const child of all) {
+    const kids = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === child));
+    if (kids.length < 6) continue;
+    for (const parent of all) {
+      if (parent === child) continue;
+      const inParent = kids.filter((s) => s.signals.some((w) => w.split(":")[0] === parent));
+      if (inParent.length / kids.length < 0.9) continue;
+      const family = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === parent));
+      const siblings = family.filter((s) => !s.signals.some((w) => w.split(":")[0] === child));
+      if (siblings.length < 4) continue;
+      const rate = (xs: Sample[], f: (s: Sample) => boolean) => (xs.length ? xs.filter(f).length / xs.length : 0);
+      containment.push({
+        child, parent, n: inParent.length,
+        lift: rate(inParent, (s) => s.hit) - rate(siblings, (s) => s.hit),
+        majLift: rate(inParent, (s) => s.hitMajor) - rate(siblings, (s) => s.hitMajor),
+      });
+      break;
+    }
+  }
+  if (containment.length) {
+    console.log(`\nNESTED signals — raw lift above is confounded; weight on THESE numbers instead`);
+    console.log("─".repeat(70));
+    for (const c of containment) {
+      console.log(
+        `  ${c.child} within ${c.parent} (n=${c.n}):  ` +
+        `any ${(c.lift * 100).toFixed(1)}pp   major ${(c.majLift * 100).toFixed(1)}pp`,
+      );
+    }
+  }
+
   // Does confidence rank? Compared WITHIN each chapter, because confidence is a
   // z-score calibrated inside the chapter and is therefore not comparable across
   // chapters at all. An earlier version of this check pooled every candidate
@@ -177,16 +219,46 @@ async function main() {
       else { secondHalfHits += hit; secondHalfN++; }
     }
   }
+  // ── The cut that matters is TOP FOUR, not the median.
+  //
+  // The timeline renders four chips, so the product only ever asks the ranking
+  // one question: are the best four better than the rest? A median split answers
+  // a different question, and the two came apart sharply once the weights were
+  // refitted — precision@4 went 47.5% -> 50.0% while the median separation stayed
+  // flat at ~1.8pp. Both numbers were right. A ranking can be sharp at the very
+  // top and noisy through the middle, and only one of those costs a writer
+  // anything. Reporting the median split alone would have read as "no change"
+  // on the single change that mattered most.
+  let topHits = 0, topN = 0, restHits = 0, restN = 0;
+  let topMaj = 0, restMaj = 0;
+  for (const group of byChapter.values()) {
+    const ranked = [...group].sort((a, b) => b.confidence - a.confidence);
+    for (let i = 0; i < ranked.length; i++) {
+      const inTop = i < 4;
+      if (inTop) { topN++; topHits += ranked[i].hit ? 1 : 0; topMaj += ranked[i].hitMajor ? 1 : 0; }
+      else { restN++; restHits += ranked[i].hit ? 1 : 0; restMaj += ranked[i].hitMajor ? 1 : 0; }
+    }
+  }
+  const t = topN ? topHits / topN : 0, r = restN ? restHits / restN : 0;
+  const tm = topN ? topMaj / topN : 0, rm = restN ? restMaj / restN : 0;
+  console.log(`\nDoes confidence put the right things in the TOP FOUR? (what the product asks)`);
+  console.log(`  hit rate, top 4 of each chapter   ${(t * 100).toFixed(1)}%  (n=${topN})`);
+  console.log(`  hit rate, everything below        ${(r * 100).toFixed(1)}%  (n=${restN})`);
+  console.log(`  separation                        ${((t - r) * 100).toFixed(1)}pp`);
+  console.log(`  MAJOR rate, top 4                 ${(tm * 100).toFixed(1)}%`);
+  console.log(`  MAJOR rate, below                 ${(rm * 100).toFixed(1)}%`);
+  console.log(`  separation                        ${((tm - rm) * 100).toFixed(1)}pp`);
+  if (t - r < 0.05) {
+    console.log(`  → the ranking is not separating where it counts. Reweighting will not`);
+    console.log(`    fix that; a signal that actually discriminates has to be added.`);
+  }
+
   const topRate = firstHalfN ? firstHalfHits / firstHalfN : 0;
   const botRate = secondHalfN ? secondHalfHits / secondHalfN : 0;
-  console.log(`\nDoes confidence rank WITHIN a chapter? (the only comparison that means anything)`);
+  console.log(`\nMedian split, for reference (a blunter cut — see the note above)`);
   console.log(`  hit rate, better-ranked half   ${(topRate * 100).toFixed(1)}%  (n=${firstHalfN})`);
   console.log(`  hit rate, worse-ranked half    ${(botRate * 100).toFixed(1)}%  (n=${secondHalfN})`);
   console.log(`  separation                     ${((topRate - botRate) * 100).toFixed(1)}pp`);
-  if (topRate - botRate < 0.05) {
-    console.log(`  → the ranking is not separating. Reweighting will not fix that;`);
-    console.log(`    a signal that actually discriminates has to be added.`);
-  }
 }
 
 main().catch((e) => { console.error(e); process.exitCode = 1; });
