@@ -1531,6 +1531,12 @@ function selectEvents(
 export interface SalienceRefineOptions {
   /** Returns one score per clause. Positive = reads like a plot event. */
   scorer: (clauses: string[]) => Promise<number[]>;
+  /** Optional second scorer: how central each clause is to the chapter's subject.
+   *  Its WEIGHT may be negative; see chapterCentrality's header on why the sign
+   *  is measured rather than assumed. */
+  centrality?: (clauses: string[]) => Promise<number[]>;
+  /** Weight for the centrality term. Set from measured lift. */
+  centralityWeight?: number;
   /** Drop events below this. Tuned by the suite; see the sweep in its comments. */
   minSalience?: number;
   /** How hard the LM score moves the ranking, relative to the sync confidence. */
@@ -1542,7 +1548,10 @@ export async function refineEventSalience(
   options: SalienceRefineOptions,
 ): Promise<NarrativeEvent[]> {
   if (events.length === 0) return events;
-  const scores = await options.scorer(events.map((e) => e.sentence));
+  const sentences = events.map((e) => e.sentence);
+  const scores = await options.scorer(sentences);
+  const central = options.centrality ? await options.centrality(sentences) : null;
+  const centralityWeight = options.centralityWeight ?? 0;
   const minSalience = options.minSalience ?? -Infinity;
   const weight = options.weight ?? 0.5;
 
@@ -1551,11 +1560,16 @@ export async function refineEventSalience(
     // Blend rather than replace. The sync score carries structural evidence the
     // LM cannot see (realis mood, agent kind, object class); the LM carries
     // semantic evidence the structure cannot. Neither should win outright.
-    const blended = Math.max(0, Math.min(1, e.confidence + weight * s));
+    const c = central?.[i] ?? 0;
+    const blended = Math.max(0, Math.min(1, e.confidence + weight * s + centralityWeight * c));
     return {
       ...e,
       confidence: Number(blended.toFixed(3)),
-      why: [...e.why, `lm-salience:${s.toFixed(2)}`],
+      why: [
+        ...e.why,
+        `lm-salience:${s.toFixed(2)}`,
+        ...(central ? [c >= 0.35 ? "central" : "peripheral"] : []),
+      ],
       _salience: s,
     };
   });

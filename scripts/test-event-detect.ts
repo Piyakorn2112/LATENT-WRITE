@@ -332,11 +332,17 @@ const SALIENCE_MIN = process.env.SALIENCE === "off"
 async function runNewAsync(p: Prepared): Promise<Predicted[]> {
   let events = detectNarrativeEventsFor(p);
   if (SALIENCE_MIN !== null) {
-    const { eventSalienceBatch } = await import("../src/lib/narrative-lm");
+    const { eventSalienceBatch, chapterCentrality } = await import("../src/lib/narrative-lm");
+    // Default matches what story-graph.ts ships. A suite testing a configuration
+    // nobody runs is measuring fiction, which this file has already been caught
+    // doing once.
+    const cw = Number(process.env.CENTRALITY_W ?? 0.45);
     events = await refineEventSalience(events, {
       scorer: eventSalienceBatch,
       minSalience: SALIENCE_MIN,
       weight: Number(process.env.SALIENCE_W ?? 0.5),
+      centrality: (clauses) => chapterCentrality(clauses, p.paragraphs),
+      centralityWeight: cw,
     });
   }
   return events.map(toPredicted);

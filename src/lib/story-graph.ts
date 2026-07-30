@@ -171,7 +171,8 @@ export async function enrichChapterEntryWithLM(
   if (paras.length === 0 || entry.majorEvents.length === 0) return entry;
 
   try {
-    const { classifyEventDetail, semanticSimilarity, hasEmbedder, eventSalienceBatch } = await import("./narrative-lm");
+    const { classifyEventDetail, semanticSimilarity, hasEmbedder, eventSalienceBatch, chapterCentrality } =
+      await import("./narrative-lm");
     const { refineEventSalience } = await import("./narrative-events");
 
     // Say so out loud. A bare `catch {}` around this whole function meant that
@@ -205,7 +206,22 @@ export async function enrichChapterEntryWithLM(
           channel: e.channel ?? "narration",
           why: [],
         })),
-        { scorer: eventSalienceBatch, minSalience: -0.05, weight: 0.5 },
+        {
+          scorer: eventSalienceBatch,
+          minSalience: -0.05,
+          weight: 0.5,
+          // Chapter centrality: how close each clause sits to what the chapter is
+          // about. Sign and weight both MEASURED, not assumed, because every
+          // intuition-set weight in this engine has been wrong. The sweep on the
+          // eight-book gold set, reading precision@4:
+          //     -1.5 -> 36.1%   -0.6 -> 41.0%   0 -> 45.9%
+          //      0.3 -> 47.5%    0.45 -> 47.5%   0.6 -> 47.5%
+          //      0.75 -> 45.9%   1.2 -> 39.3%    2.0 -> 29.5%
+          // A real plateau across 0.3 to 0.6 rather than a lucky point, and the
+          // negative side confirms the direction hard. 0.45 is the middle of it.
+          centrality: (clauses) => chapterCentrality(clauses, paras),
+          centralityWeight: 0.45,
+        },
       );
       const keep = new Set(refined.map((r) => `${r.paragraphIndex}|${r.label}`));
       events = events

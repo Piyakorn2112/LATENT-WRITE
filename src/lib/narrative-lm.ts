@@ -935,3 +935,52 @@ export async function eventSalienceBatch(clauses: string[]): Promise<number[]> {
   for (const c of clauses) out.push(await eventSalience(c));
   return out;
 }
+
+// ─── Chapter centrality ───────────────────────────────────────────────────────
+/**
+ * How close is each clause to what the chapter as a whole is ABOUT?
+ *
+ * The chapter's centroid is the mean of its paragraph embeddings. A clause near
+ * that centroid is on the chapter's main subject; one far from it is a digression,
+ * an aside, or scene furniture.
+ *
+ * This is the cheap approximation of summarisation-based salience. The properly
+ * grounded version (Otake et al., COLING 2020, following Barthes' cardinal
+ * functions) measures how much coherence is LOST when a clause is deleted, which
+ * needs a generative model to score likelihood and is therefore out of scope on a
+ * weak machine. Distance to the chapter centroid needs only the embeddings that
+ * are already being computed.
+ *
+ * ★ THE SIGN IS NOT ASSUMED. It is entirely plausible that central clauses are
+ * the TYPICAL ones rather than the pivotal ones, in which case this is
+ * anti-predictive. That is not a guess worth making: every scoring bonus in this
+ * engine that was set by intuition turned out to have the wrong sign, and the
+ * measured fix moved precision@4 from 31.1% to 45.9%. So this returns a raw
+ * number, `scripts/analyse-event-signals.ts` measures its lift, and only then does
+ * it get a weight.
+ *
+ * Cost is one embed per paragraph, about 4ms each, so roughly 0.4s for a median
+ * chapter and 1.1s at the 90th percentile. It runs in the async pass.
+ */
+export async function chapterCentrality(
+  clauses: string[],
+  paragraphs: string[],
+): Promise<number[]> {
+  if (clauses.length === 0) return [];
+  const sample = paragraphs.filter((p) => p.length >= 40);
+  if (sample.length < 3) return clauses.map(() => 0);
+
+  const paraEmbeddings = await Promise.all(sample.map((p) => embed(p.slice(0, 400))));
+  const centroid = new Float32Array(EMBED_DIM);
+  for (const v of paraEmbeddings) {
+    for (let i = 0; i < EMBED_DIM; i++) centroid[i] += v[i];
+  }
+  for (let i = 0; i < EMBED_DIM; i++) centroid[i] /= paraEmbeddings.length;
+
+  const out: number[] = [];
+  for (const c of clauses) {
+    const t = c.replace(/\s+/g, " ").trim();
+    out.push(t.length < 8 ? 0 : cosine(await embed(t.slice(0, 300)), centroid));
+  }
+  return out;
+}
