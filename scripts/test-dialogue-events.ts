@@ -122,7 +122,30 @@ const MORE: Case[] = [
   },
 ];
 
-const MORE2: Case[] = [
+const MORE2: Case[] = [] = [
+  {
+    name: "an arrangement announced as ended",
+    from: "sherlock ch2 — the Red-Headed League is dissolved — was blocked on attribution, fixed 2026-07-31",
+    paragraphs: [
+      "He read the card aloud, and I could hear the dismay in his voice.",
+      "“THE RED-HEADED LEAGUE IS DISSOLVED. October 9, 1890,” said Mr. Wilson.",
+      "We stared at the little card and at the rueful face behind it.",
+    ],
+    target: 1,
+    speakers: ["Mr. Wilson", "Holmes"],
+  },
+  {
+    name: "announced arrival with a purpose",
+    from: "carol ch2 — Fan arrives to take Scrooge home — was blocked on attribution, fixed 2026-07-31",
+    paragraphs: [
+      "The door opened and a little girl came darting in.",
+      "“I have come to bring you home, dear brother!” said the child.",
+      "She clapped her tiny hands and bent to laugh.",
+    ],
+    target: 1,
+    speakers: ["Fan", "Scrooge"],
+  },
+
   {
     name: "self-identification",
     from: "gatsby ch3 — Gatsby tells Nick who he is",
@@ -176,39 +199,17 @@ const MORE2: Case[] = [
  * permanently red suite that says nothing about the code it guards. They are
  * kept visible because a gap nobody can see is a gap nobody fixes.
  */
-const KNOWN_GAPS: Case[] = [
-  {
-    name: "an arrangement announced as ended",
-    from: "sherlock ch2 — the Red-Headed League is dissolved. BLOCKED ON "
-      + "ATTRIBUTION: the tag is “said Mr. Wilson” and the honorific defeats name "
-      + "resolution, so no speaker is found. The classifier rule for termination "
-      + "announcements is already in place and correct.",
-    paragraphs: [
-      "He read the card aloud, and I could hear the dismay in his voice.",
-      "“THE RED-HEADED LEAGUE IS DISSOLVED. October 9, 1890,” said Mr. Wilson.",
-      "We stared at the little card and at the rueful face behind it.",
-    ],
-    target: 1,
-    speakers: ["Mr. Wilson", "Holmes"],
-  },
-  {
-    name: "announced arrival with a purpose",
-    from: "carol ch2 — Fan arrives to take Scrooge home. BLOCKED ON ATTRIBUTION: "
-      + "the tag is “said the child”, a definite description rather than a name, "
-      + "so speech-detect never resolves a speaker and the utterance is "
-      + "unreachable. The classifier rule for it is already in place and correct. "
-      + "Fixing this means teaching attribution to resolve definite descriptions "
-      + "(“the child”, “the old man”, “the stranger”) against the cast — a "
-      + "speech-detect change, scored by accuracy-suite, not by this file.",
-    paragraphs: [
-      "The door opened and a little girl came darting in.",
-      "“I have come to bring you home, dear brother!” said the child.",
-      "She clapped her tiny hands and bent to laugh.",
-    ],
-    target: 1,
-    speakers: ["Fan", "Scrooge"],
-  },
-];
+/**
+ * KNOWN GAPS — reported every run, NOT gated. Currently EMPTY.
+ *
+ * It held two cases, both blocked outside this file: "said the child" (a definite
+ * description) and "said Mr. Wilson" (an honorific). Both were fixed in
+ * speech-detect on 2026-07-31 — the classifier rules had been correct and simply
+ * unreachable — and both were promoted into the gated set above. Keeping the
+ * mechanism here for the next one.
+ */
+const KNOWN_GAPS: Case[] = [];
+
 
 /**
  * Utterances that are NOT events. Every one was actually emitted by an earlier,
@@ -315,10 +316,9 @@ async function main() {
   console.log("\n══ Utterances that are NOT events (the flood, pinned) ══");
   for (const c of SHOULD_NOT_DETECT) check(c, false);
 
-  console.log("\n══ Known gaps (reported, not gated) ══");
-  console.log("   BOTH are speech-detect attribution failures, not classification:");
-  console.log("   a definite description (“the child”) and an honorific (“Mr. Wilson”).");
-  console.log("   The classifier rules for both utterances are already in place.");
+  if (KNOWN_GAPS.length) {
+    console.log("\n══ Known gaps (reported, not gated) ══");
+  }
   for (const c of KNOWN_GAPS) {
     const { found, why } = detectAt(c);
     console.log(`  ${found ? "✓ NOW PASSES — promote it into SHOULD_DETECT" : "· still open"}  ${c.name}`);
