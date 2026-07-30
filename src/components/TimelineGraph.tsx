@@ -15,6 +15,7 @@ import { memo } from "react";
 import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
 import { measureTextWidth } from "../lib/measure-text";
+import { TIMELINE_CHIP_BUDGET } from "../lib/narrative-events";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
 
@@ -139,7 +140,10 @@ function TimelineGraphImpl({
       {/* ── Rows ── */}
       {chapters.map((ch, i) => {
         const entry    = storyGraph.entries[ch.id];
-        const events   = entry?.majorEvents ?? [];
+        // ★ This had NO cap and drew every event the engine emitted — up to 40
+        // on a long chapter, against the full timeline's 3. Same budget, one
+        // source, so the accuracy gate describes both views.
+        const events   = (entry?.majorEvents ?? []).slice(0, TIMELINE_CHIP_BUDGET);
         const { chapterCenterY: cy, eventStartY: evY } = geoms[i];
         const isActive = ch.id === currentChapterId;
         const analyzed = !!entry;

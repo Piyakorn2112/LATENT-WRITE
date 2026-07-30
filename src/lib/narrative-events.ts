@@ -135,7 +135,22 @@ export interface DetectOptions {
 /** The timeline gives an event label 20–36 characters depending on whether a
  *  detail tag sits beside it (measured off TimelineGraph/TimelineGraphFull).
  *  Build to the lower bound so nothing is ever cut mid-word. */
-const LABEL_BUDGET = 28;
+export const LABEL_BUDGET = 28;
+
+/**
+ * ★ HOW MANY CHIPS A CHAPTER ACTUALLY SHOWS. The single source of truth, and it
+ * has to be, because it was previously three different numbers in three places:
+ *
+ *   TimelineGraphFull.tsx   MAX_EVENTS = 3   (sliced)
+ *   TimelineGraph.tsx       no cap at all    (drew every event, up to 40)
+ *   test-event-detect.ts    hardcoded 4      (what precision@N was measured at)
+ *
+ * The engine deliberately emits far more than this and lets the ranking decide
+ * the order — see the cap in `detectNarrativeEvents`. But the number that
+ * describes the PRODUCT is precision@(this), so the harness and both renderers
+ * must agree on it or the gate is measuring a view nobody sees.
+ */
+export const TIMELINE_CHIP_BUDGET = 3;
 
 /**
  * Reject a dialogue act whose content could not be recovered, rather than only

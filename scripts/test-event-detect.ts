@@ -35,7 +35,11 @@ import { fileURLToPath } from "url";
 
 import { analyzeChapter } from "../src/lib/chapter-analysis";
 import { detectMajorEvents } from "../src/lib/event-detect";
-import { detectNarrativeEvents, refineEventSalience, type NarrativeEvent } from "../src/lib/narrative-events";
+import {
+  detectNarrativeEvents, refineEventSalience,
+  LABEL_BUDGET, TIMELINE_CHIP_BUDGET,
+  type NarrativeEvent,
+} from "../src/lib/narrative-events";
 import { detectSpeechInChapter } from "../src/lib/speech-detect";
 import { resolveKnownNames } from "../src/lib/world-data";
 import { BOOKS, loadBook, splitParagraphs } from "./print-chapter";
@@ -76,20 +80,33 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // and none. It is still a long way from trustworthy.
 // Targets are REGRESSION LOCKS set just under the measured value, not
 // aspirations. They are raised whenever a change is banked, so that the next
-// change has to keep the ground already taken. Measured on the eight-book set at
-// the time of writing: precision@4 50.7%, major-in-top-4 30.5%, major recall
-// 45.8%, precision 35.3%, label fit 100%.
+// change has to keep the ground already taken.
+//
+// ★★ RE-BASELINED ONCE, and never lower a target for a weaker reason than this.
+// The two "what the writer sees" metrics were measured at a hardcoded top-FOUR
+// while the shipping timeline renders TIMELINE_CHIP_BUDGET = 3 — and the compact
+// timeline rendered every event, uncapped. The gate described a view nobody had.
+// Re-measured at the real budget:
+//
+//                              at 4 (wrong)   at 3 (real)
+//   precision@budget              50.7%          49.1%
+//   major events shown            30.5%          16.9%
+//
+// The first barely moved; the second nearly halved, because three slots cannot
+// hold as many major events. NOTHING REGRESSED — it is the same engine measured
+// against what actually ships. 30.5% had been reported to the owner and was
+// wrong; 16.9% is honest, and the gap to the goal is wider than stated.
 const TARGETS = {
   /**
-   * ★ THE NUMBER THAT DESCRIBES THE PRODUCT. The timeline renders four chips, so
-   * this is the share of what a writer actually sees that is real. It went
-   * ungated for a long time while three lesser numbers were gated, which meant
-   * the suite could stay green through a change that made the visible output
-   * worse. Gated now.
+   * ★ THE NUMBER THAT DESCRIBES THE PRODUCT: of the chips a writer actually
+   * sees, how many are real. It went ungated for a long time while three lesser
+   * numbers were gated, which meant the suite could stay green through a change
+   * that made the visible output worse.
    */
-  precisionAt4: 0.44,
-  /** Of the events a chapter summary would mention, how many reach the top four. */
-  majorInTop4: 0.25,
+  precisionAtBudget: 0.44,
+  /** Of the events a chapter summary would mention, how many are actually SHOWN.
+   *  The weakest number here by a distance, and the one the goal is about. */
+  majorInBudget: 0.15,
   /** Of the events a chapter summary would mention, how many are found at all. */
   majorRecall: 0.40,
   /** Of everything emitted, how much corresponds to a real event. Still the
@@ -101,11 +118,11 @@ const TARGETS = {
 };
 
 /**
- * ★ THE MOST IMPORTANT NUMBER THIS SUITE PRINTS IS precision@4, because the
- * timeline renders the top FOUR chips by confidence. It is now gated.
+ * ★ THE MOST IMPORTANT NUMBER THIS SUITE PRINTS IS precision@BUDGET, because
+ * the timeline renders TIMELINE_CHIP_BUDGET chips by confidence. It is gated.
  *
  * It was not always, and the history is the useful part. Measured when this
- * comment was first written:
+ * comment was first written (at the wrong budget of 4, see the note above):
  *
  *   precision over everything emitted   25.5%
  *   precision@4 (what a writer sees)    31.1%
@@ -114,27 +131,28 @@ const TARGETS = {
  *
  * Those last two read together said the ranking was actively BURYING real events:
  * major coverage in the top four was roughly half what the engine achieved across
- * its whole output. The signal analyser later found why — every bonus in the
- * scorer was anti-predictive and confidence was anti-correlated with correctness.
+ * its whole output. The signal analyser found why - every bonus in the scorer was
+ * anti-predictive and confidence was anti-correlated with correctness.
  *
  * After fitting the weights to measured lift, adding chapter centrality, fixing
  * the noun-phrase walk, restricting utterances to performative verbs, and
- * deduplicating labels:
+ * deduplicating labels, measured at the REAL budget of 3:
  *
  *   precision over everything emitted   35.3%
- *   precision@4 (what a writer sees)    50.7%
- *   major events reaching the top 4     30.5%
+ *   precision@3 (what a writer sees)    49.1%
+ *   major events SHOWN                  16.9%
  *   major events found ANYWHERE         45.8%
  *
- * precision@4 is now well clear of overall precision, which is the shape it
+ * precision@3 is now well clear of overall precision, which is the shape it
  * should have had all along: the ranking concentrates real events at the top.
- * The binding constraint has moved to RECALL — 32 of 59 major events are never
- * found at all, and of the ones that ARE found, two thirds already reach the top
- * four. Ranking work has largely paid out; extraction is where the rest is.
+ *
+ * The binding constraint has moved to RECALL AND TO THE BUDGET ITSELF. The engine
+ * finds 27 of 59 major events; three slots per chapter then cap how many can be
+ * shown at all. Raising `major events SHOWN` therefore needs either better recall
+ * or more chips, and the second is a layout decision, not an accuracy one.
  */
 
 const PARAGRAPH_TOLERANCE = 1;
-const LABEL_BUDGET = 28;
 
 interface GoldEvent {
   paragraph: number;
@@ -457,14 +475,14 @@ function report(name: string, t: Totals): { f1: number; majorRecall: number; pre
   console.log(`  legacy type (of matched)  ${pct(t.legacyCorrect, t.matched)}`);
   console.log(`  label↔gold token overlap  ${t.matched ? `${((t.overlapSum / t.matched) * 100).toFixed(1).padStart(5)}%` : "  n/a"}`);
   console.log(`  labels fit ≤${LABEL_BUDGET} chars, uncut ${pct(t.labelsFit, t.predicted)}`);
-  console.log(`  ── what the timeline SHOWS (top 4 per chapter) ──`);
+  console.log(`  ── what the timeline SHOWS (top ${TIMELINE_CHIP_BUDGET} per chapter) ──`);
   console.log(`  chips rendered              ${String(t.topEmitted).padStart(4)}`);
-  console.log(`  precision@4               ${pct(t.topMatched, t.topEmitted)}`);
-  console.log(`  major events in the top 4 ${pct(t.topMajorMatched, t.goldMajor)}`);
+  console.log(`  precision@${TIMELINE_CHIP_BUDGET}               ${pct(t.topMatched, t.topEmitted)}`);
+  console.log(`  major events SHOWN        ${pct(t.topMajorMatched, t.goldMajor)}`);
   return {
     f1, majorRecall, precision, fit,
-    precisionAt4: t.topEmitted ? t.topMatched / t.topEmitted : 0,
-    majorInTop4: t.goldMajor ? t.topMajorMatched / t.goldMajor : 0,
+    precisionAtBudget: t.topEmitted ? t.topMatched / t.topEmitted : 0,
+    majorInBudget: t.goldMajor ? t.topMajorMatched / t.goldMajor : 0,
   };
 }
 
@@ -541,11 +559,16 @@ async function main() {
       const { matches, unmatched } = align(gc.events, predicted);
       const t = engine.totals;
 
-      // ── What the writer actually sees. The timeline renders the top four chips
-      // by confidence, so the precision of the whole ranked list is not the
-      // precision of the product. Both are reported; neither is hidden.
-      const TOP_N = 4;
-      const top = [...predicted].sort((a, b) => b.confidence - a.confidence).slice(0, TOP_N);
+      // ── What the writer actually sees. The timeline renders the top
+      // TIMELINE_CHIP_BUDGET chips by confidence, so the precision of the whole
+      // ranked list is not the precision of the product. Both are reported.
+      //
+      // ★ This was hardcoded to 4 while the shipping timeline rendered 3, so the
+      // gate described a view nobody sees. The budget is now imported from the
+      // engine, which both renderers also import. Do not re-inline it.
+      const top = [...predicted]
+        .sort((a, b) => b.confidence - a.confidence)
+        .slice(0, TIMELINE_CHIP_BUDGET);
       const topAligned = align(gc.events, top);
       t.topEmitted += top.length;
       for (const m of topAligned.matches) {
@@ -594,8 +617,8 @@ async function main() {
   console.log(`\n── gate ────────────────────────────────────────────────`);
   const checks: Array<[string, number, number]> = [
     // ★ First, because it is the only one a writer experiences directly.
-    ["precision@4 (what is SHOWN)", newEngine.precisionAt4, TARGETS.precisionAt4],
-    ["major events in the top 4", newEngine.majorInTop4, TARGETS.majorInTop4],
+    [`precision@${TIMELINE_CHIP_BUDGET} (what is SHOWN)`, newEngine.precisionAtBudget, TARGETS.precisionAtBudget],
+    [`major events in the top ${TIMELINE_CHIP_BUDGET}`, newEngine.majorInBudget, TARGETS.majorInBudget],
     ["recall on major events", newEngine.majorRecall, TARGETS.majorRecall],
     ["precision", newEngine.precision, TARGETS.precision],
     ["label fit rate", newEngine.fit, TARGETS.labelFitRate],

@@ -73,12 +73,21 @@ Type accuracy is reported, not gated: a trained-literary-scholar event typology
 reached Krippendorff's α of only 0.57-0.75 on a coarser scheme than this one, so
 moderate type agreement is a property of the domain, not a bug.
 
-**The number that describes the PRODUCT is precision@4**, because the timeline
-renders four chips. Current, on the eight-book set: precision@4 50.7%, major
-events reaching the top four 30.5%, major events found anywhere 45.8%, overall
-precision 35.3%. Quote precision@4, and never quote a figure without saying which
-gold set produced it. Every smaller set was flattering: 1 author / 22 events gave
-precision 57.1%, and it meant nothing.
+**The number that describes the PRODUCT is precision@BUDGET**, where the budget
+is `TIMELINE_CHIP_BUDGET` in `narrative-events.ts` — currently 3. Current, on the
+eight-book set: precision@3 49.1%, major events SHOWN 16.9%, major events found
+anywhere 45.8%, overall precision 35.3%. Quote precision@3, and never quote a
+figure without saying which gold set produced it. Every smaller set was
+flattering: 1 author / 22 events gave precision 57.1%, and it meant nothing.
+
+**The chip budget has ONE definition and three consumers.** It used to be three
+different answers: `TimelineGraphFull` capped at 3, `TimelineGraph` had no cap at
+all and drew every event the engine emitted (up to 40 on a long chapter), and the
+suite hardcoded 4 — so the gate scored a view nobody had. All three now import
+`TIMELINE_CHIP_BUDGET`. Re-measuring at the real budget moved precision@N only
+50.7% → 49.1% but nearly halved major-events-shown, 30.5% → 16.9%, because three
+slots cannot hold as many. Nothing regressed; the measurement got honest. Same
+applies to `LABEL_BUDGET`, which the suite had also re-declared independently.
 
 **Run `npm run analyse:event-signals` before touching any scoring weight.** It
 measures, per signal, the hit rate of candidates where that signal fired against

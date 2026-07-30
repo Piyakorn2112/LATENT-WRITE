@@ -16,6 +16,7 @@ import { Activity } from "lucide-react";
 import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
 import { measureTextWidth } from "../lib/measure-text";
+import { TIMELINE_CHIP_BUDGET } from "../lib/narrative-events";
 import { CloseIcon } from "./Icon";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
@@ -60,7 +61,9 @@ const PAD_X       = 120;   // horizontal padding
 const SPINE_BASE  = 280;   // baseline Y (no tension) — was 230
 const TERRAIN_AMP = 60;    // max upward displacement (full tension = y=220)
 // Event box collision layout constants
-const MAX_EVENTS  = 3;     // max events per chapter fed into layout
+// ★ The chip budget lives in narrative-events.ts, because the accuracy suite
+// gates on precision@BUDGET and has to measure the view that actually ships.
+const MAX_EVENTS  = TIMELINE_CHIP_BUDGET;
 const EVENT_LAYOUT_OVERSCAN = 3;
 const BOX_H       = 22;    // fixed box height
 const BOX_GAP     = 8;     // minimum gap between boxes
