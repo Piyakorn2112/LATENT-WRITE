@@ -15,6 +15,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test:entity-scan": "tsx scripts/test-entity-scan.ts",
+    "test:attribution-corpus": "tsx scripts/test-attribution-corpus.ts",
+    "test:cast-corpus": "tsx scripts/test-cast-corpus.ts",
     "test:local-review": "tsx scripts/test-local-review.ts",
     "test:chapter-roles": "tsx scripts/test-chapter-roles.ts",
     "test:prose-segments": "tsx scripts/test-prose-segments.ts",

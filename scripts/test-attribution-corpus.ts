@@ -14,8 +14,8 @@
  *   resolution required. A high score here says nothing about the harder
  *   majority of dialogue (bare alternation, pronouns, leading attribution,
  *   multi-turn exchanges) that this harness structurally CANNOT label without
- *   a human. `coverage.hardMajorityPct` reports how much of all dialogue this
- *   is — expect it to be large.
+ *   a human. The printed "hard-majority" line reports how much of all
+ *   dialogue this is — expect it to be large.
  *
  * Two other patterns are extracted and scored SEPARATELY, unfiltered by cast
  * membership, because they are known failure classes (see CLAUDE.md /
@@ -23,6 +23,19 @@
  * are isolated hand-picked cases or fail at real scale:
  *   - HONORIFIC   : `said Mr. Wilson.` / `said Dr. Livesey.` / `said Mrs. Bennet.`
  *   - DEFINITE-DESC: `said the old man.` / `said the stranger.` / `said a woman.`
+ *
+ * ★ REGISTER SKEW, FOUND AND CORRECTED: the literal `"…," said <Name>.` template
+ * is a real 19th-century-British convention (Austen, Doyle, Dickens) but the
+ * in-house sci-fi manuscripts (hollow-iris, root-crown) and the synthetic
+ * webnovel register almost never use it — they write `"…," <Name> said.`
+ * (name-first). Measured: literal-order gave 0 gold paragraphs on 534,912-word
+ * hollow-iris and 1 on 119,197-word root-crown. Scoring ONLY the literal
+ * template would report "no data" on the two largest, most product-relevant
+ * books in the corpus while looking superficially fine in aggregate (Victorian
+ * books alone would carry the number). A second bucket, `leadName`, extracts
+ * the mirror order (`<Name> said/asked/replied/answered.`) — same difficulty
+ * class (explicit tag, explicit name), opposite word order — and is reported
+ * separately, never blended silently into the literal-template number.
  *
  * Segment lookup is exact, not fuzzy: `extractQuotePairs` builds each
  * SpeechSegment as `{ start: openIdx, end: closeIdx + 1 }` (speech-detect.ts
@@ -77,6 +90,18 @@ function descTagRe(): RegExp {
   return new RegExp(
     `${CLOSE_Q}\\s*,?\\s*said\\s+(?:the|a|an)\\s+([a-z][a-z'’-]*(?:\\s+[a-z][a-z'’-]*){0,2})\\s*[.,!?]`,
     "gi",
+  );
+}
+
+// Mirror order: `"<quote>," <Name> [adverb] said/asked/replied/answered.`
+// Same easy-case difficulty (explicit tag + explicit name), opposite word
+// order. See header comment — added because the literal `said <Name>` order
+// left the two largest in-house manuscripts at ~0 gold paragraphs.
+const LEAD_VERB_ALT = "said|asked|replied|answered";
+function leadNameTagRe(): RegExp {
+  return new RegExp(
+    `${CLOSE_Q}\\s*,?\\s*([A-Z][A-Za-z'’-]*(?:\\s+[A-Z][A-Za-z'’-]*){0,2})\\s+(?:\\w+\\s+){0,1}(?:${LEAD_VERB_ALT})\\s*[.,!?]`,
+    "g",
   );
 }
 
@@ -141,6 +166,8 @@ interface BookResult {
   goldParagraphs: number;
   plain: Tally;
   plainOutOfCastCount: number;
+  leadName: Tally;
+  leadNameOutOfCastCount: number;
   honorific: Tally;
   descriptive: Tally;
   descriptiveGenericHit: number;
@@ -154,9 +181,11 @@ async function runBook(key: string, level: IntelligenceLevel, collectSamples: bo
   const words = novel.chapters.reduce((a, c) => a + c.content.trim().split(/\s+/).length, 0);
 
   const plain = emptyTally();
+  const leadName = emptyTally();
   const honorific = emptyTally();
   const descriptive = emptyTally();
   let plainOutOfCastCount = 0;
+  let leadNameOutOfCastCount = 0;
   let descriptiveGenericHit = 0;
   let dialogueParagraphs = 0;
   let goldParagraphs = 0;
@@ -214,6 +243,21 @@ async function runBook(key: string, level: IntelligenceLevel, collectSamples: bo
         }
       }
 
+      const leadRe = leadNameTagRe();
+      while ((m = leadRe.exec(p))) {
+        const captured = m[1];
+        const closeIdx = m.index;
+        const expected = resolveAgainstCast(captured, lookup);
+        if (!expected) { leadNameOutOfCastCount++; continue; }
+        paraHasGold = true;
+        const seg = findSegment(result, closeIdx);
+        leadName.total++;
+        if (!seg) leadName.noSegment++;
+        else if (!seg.speaker) leadName.unattributed++;
+        else if (seg.speaker.toLowerCase() === expected.toLowerCase()) leadName.correct++;
+        else leadName.wrong++;
+      }
+
       const descRe = descTagRe();
       while ((m = descRe.exec(p))) {
         const closeIdx = m.index;
@@ -246,6 +290,8 @@ async function runBook(key: string, level: IntelligenceLevel, collectSamples: bo
     goldParagraphs,
     plain,
     plainOutOfCastCount,
+    leadName,
+    leadNameOutOfCastCount,
     honorific,
     descriptive,
     descriptiveGenericHit,
@@ -290,11 +336,13 @@ async function main() {
   }
 
   const grandPlain = emptyTally();
+  const grandLeadName = emptyTally();
   const grandHonorific = emptyTally();
   const grandDescriptive = emptyTally();
   let grandDialogueParas = 0;
   let grandGoldParas = 0;
   let grandPlainOutOfCast = 0;
+  let grandLeadNameOutOfCast = 0;
   let grandDescriptiveGenericHit = 0;
 
   for (const r of bookResults) {
@@ -303,18 +351,22 @@ async function main() {
     console.log(`   dialogue paragraphs (quote-char detected): ${r.dialogueParagraphs}   gold-labelled paragraphs: ${r.goldParagraphs}   hard-majority: ${f1(pct(r.dialogueParagraphs - r.goldParagraphs, r.dialogueParagraphs))}%`);
     tallyLine("plain", r.plain);
     console.log(`      (+ ${r.plainOutOfCastCount} plain "said Name." tags where Name was NOT in the resolved cast — extraction-recall gap, not scored)`);
+    tallyLine("leadName", r.leadName);
+    console.log(`      (+ ${r.leadNameOutOfCastCount} "Name said." tags where Name was NOT in the resolved cast — extraction-recall gap, not scored)`);
     tallyLine("honorific", r.honorific);
     tallyLine("descriptive", r.descriptive);
     if (r.descriptive.total > 0) console.log(`      (of attributed, ${r.descriptiveGenericHit} resolved to the generic word itself, e.g. "old man" → "Man")`);
 
     for (const k of ["total", "correct", "wrong", "unattributed", "noSegment"] as const) {
       grandPlain[k] += r.plain[k];
+      grandLeadName[k] += r.leadName[k];
       grandHonorific[k] += r.honorific[k];
       grandDescriptive[k] += r.descriptive[k];
     }
     grandDialogueParas += r.dialogueParagraphs;
     grandGoldParas += r.goldParagraphs;
     grandPlainOutOfCast += r.plainOutOfCastCount;
+    grandLeadNameOutOfCast += r.leadNameOutOfCastCount;
     grandDescriptiveGenericHit += r.descriptiveGenericHit;
 
     if (showSamples) {
@@ -330,6 +382,11 @@ async function main() {
   console.log(`  → hard-majority this harness CANNOT label: ${f1(pct(grandDialogueParas - grandGoldParas, grandDialogueParas))}% of dialogue paragraphs\n`);
   tallyLine("plain", grandPlain);
   console.log(`      (+ ${grandPlainOutOfCast} plain tags where Name fell outside the resolved cast — not scored, reported for context)`);
+  console.log(`  literal-template "said <Name>." total tagged occurrences: ${grandPlain.total + grandPlainOutOfCast} (of which ${grandPlain.total} in-cast/scored)`);
+  tallyLine("leadName", grandLeadName);
+  console.log(`      (+ ${grandLeadNameOutOfCast} "Name said." tags where Name fell outside the resolved cast — not scored, reported for context)`);
+  console.log(`  mirror-order "<Name> said." total tagged occurrences: ${grandLeadName.total + grandLeadNameOutOfCast} (of which ${grandLeadName.total} in-cast/scored)`);
+  console.log(`\n  COMBINED bulk gold (plain + leadName, in-cast/scored): N=${grandPlain.total + grandLeadName.total}   combined correct=${grandPlain.correct + grandLeadName.correct}   combined wrong=${grandPlain.wrong + grandLeadName.wrong}   combined unattributed=${grandPlain.unattributed + grandLeadName.unattributed + grandPlain.noSegment + grandLeadName.noSegment}`);
   console.log("\n  FAILURE CLASSES (unfiltered by cast membership — checking scale, not isolated cases):");
   tallyLine("honorific", grandHonorific);
   tallyLine("descriptive", grandDescriptive);
