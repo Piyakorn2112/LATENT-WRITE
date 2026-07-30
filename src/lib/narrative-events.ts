@@ -1509,6 +1509,33 @@ function detectNarrativeEventsUncached(
       // The verb class still identifies WHAT KIND of event a clause describes,
       // which the type channel needs, but it does not predict whether the clause
       // is a real event, so it no longer moves the ranking.
+      // ★★ THE TYPE CHANNEL IS SEPARABLE BUT NOT USABLE, and both halves of that
+      // are worth knowing.
+      //
+      // This was long documented as "the verb class identifies WHAT KIND of event
+      // a clause describes but does not predict WHETHER it is one". That was an
+      // ARTIFACT: `analyse-event-signals` split every signal on ":" and collapsed
+      // all eight types into one "verb" bucket, whose lift is near zero because
+      // the good and bad types cancel. Keeping `verb:<type>` whole (851
+      // candidates) shows they separate strongly:
+      //
+      //     state-change  +9.3  (+11.2 major)     revelation    -10.1
+      //     departure     +8.2                    arrival        -8.4
+      //     action        +7.0                    confrontation  -7.8
+      //     decision      +6.4   (+3.6 major)
+      //
+      // So the types DO carry information. Scoring them still LOSES: at the full
+      // measured lift precision@3 went 47.4% -> 46.4%, and at half weight 45.5%.
+      // Both reverted.
+      //
+      // The reason is the one that has caught every marginal-lift fit in this
+      // file: `revelation` is the default type for most dialogue acts, so its
+      // -10.1pp is largely `dialogue-act`'s -15.2pp measured a second time.
+      // Adding it double-counts a penalty the scorer already applies.
+      //
+      // Recorded rather than deleted because the SEPARATION is real and a future
+      // model that fits jointly — rather than from marginals — could use it. The
+      // measurement bug is fixed either way, so the next person sees true numbers.
       if (cand.type !== "unclassified") why.push(`verb:${cand.type}`);
 
       // ─── Agent kind ────────────────────────────────────────────────────────

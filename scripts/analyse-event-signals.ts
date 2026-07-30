@@ -105,14 +105,21 @@ async function main() {
   console.log(`${total} candidates over ${gold.chapters.length} gold chapters`);
   console.log(`base hit rate: ${(base * 100).toFixed(1)}%  (${hits} land on a gold event)\n`);
 
-  const all = [...new Set(samples.flatMap((s) => s.signals.map((w) => w.split(":")[0])))].sort();
+  // ★ Keep `verb:<type>` whole. Splitting on ":" collapsed all eight narrative
+  // types into one "verb" signal, which is why the type channel has always
+  // measured as carrying no ranking information — the measurement could not see
+  // the types apart. Since then the dialogue classifier gained eight specific
+  // speech acts (declaration, threat, revocation, self-identification…), and
+  // whether THOSE predict a real event is a different and much sharper question.
+  const key = (w: string) => (w.startsWith("verb:") ? w : w.split(":")[0]);
+  const all = [...new Set(samples.flatMap((s) => s.signals.map(key)))].sort();
 
   console.log("signal                    fires   hit|fired  hit|absent      LIFT");
   console.log("─".repeat(70));
   const rows: Array<{ name: string; lift: number; fired: number; withRate: number }> = [];
   for (const sig of all) {
-    const withSig = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === sig));
-    const without = samples.filter((s) => !s.signals.some((w) => w.split(":")[0] === sig));
+    const withSig = samples.filter((s) => s.signals.some((w) => key(w) === sig));
+    const without = samples.filter((s) => !s.signals.some((w) => key(w) === sig));
     if (withSig.length < 4 || without.length < 4) continue;
     const a = withSig.filter((s) => s.hit).length / withSig.length;
     const b = without.filter((s) => s.hit).length / without.length;
@@ -137,8 +144,8 @@ async function main() {
   console.log("─".repeat(70));
   const majRows: Array<{ name: string; lift: number; fired: number; withRate: number }> = [];
   for (const sig of all) {
-    const withSig = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === sig));
-    const without = samples.filter((s) => !s.signals.some((w) => w.split(":")[0] === sig));
+    const withSig = samples.filter((s) => s.signals.some((w) => key(w) === sig));
+    const without = samples.filter((s) => !s.signals.some((w) => key(w) === sig));
     if (withSig.length < 4 || without.length < 4) continue;
     const a = withSig.filter((s) => s.hitMajor).length / withSig.length;
     const b = without.filter((s) => s.hitMajor).length / without.length;
@@ -168,14 +175,14 @@ async function main() {
   // another signal's is re-measured WITHIN that parent only.
   const containment: Array<{ child: string; parent: string; lift: number; majLift: number; n: number }> = [];
   for (const child of all) {
-    const kids = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === child));
+    const kids = samples.filter((s) => s.signals.some((w) => key(w) === child));
     if (kids.length < 6) continue;
     for (const parent of all) {
       if (parent === child) continue;
-      const inParent = kids.filter((s) => s.signals.some((w) => w.split(":")[0] === parent));
+      const inParent = kids.filter((s) => s.signals.some((w) => key(w) === parent));
       if (inParent.length / kids.length < 0.9) continue;
-      const family = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === parent));
-      const siblings = family.filter((s) => !s.signals.some((w) => w.split(":")[0] === child));
+      const family = samples.filter((s) => s.signals.some((w) => key(w) === parent));
+      const siblings = family.filter((s) => !s.signals.some((w) => key(w) === child));
       if (siblings.length < 4) continue;
       const rate = (xs: Sample[], f: (s: Sample) => boolean) => (xs.length ? xs.filter(f).length / xs.length : 0);
       containment.push({
