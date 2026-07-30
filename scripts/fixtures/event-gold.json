@@ -121,6 +121,358 @@
       ]
     },
     {
+      "book": "carol",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "The Ghost of Christmas Past leads Scrooge through his own memories: his sister Fan arriving to bring him home from school, the joyous Christmas party thrown by his old employer Fezziwig, his fiancee Belle breaking their engagement because greed had replaced his love for her, and a later glimpse of Belle's family learning that Scrooge now sits utterly alone; overwhelmed, Scrooge forces the extinguisher-cap onto the Spirit and falls into an exhausted sleep.",
+      "events": [
+        {
+          "paragraph": 19,
+          "summary": "The Ghost of Christmas Past draws back the bed curtains and appears to Scrooge",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "found himself face to face with the unearthly visitor who drew them"
+        },
+        {
+          "paragraph": 40,
+          "summary": "Scrooge and the Ghost pass through the wall into a vision of his boyhood countryside",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "they passed through the wall, and stood upon an open country road"
+        },
+        {
+          "paragraph": 68,
+          "summary": "Fan arrives at the school to bring young Scrooge home for good",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "I have come to bring you home, dear brother!"
+        },
+        {
+          "paragraph": 73,
+          "summary": "The schoolmaster sends the children off, and they depart together for home",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "drove gaily down the garden-sweep"
+        },
+        {
+          "paragraph": 89,
+          "summary": "Fezziwig shuts up the warehouse early and declares a Christmas party",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "No more work to-night. Christmas Eve, Dick. Christmas, Ebenezer!"
+        },
+        {
+          "paragraph": 128,
+          "summary": "Belle releases young Scrooge from their engagement",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I do; and I release you."
+        },
+        {
+          "paragraph": 131,
+          "summary": "Belle leaves, and the two part for good",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "scene-break",
+          "evidence": "She left him, and they parted."
+        },
+        {
+          "paragraph": 143,
+          "summary": "Belle's husband reveals he saw Scrooge sitting quite alone in the world",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Quite alone in the world, I do believe."
+        },
+        {
+          "paragraph": 149,
+          "summary": "Scrooge forces the extinguisher-cap down over the Ghost's head to end the visions",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "he seized the extinguisher-cap, and by a sudden action pressed it down upon its head"
+        }
+      ]
+    },
+    {
+      "book": "carol",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "The Ghost of Christmas Present shows Scrooge the true Cratchit Christmas, revealing that Tiny Tim will die unless the future changes, then takes him to his nephew Fred's joyful party, where Fred vows to keep welcoming his uncle every year; before vanishing at midnight, the Ghost reveals two wretched children, Ignorance and Want, warning Scrooge to beware them, and a new hooded Phantom appears.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "A strange voice summons Scrooge into the transformed room to meet the new Spirit",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "a strange voice called him by his name, and bade him enter"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Touching the Ghost's robe, Scrooge is transported to the Christmas morning streets",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "they stood in the city streets on Christmas morning"
+        },
+        {
+          "paragraph": 24,
+          "summary": "The Spirit sprinkles water from his torch to end a quarrel and restore good humor",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "their good humour was restored directly"
+        },
+        {
+          "paragraph": 71,
+          "summary": "The Ghost reveals that Tiny Tim will die unless the future changes",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "the child will die"
+        },
+        {
+          "paragraph": 75,
+          "summary": "The Ghost rebukes Scrooge for his own words about the surplus population",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "forbear that wicked cant until you have discovered What the surplus is"
+        },
+        {
+          "paragraph": 78,
+          "summary": "Mrs. Cratchit objects to toasting Scrooge, calling him odious",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "I'd give him a piece of my mind to feast upon"
+        },
+        {
+          "paragraph": 114,
+          "summary": "Fred declares he will keep inviting his uncle every year regardless of refusal",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I mean to give him the same chance every year, whether he likes it or not"
+        },
+        {
+          "paragraph": 133,
+          "summary": "The Ghost reveals that its own life will end at midnight tonight",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "It ends to-night."
+        },
+        {
+          "paragraph": 144,
+          "summary": "The Ghost reveals two wretched children hidden in its robe, Ignorance and Want",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "This boy is Ignorance. This girl is Want."
+        },
+        {
+          "paragraph": 148,
+          "summary": "The bell strikes twelve, the Ghost vanishes, and a hooded Phantom approaches",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "scene-break",
+          "evidence": "beheld a solemn Phantom, draped and hooded, coming, like a mist along the ground, towards him"
+        }
+      ]
+    },
+    {
+      "book": "dracula",
+      "chapter": 1,
+      "eventfulness": "eventful",
+      "whatHappens": "Jonathan Harker travels through Transylvania toward Castle Dracula, brushing off ominous warnings from the locals, and is collected at the Borgo Pass by a mysterious driver whose calèche is surrounded by wolves before he delivers Harker to the ruined castle.",
+      "events": [
+        {
+          "paragraph": 14,
+          "summary": "The landlord and his wife refuse to discuss Count Dracula further",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "revelation",
+          "evidence": "saying that they knew nothing at all, simply refused to speak further"
+        },
+        {
+          "paragraph": 19,
+          "summary": "Harker insists on continuing his journey despite the old woman's desperate plea to wait",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "my duty was imperative, and that I must go"
+        },
+        {
+          "paragraph": 19,
+          "summary": "The old woman puts her own rosary around Harker's neck for protection",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "she put the rosary round my neck"
+        },
+        {
+          "paragraph": 29,
+          "summary": "The coachman claims no carriage came and that Harker must go on to Bukovina",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "There is no carriage here. The Herr is not expected after all."
+        },
+        {
+          "paragraph": 29,
+          "summary": "A mysterious calèche driven by a strange man suddenly arrives and draws up beside the coach",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "a calèche, with four horses, drove up behind us, overtook us"
+        },
+        {
+          "paragraph": 34,
+          "summary": "Harker transfers into the calèche and is swept away into the darkness with the strange driver",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "we swept into the darkness of the Pass"
+        },
+        {
+          "paragraph": 35,
+          "summary": "Harker realizes the carriage has been doubling back over the same ground",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "we were simply going over and over the same ground again"
+        },
+        {
+          "paragraph": 38,
+          "summary": "The driver repeatedly leaves the calèche to investigate mysterious blue flames in the dark",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "he at once checked the horses, and, jumping to the ground, disappeared into the darkness"
+        },
+        {
+          "paragraph": 39,
+          "summary": "Harker sees that the calèche is surrounded by a ring of wolves",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "I saw around us a ring of wolves"
+        },
+        {
+          "paragraph": 40,
+          "summary": "The driver commands the wolves and they retreat",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "the wolves fell back and back further still"
+        },
+        {
+          "paragraph": 41,
+          "summary": "The calèche arrives at Castle Dracula",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "climax",
+          "evidence": "pulling up the horses in the courtyard of a vast ruined castle"
+        }
+      ]
+    },
+    {
+      "book": "dracula",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "Harker meets Count Dracula, who welcomes him into the castle and has him finalize the purchase of Carfax estate near London; when Harker discovers the Count casts no reflection and is nearly attacked after cutting himself shaving, he explores the castle and realizes every door is locked -- he is a prisoner.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "The driver drops off Harker's luggage and departs into the darkness with the calèche",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "the horses started forward, and trap and all disappeared down one of the dark openings"
+        },
+        {
+          "paragraph": 5,
+          "summary": "The castle's great door swings open, granting Harker entry",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "the great door swung back"
+        },
+        {
+          "paragraph": 10,
+          "summary": "The old man reveals himself to be Count Dracula and welcomes Harker into his house",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "introduction",
+          "evidence": "I am Dracula; and I bid you welcome, Mr. Harker, to my house."
+        },
+        {
+          "paragraph": 29,
+          "summary": "The Count leaves a note saying he will be absent and Harker should not wait for him",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "I have to be absent for a while."
+        },
+        {
+          "paragraph": 46,
+          "summary": "Harker gets the Count's signature on the papers finalizing the purchase of Carfax estate",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "got his signature to the necessary papers"
+        },
+        {
+          "paragraph": 51,
+          "summary": "Harker discovers marks on the Count's atlas near London, Exeter, and Whitby",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "the other two were Exeter, and Whitby on the Yorkshire coast"
+        },
+        {
+          "paragraph": 57,
+          "summary": "Harker sees that the Count casts no reflection in the shaving mirror",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "there was no reflection of him in the mirror"
+        },
+        {
+          "paragraph": 57,
+          "summary": "Seeing Harker's blood, the Count suddenly grabs at his throat",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "he suddenly made a grab at my throat"
+        },
+        {
+          "paragraph": 58,
+          "summary": "The Count seizes the shaving mirror and hurls it out the window, smashing it",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "he flung out the glass, which was shattered into a thousand pieces"
+        },
+        {
+          "paragraph": 61,
+          "summary": "Harker finds every door locked and realizes he is a prisoner in the castle",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "The castle is a veritable prison, and I am a prisoner!"
+        }
+      ]
+    },
+    {
       "book": "dracula",
       "chapter": 3,
       "eventfulness": "eventful",
@@ -225,6 +577,614 @@
       ]
     },
     {
+      "book": "dracula",
+      "chapter": 4,
+      "eventfulness": "eventful",
+      "whatHappens": "Harker, held captive and coerced into writing dated letters to disguise his fate, watches the Count use gypsies and Slovak workmen to bring in earth-filled boxes, witnesses the Count set wolves on a woman who comes to reclaim her stolen child, discovers the Count lying in deathlike torpor in a box in the ruined chapel, is blocked from escaping by a pack of wolves the Count admits to the hall, attacks the now-rejuvenated, blood-gorged Count with a shovel without killing him, and is left alone in the castle with the vampire women as the boxes are carried away, resolving to escape down the precipice.",
+      "events": [
+        {
+          "paragraph": 6,
+          "summary": "The Count forces Harker to write three letters home falsely dated to hide his true situation",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "the Count asked me in the suavest tones to write three letters"
+        },
+        {
+          "paragraph": 10,
+          "summary": "A band of Szgany gipsies arrives and camps in the castle courtyard",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "A band of Szgany have come to the castle, and are encamped in the courtyard."
+        },
+        {
+          "paragraph": 15,
+          "summary": "Harker throws his letters through the window bars to a Szgany man to post",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "I threw them through the bars of my window with a gold piece"
+        },
+        {
+          "paragraph": 18,
+          "summary": "The Count reads Harker's letters and burns the anonymous coded one in the lamp flame",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "confrontation",
+          "evidence": "he calmly held letter and envelope in the flame of the lamp till they were consumed"
+        },
+        {
+          "paragraph": 25,
+          "summary": "Harker discovers his travelling suit and coat have vanished along with his papers",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "The suit in which I had travelled was gone, and also my overcoat and rug"
+        },
+        {
+          "paragraph": 27,
+          "summary": "Slovak wagons arrive at the castle carrying great empty boxes",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "saw drive into the yard two great leiter-wagons, each drawn by eight sturdy horses"
+        },
+        {
+          "paragraph": 31,
+          "summary": "Harker sees the Count leave the castle wearing Harker's own clothes",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "he had on the suit of clothes which I had worn whilst travelling here"
+        },
+        {
+          "paragraph": 37,
+          "summary": "A grieving woman confronts the castle demanding the return of her stolen child",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "Monster, give me my child!"
+        },
+        {
+          "paragraph": 39,
+          "summary": "The Count summons a pack of wolves that pour into the courtyard",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "a pack of them poured, like a pent-up dam when liberated, through the wide entrance into the courtyard"
+        },
+        {
+          "paragraph": 51,
+          "summary": "Harker finds the Count lying in a box of earth, apparently dead or in a deathlike sleep",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "lay the Count! He was either dead or asleep, I could not say which"
+        },
+        {
+          "paragraph": 55,
+          "summary": "The Count announces that Harker will be allowed to leave for home the next day",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "To-morrow, my friend, we must part."
+        },
+        {
+          "paragraph": 67,
+          "summary": "Blocked by a pack of wolves at the open door, Harker begs the Count to shut it and stay",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "Shut the door; I shall wait till morning!"
+        },
+        {
+          "paragraph": 70,
+          "summary": "The Count sends away the three vampire women who have come for Harker",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "Back, back, to your own place! Your time is not yet come."
+        },
+        {
+          "paragraph": 75,
+          "summary": "Harker finds the main door locked again after his failed attempt to leave",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "It had been locked after I left the Count."
+        },
+        {
+          "paragraph": 77,
+          "summary": "Harker attacks the rejuvenated, blood-gorged Count with a shovel but fails to kill him",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "lifting it high, struck, with the edge downward, at the hateful face"
+        },
+        {
+          "paragraph": 78,
+          "summary": "A gust of wind slams the stairway door shut, trapping Harker again",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "I was again a prisoner, and the net of doom was closing round me more closely."
+        },
+        {
+          "paragraph": 81,
+          "summary": "The Szgany depart the castle with their wagons and the earth-filled boxes",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "the roll of heavy wheels, the crack of whips, and the chorus of the Szgany as they pass into the distance"
+        },
+        {
+          "paragraph": 83,
+          "summary": "Left alone with the vampire women, Harker resolves to climb down the castle wall to escape",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I shall try to scale the castle wall farther than I have yet attempted"
+        }
+      ]
+    },
+    {
+      "book": "expectations",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "An orphaned boy named Pip is accosted in a graveyard by an escaped convict, who threatens to kill him unless he steals a file and food and brings them to him the next morning; Pip promises to comply, and the convict limps away across the marshes.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "An escaped convict springs up among the graves and threatens to cut Pip's throat",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "introduction",
+          "evidence": "or I’ll cut your throat!"
+        },
+        {
+          "paragraph": 13,
+          "summary": "The convict turns Pip upside down, empties his pockets, and eats his bread",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "confrontation",
+          "evidence": "turned me upside down, and emptied my pockets"
+        },
+        {
+          "paragraph": 34,
+          "summary": "The convict threatens to tear out Pip's heart and liver if he does not comply",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "Or I’ll have your heart and liver out."
+        },
+        {
+          "paragraph": 38,
+          "summary": "Pip promises to bring the convict the file and food",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I would get him the file, and I would get him what broken bits of food"
+        },
+        {
+          "paragraph": 44,
+          "summary": "The convict limps away toward the church wall, clasping himself together",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "scene-break",
+          "evidence": "limped towards the low church wall"
+        }
+      ]
+    },
+    {
+      "book": "expectations",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "Pip endures his sister's temper and secretly saves food for the convict; Joe notices but covers for him, and that night cannon fire reveals a second convict has escaped from the prison hulks; at dawn, Pip steals food and a file from the house to fulfill his promise.",
+      "events": [
+        {
+          "paragraph": 12,
+          "summary": "Mrs. Joe returns in a rage and disciplines Pip with Tickler",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "applied Tickler to its further investigation"
+        },
+        {
+          "paragraph": 25,
+          "summary": "Pip hides his bread and butter down his trouser leg to save for the convict",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "got my bread and butter down my leg"
+        },
+        {
+          "paragraph": 26,
+          "summary": "Joe notices that Pip's bread and butter has disappeared",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "he saw that my bread and butter was gone"
+        },
+        {
+          "paragraph": 32,
+          "summary": "Mrs. Joe grabs Joe by the whiskers and knocks his head against the wall",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "knocked his head for a little while against the wall"
+        },
+        {
+          "paragraph": 37,
+          "summary": "Joe covers for Pip by claiming he simply bolted his food",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I never see your Bolting equal yet, Pip"
+        },
+        {
+          "paragraph": 38,
+          "summary": "Mrs. Joe seizes Pip by the hair to dose him with Tar-water",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "confrontation",
+          "evidence": "fished me up by the hair"
+        },
+        {
+          "paragraph": 43,
+          "summary": "Joe announces that another convict has escaped",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "There’s another conwict off"
+        },
+        {
+          "paragraph": 63,
+          "summary": "Pip steals bread, meat, mincemeat, brandy, and a pork pie from the pantry",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I stole some bread, some rind of cheese, about half a jar of mincemeat"
+        },
+        {
+          "paragraph": 64,
+          "summary": "Pip takes a file from among Joe's tools in the forge",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "got a file from among Joe’s tools"
+        }
+      ]
+    },
+    {
+      "book": "expectations",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "Pip, wracked with guilt, crosses the misty marsh to deliver the stolen food and file, but at the Battery he first startles a different escaped convict who attacks him and flees; when Pip reaches his own convict and describes the stranger, the convict reacts with alarm and fury, declaring he will hunt the man down, and begins savagely filing at his leg iron as Pip slips away home.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "Pip discovers the man he approached is a different convict, not his own",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "confrontation",
+          "evidence": "it was not the same man, but another man"
+        },
+        {
+          "paragraph": 5,
+          "summary": "The strange convict swears, swings at Pip, and flees into the mist",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "he swore an oath at me, made a hit at me"
+        },
+        {
+          "paragraph": 7,
+          "summary": "Pip finds his convict and hands over the file and food",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "when I handed him the file and he laid it down on the grass"
+        },
+        {
+          "paragraph": 32,
+          "summary": "The convict reacts with alarm and scrutiny on hearing Pip's description of the other man",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "regarded me with the keenest scrutiny and the greatest surprise"
+        },
+        {
+          "paragraph": 37,
+          "summary": "The convict grabs Pip by the collar in sudden alarm",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "He held me by the collar and stared at me"
+        },
+        {
+          "paragraph": 45,
+          "summary": "The convict vows to hunt down the other man like a bloodhound",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I’ll pull him down, like a bloodhound"
+        },
+        {
+          "paragraph": 46,
+          "summary": "Pip slips away and heads home while the convict files frantically at his iron",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "scene-break",
+          "evidence": "I thought the best thing I could do was to slip off"
+        }
+      ]
+    },
+    {
+      "book": "expectations",
+      "chapter": 4,
+      "eventfulness": "moderate",
+      "whatHappens": "At the Gargerys' Christmas dinner, Pip endures the guests' mockery while dreading discovery of his theft; the brandy he had secretly diluted with tar-water nearly exposes him when Uncle Pumblechook drinks it and has a violent coughing fit, but the subject is dropped, and just as his sister goes to fetch the stolen pork pie, Pip flees the table and runs straight into a party of soldiers holding handcuffs.",
+      "events": [
+        {
+          "paragraph": 43,
+          "summary": "Pumblechook drinks the tar-watered brandy and has a violent coughing fit, rushing outside",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "and rushing out at the door"
+        },
+        {
+          "paragraph": 46,
+          "summary": "Mrs. Joe questions in amazement how tar got into the brandy",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Why, how ever could Tar come there?"
+        },
+        {
+          "paragraph": 47,
+          "summary": "Pumblechook refuses to hear more about the tar, deflecting suspicion",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "wouldn’t hear of the subject, imperiously waved it all away with his hand"
+        },
+        {
+          "paragraph": 54,
+          "summary": "Pip, in terror as his sister heads to the pantry for the pie, flees the table",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "I released the leg of the table, and ran for my life"
+        },
+        {
+          "paragraph": 55,
+          "summary": "Pip runs headlong into a party of soldiers holding handcuffs",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "climax",
+          "evidence": "I ran head-foremost into a party of soldiers with their muskets"
+        }
+      ]
+    },
+    {
+      "book": "expectations",
+      "chapter": 5,
+      "eventfulness": "eventful",
+      "whatHappens": "Soldiers arrive to have Joe repair broken handcuffs for recapturing two escaped convicts, and in the commotion Mrs. Joe discovers the stolen pork pie is missing without connecting it to Pip. Joe, Pip, and Wopsle join the manhunt, and the soldiers find and drag both convicts out of a ditch where they had been fighting; Pip's convict declares he caught the other man himself, and the two accuse each other of attempted murder. Before being rowed out to the prison ship, Pip's convict confesses to the sergeant that he stole food from the blacksmith's house, and Joe generously forgives him, unknowingly sparing Pip's secret.",
+      "events": [
+        {
+          "paragraph": 1,
+          "summary": "Mrs. Joe discovers the pork pie is missing",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "what’s gone—with the—pie!"
+        },
+        {
+          "paragraph": 3,
+          "summary": "The sergeant explains he needs the blacksmith to repair broken handcuffs",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I am on a chase in the name of the king, and I want the blacksmith"
+        },
+        {
+          "paragraph": 29,
+          "summary": "Joe proposes joining the soldiers on the manhunt, and Mrs. Joe allows Pip to go",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "he mustered courage to propose that some of us should go down with the soldiers and see what came of the hunt"
+        },
+        {
+          "paragraph": 37,
+          "summary": "The search party hears cries of murder and pursuit coming from the marshes",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "we could hear one voice calling “Murder!” and another voice, “Convicts! Runaways!"
+        },
+        {
+          "paragraph": 40,
+          "summary": "The soldiers drag both convicts, bleeding and struggling, out of a ditch",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "dragged out, separately, my convict and the other one"
+        },
+        {
+          "paragraph": 41,
+          "summary": "Pip's convict declares that he himself caught and gave up the other man",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "_I_ took him! _I_ give him up to you!"
+        },
+        {
+          "paragraph": 45,
+          "summary": "The other convict accuses Pip's convict of trying to murder him",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "he tried to murder me"
+        },
+        {
+          "paragraph": 65,
+          "summary": "The convict confesses to the sergeant that he stole food from the blacksmith's",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "From the blacksmith’s."
+        },
+        {
+          "paragraph": 72,
+          "summary": "Joe forgives the convict, saying he is welcome to the food",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "God knows you’re welcome to it,—so far as it was ever mine"
+        }
+      ]
+    },
+    {
+      "book": "frankenstein",
+      "chapter": 4,
+      "eventfulness": "quiet",
+      "whatHappens": "Victor recounts his family background: his father's friend Beaufort dies in poverty after his fall from fortune, prompting Victor's father to rescue and eventually marry Beaufort's daughter Caroline, who becomes Victor's mother; Victor is born in Naples, and years later his parents adopt an orphaned foundling, Elizabeth Lavenza, who grows up as Victor's beloved companion.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "Beaufort, ruined and too proud to stay, retreats with his daughter to Lucerne to live in obscurity",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "he retreated with his daughter to the town of Lucerne, where he lived unknown and in wretchedness"
+        },
+        {
+          "paragraph": 3,
+          "summary": "Victor's father finally discovers Beaufort's hidden lodging after ten months of searching",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "it was ten months before my father discovered his abode"
+        },
+        {
+          "paragraph": 5,
+          "summary": "Beaufort dies in his daughter Caroline's arms, leaving her an orphan and a beggar",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "her father died in her arms, leaving her an orphan and a beggar"
+        },
+        {
+          "paragraph": 5,
+          "summary": "Victor's father takes Caroline into his care and brings her to Geneva",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "he conducted her to Geneva and placed her under the protection of a relation"
+        },
+        {
+          "paragraph": 5,
+          "summary": "Two years later, Caroline becomes Victor's father's wife",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Two years after this event Caroline became his wife."
+        },
+        {
+          "paragraph": 7,
+          "summary": "Victor is born to his parents in Naples",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "I, their eldest child, was born at Naples"
+        },
+        {
+          "paragraph": 9,
+          "summary": "Victor's mother learns that the foundling girl is actually the orphaned daughter of a Milanese nobleman",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "She was not her child, but the daughter of a Milanese nobleman."
+        },
+        {
+          "paragraph": 10,
+          "summary": "Elizabeth Lavenza is taken into Victor's family and becomes his adopted companion",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "Elizabeth Lavenza became the inmate of my parents’ house"
+        }
+      ]
+    },
+    {
+      "book": "frankenstein",
+      "chapter": 5,
+      "eventfulness": "moderate",
+      "whatHappens": "Victor describes his happy childhood with Elizabeth and his friend Henry Clerval, then recounts how discovering Cornelius Agrippa's work as a boy sparked his fascination with alchemy and the elixir of life, a passion that a violent lightning storm later redirected toward the emerging science of electricity, leading him to abandon his old studies for mathematics.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "A second son is born, and Victor's parents give up their travelling life to settle permanently",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "On the birth of a second son, my junior by seven years"
+        },
+        {
+          "paragraph": 2,
+          "summary": "Victor forms a close friendship with Henry Clerval",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "introduction",
+          "evidence": "I united myself in the bonds of the closest friendship to one among them"
+        },
+        {
+          "paragraph": 7,
+          "summary": "Victor discovers a volume of Cornelius Agrippa's work, which excites his enthusiasm for hidden knowledge",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I chanced to find a volume of the works of Cornelius Agrippa"
+        },
+        {
+          "paragraph": 7,
+          "summary": "Victor's father dismisses the book as sad trash without examining it",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "do not waste your time upon this; it is sad trash"
+        },
+        {
+          "paragraph": 11,
+          "summary": "Victor commits himself to searching for the philosopher's stone and the elixir of life",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "the search of the philosopher’s stone and the elixir of life"
+        },
+        {
+          "paragraph": 13,
+          "summary": "Victor watches lightning utterly destroy an old oak tree before his eyes",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "I beheld a stream of fire issue from an old and beautiful oak"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Struck by an explanation of electricity and galvanism, Victor abandons his old studies for mathematics",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "I at once gave up my former occupations"
+        }
+      ]
+    },
+    {
       "book": "frankenstein",
       "chapter": 9,
       "eventfulness": "moderate",
@@ -285,6 +1245,102 @@
           "type": "state-change",
           "legacyType": "climax",
           "evidence": "I became the same happy creature who, a few years ago, loved and beloved by all, had no sorrow or care."
+        }
+      ]
+    },
+    {
+      "book": "frankenstein",
+      "chapter": 10,
+      "eventfulness": "eventful",
+      "whatHappens": "Victor learns from a letter that his young brother William has been murdered, hurries home to Geneva, and during a storm near the murder site glimpses the creature he created and becomes certain it is the killer, but resolves to keep this secret; on returning home he discovers that the family's servant Justine Moritz has been arrested for the murder after William's stolen locket was found on her, and Victor privately vows to prove her innocence.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "Victor's father writes that Victor's young brother William has been murdered",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "Victor, he is murdered!"
+        },
+        {
+          "paragraph": 6,
+          "summary": "William goes missing during the family's evening walk and cannot be found",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "William and Ernest, who had gone on before, were not to be found."
+        },
+        {
+          "paragraph": 7,
+          "summary": "William's father discovers his body, strangled, lying on the grass",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "stretched on the grass livid and motionless; the print of the murder’s finger was on his neck"
+        },
+        {
+          "paragraph": 8,
+          "summary": "Elizabeth, seeing the corpse, cries out that she has caused the child's death",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "O God! I have murdered my darling child!"
+        },
+        {
+          "paragraph": 9,
+          "summary": "The family discovers the valuable miniature portrait William wore is missing, suggesting a motive",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "This picture is gone, and was doubtless the temptation which urged the murderer to the deed."
+        },
+        {
+          "paragraph": 19,
+          "summary": "Victor resolves to leave at once for Geneva",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "To go instantly to Geneva: come with me, Henry, to order the horses."
+        },
+        {
+          "paragraph": 29,
+          "summary": "During a storm near the murder site, Victor glimpses the creature and becomes certain it is the killer",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "it was the wretch, the filthy dæmon, to whom I had given life"
+        },
+        {
+          "paragraph": 32,
+          "summary": "Victor resolves to remain silent about what he knows of the true murderer",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "These reflections determined me, and I resolved to remain silent."
+        },
+        {
+          "paragraph": 39,
+          "summary": "Victor learns that the family's servant Justine Moritz has been accused of William's murder",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Justine Moritz! Poor, poor girl, is she the accused?"
+        },
+        {
+          "paragraph": 41,
+          "summary": "Justine is arrested after William's portrait is found hidden in her pocket",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "upon their deposition, Justine was apprehended."
+        },
+        {
+          "paragraph": 49,
+          "summary": "Victor promises Elizabeth that he will prove Justine's innocence",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "and that shall be proved; fear nothing"
         }
       ]
     },
@@ -594,6 +1650,54 @@
     },
     {
       "book": "pride",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "Mr. Bennet reveals to his astonished family, through a teasing round of dinner-table banter, that he has already paid a visit to Mr. Bingley.",
+      "events": [
+        {
+          "paragraph": 22,
+          "summary": "Mr. Bennet reveals he has already visited Mr. Bingley",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "as I have actually paid the visit, we cannot escape the acquaintance now."
+        },
+        {
+          "paragraph": 25,
+          "summary": "Mr. Bennet leaves the room after delivering his news",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "he left the room, fatigued with the raptures of his wife."
+        },
+        {
+          "paragraph": 28,
+          "summary": "The family resolves to have Mr. Bingley to dinner",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "determining when they should ask him to dinner."
+        }
+      ]
+    },
+    {
+      "book": "pride",
+      "chapter": 3,
+      "eventfulness": "quiet",
+      "whatHappens": "Jane confides her admiration for Bingley to a skeptical Elizabeth, and the narrator lays out Bingley's background and his contrasting friendship with the haughty Darcy.",
+      "events": [
+        {
+          "paragraph": 17,
+          "summary": "Bingley's sisters' approval of Jane frees him to pursue her openly",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "felt authorized by such commendation to think of her as he chose"
+        }
+      ]
+    },
+    {
+      "book": "pride",
       "chapter": 5,
       "eventfulness": "moderate",
       "whatHappens": "Despite his early disdain Darcy grows attracted to Elizabeth, asks her to dance and is refused, then admits to Miss Bingley that he admires her.",
@@ -629,6 +1733,182 @@
           "type": "revelation",
           "legacyType": "revelation",
           "evidence": "Miss Elizabeth Bennet."
+        }
+      ]
+    },
+    {
+      "book": "pride",
+      "chapter": 6,
+      "eventfulness": "eventful",
+      "whatHappens": "After Mr. Bennet needles his youngest daughters, Mrs. Bennet contrives to send Jane to Netherfield on horseback so rain will force her to stay overnight; Jane catches a bad cold there, and Elizabeth walks three muddy miles to nurse her, ending up invited to stay at Netherfield herself.",
+      "events": [
+        {
+          "paragraph": 7,
+          "summary": "Mr. Bennet openly calls Catherine and Lydia the silliest girls in the country",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "you must be two of the silliest girls in the country."
+        },
+        {
+          "paragraph": 19,
+          "summary": "Caroline Bingley's letter invites Jane to dine at Netherfield",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "Come as soon as you can on the receipt of this."
+        },
+        {
+          "paragraph": 24,
+          "summary": "Mrs. Bennet insists Jane go on horseback so rain will force her to stay the night",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "No, my dear, you had better go on horseback, because it seems likely to rain; and then you must stay all night."
+        },
+        {
+          "paragraph": 32,
+          "summary": "Heavy rain traps Jane at Netherfield overnight",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "Jane certainly could not come back."
+        },
+        {
+          "paragraph": 35,
+          "summary": "Jane's letter reveals she has fallen ill from getting wet and must stay at Netherfield",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I find myself very unwell this morning, which, I suppose, is to be imputed to my getting wet through yesterday."
+        },
+        {
+          "paragraph": 39,
+          "summary": "Elizabeth resolves to walk three miles to Netherfield to see Jane",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "determined to go to her, though the carriage was not to be had"
+        },
+        {
+          "paragraph": 48,
+          "summary": "Elizabeth arrives at Netherfield muddy and dishevelled, surprising the household",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "her appearance created a great deal of surprise."
+        },
+        {
+          "paragraph": 51,
+          "summary": "Miss Bingley's carriage offer becomes an invitation for Elizabeth to stay, which she accepts",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "an invitation to remain at Netherfield for the present"
+        }
+      ]
+    },
+    {
+      "book": "pride",
+      "chapter": 18,
+      "eventfulness": "moderate",
+      "whatHappens": "Wickham tells Elizabeth he deliberately avoided Darcy at the ball, and a letter from Caroline Bingley reveals that the whole Netherfield party has left for London for good, hinting Bingley may marry Georgiana Darcy instead of Jane.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "Collins transfers his attentions from Elizabeth to Charlotte Lucas",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "were transferred for the rest of the day to Miss Lucas"
+        },
+        {
+          "paragraph": 4,
+          "summary": "Wickham admits his absence from the ball was deliberate, to avoid Darcy",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "he voluntarily acknowledged that the necessity of his absence _had_ been self-imposed."
+        },
+        {
+          "paragraph": 6,
+          "summary": "Wickham is introduced to Elizabeth's father and mother",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "it was most acceptable as an occasion of introducing him to her father and mother."
+        },
+        {
+          "paragraph": 9,
+          "summary": "Caroline Bingley's letter reveals the whole Netherfield party has left for London for good",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "climax",
+          "evidence": "The whole party have left Netherfield by this time, and are on their way to town; and without any intention of coming back again."
+        },
+        {
+          "paragraph": 16,
+          "summary": "The letter reveals Bingley's growing attachment to Georgiana Darcy",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "My brother admires her greatly already"
+        },
+        {
+          "paragraph": 31,
+          "summary": "Jane and Elizabeth agree to withhold their worries from Mrs. Bennet",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Mrs. Bennet should only hear of the departure of the family"
+        }
+      ]
+    },
+    {
+      "book": "pride",
+      "chapter": 19,
+      "eventfulness": "moderate",
+      "whatHappens": "Charlotte Lucas secretly accepts Mr. Collins's proposal of marriage, stunning Elizabeth when the engagement is revealed to her the next day.",
+      "events": [
+        {
+          "paragraph": 4,
+          "summary": "Mr. Collins proposes and Charlotte Lucas accepts him",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "everything was settled between them to the satisfaction of both"
+        },
+        {
+          "paragraph": 5,
+          "summary": "Charlotte's parents joyfully consent to the match",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "it was bestowed with a most joyful alacrity"
+        },
+        {
+          "paragraph": 9,
+          "summary": "Charlotte swears Collins to secrecy so she can tell Elizabeth herself",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "drop no hint of what had passed before any of the family"
+        },
+        {
+          "paragraph": 11,
+          "summary": "Collins declares he will return to Longbourn very soon, astonishing the family",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "transition",
+          "evidence": "I shall avail myself of it as soon as possible"
+        },
+        {
+          "paragraph": 17,
+          "summary": "Charlotte reveals her engagement to Elizabeth",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "related the event of the day before"
         }
       ]
     },
@@ -885,6 +2165,310 @@
           "type": "decision",
           "legacyType": "transition",
           "evidence": "This photograph!"
+        }
+      ]
+    },
+    {
+      "book": "sherlock",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "Jabez Wilson recounts how a bizarre 'Red-Headed League' job vanished after paying him to copy an encyclopedia for weeks; Holmes deduces it was a scheme to keep him away from his shop while his assistant tunnelled into a neighboring bank vault, and that night Holmes, Watson, and the police capture the criminal, John Clay, emerging from the tunnel.",
+      "events": [
+        {
+          "paragraph": 29,
+          "summary": "The bizarre Red-Headed League advertisement is read aloud",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "introduction",
+          "evidence": "there is now another vacancy open which entitles a member of the League to a salary of £ 4 a week for purely nominal services."
+        },
+        {
+          "paragraph": 56,
+          "summary": "Wilson closes his shop and goes to apply for the League vacancy",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I just ordered him to put up the shutters for the day and to come right away with me"
+        },
+        {
+          "paragraph": 61,
+          "summary": "Wilson is accepted into the Red-Headed League position",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "congratulated me warmly on my success"
+        },
+        {
+          "paragraph": 93,
+          "summary": "Wilson finds the League's office shut, with a notice that it is dissolved",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "THE RED-HEADED LEAGUE IS DISSOLVED. October 9, 1890."
+        },
+        {
+          "paragraph": 123,
+          "summary": "Holmes reacts with excitement to the description of Wilson's assistant, recognizing him",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "transition",
+          "evidence": "Holmes sat up in his chair in considerable excitement."
+        },
+        {
+          "paragraph": 145,
+          "summary": "Holmes reveals he was scrutinizing the assistant's worn trouser knees",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "The knees of his trousers."
+        },
+        {
+          "paragraph": 157,
+          "summary": "Holmes reveals a major crime is being planned and that he means to stop it",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "A considerable crime is in contemplation."
+        },
+        {
+          "paragraph": 164,
+          "summary": "Holmes brings Jones and Merryweather in to join the night's operation",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "Let me introduce you to Mr. Merryweather, who is to be our companion in to-night’s adventure."
+        },
+        {
+          "paragraph": 192,
+          "summary": "A vault floor stone is lifted and the tunnelling intruders emerge",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "one of the broad, white stones turned over upon its side and left a square, gaping hole"
+        },
+        {
+          "paragraph": 194,
+          "summary": "Holmes seizes the intruder, John Clay, in the vault",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "Sherlock Holmes had sprung out and seized the intruder by the collar."
+        },
+        {
+          "paragraph": 201,
+          "summary": "John Clay is handcuffed and taken into custody",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "confrontation",
+          "evidence": "as the handcuffs clattered upon his wrists"
+        }
+      ]
+    },
+    {
+      "book": "sherlock",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "Mary Sutherland tells Holmes how her fiance Hosmer Angel vanished on their wedding morning; Holmes deduces and exposes that Angel was actually her own stepfather in disguise, who flees when confronted.",
+      "events": [
+        {
+          "paragraph": 14,
+          "summary": "Miss Mary Sutherland arrives at Baker Street to consult Holmes",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "the boy in buttons entered to announce Miss Mary Sutherland"
+        },
+        {
+          "paragraph": 41,
+          "summary": "Mary Sutherland becomes engaged to Hosmer Angel",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "We were engaged after the first walk that we took."
+        },
+        {
+          "paragraph": 57,
+          "summary": "Hosmer Angel vanishes from the cab on the wedding morning, never seen again",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "revelation",
+          "evidence": "we waited for him to step out, but he never did"
+        },
+        {
+          "paragraph": 68,
+          "summary": "Holmes commits to investigating the case for Miss Sutherland",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I shall glance into the case for you"
+        },
+        {
+          "paragraph": 73,
+          "summary": "Miss Sutherland reveals she had already advertised for Hosmer Angel",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "I advertised for him in last Saturday’s _Chronicle_"
+        },
+        {
+          "paragraph": 99,
+          "summary": "Holmes writes to Windibank arranging a meeting at Baker Street",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "asking him whether he could meet us here at six o’clock to-morrow evening"
+        },
+        {
+          "paragraph": 110,
+          "summary": "Mr. James Windibank arrives at Baker Street for the appointment",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "The man who entered was a sturdy, middle-sized fellow"
+        },
+        {
+          "paragraph": 119,
+          "summary": "Holmes reveals he has already caught Hosmer Angel, exposing Windibank",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "I let you know, then, that I have caught him!"
+        },
+        {
+          "paragraph": 129,
+          "summary": "Windibank threatens Holmes with legal liability for locking the door",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "it is you who are breaking the law now, and not me"
+        },
+        {
+          "paragraph": 130,
+          "summary": "Windibank flees Baker Street at a run, escaping Holmes's whip",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "climax",
+          "evidence": "from the window we could see Mr. James Windibank running at the top of his speed down the road"
+        }
+      ]
+    },
+    {
+      "book": "worlds",
+      "chapter": 1,
+      "eventfulness": "quiet",
+      "whatHappens": "The narrator recounts, in hindsight, how astronomers first detected unexplained flashes of gas on Mars, and how he personally witnessed one such flash through Ogilvy's telescope -- the first sign of the Martians launching their invasion of Earth.",
+      "events": [
+        {
+          "paragraph": 9,
+          "summary": "Astronomers observe an unexplained great light on Mars during the 1894 opposition",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "introduction",
+          "evidence": "a great light was seen on the illuminated part of the disk"
+        },
+        {
+          "paragraph": 10,
+          "summary": "Lavelle observes a huge outbreak of incandescent gas launched from Mars toward Earth",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "introduction",
+          "evidence": "a huge outbreak of incandescent gas upon the planet"
+        },
+        {
+          "paragraph": 11,
+          "summary": "Ogilvy invites the narrator to join him in observing Mars through his telescope that night",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "invited me up to take a turn with him that night in a scrutiny of the red planet"
+        },
+        {
+          "paragraph": 15,
+          "summary": "The narrator personally witnesses another jet of gas fired from Mars toward Earth",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "there was another jetting out of gas from the distant planet. I saw it."
+        }
+      ]
+    },
+    {
+      "book": "worlds",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "Ogilvy discovers that the falling star seen overnight was in fact a huge artificial cylinder buried in Horsell Common; watching it, he realizes its top is being unscrewed from within and connects it to the strange flashes seen on Mars, then runs for help, and by the time Henderson telegraphs the news to London, crowds are already heading out to see the dead men from Mars.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "A blazing falling star is seen streaking across the sky and falling to earth near Woking",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "rushing over Winchester eastward, a line of flame high in the atmosphere"
+        },
+        {
+          "paragraph": 4,
+          "summary": "Ogilvy finds the fallen object: an enormous hole gouged out by the impact of a huge cylinder",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "An enormous hole had been made by the impact of the projectile"
+        },
+        {
+          "paragraph": 9,
+          "summary": "Ogilvy realizes the cylinder is artificial and hollow, its top being unscrewed from within",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "The cylinder was artificial—hollow—with an end that screwed out!"
+        },
+        {
+          "paragraph": 11,
+          "summary": "Ogilvy connects the cylinder to the flash of gas he had seen on Mars",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "he linked the Thing with the flash upon Mars"
+        },
+        {
+          "paragraph": 12,
+          "summary": "Ogilvy runs for help, dismissed as mad until he reaches the journalist Henderson",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "set off running wildly into Woking"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Returning to the cylinder, Ogilvy and Henderson find a ring of bright metal now showing at its rim",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "a thin circle of bright metal showed between the top and the body of the cylinder"
+        },
+        {
+          "paragraph": 22,
+          "summary": "Henderson telegraphs the news of the cylinder to London",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Henderson went into the railway station at once, in order to telegraph the news to London."
+        },
+        {
+          "paragraph": 23,
+          "summary": "Crowds of boys and unemployed men set out for the common to see the dead men from Mars",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "a number of boys and unemployed men had already started for the common"
+        },
+        {
+          "paragraph": 23,
+          "summary": "The narrator hears the news and heads out to the sand-pits himself",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "lost no time in going out and across the Ottershaw bridge to the sand-pits"
         }
       ]
     },

@@ -595,3 +595,56 @@ silently truncated the 768-dim bge-base to its first half and produced a
 confidently wrong bake-off. `chapterCentrality` allocated its centroid from the
 same constant. Both now take the width from the vectors themselves. Verified
 byte-identical results for MiniLM before and after.
+
+---
+
+## The gold set tripled, and it REFUTED the data hypothesis (2026-07-31)
+
+Three agents annotated 22 new chapters from the annotation guide, blind to the
+detector's output. Every clause machine-verified by `gold:validate` against the
+engine's own paragraph split before merging.
+
+    19 chapters, 103 events  ->  41 chapters, 279 events (134 major), 9 books
+
+**Re-baseline, engine untouched:**
+
+| | 103 events | 279 events |
+|---|---|---|
+| precision@3 | 50.9% | **46.1%** |
+| major events SHOWN | 22.0% | **17.2%** |
+| major recall | 45.8% | **39.6%** |
+| precision | 35.3% | **33.1%** |
+| F1 | 40.5% | **34.9%** |
+
+Fifth consecutive expansion, fifth drop. Nothing regressed; the ruler got honest
+again. Targets re-baselined with that reason recorded at the constant.
+
+**★ AND IT KILLED MY OWN CONCLUSION.** The previous round ended with: "the
+constraint is GOLD DATA, not the model class — the learning curve has not
+plateaued, revisit at 2-3x annotation." We now have 2.7x annotation. Retrained:
+
+    small fixture (204 candidates, 8 books)   LEARNED beats hand-fitted by +1.8pp
+    large fixture (435 candidates, 9 books)   LEARNED beats hand-fitted by +0.8pp
+
+**The advantage SHRANK as data grew.** And the learning curve, which previously
+looked like it was climbing toward a crossover, is now flat-to-declining:
+
+    2 books 44.6%   3 books 48.2%   4 books 47.3%   5 books 45.6%
+    6 books 44.8%   7 books 41.9%   8 books 39.5%
+
+The earlier "still climbing" reading was NOISE — at high k the test set shrinks to
+one or two books, and I over-read a trend that the larger sample does not support.
+
+**So the corrected conclusion: labelled data is NOT the constraint.** A trained
+ranker over these features does not beat hand-written rules, and more data makes
+that clearer rather than less clear. The limit is the FEATURE SET and the
+CANDIDATE GENERATION upstream of it — the same conclusion the model bake-off
+reached from the other direction ("a better model cannot find an event the
+extractor never proposed").
+
+Both experiments now point at the same place: **extraction, not scoring, not
+model size, not annotation volume.**
+
+The expanded fixture is still worth every token it cost. Every number the project
+reports is now measured against 279 events across nine authors instead of 103,
+which is the difference between a plausible claim and a defensible one.

@@ -325,7 +325,7 @@ async function main() {
     const bar = "█".repeat(Math.round(acc / 2));
     console.log(`  ${String(k).padStart(2)} books  ${acc.toFixed(1).padStart(5)}%  ${bar}`);
   }
-  console.log(`  (hand-fitted rules, same held-out protocol: 47.4%)`);
+  console.log(`  (hand-fitted rules, same held-out protocol: printed above)`);
 
   // ── Coefficients from the full set, for reading. These are what would ship.
   const L2_FINAL = Number(process.env.L2 ?? 0.03);
