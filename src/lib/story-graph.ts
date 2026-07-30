@@ -208,19 +208,39 @@ export async function enrichChapterEntryWithLM(
         })),
         {
           scorer: eventSalienceBatch,
+          // The PRUNE. This is where the LM's value actually is, and the cut is a
+          // cliff rather than a slope: -0.2 prunes 3 events, -0.05 prunes 65, 0.1
+          // prunes 174 of 204 and destroys the output. Do not nudge it casually.
           minSalience: -0.05,
-          weight: 0.5,
+          // ★ THE SALIENCE BLEND IS OFF, AND THAT IS A MEASURED DECISION.
+          //
+          // `weight` multiplies the contrastive event-vs-description score into
+          // confidence. The prune above uses the RAW score, so these are
+          // independent: turning the blend off keeps the pruning.
+          //
+          // Measured on the eight-book set, all with the prune on:
+          //     blend cent 0.45 + sal 0.5   precision@3 49.1%   major shown 16.9%
+          //     blend off entirely          precision@3 49.1%   major shown 18.6%
+          //     centrality only             precision@3 50.9%   major shown 18.6%
+          //
+          // So the salience term was COSTING 1.8 points of precision and 1.7 of
+          // major coverage. It was not inert either: a probe with pruning disabled
+          // showed it reshuffling the top three in 78.9% of chapters and landing
+          // on precision@3 43.9% — bit-identical to not blending at all. Constant
+          // churn, zero accuracy. MiniLM's event-vs-description judgement is good
+          // enough to PRUNE with and not good enough to RANK with, on this corpus.
+          weight: 0,
           // Chapter centrality: how close each clause sits to what the chapter is
           // about. Sign and weight both MEASURED, not assumed, because every
-          // intuition-set weight in this engine has been wrong. The sweep on the
-          // eight-book gold set, reading precision@4:
-          //     -1.5 -> 36.1%   -0.6 -> 41.0%   0 -> 45.9%
-          //      0.3 -> 47.5%    0.45 -> 47.5%   0.6 -> 47.5%
-          //      0.75 -> 45.9%   1.2 -> 39.3%    2.0 -> 29.5%
-          // A real plateau across 0.3 to 0.6 rather than a lucky point, and the
-          // negative side confirms the direction hard. 0.45 is the middle of it.
+          // intuition-set weight in this engine has been wrong. Re-swept after the
+          // salience term came out, reading precision@3 / major shown:
+          //     0.2 -> 49.1/16.9   0.35 -> 49.1/16.9   0.45 -> 50.9/18.6
+          //     0.6 -> 50.9/22.0   0.8 -> 49.1/20.3
+          // Still a plateau rather than a lucky point, and 0.6 is the best corner
+          // of it. An earlier sweep including negative weights fell away hard,
+          // which is what confirmed the direction.
           centrality: (clauses) => chapterCentrality(clauses, paras),
-          centralityWeight: 0.45,
+          centralityWeight: 0.6,
         },
       );
       const keep = new Set(refined.map((r) => `${r.paragraphIndex}|${r.label}`));

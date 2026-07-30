@@ -36,6 +36,9 @@ npx tsx scripts/ood-language-audit.ts       # OUT-OF-DISTRIBUTION audit: speech,
 npx tsx scripts/ood-event-audit.ts          # OUT-OF-DISTRIBUTION audit: events, label-free
 npx tsx scripts/analyse-event-signals.ts    # per-signal LIFT — run before any weight change
 npx tsx scripts/probe-entity-funnel.ts      # where entity-subject candidates die
+npx tsx scripts/probe-missed-majors.ts      # what the engine is BLIND to, by class
+npx tsx scripts/probe-lm-blend.ts           # does the LM blend actually re-rank?
+npx tsx scripts/probe-type-mix.ts <book>    # what is behind a collapsed type mix
 ```
 
 ## Event detection — read the plan before touching it
@@ -75,7 +78,7 @@ moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@BUDGET**, where the budget
 is `TIMELINE_CHIP_BUDGET` in `narrative-events.ts` — currently 3. Current, on the
-eight-book set: precision@3 49.1%, major events SHOWN 16.9%, major events found
+eight-book set: precision@3 50.9%, major events SHOWN 22.0%, major events found
 anywhere 45.8%, overall precision 35.3%. Quote precision@3, and never quote a
 figure without saying which gold set produced it. Every smaller set was
 flattering: 1 author / 22 events gave precision 57.1%, and it meant nothing.
@@ -105,10 +108,30 @@ reports that are easy to misread:
   inside another (`unspecified-entity` inside `entity-subject`) shows the
   parent's strength, not its own. The analyser detects ≥90% containment
   automatically and reports the within-parent number. Weight on that one.
-- **Read the TOP-4 separation, not the median split.** They came apart:
-  precision@4 rose 47.5% → 50.0% while the median split stayed flat at 1.8pp,
+- **Read the TOP-N separation, not the median split.** They came apart:
+  precision@N rose 47.5% → 50.0% while the median split stayed flat at 1.8pp,
   because the ranking is sharp at the top and noisy through the middle. Only the
-  top-4 cut costs a writer anything. Top 4 currently separates by 22.3pp.
+  top-N cut costs a writer anything. It currently separates by ~20pp.
+
+**The scorer's weights have SATURATED — do not refit them expecting a gain.**
+Three refits were run; the first won 15 points because the SIGNS were wrong, and
+sign errors dominate everything else. The second and third both LOST. Lift is a
+MARGINAL association, not a conditional effect, and these features are correlated
+(`-no-content` fires only inside `dialogue-act`, itself mostly inside
+`named-agent`), so fitting each to its own marginal double-counts the shared
+part. Remaining headroom is in extraction or in a signal that does not exist yet.
+
+**The LM PRUNES well and RANKS badly, and those are separate settings.**
+`refineEventSalience` filters on the raw contrastive score and separately blends
+it into confidence. The prune is where all the value is: without it precision@3
+drops 50.9% → 43.9%. The blend was measured costing 1.8 points of precision and
+1.7 of major coverage, so `weight` is now **0**. It was not inert — with pruning
+disabled it reshuffled the top three in 78.9% of chapters and landed on exactly
+the accuracy of not blending at all. Constant churn, zero gain: MiniLM's
+event-vs-description judgement is good enough to prune with, not to rank with.
+Chapter centrality still blends, re-swept to **0.6** (plateau 0.45–0.6).
+The prune cut is a CLIFF, not a slope: −0.2 prunes 3 events, −0.05 prunes 65,
++0.1 prunes 174 of 204 and destroys the output.
 
 **When a rate looks wrong, count the funnel — don't hypothesise.**
 `npm run probe:entity-funnel` exists because four rounds of reasoning blamed the

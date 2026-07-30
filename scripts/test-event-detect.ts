@@ -106,7 +106,7 @@ const TARGETS = {
   precisionAtBudget: 0.44,
   /** Of the events a chapter summary would mention, how many are actually SHOWN.
    *  The weakest number here by a distance, and the one the goal is about. */
-  majorInBudget: 0.15,
+  majorInBudget: 0.20,
   /** Of the events a chapter summary would mention, how many are found at all. */
   majorRecall: 0.40,
   /** Of everything emitted, how much corresponds to a real event. Still the
@@ -139,8 +139,8 @@ const TARGETS = {
  * deduplicating labels, measured at the REAL budget of 3:
  *
  *   precision over everything emitted   35.3%
- *   precision@3 (what a writer sees)    49.1%
- *   major events SHOWN                  16.9%
+ *   precision@3 (what a writer sees)    50.9%
+ *   major events SHOWN                  22.0%
  *   major events found ANYWHERE         45.8%
  *
  * precision@3 is now well clear of overall precision, which is the shape it
@@ -373,11 +373,11 @@ async function runNewAsync(p: Prepared): Promise<Predicted[]> {
     // Default matches what story-graph.ts ships. A suite testing a configuration
     // nobody runs is measuring fiction, which this file has already been caught
     // doing once.
-    const cw = Number(process.env.CENTRALITY_W ?? 0.45);
+    const cw = Number(process.env.CENTRALITY_W ?? 0.6);
     events = await refineEventSalience(events, {
       scorer: eventSalienceBatch,
       minSalience: SALIENCE_MIN,
-      weight: Number(process.env.SALIENCE_W ?? 0.5),
+      weight: Number(process.env.SALIENCE_W ?? 0),
       centrality: (clauses) => chapterCentrality(clauses, p.paragraphs),
       centralityWeight: cw,
     });
