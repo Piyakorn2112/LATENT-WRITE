@@ -1229,6 +1229,25 @@ function detectNarrativeEventsUncached(
       // gates. It also reports nested signals separately — a feature that can only
       // fire inside another one has a confounded raw lift, and weighting on that
       // raw number double-counts the parent.
+      //
+      // ★★ THESE WEIGHTS HAVE SATURATED. A third refit against the 212-candidate
+      // population LOST: precision@4 50.0% -> 47.8%, major-in-top-4 30.5% ->
+      // 27.1%. Even applying only the single most obviously mis-calibrated term
+      // on its own — `-no-content`, sitting at -0.1 while measuring -16.8pp —
+      // came out neutral on both product metrics and slightly negative on
+      // precision. Both reverted.
+      //
+      // The reason is a limit of the tool, stated here so nobody spends another
+      // day on it: LIFT IS A MARGINAL ASSOCIATION, NOT A CONDITIONAL EFFECT.
+      // These features are correlated (`-no-content` fires only inside
+      // `dialogue-act`, which fires mostly inside `named-agent`), so fitting each
+      // independently to its own marginal double-counts the shared part. The
+      // first fit won big because the SIGNS were wrong, and sign errors dominate
+      // everything else. With the signs right, marginal fitting has nothing left.
+      //
+      // Do not refit expecting a gain. The remaining headroom is in a signal that
+      // does not exist yet, or in EXTRACTION — which is where every real gain in
+      // this file has actually come from.
 
       // The verb class still identifies WHAT KIND of event a clause describes,
       // which the type channel needs, but it does not predict whether the clause
@@ -1379,7 +1398,7 @@ function narrationCandidate(
   // the timeline at confidence 0.7+; those are descriptions of a mind, and a
   // chip that says one is worse than no chip.
   if (!verb.base || !CHANGE_VERBS[verb.base]) {
-    if (ENT) { _funnel.entityVerbNotChange++; sample(_funnelSamples.notChange, `[${agent.name}] ⟩⟩ ${verb.base ?? "?"} ⟩⟩ ${text.slice(0, 80)}`); }
+    if (ENT) { _funnel.entityVerbNotChange++; sample(_funnelSamples.notChange, `${verb.surface}\t[${agent.name}] ⟩⟩ ${text.slice(0, 78)}`); }
     return null;
   }
 
@@ -1679,7 +1698,19 @@ function selectEvents(
     .map((c) => ({ c, conf: 1 / (1 + Math.exp(-((c.score - mean) / sd))) }))
     .sort((a, b) => b.conf - a.conf);
 
-  const kept: Array<{ c: Candidate; conf: number }> = [];
+  const kept: Array<{ c: Candidate; conf: number; label: string }> = [];
+  // ── Two chips with the SAME TEXT carry one chip's worth of information.
+  //
+  // A Christmas Carol chapter 1 emitted "Scrooge accuses" three times, at
+  // confidence 0.71, 0.71 and 0.50, alongside "Scrooge commits" and "Ghost
+  // commits" — all of them attributed utterances whose content could not be
+  // extracted, so the label collapsed to agent plus speech act. Each one occupied
+  // a slot in a timeline that shows four.
+  //
+  // The label has to be built HERE rather than after selection, which is why this
+  // did not exist: you cannot deduplicate on something you compute later. Ranked
+  // order means the survivor is the highest-confidence instance.
+  const seenLabels = new Set<string>();
   for (const entry of ranked) {
     if (entry.conf < floor) continue;
     // Non-maximum suppression: the highest-scoring clause in a neighbourhood
@@ -1688,7 +1719,18 @@ function selectEvents(
       (k) => Math.abs(k.c.paragraphIndex - entry.c.paragraphIndex) <= MIN_SEPARATION_PARAGRAPHS,
     );
     if (clash) continue;
-    kept.push(entry);
+    const verbSurface = entry.c.channel === "dialogue" ? entry.c.verbBase : toPresent(entry.c.verbBase);
+    const label = buildLabel(entry.c.agent, verbSurface, entry.c.object);
+    const key = label.toLowerCase();
+    if (seenLabels.has(key)) continue;
+    // A CONTENT-LESS label is subsumed by one that shares its agent and verb and
+    // actually says something. "Scrooge accuses" adds nothing beside "Scrooge
+    // accuses particular"; the reverse is not true, so only the empty one yields.
+    const stem = `stem:${entry.c.agent ?? ""}|${entry.c.verbBase}`.toLowerCase();
+    if (!entry.c.object && seenLabels.has(stem)) continue;
+    seenLabels.add(stem);
+    seenLabels.add(key);
+    kept.push({ ...entry, label });
     if (kept.length >= maxEvents) break;
   }
 
@@ -1697,9 +1739,7 @@ function selectEvents(
   const majorCut = kept.length ? Math.max(0.62, kept[0].conf - 0.12) : 1;
 
   return kept
-    .map(({ c, conf }) => {
-      const verbSurface = c.channel === "dialogue" ? c.verbBase : toPresent(c.verbBase);
-      const label = buildLabel(c.agent, verbSurface, c.object);
+    .map(({ c, conf, label }) => {
       return {
         label,
         type: c.type,

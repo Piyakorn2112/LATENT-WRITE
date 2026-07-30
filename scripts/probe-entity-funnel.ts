@@ -71,8 +71,20 @@ async function main() {
   const N = Number(process.env.SAMPLES ?? 40);
   console.log(`\n── ${N} of the ${f.entityNoVerb} "no verb found" cases  [subject] ⟩⟩ remainder ──`);
   for (const s of _funnelSamples.noVerb.slice(0, N)) console.log(`  ${s}`);
-  console.log(`\n── ${N} of the ${f.entityVerbNotChange} "verb not in CHANGE_VERBS" cases ──`);
-  for (const s of _funnelSamples.notChange.slice(0, N)) console.log(`  ${s}`);
+  // The unrecognised verbs, by frequency. CHANGE_VERBS is a closed class on
+  // purpose, so growing it is only defensible when the additions are common and
+  // genuinely denote change — which needs the counts, not a sample.
+  const verbs = new Map<string, number>();
+  const example = new Map<string, string>();
+  for (const s of _funnelSamples.notChange) {
+    const [v, rest] = s.split("\t");
+    verbs.set(v, (verbs.get(v) ?? 0) + 1);
+    if (!example.has(v)) example.set(v, rest);
+  }
+  console.log(`\n── unrecognised verbs on the entity path, by frequency (${f.entityVerbNotChange} total) ──`);
+  for (const [v, n] of [...verbs].sort((a, b) => b[1] - a[1]).slice(0, N)) {
+    console.log(`  ${String(n).padStart(3)}×  ${v.padEnd(14)} ${example.get(v)?.slice(0, 88) ?? ""}`);
+  }
 }
 
 main().catch((e) => { console.error(e); process.exitCode = 1; });

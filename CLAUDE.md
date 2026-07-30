@@ -74,9 +74,9 @@ reached Krippendorff's α of only 0.57-0.75 on a coarser scheme than this one, s
 moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@4**, because the timeline
-renders four chips. Current, on the eight-book set: precision@4 50.0%, major
+renders four chips. Current, on the eight-book set: precision@4 50.7%, major
 events reaching the top four 30.5%, major events found anywhere 45.8%, overall
-precision 33.3%. Quote precision@4, and never quote a figure without saying which
+precision 35.3%. Quote precision@4, and never quote a figure without saying which
 gold set produced it. Every smaller set was flattering: 1 author / 22 events gave
 precision 57.1%, and it meant nothing.
 

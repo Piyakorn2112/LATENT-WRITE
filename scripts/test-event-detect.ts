@@ -77,8 +77,8 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Targets are REGRESSION LOCKS set just under the measured value, not
 // aspirations. They are raised whenever a change is banked, so that the next
 // change has to keep the ground already taken. Measured on the eight-book set at
-// the time of writing: precision@4 50.0%, major-in-top-4 30.5%, major recall
-// 45.8%, precision 33.3%, label fit 100%.
+// the time of writing: precision@4 50.7%, major-in-top-4 30.5%, major recall
+// 45.8%, precision 35.3%, label fit 100%.
 const TARGETS = {
   /**
    * ★ THE NUMBER THAT DESCRIBES THE PRODUCT. The timeline renders four chips, so
@@ -95,36 +95,42 @@ const TARGETS = {
   /** Of everything emitted, how much corresponds to a real event. Still the
    *  weakest number here, and expected to be: the engine deliberately emits more
    *  than the timeline shows and lets the ranking do the selecting. */
-  precision: 0.30,
+  precision: 0.32,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };
 
 /**
- * ★ THE MOST IMPORTANT NUMBER THIS SUITE PRINTS IS NOT GATED, BECAUSE IT IS
- * CURRENTLY BROKEN AND GATING IT WOULD ONLY HIDE THAT.
+ * ★ THE MOST IMPORTANT NUMBER THIS SUITE PRINTS IS precision@4, because the
+ * timeline renders the top FOUR chips by confidence. It is now gated.
  *
- * The timeline renders the top FOUR chips by confidence. So the metric that
- * describes the product is precision@4, not precision over the whole ranked list.
- * Measured on 103 events across eight books:
+ * It was not always, and the history is the useful part. Measured when this
+ * comment was first written:
  *
  *   precision over everything emitted   25.5%
  *   precision@4 (what a writer sees)    31.1%
  *   major events reaching the top 4     22.0%
  *   major events found ANYWHERE          40.7%
  *
- * Read those last two together. If confidence ranked correctly, the top four
- * would be densely packed with real events and precision@4 would tower over the
- * overall figure. It does not: it is barely higher. And major-event coverage in
- * the top four (22.0%) is roughly HALF what the engine achieves across its whole
- * output (40.7%), which means the ranking is actively burying real events beneath
- * false ones.
+ * Those last two read together said the ranking was actively BURYING real events:
+ * major coverage in the top four was roughly half what the engine achieved across
+ * its whole output. The signal analyser later found why — every bonus in the
+ * scorer was anti-predictive and confidence was anti-correlated with correctness.
  *
- * The engine therefore FINDS a great deal more than it SHOWS, and the confidence
- * score is close to uninformative about correctness. That is the next thing to
- * fix, and it is a different problem from precision or recall: it is calibration
- * of the ranking. Until it is fixed, raising recall barely helps the writer,
- * because the extra events land below the fold.
+ * After fitting the weights to measured lift, adding chapter centrality, fixing
+ * the noun-phrase walk, restricting utterances to performative verbs, and
+ * deduplicating labels:
+ *
+ *   precision over everything emitted   35.3%
+ *   precision@4 (what a writer sees)    50.7%
+ *   major events reaching the top 4     30.5%
+ *   major events found ANYWHERE         45.8%
+ *
+ * precision@4 is now well clear of overall precision, which is the shape it
+ * should have had all along: the ranking concentrates real events at the top.
+ * The binding constraint has moved to RECALL — 32 of 59 major events are never
+ * found at all, and of the ones that ARE found, two thirds already reach the top
+ * four. Ranking work has largely paid out; extraction is where the rest is.
  */
 
 const PARAGRAPH_TOLERANCE = 1;
