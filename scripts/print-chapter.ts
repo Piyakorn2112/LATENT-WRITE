@@ -44,6 +44,14 @@ export const CORPUS_BOOKS: Record<string, string> = {
   carol: "carol.txt",
   frankenstein: "frankenstein.txt",
   expectations: "expectations.txt",
+  // ★ Added to fix a measured representativeness problem: 84% of the gold set was
+  // 19th-century BRITISH prose. These bring American and Canadian voices, 20th
+  // century, YA, adventure and close-interior registers.
+  gatsby: "gatsby.txt",
+  anne: "anne.txt",
+  antonia: "antonia.txt",
+  treasure: "treasure.txt",
+  awakening: "awakening.txt",
 };
 
 /** The engine's paragraph split. Single source of truth for the harness. */

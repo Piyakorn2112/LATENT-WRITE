@@ -136,6 +136,58 @@ const BOOKS: BookSpec[] = [
     headingRe: /^([IVXLC]+)\.$/,
     titleOf: (line) => line.trim().replace(/\.$/, ""),
   },
+  // ─── ADDED to fix a measured representativeness problem ────────────────────
+  // 84% of the gold set was 19th-century BRITISH prose, and the only
+  // contemporary material was two manuscripts by one author. The product claim
+  // is that an arbitrary novelist can trust the timeline, so the corpus has to
+  // contain prose that is not Victorian: shorter sentences, American and
+  // Canadian voices, children's and adventure registers, 20th-century dialogue.
+  {
+    key: "gatsby",
+    title: "The Great Gatsby",
+    gutenbergId: 64317,
+    // 1925 American literary. Short declarative sentences and modern dialogue
+    // punctuation — the closest thing in the public domain to how the app's
+    // users actually write.
+    headingRe: /^([IVX]+)$/,
+    titleOf: (line) => line.trim(),
+  },
+  {
+    key: "anne",
+    title: "Anne of Green Gables",
+    gutenbergId: 45,
+    // 1908 Canadian, YA/children's. Overwhelmingly dialogue-driven, which is the
+    // register the engine is weakest on.
+    headingRe: /^CHAPTER ([IVXLC]+)\.?\s*(.*)$/,
+    titleOf: (line) => line.replace(/^CHAPTER [IVXLC]+\.?\s*/, "").trim(),
+  },
+  {
+    key: "antonia",
+    title: "My Ántonia",
+    gutenbergId: 242,
+    // 1918 American, first-person retrospective, prairie plain style.
+    headingRe: /^([IVXLC]+)$/,
+    titleOf: (line) => line.trim(),
+  },
+  {
+    key: "treasure",
+    title: "Treasure Island",
+    gutenbergId: 120,
+    // 1883 adventure, first-person, action-dense. Physical events per page far
+    // above anything else in the corpus.
+    // Roman numeral ALONE on a line, with the chapter title on the NEXT line.
+    headingRe: /^([IVXLC]+)$/,
+    titleOf: (line) => line.trim(),
+  },
+  {
+    key: "awakening",
+    title: "The Awakening",
+    gutenbergId: 160,
+    // 1899 American, close interior third person on a woman's POV — a register
+    // with almost no representation in the set.
+    headingRe: /^([IVXLC]+)$/,
+    titleOf: (line) => line.trim(),
+  },
 ];
 
 /**
@@ -238,7 +290,15 @@ async function main() {
   }
 
   for (const spec of BOOKS) {
-    const raw = await readFile(path.join(scratch, `${spec.key}.raw.txt`), "utf8");
+    // Skip a book whose raw file is absent, so the corpus can be extended one
+    // title at a time without re-downloading everything already committed.
+    let raw: string;
+    try {
+      raw = await readFile(path.join(scratch, `${spec.key}.raw.txt`), "utf8");
+    } catch {
+      console.log(`  · ${spec.key.padEnd(12)} skipped (no ${spec.key}.raw.txt in RAW_DIR)`);
+      continue;
+    }
     const body = stripBoilerplate(raw);
     const chapters = splitChapters(body, spec);
     const out = toAppFormat(spec, chapters);
