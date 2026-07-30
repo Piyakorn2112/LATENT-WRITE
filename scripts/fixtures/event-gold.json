@@ -3601,6 +3601,494 @@
       ]
     },
     {
+      "book": "webnovel",
+      "chapter": 1,
+      "eventfulness": "eventful",
+      "whatHappens": "Lin Xiao loses a rigged ranking duel to Chen Feng, refuses to grovel and nearly gets expelled for it, learns from Elder Su Wan that his father may not have been the traitor everyone believes, and that night his hidden pendant activates in blood, revealing him as the son of the vanished Sect Master Lin Feiyu just as someone arrives at the sect gate.",
+      "events": [
+        {
+          "paragraph": 34,
+          "summary": "Chen Feng's spirit energy overwhelms Lin Xiao and ends the duel",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "Chen Feng's spirit energy hit him like a wall"
+        },
+        {
+          "paragraph": 43,
+          "summary": "Lin Xiao refuses to say words of submission, forfeiting his stipend instead",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "\"Keep the stipend,\" he said."
+        },
+        {
+          "paragraph": 47,
+          "summary": "Elder Kang threatens Lin Xiao with expulsion from the outer court",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "perhaps the outer court has no place for you at all"
+        },
+        {
+          "paragraph": 51,
+          "summary": "Elder Su Wan intervenes to stop the expulsion, citing sect law",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "A first offense does not warrant expulsion. Sect law is clear."
+        },
+        {
+          "paragraph": 61,
+          "summary": "Elder Su Wan reveals for the first time that she knew Lin Xiao's father",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Your mother would have been proud. Your father, I'm not so sure."
+        },
+        {
+          "paragraph": 75,
+          "summary": "The jade pendant activates for the first time, reacting to Lin Xiao's blood",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "it began to glow, a cold blue-white light"
+        },
+        {
+          "paragraph": 76,
+          "summary": "A voice through the pendant reveals Lin Xiao is Lin Feiyu's son",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Lin Feiyu's son. Finally."
+        },
+        {
+          "paragraph": 79,
+          "summary": "Someone arrives at the sect gate as the alarm bell rings",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "scene-break",
+          "evidence": "Someone was at the gate."
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 2,
+      "eventfulness": "eventful",
+      "whatHappens": "Elder Su Wan reveals the pendant is the Frostmoon Token of the disgraced former Sect Master Lin Feiyu and trains Lin Xiao urgently; a month later he decisively defeats Chen Feng, Sect Master Duan exposes Elder Kang as a Blackfang informant and has him expelled, then reveals Lin Feiyu was framed and elevates Lin Xiao to Inner Court, just before a Blackfang rider arrives declaring Lin Feiyu is still alive.",
+      "events": [
+        {
+          "paragraph": 10,
+          "summary": "Elder Su Wan reveals the pendant belonged to disgraced former Sect Master Lin Feiyu",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "He disappeared twelve years ago. The official record says traitor."
+        },
+        {
+          "paragraph": 15,
+          "summary": "Elder Su Wan reveals a rider came asking after a boy with a jade token",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "A rider came to the gate asking after a boy with a jade token."
+        },
+        {
+          "paragraph": 17,
+          "summary": "Elder Su Wan decides to begin training Lin Xiao immediately",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "\"You get stronger,\" Elder Su Wan said. \"Starting now.\""
+        },
+        {
+          "paragraph": 40,
+          "summary": "Lin Xiao decisively defeats Chen Feng in the ranking rematch",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "Lin Xiao's first strike broke Chen Feng's guard clean in half."
+        },
+        {
+          "paragraph": 54,
+          "summary": "Sect Master Duan strips Elder Kang of rank and expels him as a Blackfang informant",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "Stripped of rank. Escorted out by sundown."
+        },
+        {
+          "paragraph": 64,
+          "summary": "Sect Master Duan declares Lin Feiyu was framed and elevates Lin Xiao to Inner Court",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "Lin Xiao is Inner Court, direct disciple candidate, and no one here will lay a hand on him again."
+        },
+        {
+          "paragraph": 69,
+          "summary": "A Blackfang rider arrives declaring that Lin Xiao's father is alive",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "scene-break",
+          "evidence": "And tell him his father is very much alive."
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "Party leader Talon seals Jonah in a tunnel and abandons him to die during a gate raid; Jonah dies, revives as a hidden new class called Graveborn, and comes back to single-handedly kill the boss monster, then notices an ominous message suggesting something in the system is watching him.",
+      "events": [
+        {
+          "paragraph": 34,
+          "summary": "The tunnel collapses, sealing Jonah off from his own team",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "sealing him off from the boss chamber completely, sealing him off from his own team"
+        },
+        {
+          "paragraph": 38,
+          "summary": "Talon admits over the earpiece that he deliberately abandoned Jonah",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "confrontation",
+          "evidence": "Six-way split doesn't work as well as five-way. Nothing personal."
+        },
+        {
+          "paragraph": 47,
+          "summary": "Jonah dies after his HP is drained to zero",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "The world went white."
+        },
+        {
+          "paragraph": 51,
+          "summary": "Jonah is assigned the hidden Graveborn class and revives",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "CLASS ASSIGNED: GRAVEBORN"
+        },
+        {
+          "paragraph": 64,
+          "summary": "Jonah single-handedly defeats the boss, the Chamber Keeper",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "BOSS DEFEATED: Chamber Keeper"
+        },
+        {
+          "paragraph": 76,
+          "summary": "A hidden line reveals Jonah has been flagged and is being watched",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "scene-break",
+          "evidence": "Player flagged. Watching."
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 4,
+      "eventfulness": "eventful",
+      "whatHappens": "The guild exposes and expels Talon for abandoning Jonah, promoting Jonah to C-rank instead; weeks later an unprecedented gate appears and the dormant Hollow King quest reactivates on its own, compelling Jonah to walk into it alone, where the being on the throne greets him by name as though it has been waiting.",
+      "events": [
+        {
+          "paragraph": 18,
+          "summary": "Guild Master Kessler strips Talon's rank and expels him after reviewing the gate log",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "\"Rank stripped,\" Kessler said. \"Guild membership revoked, effective now. Don't let the door catch your cloak.\""
+        },
+        {
+          "paragraph": 29,
+          "summary": "Jonah agrees to let Mira join his new team",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "\"Fine,\" Jonah said. \"Try not to leave me in any tunnels.\""
+        },
+        {
+          "paragraph": 31,
+          "summary": "Kessler promotes Jonah from E-rank to C-rank for the solo boss kill",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "That's a C-rank feat on a good day. I'm not putting you back at E."
+        },
+        {
+          "paragraph": 48,
+          "summary": "An unclassified, S-rank-exceeding gate is detected, summoning all hunters",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "ANOMALOUS GATE DETECTED"
+        },
+        {
+          "paragraph": 54,
+          "summary": "The dormant Hollow King quest reactivates on its own, declaring it has found Jonah",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "transition",
+          "evidence": "The gate you are looking for has found you first."
+        },
+        {
+          "paragraph": 65,
+          "summary": "Jonah walks alone into the black gate without waiting for backup",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "climax",
+          "evidence": "Jonah walked straight through."
+        },
+        {
+          "paragraph": 69,
+          "summary": "The being on the throne addresses Jonah by name, revealing it has been waiting",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "scene-break",
+          "evidence": "\"Jonah Pierce,\" it said, in a voice like a door swinging on a rusted hinge. \"At last.\""
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 5,
+      "eventfulness": "eventful",
+      "whatHappens": "A modern woman dies and wakes up reincarnated as Lady Iris Calderwood, the doomed side character of a novel she once read; at her betrothal dinner she publicly refuses to marry the Crown Prince, and that night a letter from an unknown sender reveals, through Nell's stricken silence, that the Duchess is not actually her mother.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "A dying modern woman wakes up reincarnated as Lady Iris Calderwood",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "introduction",
+          "evidence": "Iris opened her eyes in a canopy bed she had read about in a novel three years ago"
+        },
+        {
+          "paragraph": 19,
+          "summary": "Duke Alaric publicly announces Iris's long-private betrothal to the Crown Prince",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the betrothal between my daughter Iris and His Highness Crown Prince Cassian has stood as private treaty for years. Tonight, we make it public."
+        },
+        {
+          "paragraph": 28,
+          "summary": "Iris publicly refuses to marry the Crown Prince",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "I won't marry the Crown Prince."
+        },
+        {
+          "paragraph": 41,
+          "summary": "Her father grants her limited time instead of forcing an answer",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I'll allow you time. Not much of it."
+        },
+        {
+          "paragraph": 48,
+          "summary": "Lady Seraphine threatens Iris, hinting she senses something is different about her",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "I know what usually happens to girls who make scenes at dinner parties."
+        },
+        {
+          "paragraph": 55,
+          "summary": "An anonymous letter arrives addressed to Iris from someone claiming to be her father",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "transition",
+          "evidence": "To my daughter. If you are reading this, it means you survived long enough for me to finally risk sending it."
+        },
+        {
+          "paragraph": 59,
+          "summary": "Nell's silence confirms the Duchess is not Iris's real mother",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Nell didn't answer, and the silence answered for her."
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 6,
+      "eventfulness": "eventful",
+      "whatHappens": "The letter reveals Iris's birth mother and the Ashgrave family's hunt for her silverwolf bloodline; her father confirms the truth, and she and Prince Cassian sign a contract delaying their wedding; at a garden reception Seraphine publicly challenges her to a duel, Iris's dormant bloodline power awakens for the first time and she wins decisively, and a priestess publicly confirms her lineage before privately revealing she knows Iris isn't supposed to be alive at this point in the story.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "The letter reveals Iris's birth mother and the Ashgraves' hunt for her bloodline",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "the Ashgrave family was hunting the last of the silverwolf bloodline"
+        },
+        {
+          "paragraph": 13,
+          "summary": "Duke Alaric confirms he always meant to tell her the truth",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "confrontation",
+          "evidence": "I should have told you years ago. I told myself I was protecting you."
+        },
+        {
+          "paragraph": 26,
+          "summary": "Iris and Prince Cassian sign a contract delaying their wedding by a year",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "one year's grace in place of a wedding neither of them wanted yet"
+        },
+        {
+          "paragraph": 33,
+          "summary": "Seraphine publicly taunts Iris about her bloodline and challenges her to a duel",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "Duel me, then. Or is the mutt all bark?"
+        },
+        {
+          "paragraph": 38,
+          "summary": "Iris's dormant silverwolf bloodline awakens for the first time during the duel",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "rising up her spine from the mark on her shoulder blade like water finding a crack"
+        },
+        {
+          "paragraph": 42,
+          "summary": "Iris defeats Seraphine decisively in the duel",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "Seraphine on her knees in the grass, silver light fading slowly back into skin"
+        },
+        {
+          "paragraph": 44,
+          "summary": "A priestess publicly confirms Iris as the last of the silverwolf bloodline",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "confirmed, before witnesses, in the house of Calderwood."
+        },
+        {
+          "paragraph": 48,
+          "summary": "The priestess cryptically reveals she knows Iris isn't supposed to be alive now",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "scene-break",
+          "evidence": "You're not supposed to be alive at this point in the story"
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 7,
+      "eventfulness": "moderate",
+      "whatHappens": "Seo Ha-eun returns to Seoul after eight years and strikes a one-year contract engagement with Jung Tae-min, trading the appearance of a stable fiancee for access to the company records that could prove her father was framed; after the engagement goes public she comes face to face with Han Soo-jin, the executive behind his ruin, and that night receives an anonymous message proving someone already knew she was coming back.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "Ha-eun arrives back in Seoul after eight years, carrying evidence against Jung Group",
+          "salience": "minor",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "She walked through arrivals with one suitcase and a folder of documents she'd been building since she was twenty-two"
+        },
+        {
+          "paragraph": 28,
+          "summary": "Ha-eun and Tae-min sign a one-year contract fiancee arrangement",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "They signed the contract at nine that night, a lawyer on each side, nothing romantic about it, just two signatures and a witnessed date."
+        },
+        {
+          "paragraph": 32,
+          "summary": "The engagement announcement goes public and is picked up by the press",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "By noon, half of Seoul's business press had run the story."
+        },
+        {
+          "paragraph": 39,
+          "summary": "Ha-eun confronts Han Soo-jin, the executive tied to her father's ruin",
+          "salience": "minor",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "I've always wondered exactly how sloppy those books really were."
+        },
+        {
+          "paragraph": 54,
+          "summary": "Ha-eun receives an anonymous text proving someone knew of her return in advance",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "scene-break",
+          "evidence": "Welcome back, Ha-eun. Let's see how long you last this time."
+        }
+      ]
+    },
+    {
+      "book": "webnovel",
+      "chapter": 8,
+      "eventfulness": "eventful",
+      "whatHappens": "At the engagement gala Ha-eun publicly exposes forensic proof that the fraud complaint which destroyed her father was falsified by Jung Group itself, and the chairman collapses in the ensuing chaos; when the board tries to force Tae-min to annul the engagement over the scandal he publicly refuses, and afterward Se-yeon shows Ha-eun the original wire authorization, revealing the true forger was not Soo-jin but Tae-min's own father.",
+      "events": [
+        {
+          "paragraph": 18,
+          "summary": "Ha-eun publicly reveals the audit against her father was falsified",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "I found the audit trail Jung Group filed against him. Every entry was falsified after the fact."
+        },
+        {
+          "paragraph": 23,
+          "summary": "Chairman Jung Il-woo collapses amid the confrontation",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "Chairman Il-woo rose unsteadily from his chair, one hand pressed to his chest."
+        },
+        {
+          "paragraph": 34,
+          "summary": "Tae-min publicly refuses to annul the engagement despite the scandal",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "If the company can't survive one honest audit, it deserves whatever this becomes. The engagement stands."
+        },
+        {
+          "paragraph": 38,
+          "summary": "Soo-jin leaves the board meeting without a word after losing the interim vote",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "Soo-jin left first, without a word to anyone, her heels sharp against the marble the whole way to the elevator."
+        },
+        {
+          "paragraph": 46,
+          "summary": "The wire authorization reveals the true forger was Tae-min's father, not Soo-jin",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "scene-break",
+          "evidence": "Jung Chul-min. Tae-min's father."
+        }
+      ]
+    },
+    {
       "book": "worlds",
       "chapter": 1,
       "eventfulness": "quiet",

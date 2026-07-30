@@ -52,6 +52,13 @@ export const CORPUS_BOOKS: Record<string, string> = {
   antonia: "antonia.txt",
   treasure: "treasure.txt",
   awakening: "awakening.txt",
+  // ★ SYNTHETIC, and labelled as such wherever its numbers are quoted. The
+  // web-novel / light-novel register (cultivation, LitRPG, isekai, manhwa-style
+  // revenge) has NO public-domain representation and is what a large share of
+  // this app's users write. Written by one agent and annotated blind by another,
+  // so the annotation cannot be steered by the author's intent. Kept as its own
+  // book so its effect can be isolated and reported with and without.
+  webnovel: "webnovel.txt",
 };
 
 /** The engine's paragraph split. Single source of truth for the harness. */

@@ -677,3 +677,57 @@ a ten-minute job instead of a rediscovery.
 The same lesson appeared three times in one session, in three different places:
 the trained ranker's "still-climbing" learning curve (noise), the scorer weights'
 "saturation" (four flipped signs, invisible at n=212), and this.
+
+---
+
+## ★★ THE POOLED NUMBER WAS HIDING A 4.5x SPREAD (2026-07-31)
+
+The corpus reached 15 books / 74 chapters / 463 events, and `ONLY_BOOK=<key>`
+was added so a single register could be scored on its own. That one change is
+worth more than any accuracy work this session:
+
+| book | register | precision@3 |
+|---|---|---|
+| treasure | 1883 adventure, action-dense | **75.0%** |
+| dracula | 1897 epistolary horror | 66.7% |
+| expectations | 1861 bildungsroman | 60.0% |
+| hollow-iris | contemporary literary SF | 60.0% |
+| carol | 1843 novella | 55.6% |
+| antonia | 1918 American first-person | 45.5% |
+| pride | 1813 social comedy | 42.9% |
+| awakening | 1899 close interior | 33.3% |
+| **webnovel** | **synthetic light/web novel** | **29.2%** |
+| anne | 1908 Canadian YA, dialogue-driven | 26.7% |
+| sherlock | 1892 detective | 22.2% |
+| **gatsby** | **1925 American literary** | **16.7%** |
+
+Pooled: 47.4%. The spread is **16.7% to 75.0%** — a factor of four and a half.
+Every headline number this project has ever reported was an average across
+registers the engine handles very differently, and it said nothing about which.
+
+**What the pattern actually is.** The engine is good where events are PHYSICAL
+and EXTERNAL — someone arrives, strikes, dies, sails. It is poor where events are
+SOCIAL or INTERIOR: Gatsby (a party, an introduction, a rumour landing), Anne
+(dialogue that changes a decision), Sherlock (a deduction stated aloud), Awakening
+(a woman refusing a role). That is a coherent, explainable weakness, and it is
+precisely the modern register — Gatsby at 16.7% is the closest thing in the
+corpus to how contemporary novelists write.
+
+**Consequences for how this is measured from now on.**
+
+1. Quote the RANGE, not just the pooled figure. "About half the chips are real"
+   is true on average and false for any individual writer.
+2. A change that lifts the pooled number by raising Treasure Island while
+   lowering Gatsby is a REGRESSION for the product, and the pooled metric cannot
+   see it. Check the spread on any future change.
+3. The next real work is not more tuning. It is a detector for social and
+   interior events — a conversation that changes a relationship, a decision taken
+   silently — which is a different mechanism from the physical-change verbs the
+   engine is built on.
+
+**On the synthetic web-novel book.** It scores 29.2%, in the lower cluster with
+the other dialogue-and-interior registers rather than as an outlier, which is
+mild evidence that it behaves like real prose of its kind rather than like
+something written to be easy. It stays LABELLED SYNTHETIC wherever it is quoted,
+and every pooled figure should be reported with and without it: 15 books 47.4%,
+14 real books 49.7%.
