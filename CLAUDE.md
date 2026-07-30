@@ -30,9 +30,50 @@ npx tsx scripts/test-auto-format.ts         # auto-paragraph + auto-scene-break 
 npx tsx scripts/test-tension-scene.ts       # chapter tension scanner + scene labels (calm/elevated ≥85%)
 npx tsx scripts/test-cast-roles.ts          # cast influence roles + chapter-role direction (clear cases)
 npx tsx scripts/test-known-names.ts         # cold-start name resolution ranking (100% — regression lock)
-npx tsx scripts/test-chapter-observation.ts # panel entry-point sentence templates (100%)
-npx tsx scripts/ood-language-audit.ts       # OUT-OF-DISTRIBUTION audit: real manuscripts, label-free (~4 min)
+npx tsx scripts/test-chapter-observation.ts # "This chapter" brief: contract, not wording (100%)
+npx tsx scripts/test-event-detect.ts        # EVENT DETECTION vs the hand-annotated gold set (gated)
+npx tsx scripts/ood-language-audit.ts       # OUT-OF-DISTRIBUTION audit: speech, label-free (~4 min)
+npx tsx scripts/ood-event-audit.ts          # OUT-OF-DISTRIBUTION audit: events, label-free
 ```
+
+## Event detection — read the plan before touching it
+
+`src/lib/narrative-events.ts` replaced `event-detect.ts`. Every rule in it answers
+a measured failure; the header explains which, and `plans/narrative-event-engine.md`
+has the numbers. `event-detect.ts` is kept ONLY so the suite can score against it —
+do not extend it.
+
+Two suites, and they do different jobs:
+
+- `test:event-detect` scores 22 hand-annotated events across 5 chapters with **±1
+  paragraph tolerance** and gates on precision ≥50% and major-event recall ≥55%.
+  This is what you tune against. `--detail` prints every miss and false positive;
+  `FLOOR=0.4` sweeps the operating point.
+- `audit:ood-events` reports label-free health over both whole manuscripts, split
+  in-distribution vs held out. **Do not tune against this one** — tuning against a
+  held-out measure destroys the only thing it is for.
+
+Three rules that are easy to break by "simplifying":
+
+1. **The fixture self-checks before scoring.** Every gold event carries an
+   `evidence` clause and the harness confirms it occurs where it claims. Without
+   it, a changed paragraph split turns the whole gold set into plausible-looking
+   near-misses and the suite reports a confident, meaningless number.
+2. **Read `analysis.peakParagraph`; never invert `tensionCurve`** to find a
+   paragraph. The curve is a ≤30-bucket reduction and a bucket index maps back to
+   a bucket *centre*; doing it that way named a non-peak paragraph 47.5% of the time.
+3. **The LM must not relabel.** `narrative-events.ts` builds labels from the clause
+   that triggered detection, inside the timeline's real 28-character budget. The
+   old LM pass replaced them with picked sentences, which is where the truncated
+   fragments came from. It does dedup and detail tags only.
+
+Type accuracy is reported, not gated: a trained-literary-scholar event typology
+reached Krippendorff's α of only 0.57–0.75 on a coarser scheme than this one, so
+moderate type agreement is a property of the domain, not a bug.
+
+**Known weakness, deliberately left:** `action` is 54.0% of events on the held-out
+manuscript. It is the widest verb class and a domestic novel is made of people
+opening doors. See the plan's section 4.
 
 **Held-out audit rule:** the curated suites above hand `knownNames` in explicitly, so
 they can never catch a failure in the extraction that produces those names (this

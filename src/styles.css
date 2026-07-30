@@ -1518,6 +1518,110 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   .chapter-observation-jump:hover { background: transparent; }
 }
 
+/* ── Chapter brief: event chips + supporting lines ─────────────────────────
+   The box grew from one sentence into a brief, because one sentence chosen
+   from six templates gave a third of all chapters the same line. The chips are
+   the chapter's detected turns; the lines below are one fact each, from a
+   different dimension, so the box cannot repeat itself.
+
+   Chips are FLAT rather than glassy: they sit inside a liquid-glass surface,
+   and nesting glass in glass reads as mush. Press response is the system's
+   standard scale(0.96). */
+.chapter-brief-events {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.chapter-brief-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: 100%;
+  padding: 3px 8px 4px;
+  border: none;
+  border-radius: 8px;
+  /* currentColor at low alpha, so the per-type colour below tints the fill
+     without needing a second variable for every type. */
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.chapter-brief-chip:disabled { cursor: default; }
+.chapter-brief-chip:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+.chapter-brief-chip:active:not(:disabled) { transform: scale(0.96); }
+
+@media (hover: none) {
+  .chapter-brief-chip:hover {
+    background: color-mix(in srgb, currentColor 10%, transparent);
+  }
+}
+
+.chapter-brief-chip__label {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-brief-chip__at {
+  flex: none;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+
+/* Salience is the engine's own within-chapter judgement, so this is data being
+   displayed, not emphasis being invented. */
+.chapter-brief-chip[data-salience="minor"] { opacity: 0.72; }
+
+/* Type colours draw from the tension-colour family and the neutrals. The amber
+   accent stays the accent; no new hues enter the system for this. */
+.chapter-brief-chip[data-narrative-type="decision"]      { color: var(--accent-saturated); }
+.chapter-brief-chip[data-narrative-type="revelation"]    { color: var(--accent); }
+.chapter-brief-chip[data-narrative-type="confrontation"] { color: var(--tc-high); }
+.chapter-brief-chip[data-narrative-type="state-change"]  { color: var(--tc-rising); }
+.chapter-brief-chip[data-narrative-type="arrival"],
+.chapter-brief-chip[data-narrative-type="departure"],
+.chapter-brief-chip[data-narrative-type="shift"]         { color: var(--tc-calm); }
+
+.chapter-brief-lines {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* One hairline separates "what happens" from "what to notice about it" without
+   introducing a second surface. */
+.chapter-brief-lines::before {
+  content: "";
+  display: block;
+  height: 1px;
+  background: var(--divider-line);
+  margin-bottom: 4px;
+}
+
+.chapter-brief-line {
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.chapter-brief-line[data-kind="diagnostic"] { color: var(--text-tertiary); }
+
 .widget-list-stack {
   position: relative;
   display: flex;

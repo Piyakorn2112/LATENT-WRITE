@@ -96,6 +96,11 @@ interface BoxState {
   detail: string | null;
   detailW: number;
   label: string;
+  /** Hover text: type, salience, location, confidence, and the SOURCE CLAUSE.
+   *  Threaded all the way through the layout because the label is capped at
+   *  20-30 characters and cannot justify itself; before `sentence` was
+   *  persisted there was nothing to show here. */
+  tip: string;
   w: number;       // dynamic box width
   cx: number;      // center X (mutable during layout)
   cy: number;      // center Y (mutable during layout)
@@ -141,7 +146,16 @@ function detailTag(event: Pick<MajorEvent, "detailLabel">): string | null {
 }
 
 function layoutBoxes(
-  chData: Array<{ch: {id:string}; x:number; y:number; nr:number; events: Array<{type:string; label:string; detailLabel?: string}>; color:string}>,
+  chData: Array<{
+    ch: { id: string };
+    x: number; y: number; nr: number;
+    events: Array<{
+      type: string; label: string; detailLabel?: string;
+      sentence?: string; paragraphIndex?: number; narrativeType?: string;
+      salience?: string; confidence?: number; tensionPosition?: number;
+    }>;
+    color: string;
+  }>,
 ): PlacedBox[] {
   const states: BoxState[] = [];
   const nodes = chData.map(({ x, y, nr }) => ({ x, y, nr }));
@@ -177,6 +191,15 @@ function layoutBoxes(
         detail,
         detailW,
         label, w,
+        tip: [
+          `${evt.narrativeType ?? evt.type}${evt.salience ? ` · ${evt.salience}` : ""}`,
+          evt.paragraphIndex !== undefined
+            ? `¶${evt.paragraphIndex + 1}${evt.confidence !== undefined ? ` · ${Math.round(evt.confidence * 100)}% confidence` : ""}`
+            : evt.tensionPosition !== undefined
+              ? `${Math.round(evt.tensionPosition * 100)}% through the chapter`
+              : "",
+          evt.sentence ? `\n${evt.sentence}` : "",
+        ].filter(Boolean).join("\n"),
         cx: chX,
         cy: Math.max(MIN_BOX_Y + BOX_H / 2, initCY),
       });
@@ -469,6 +492,7 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes }: { boxes: Placed
             fill="none" stroke={box.color}
             strokeWidth={1.1} strokeOpacity={0.3}
           />
+          <title>{box.tip}</title>
           <rect
             x={box.x} y={box.y}
             width={box.w} height={BOX_H}

@@ -1,16 +1,36 @@
 /**
  * test-chapter-observation.ts
  *
- * Deterministic template + branch-selection tests for chapter-observation.ts,
- * the one-sentence panel entry point. Fixtures are minimal hand-built
- * ChapterAnalysisResult shapes — the module is pure synthesis, so no engine
- * runs are needed.
+ * Contract tests for the "This chapter" brief (chapter-observation.ts).
  *
  * Run:  npx tsx scripts/test-chapter-observation.ts     (exit 1 on failure)
+ *
+ * ─── WHAT CHANGED, AND WHY THIS FILE WAS REWRITTEN ───────────────────────────
+ *
+ * The previous version asserted on the exact wording of a five-branch template
+ * waterfall ("One spike at ¶16 carries the chapter", "holds high from ¶11"). That
+ * waterfall is gone, and it is worth recording why rather than just deleting the
+ * assertions: over 52 real chapters it produced only SIX distinct sentences, gave
+ * 17 chapters the same one verbatim, and cited paragraph numbers located by
+ * inverting the ≤30-bucket tension curve — which named a paragraph that was not
+ * at the chapter's peak in 47.5% of cases.
+ *
+ * So this suite no longer tests wording. It tests the brief's CONTRACT:
+ *
+ *   · the guards hold
+ *   · a chapter with a turn leads on that turn; one without says so plainly
+ *   · every paragraph number cited is real and in range
+ *   · supporting lines never repeat a dimension, and cap at three
+ *   · no em or en dashes reach shipped copy (house rule)
+ *
+ * Detection ACCURACY is not this file's job — that is scripts/test-event-detect.ts
+ * against the hand-annotated gold set. Fixtures here therefore use short, blunt
+ * prose: enough for the assembly logic to have something to assemble.
  */
 
-import { buildChapterObservation } from '../src/lib/chapter-observation';
+import { buildChapterBrief } from '../src/lib/chapter-observation';
 import type { ChapterAnalysisResult } from '../src/lib/chapter-analysis-runner';
+import type { ChapterParaResult } from '../src/lib/speech-detect';
 
 let passed = 0;
 let failed = 0;
@@ -19,23 +39,36 @@ const ok = (cond: boolean, msg: string) => {
   else { failed++; console.log(`  ✗ ${msg}`); }
 };
 
+/** A calm speech result per paragraph, or a given tension pattern. */
+function speech(paraCount: number, tension?: Array<'calm' | 'rising' | 'high'>): ChapterParaResult[] {
+  return Array.from({ length: paraCount }, (_, i) => ({
+    segments: [],
+    meta: {
+      tension: tension?.[i] ?? 'calm',
+      dialogueDensity: 0,
+    },
+  })) as ChapterParaResult[];
+}
+
 function fixture(over: {
-  paragraphs?: number;
+  paragraphs: string[];
   curve?: number[];
+  peakParagraph?: number;
   arcShape?: string;
+  tension?: Array<'calm' | 'rising' | 'high'>;
   diagnostics?: Array<{ code: string; message: string; severity: 'warning' | 'info' }>;
   speakers?: Array<{ name: string; chars: number; turns: number }>;
 }): ChapterAnalysisResult {
-  const paraCount = over.paragraphs ?? 20;
   return {
     contentSnapshot: '',
-    paragraphs: Array.from({ length: paraCount }, (_, i) => `Paragraph ${i}.`),
-    speechResults: [],
+    paragraphs: over.paragraphs,
+    speechResults: speech(over.paragraphs.length, over.tension),
     speechPredictions: [],
     actionPredictions: [],
     endContext: null,
     analysis: {
       tensionCurve: over.curve ?? [],
+      peakParagraph: over.peakParagraph ?? 0,
       arcShape: (over.arcShape ?? 'flat') as never,
       writerDiagnostics: over.diagnostics ?? [],
       speakerCounts: over.speakers ?? [],
@@ -43,106 +76,148 @@ function fixture(over: {
   } as ChapterAnalysisResult;
 }
 
-console.log('\n══ Distinctive tension shapes lead ══');
+/**
+ * Filler that cannot itself contain an event: no agent performing a change verb.
+ * It DOES name Mira, because the engine requires an unlisted proper noun to
+ * recur before treating it as a character — a name mentioned once in a chapter
+ * is more often a place in passing, and admitting the singletons cost real
+ * precision on the gold set. A fixture where the protagonist appears exactly
+ * once is not a realistic chapter.
+ */
+const filler = (n: number) =>
+  Array.from({ length: n }, (_, i) =>
+    i % 3 === 0
+      ? `The room was quiet in the way of rooms at that hour, number ${i}.`
+      : `Around Mira the light was the colour of old paper, number ${i}.`);
+
+/** A blunt, unambiguous turn. */
+const TURN = 'Mira refused the contract and walked out of the Assembly hall.';
+
+console.log('\n══ Guards ══');
 {
-  // plateau-high: samples 10..29 high in a 30-sample curve over 30 paragraphs.
-  const curve = Array.from({ length: 30 }, (_, i) => (i >= 10 ? 0.9 : 0.2));
-  const o = buildChapterObservation(fixture({ paragraphs: 30, curve, arcShape: 'plateau-high' }));
-  ok(!!o && o.kind === 'tension', 'plateau-high selects a tension observation');
-  ok(!!o && /holds high from ¶11/.test(o.text), `high-run start maps to ¶11 (got "${o?.text}")`);
-  ok(!!o && o.paragraphIndex === 10, 'anchor paragraph matches the run start');
-}
-{
-  const curve = Array.from({ length: 30 }, (_, i) => (i === 15 ? 1 : 0.1));
-  const o = buildChapterObservation(fixture({ paragraphs: 30, curve, arcShape: 'spike' }));
-  ok(!!o && /One spike at ¶16/.test(o!.text), `spike names the peak paragraph (got "${o?.text}")`);
-}
-{
-  // A calm chapter must NOT get a tension template; the engine's own info
-  // diagnostic (when present) is the honest observation.
-  const calm = fixture({ paragraphs: 20, curve: Array(20).fill(0.3), arcShape: 'flat' });
-  ok(buildChapterObservation(calm) === null, 'calm flat chapter with no diagnostics produces null');
-  const calmWithNote = fixture({
-    paragraphs: 20, curve: Array(20).fill(0.3), arcShape: 'slope-up',
-    diagnostics: [{ code: 'NO_CLEAR_CLIMAX', message: 'No clear tension peak detected.', severity: 'info' }],
-  });
-  const o = buildChapterObservation(calmWithNote);
-  ok(!!o && o.kind === 'diagnostic' && /No clear tension peak/.test(o.text),
-    'calm chapter surfaces the engine’s info note instead of inventing a shape');
-}
-{
-  const curve = [...Array.from({ length: 10 }, () => 0.8), ...Array.from({ length: 10 }, () => 0.2), ...Array.from({ length: 10 }, () => 0.85)];
-  const o = buildChapterObservation(fixture({ paragraphs: 30, curve, arcShape: 'valley' }));
-  ok(!!o && /returns tense at ¶/.test(o!.text), 'valley names the return point');
+  ok(buildChapterBrief(fixture({ paragraphs: filler(5) })) === null,
+    'chapters under 6 paragraphs produce no brief');
+  const b = buildChapterBrief(fixture({ paragraphs: filler(12) }));
+  ok(b !== null, 'a chapter with enough prose ALWAYS produces a brief');
+  // The old box rendered nothing for 7.7% of real chapters. An empty surface is
+  // a wasted one; honest emptiness is a finding and has to be stated.
+  ok(!!b && b.eventless && /Nothing here reads as a turn/.test(b.headline),
+    'a chapter with no turn says so, rather than rendering nothing');
 }
 
-console.log('\n══ Fallback ladder ══');
+console.log('\n══ The lead line follows the prose ══');
 {
-  // Non-distinctive shape + warning diagnostic → diagnostic wins.
-  const o = buildChapterObservation(fixture({
-    curve: Array(20).fill(0.4),
-    arcShape: 'slope-up',
-    diagnostics: [{ code: 'X', message: 'Dialogue tags repeat the same verb eleven times.', severity: 'warning' }],
-  }));
-  ok(!!o && o.kind === 'diagnostic' && /eleven times/.test(o.text), 'warning diagnostic outranks a plain slope');
+  const paras = [...filler(6), TURN, ...filler(6)];
+  const b = buildChapterBrief(fixture({ paragraphs: paras }));
+  ok(!!b && !b.eventless, 'a chapter containing a turn is not reported as eventless');
+  ok(!!b && b.events.length > 0, 'the turn is detected and carried on the brief');
+  ok(!!b && /refuse/i.test(b.headline), `the lead line names what happens (got "${b?.headline}")`);
+  ok(!!b && /¶\d+/.test(b.headline), 'the lead line locates it');
 }
 {
-  // No diagnostics → dominance beats the slope when extreme.
-  const o = buildChapterObservation(fixture({
-    curve: Array(20).fill(0.4),
-    arcShape: 'slope-up',
+  // Two different chapters must not produce the same sentence. This is the single
+  // property the previous implementation failed hardest: 17 of 52 chapters shared
+  // one line.
+  const a = buildChapterBrief(fixture({ paragraphs: [...filler(6), TURN, ...filler(6)] }));
+  const c = buildChapterBrief(fixture({
+    paragraphs: [
+      ...filler(4),
+      'Beside Gareth the ledger lay open to the wrong page.',
+      'Gareth signed the transfer order for the northern fields.',
+      ...filler(8),
+    ],
+  }));
+  ok(!!a && !!c && a.headline !== c.headline,
+    'different prose produces different lead lines');
+}
+
+console.log('\n══ Every cited paragraph is real ══');
+{
+  const paras = [...filler(5), TURN, ...filler(10)];
+  const tension: Array<'calm' | 'rising' | 'high'> = paras.map((_, i) => (i === 12 ? 'high' : 'calm'));
+  const b = buildChapterBrief(fixture({
+    paragraphs: paras,
+    curve: Array.from({ length: 16 }, (_, i) => (i === 12 ? 1 : 0.1)),
+    peakParagraph: 12,
+    tension,
+  }));
+  const inRange = (n: number | undefined) => n === undefined || (n >= 0 && n < paras.length);
+  ok(!!b && b.events.every((e) => inRange(e.paragraphIndex)), 'every event anchor is in range');
+  ok(!!b && b.lines.every((l) => inRange(l.paragraphIndex)), 'every line anchor is in range');
+  ok(!!b && b.lines.some((l) => l.kind === 'tension' && l.paragraphIndex === 12),
+    'the tension line anchors to analysis.peakParagraph, not to an inverted curve index');
+}
+{
+  // A real regression that shipped in the first draft of the rewrite: with no
+  // events, the distance to "the nearest turn" was Infinity and the line read
+  // "Tension peaks at ¶29, Infinity paragraphs from the nearest turn."
+  const paras = filler(20);
+  const b = buildChapterBrief(fixture({
+    paragraphs: paras,
+    curve: Array.from({ length: 20 }, (_, i) => (i === 15 ? 1 : 0.1)),
+    peakParagraph: 15,
+    tension: paras.map((_, i) => (i === 15 ? 'high' : 'calm')),
+  }));
+  const all = [b?.headline ?? '', ...(b?.lines.map((l) => l.text) ?? [])].join(' ');
+  ok(!/Infinity|NaN|undefined/.test(all), 'no Infinity, NaN or undefined reaches the copy');
+}
+
+console.log('\n══ Supporting lines ══');
+{
+  const paras = [...filler(5), TURN, ...filler(10)];
+  const b = buildChapterBrief(fixture({
+    paragraphs: paras,
+    curve: Array.from({ length: 16 }, (_, i) => (i === 12 ? 1 : 0.1)),
+    peakParagraph: 12,
+    tension: paras.map((_, i) => (i === 12 ? 'high' : 'calm')),
+    diagnostics: [{ code: 'X', message: 'The middle third carries no dialogue.', severity: 'warning' }],
     speakers: [
       { name: 'Mira', chars: 900, turns: 14 },
       { name: 'Gareth', chars: 120, turns: 3 },
     ],
   }));
-  ok(!!o && o.kind === 'dialogue' && /Mira speaks 88%/.test(o.text), `dominance observation fires at 88% (got "${o?.text}")`);
-}
-{
-  // Balanced dialogue → slope template with a located peak.
-  const curve = Array.from({ length: 30 }, (_, i) => i / 29);
-  const o = buildChapterObservation(fixture({ paragraphs: 30, curve, arcShape: 'slope-up' }));
-  ok(!!o && /peaks at ¶30/.test(o!.text), `slope-up names the closing peak (got "${o?.text}")`);
-}
-{
-  // Echo: same shape as previous chapter, nothing else notable.
-  const cur = fixture({ curve: Array(20).fill(0.4), arcShape: 'double-peak' });
-  // double-peak with a flat curve can't find two distinct peaks → falls through.
-  const prev = fixture({ curve: Array(20).fill(0.4), arcShape: 'double-peak' });
-  const o = buildChapterObservation(cur, prev);
-  ok(!!o && o.kind === 'echo' && /Same double peak shape/.test(o.text), `echo fires when shapes repeat (got "${o?.text}")`);
+  ok(!!b && b.lines.length <= 3, 'at most three supporting lines');
+  const kinds = b?.lines.map((l) => l.kind) ?? [];
+  ok(new Set(kinds).size === kinds.length,
+    `each supporting line comes from a DIFFERENT dimension (got ${kinds.join(', ')})`);
+  ok(!!b && b.lines.every((l) => l.text.trim().length > 0), 'no empty lines');
 }
 
-console.log('\n══ Guards ══');
+console.log('\n══ House rules ══');
 {
-  const o = buildChapterObservation(fixture({ paragraphs: 4, curve: [0, 1, 0], arcShape: 'spike' }));
-  ok(o === null, 'chapters under 6 paragraphs produce no observation');
-}
-{
-  const o = buildChapterObservation(fixture({ paragraphs: 20, curve: [], arcShape: 'slope-up' }));
-  ok(o === null, 'no curve and nothing else notable produces null, not filler');
-}
-{
-  // Copy rules: no em/en dashes in any template output.
-  const outputs: string[] = [];
-  const shapes: Array<[string, number[]]> = [
-    ['plateau-high', Array.from({ length: 30 }, (_, i) => (i >= 10 ? 0.9 : 0.2))],
-    ['spike', Array.from({ length: 30 }, (_, i) => (i === 15 ? 1 : 0.1))],
-        ['valley', [...Array(10).fill(0.8), ...Array(10).fill(0.2), ...Array(10).fill(0.85)]],
-    ['slope-up', Array.from({ length: 30 }, (_, i) => i / 29)],
-    ['slope-down', Array.from({ length: 30 }, (_, i) => 1 - i / 29)],
+  // Sweep a spread of shapes rather than one, so a dash hiding in a rarely-taken
+  // branch is still caught.
+  const cases = [
+    fixture({ paragraphs: filler(12) }),
+    fixture({ paragraphs: [...filler(6), TURN, ...filler(6)] }),
+    fixture({
+      paragraphs: [...filler(5), TURN, ...filler(10)],
+      curve: Array.from({ length: 16 }, (_, i) => (i === 12 ? 1 : 0.1)),
+      peakParagraph: 12,
+      tension: [...filler(5), TURN, ...filler(10)].map((_, i) => (i === 12 ? 'high' : 'calm')),
+      arcShape: 'spike',
+      diagnostics: [{ code: 'X', message: 'The middle third carries no dialogue.', severity: 'warning' }],
+      speakers: [{ name: 'Mira', chars: 950, turns: 20 }, { name: 'Vey', chars: 60, turns: 2 }],
+    }),
+    fixture({
+      paragraphs: filler(14),
+      curve: Array(14).fill(0.3),
+      arcShape: 'slope-up',
+      diagnostics: [{ code: 'NO_CLEAR_CLIMAX', message: 'No clear tension peak detected.', severity: 'info' }],
+    }),
   ];
-  for (const [shape, curve] of shapes) {
-    const o = buildChapterObservation(fixture({ paragraphs: 30, curve, arcShape: shape }));
-    if (o) outputs.push(o.text);
-  }
-  ok(outputs.length >= 5 && outputs.every((t) => !/[—–]/.test(t)), 'no em/en dashes in any template');
-  ok(outputs.every((t) => t.length <= 160), 'every observation stays within one glanceable sentence');
+  const texts = cases
+    .map((c) => buildChapterBrief(c))
+    .flatMap((b) => (b ? [b.headline, ...b.lines.map((l) => l.text)] : []));
+  ok(texts.length > 0, 'the sweep produced copy to check');
+  const dashed = texts.filter((t) => /[—–]/.test(t));
+  ok(dashed.length === 0, `no em or en dashes in shipped copy${dashed.length ? ` (found: "${dashed[0]}")` : ''}`);
+  const overlong = texts.filter((t) => t.length > 220);
+  ok(overlong.length === 0, `no line runs past 220 characters${overlong.length ? ` (found ${overlong[0].length})` : ''}`);
 }
 
-console.log('\n' + '═'.repeat(60));
+console.log('\n════════════════════════════════════════════════════════════');
 console.log(`chapter-observation: ${passed}/${passed + failed}`);
-console.log('Target: 100% (deterministic templates)');
-console.log('═'.repeat(60));
-if (failed > 0) process.exit(1);
-console.log('All assertions passed.');
+console.log('Target: 100% (contract, not wording)');
+console.log('════════════════════════════════════════════════════════════\n');
+if (failed > 0) process.exitCode = 1;

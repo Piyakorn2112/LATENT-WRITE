@@ -1,7 +1,7 @@
-import type { Chapter, WorldData } from "../types";
+import type { Chapter, MajorEvent, WorldData } from "../types";
 import type { ChapterGraphEntry, StoryGraph } from "../types";
 import type { ChapterAnalysisResult } from "./use-analysis";
-import { detectMajorEvents } from "./event-detect";
+import { detectNarrativeEvents } from "./narrative-events";
 
 const DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV ?? false;
 
@@ -79,9 +79,41 @@ export function buildChapterEntry(
 
   const words = chapter.content.trim() ? chapter.content.trim().split(/\s+/).length : 0;
 
-  // Heavy event detection — runs per chapter, not per keystroke
-  const majorEvents = chapter.content.trim().length > 100
-    ? detectMajorEvents(chapter, result, worldData)
+  // Heavy event detection — runs per chapter, not per keystroke.
+  //
+  // narrative-events.ts replaced event-detect.ts here. The old engine scored
+  // paragraphs against phrase dictionaries tuned on two specific manuscripts; on
+  // the gold set it matched 4 of 22 events, typed every one of those 4 wrongly,
+  // and its labels shared no content words with what a reader would say happened.
+  // See scripts/test-event-detect.ts for the side-by-side.
+  const knownNames = [
+    ...(worldData?.characters ?? []).flatMap((c) => [c.name, ...(c.aliases ?? [])]),
+    ...analysis.speakerCounts.map((s) => s.name),
+  ].filter((n): n is string => Boolean(n) && n.length >= 2);
+
+  const majorEvents: MajorEvent[] = chapter.content.trim().length > 100
+    ? detectNarrativeEvents(result.paragraphs, result.speechResults, {
+        knownNames,
+        worldData,
+        // One value per paragraph, no subsampling. The engine reads the
+        // DERIVATIVE of this: a local rise is evidence that something happened,
+        // where a high plateau only says the chapter is tense.
+        tensionByParagraph: result.speechResults.map((r) =>
+          r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
+        ),
+      }).map((e) => ({
+        label: e.label,
+        type: e.legacyType,
+        tensionPosition: e.tensionPosition,
+        confidence: e.confidence,
+        sentence: e.sentence,
+        paragraphIndex: e.paragraphIndex,
+        offsetInParagraph: e.offsetInParagraph,
+        narrativeType: e.type,
+        salience: e.salience,
+        agent: e.agent,
+        channel: e.channel,
+      }))
     : [];
 
   return {
@@ -101,9 +133,32 @@ export function buildChapterEntry(
 }
 
 /**
- * Async LM enrichment — silently improves event labels after the
- * synchronous NLP result has already been shown.
- * Falls back gracefully if the model isn't downloaded yet.
+ * Async LM pass over a built entry: semantic dedup, and a detail tag.
+ *
+ * ★ WHAT THIS DELIBERATELY NO LONGER DOES: relabel.
+ *
+ * It used to hand each event's paragraph to `selectBestEventSentence` and take
+ * the returned sentence as the label. That made sense when the label came from a
+ * regex scavenging a paragraph. It does not now: narrative-events.ts builds the
+ * label from the same clause that triggered detection, as agent + act + object,
+ * inside the timeline's real 28-character budget. Letting the LM replace that
+ * with a picked sentence would put the truncated sentences straight back.
+ *
+ * There was also a concrete reason not to trust that scorer as it stands. Its
+ * total is `anchor*0.58 + centrality*0.18 + quality*0.45 + coverage*0.24`, and
+ * `coverage` measures overlap with the label being corrected — so the surface
+ * terms outweigh the semantic one and the pass is biased toward AGREEING with the
+ * input it was meant to improve. Handed a paragraph whose event is a declaration
+ * to a committee, it returned the scene-setting first sentence.
+ *
+ * The literature is on the LM's side about the SHAPE though, not against it:
+ * modern sentence-embedding similarity is competitive with NLI zero-shot, and
+ * the documented weaknesses of this pattern are a single hand-written anchor per
+ * class and no calibration against a null anchor. Fixing those is the next step
+ * for this file, and is why the seam is kept rather than deleted.
+ *
+ * Dedup, by contrast, is a task cosine similarity is genuinely good at, so that
+ * is what runs here.
  */
 export async function enrichChapterEntryWithLM(
   entry: ChapterGraphEntry,
@@ -115,75 +170,50 @@ export async function enrichChapterEntryWithLM(
     .filter(Boolean);
   if (paras.length === 0 || entry.majorEvents.length === 0) return entry;
 
-  if (DEV) console.log(`[StoryGraph] LM label enrichment for Ch.${entry.chapterNumber} "${entry.chapterTitle}" — ${entry.majorEvents.length} events`);
-
   try {
-    const { classifyEventDetail, refineEventType, semanticSimilarity, selectBestEventSentence } = await import("./narrative-lm");
-    const relabeled = await Promise.all(entry.majorEvents.map(async (event) => {
+    const { classifyEventDetail, semanticSimilarity, hasEmbedder } = await import("./narrative-lm");
+
+    // Say so out loud. A bare `catch {}` around this whole function meant that
+    // for months every offline suite reported "the LM changed 0% of labels" and
+    // that zero described a failed import of `sharp`, not a working model.
+    if (!hasEmbedder()) {
+      if (DEV) console.warn(`[StoryGraph] Ch.${entry.chapterNumber}: no embedding backend — dedup and detail tags skipped.`);
+      return entry;
+    }
+
+    // A detail tag, from the clause the engine actually detected. Persisting
+    // `sentence` is what makes this possible without re-deriving the paragraph.
+    const tagged = await Promise.all(entry.majorEvents.map(async (event) => {
       if (STRUCTURAL_EVENT_LABELS.has(event.label)) return event;
-
-      const paragraph = paras[paragraphIndexForEvent(event.tensionPosition, paras.length)];
-      if (!paragraph || paragraph.length < 20) return event;
-
-      let selected = await selectBestEventSentence(paragraph, event.type, { fallbackLabel: event.label });
-      const refinedType = await refineEventType(selected.sentence, event.type);
-      if (refinedType.type !== event.type) {
-        selected = await selectBestEventSentence(paragraph, refinedType.type, { fallbackLabel: selected.label });
-      }
-
-      const nextLabel = selected.label;
-      if (DEV && nextLabel !== event.label) {
-        console.log(`[StoryGraph] Ch.${entry.chapterNumber} relabel: "${event.label}" -> "${nextLabel}"`);
-      }
-
-      let nextEvent = nextLabel && nextLabel.length >= 6
-        ? { ...event, label: nextLabel, type: refinedType.type }
-        : { ...event, type: refinedType.type };
-      const detail = await classifyEventDetail(selected.sentence, nextEvent.type);
-      if (detail) {
-        if (DEV && (detail.detailLabel !== nextEvent.detailLabel || detail.type !== nextEvent.type)) {
-          console.log(`[StoryGraph] Ch.${entry.chapterNumber} detail: "${selected.sentence.slice(0, 56)}" -> ${detail.detailLabel} (${detail.type})`);
-        }
-        nextEvent = {
-          ...nextEvent,
-          type: detail.type,
-          detailType: detail.detailType,
-          detailLabel: detail.detailLabel,
-          detailConfidence: detail.confidence,
-        };
-      }
-
-      return nextEvent;
+      const source = event.sentence
+        ?? paras[event.paragraphIndex ?? paragraphIndexForEvent(event.tensionPosition, paras.length)];
+      if (!source || source.length < 20) return event;
+      const detail = await classifyEventDetail(source, event.type);
+      // The type is NOT overwritten. It came from the clause's verb, which is
+      // stronger evidence than a cosine against one hand-written anchor.
+      return detail
+        ? { ...event, detailType: detail.detailType, detailLabel: detail.detailLabel, detailConfidence: detail.confidence }
+        : event;
     }));
 
-    if (relabeled.length <= 1) {
-      if (DEV) console.log(`[StoryGraph] Ch.${entry.chapterNumber}: ${relabeled.length} event(s), relabel only`);
-      return { ...entry, majorEvents: relabeled };
-    }
+    if (tagged.length <= 1) return { ...entry, majorEvents: tagged };
 
-    const events = [...relabeled];
-    const keep   = new Array(events.length).fill(true);
-
-    // Compare all pairs: if two events are semantically similar (> 0.72) keep higher confidence
-    for (let i = 0; i < events.length; i++) {
+    const keep = new Array(tagged.length).fill(true);
+    for (let i = 0; i < tagged.length; i++) {
       if (!keep[i]) continue;
-      for (let j = i + 1; j < events.length; j++) {
+      for (let j = i + 1; j < tagged.length; j++) {
         if (!keep[j]) continue;
-        const sim = await semanticSimilarity(events[i].label, events[j].label);
+        const sim = await semanticSimilarity(tagged[i].label, tagged[j].label);
         if (sim > 0.72) {
-          // Keep the one with higher confidence
-          const dropIdx = events[i].confidence >= events[j].confidence ? j : i;
+          const dropIdx = tagged[i].confidence >= tagged[j].confidence ? j : i;
           keep[dropIdx] = false;
-          if (DEV) console.log(`[StoryGraph] Ch.${entry.chapterNumber} dedup: "${events[i].label}" ~ "${events[j].label}" (sim:${sim.toFixed(2)}) → drop "${events[dropIdx].label}"`);
+          if (DEV) console.log(`[StoryGraph] Ch.${entry.chapterNumber} dedup: "${tagged[i].label}" ~ "${tagged[j].label}" (sim ${sim.toFixed(2)}) → drop "${tagged[dropIdx].label}"`);
         }
       }
     }
-
-    const deduped = events.filter((_, i) => keep[i]);
-    if (DEV) console.log(`[StoryGraph] ✓ Ch.${entry.chapterNumber}: ${events.length} → ${deduped.length} events after dedup`);
-    return { ...entry, majorEvents: deduped };
-  } catch {
-    // LM unavailable — return as-is
+    return { ...entry, majorEvents: tagged.filter((_, i) => keep[i]) };
+  } catch (err) {
+    if (DEV) console.warn(`[StoryGraph] Ch.${entry.chapterNumber}: LM pass failed —`, err);
     return entry;
   }
 }

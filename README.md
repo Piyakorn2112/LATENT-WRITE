@@ -16,6 +16,8 @@ npm run build
 npm run electron:dev
 npm run electron:build
 npx tsx scripts/test-analysis-responsiveness.ts
+npm run test:event-detect     # event detection vs the hand-annotated gold set
+npm run audit:ood-events      # event detection, label-free, over whole manuscripts
 ```
 
 ## Architecture
@@ -53,6 +55,13 @@ flowchart TD
     D --> F
     D --> L
 
+    R --> NE1[narrative-events.ts]
+    P --> NE1
+    NE1 --> NE2[chapter-observation: This chapter brief]
+    NE1 --> F
+    NE2 --> G
+    NE1 --> NE3[narrative-lm: dedup + detail tags]
+
     E --> S[world-data.ts]
     S --> L
     S --> F
@@ -85,7 +94,9 @@ flowchart TD
 - `Editor` is the live typing surface. It only owns local UI concerns such as sizing, caret tracking, and paragraph-scoped live highlight behavior.
 - `useAnalysis` owns current-chapter analysis, stale-cache reuse, worker dispatch, and high-mode adjacent pre-analysis.
 - `world-data.ts` owns entity extraction, name resolution, and rename utilities.
-- `story-graph.ts` owns persisted chapter graph entries and asynchronous LM enrichment.
+- `narrative-events.ts` owns event detection: it decides what happens in a chapter, at clause granularity, and generates each event's label from the clause that triggered it. It replaced `event-detect.ts`, which is retained only so the suites can score against it.
+- `chapter-observation.ts` owns the "This chapter" brief above the widgets — a lead line built from the detected events plus up to three anchored facts, each from a different dimension.
+- `story-graph.ts` owns persisted chapter graph entries and the asynchronous LM pass. That pass does semantic dedup and detail tags; it deliberately no longer relabels (see System 9).
 - `StoryGraphPanel` and `TimelineGraphFull` are presentation layers over precomputed graph/timeline data.
 - `RendererPanel` owns renderer chat presentation, slash-command routing, project-backed message persistence, and the bridge into the fullscreen renderer workspace.
 - `project-manager.ts` is the typed renderer-side gateway to Electron project filesystem handlers and Claude session status/streaming.
@@ -231,6 +242,23 @@ flowchart LR
 - Adjacent pre-analysis still consumes background time in high mode even though it is chunked and idle-scheduled.
 - Without world data, known-name fallback extraction remains more expensive than the world-aware path.
 
+### Tension Curve — Fixed Defect, Recorded
+
+`analyzeChapter` reduces per-paragraph tension to ≤30 buckets. It used to
+**point-sample** one paragraph per bucket, which over 40 chapters longer than 30
+paragraphs discarded **49.1%** of all paragraphs, missed the chapter's real
+maximum in **15%** of chapters, and — because every paragraph-number claim in the
+UI was made by inverting that curve — named a paragraph that was not actually at
+the chapter's peak in **47.5%** of cases.
+
+Two changes: buckets now **aggregate** (peak level lost 15.0% → 0.0%), and a new
+`analysis.peakParagraph` locates the peak from the **full** signal, tie-broken to
+the middle of the longest run at the chapter maximum (off-peak 47.5% → **0.0%**).
+
+Read `analysis.peakParagraph`. Do not invert `tensionCurve` to find a paragraph —
+tension is a three-level ordinal, so its peak is usually a tie across many
+paragraphs and a bucket index maps back to a bucket *centre*.
+
 ### Observed Timing Profile
 
 From `scripts/test-analysis-responsiveness.ts` on the current codebase:
@@ -296,7 +324,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[ChapterAnalysisResult] --> B[buildChapterEntry]
+    A[ChapterAnalysisResult] --> A2[narrative-events.ts]
+    A2 --> B[buildChapterEntry]
     B --> C[StoryGraph store]
     C --> D[StoryGraphPanel]
     D --> E[buildSnapshotTimelineCharacterTracks]
@@ -317,12 +346,14 @@ flowchart LR
 - Chapter analysis results.
 - `worldData` character names and aliases.
 - Chapter metadata and current chapter id.
-- Optional LM enrichment for event relabeling/detail refinement.
+- Optional LM pass for semantic dedup and detail tags. It does **not** relabel.
 
 ### Output Channels
 
-- Compact side-panel timeline.
+- Compact side-panel timeline, with per-event position ticks on the tension bar.
 - Fullscreen timeline overlay.
+- Hover text on every event chip in both views: type, salience, paragraph,
+  confidence, and the **source clause**.
 - Top-character chips and chapter navigation clicks.
 - Stored story graph entries in localStorage.
 
@@ -338,7 +369,22 @@ flowchart LR
 
 - Event-chip collision layout is still main-thread work.
 - A 170-chapter timeline can still be limited by SVG text and chip density if the visible detail window becomes very busy.
-- LM enrichment is asynchronous, but still extra work on top of the base story-graph pipeline.
+- The LM pass is asynchronous, but still extra work on top of the base story-graph pipeline.
+
+### Two Fixed Defects, Recorded
+
+**`tensionPosition` was computed for every event and never read.** Chips stack by
+array index in both timeline views, so two events at 10% and 90% of a chapter
+rendered with identical spacing and the timeline could not show *where* anything
+happened. The compact view's tension bar now carries a tick per event at its real
+position; the chips still stack, because they need the vertical room to stay
+legible.
+
+**The source clause was computed and thrown away.** `story-graph.ts` selected a
+sentence, derived a label from it, and dropped it — so a 28-character chip had no
+way to justify itself and no way to be checked. `MajorEvent.sentence` and
+`.paragraphIndex` now persist, which is what the hover text shows and what makes
+an event jumpable.
 
 ## System 6: Annotation And Adaptive Learning
 
@@ -476,9 +522,136 @@ flowchart LR
 - Large overlay stacks with multiple backdrop-filter planes are expensive in Electron/Chromium.
 - Resizing many glass surfaces at once can still burst worker/filter churn.
 
+## System 9: Narrative Event Engine
+
+What actually happens in a chapter. This is what fills the arc timeline's event
+chips and the lead line of the "This chapter" brief.
+
+```mermaid
+flowchart TD
+    A[paragraphs] --> B[splitSentences per paragraph]
+    C[speech-detect segments] --> D{is this sentence inside\nattributed dialogue?}
+    B --> D
+
+    D -->|yes| E[DIALOGUE channel<br/>speaker + speech act + content]
+    D -->|no| F[NARRATION channel<br/>agent + change verb + object]
+
+    F --> F1[findAgent: name, pronoun, or definite NP]
+    F1 --> F2[findVerb: FIRST verb-shaped token]
+    F2 --> F3[verb class lookup]
+    F3 --> F4[gates: specificity for entity subjects,<br/>motion, and bare physical acts]
+
+    E --> G[score the clause]
+    F4 --> G
+    H[mood: pluperfect, habitual, modal, gnomic] --> G
+    I[persistence: do these words recur later?] --> G
+    J[tension DERIVATIVE per paragraph] --> G
+
+    G --> K[calibrate within chapter: z-score to logistic]
+    K --> L[confidence floor + one event per paragraph]
+    L --> M[buildLabel: agent + present-tense verb + object]
+    M --> N[NarrativeEvent with its SOURCE CLAUSE]
+
+    N --> O[story-graph entries -> timeline]
+    N --> P[chapter-observation brief]
+    N --> Q[narrative-lm: dedup + detail tag]
+```
+
+### Input Channels
+
+- Paragraphs, and `speech-detect` segments for the same paragraphs.
+- Known names from world data plus detected speakers.
+- Per-paragraph tension, one value per paragraph, **no subsampling** — the engine
+  reads its derivative, because a local rise is evidence that something happened
+  where a high plateau only says the chapter is tense.
+
+### Output Channels
+
+- `NarrativeEvent[]`, ranked by calibrated confidence, each carrying its label,
+  type, salience, paragraph, offset, and the verbatim clause it came from.
+- Both the legacy six types (for the existing colour map) and a richer taxonomy:
+  decision, revelation, confrontation, action, arrival, departure, shift,
+  state-change, unclassified.
+
+### Design Rules That Are Load-Bearing
+
+- **The unit is a clause, not a paragraph.** The predecessor scored paragraphs and
+  then scavenged a label from anywhere inside, so agent, verb, type and label
+  could each come from a different sentence.
+- **Verb classes, not phrases.** Verbs are a closed class and generalise; the
+  predecessor's 170 multi-word phrases did not — 45% occurred in one sample book
+  and not the other, and 24% in neither.
+- **A realis test.** Backstory, habit and hypothetical are penalised, not accepted.
+  Penalties are subtractive and confidence is calibrated *within* the chapter, so a
+  wholly retrospective chapter still ranks its own best clauses.
+- **`unclassified` exists on purpose.** The predecessor defaulted unmatched clauses
+  to "confrontation", which is why 36.3% of its output was typed that way.
+- **Labels are short by construction**, not truncated after the fact, because the
+  timeline gives a label 20–36 characters.
+
+### Two Channels, And Why
+
+Most events in this corpus are **attributed dialogue acts**. Speaker attribution is
+this app's strongest signal (`speech-detect` ~96% in high mode) and the predecessor
+used it as a flat +0.2 for "contains a quotation mark".
+
+### Verification
+
+```
+npm run test:event-detect                 # gold set, gated, old vs new
+npm run test:event-detect -- --detail     # per-chapter alignment, every miss
+FLOOR=0.4 npm run test:event-detect       # sweep the operating point
+npm run audit:ood-events                  # label-free, in-distribution vs held out
+npm run print:chapter root-crown 16       # numbered paragraphs, for annotating
+```
+
+Current gold-set numbers (22 events, 5 chapters, ±1 paragraph tolerance):
+
+| | OLD | NEW |
+|---|---|---|
+| precision | 28.6% | **57.1%** |
+| recall on major events | 27.3% | **63.6%** |
+| F1 | 22.2% | **55.8%** |
+| type correct, of matched | **0.0%** | **50.0%** |
+| labels fitting the UI budget | 50.0% | **100%** |
+
+Type accuracy is reported, not gated: a trained-literary-scholar typology reached
+Krippendorff's α of only 0.57–0.75 on a coarser scheme, so moderate type agreement
+is a property of the domain. Position and salience are the gates.
+
+### Current Bottlenecks And Known Weaknesses
+
+- **`action` dominates the held-out manuscript at 54.0%.** It is the widest class
+  in the lexicon and a domestic novel is made of people opening doors. Requiring a
+  real object or a specified clause moved it from 58.9%; it needs a better answer.
+- The operating point rests on **22 gold events**, and F1 is flat from floor 0.28
+  to 0.52, so the threshold is not meaningful to two decimal places.
+- The gold set is 5 chapters from 2 books. It needs genuinely out-of-distribution
+  prose before these numbers are quoted as generalisation.
+- Label ↔ gold token overlap is 20.7%: the label usually names the right beat in
+  different words than a reader would use. Closing that gap is abstraction, which
+  is what the generative path in `plans/narrative-event-engine.md` is for.
+- Detection is synchronous and runs per chapter, not per keystroke, on the same
+  deferred path as the story-graph update.
+
+### The Embedding Seam
+
+`narrative-lm.ts` runs MiniLM three ways: Electron IPC to the main process,
+browser WASM, and — via `setEmbedder` — an injected Node backend for the suites.
+
+★ That third path did not exist, and its absence was expensive.
+`@xenova/transformers` v2 statically imports `sharp`, whose native binary is not
+built in this store. Electron's main process stubs it; no script did. So importing
+the module under `tsx` threw at import time, `enrichChapterEntryWithLM` swallowed
+it in a bare `catch`, and the offline suite reported **"relabeled events: 0/6
+(0%)"** — a number that read as "the LM agrees" and meant "the LM never loaded".
+`scripts/lm-node-backend.ts` installs the stub and the backend. Keep the seam: an
+engine whose only inference path is inside Electron cannot be measured.
+
 ## Current System Hot Spots
 
 - Fullscreen timeline detail chips remain the primary timeline-specific hot path.
+- Event detection adds a synchronous per-chapter pass on the deferred story-graph path; it is clause-level over every sentence, so it scales with sentence count rather than paragraph count.
 - High intelligence mode remains intentionally expensive; low mode is the fast writing-safe path.
 - Whole-book world/entity scans remain expensive on large manuscripts.
 - LocalStorage persistence still needs disciplined payload sizes for annotations/adaptive data.
@@ -492,7 +665,10 @@ flowchart LR
 - `src/lib/use-analysis.ts` — analysis hook and worker dispatch.
 - `src/lib/chapter-analysis-runner.ts` — pure analysis pipeline.
 - `src/lib/world-data.ts` — world/entity scanning and name resolution.
+- `src/lib/narrative-events.ts` — event detection. Read its header before changing it; every rule is a response to a measured failure.
+- `src/lib/chapter-observation.ts` — the "This chapter" brief above the widgets.
 - `src/lib/story-graph.ts` — chapter graph generation and persistence.
+- `plans/narrative-event-engine.md` — the diagnosis, the numbers, and the on-device LLM decision table.
 - `src/components/StoryGraphPanel.tsx` — compact graph and fullscreen entry point.
 - `src/components/TimelineGraphFull.tsx` — fullscreen story timeline.
 - `src/components/RendererPanel.tsx` — renderer chat surface and slash-command routing.

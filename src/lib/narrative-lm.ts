@@ -212,6 +212,47 @@ function getAssetBaseHref(): string {
   return new URL("../../public/", import.meta.url).href;
 }
 
+// ─── Embedding backend seam ───────────────────────────────────────────────────
+/**
+ * The three environments this module runs in reach the model three different
+ * ways, and until this seam existed only two of them were reachable:
+ *
+ *   Electron  →  IPC to the main process (onnxruntime-node, native binaries)
+ *   Browser   →  the local WASM pipeline below
+ *   Node      →  NOTHING, and that silence was expensive.
+ *
+ * `@xenova/transformers` v2 has a top-level `import sharp from "sharp"` in
+ * utils/image.js. Electron's main process installs a Module._load stub for it;
+ * a plain `tsx scripts/…` run does not, so importing this module under Node
+ * threw before it ever reached a model — and `enrichChapterEntryWithLM` catches
+ * everything and returns the entry unchanged. The result: every offline event
+ * suite reported "the LM changed 0% of labels" and that number described a
+ * failed import, not a working model. Nothing logged. Nothing failed.
+ *
+ * Tests inject a Node-native embedder here instead of fighting that import.
+ * Keep the seam even if the sharp problem goes away: an engine whose only
+ * inference path is inside Electron cannot be measured, and an unmeasurable
+ * engine drifts.
+ */
+export type Embedder = (text: string) => Promise<Float32Array>;
+
+let _embedderOverride: Embedder | null = null;
+
+/** Install (or clear, with null) an embedding backend. Clears every cache. */
+export function setEmbedder(fn: Embedder | null): void {
+  _embedderOverride = fn;
+  _eventAnchors = null;
+  _eventDetailAnchors = null;
+  _anchorCache.clear();
+  _sentenceCache.clear();
+}
+
+/** True when SOME embedding backend is reachable. Callers that degrade
+ *  silently should say so out loud instead. */
+export function hasEmbedder(): boolean {
+  return _embedderOverride !== null || _pipe !== null || getElectronAPI()?.narrativeLMEmbed !== undefined;
+}
+
 async function getEmbeddingPipeline(): Promise<EmbedFn> {
   if (_pipe) return _pipe;
   if (_loading) return _loading;
@@ -266,6 +307,12 @@ async function embed(text: string): Promise<Float32Array> {
   if (cached) return cached;
 
   let result: Float32Array;
+  // An injected backend wins — that is how the offline suites reach a model.
+  if (_embedderOverride) {
+    result = await _embedderOverride(text);
+    _sentenceCache.set(text, result);
+    return result;
+  }
   // In Electron: delegate to main process (onnxruntime-node, native binaries).
   const api = getElectronAPI();
   if (api?.narrativeLMEmbed) {

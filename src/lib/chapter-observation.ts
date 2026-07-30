@@ -1,183 +1,218 @@
 import type { ChapterAnalysisResult } from "./chapter-analysis-runner";
+import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
 
 /**
- * chapter-observation.ts — ONE sentence about the chapter, with a location.
+ * chapter-observation.ts — the brief above the widgets.
  *
- * The analysis panel computes dozens of metrics; a number without a target is
- * decoration. This module distils the settled analysis into a single
- * observation a writer can act on at a glance, anchored to a paragraph when
- * possible. The widgets below it remain the deep-dive.
+ * ─── WHY THIS WAS REWRITTEN ──────────────────────────────────────────────────
  *
- * Pure synthesis over `ChapterAnalysisResult` — no new analysis runs here.
+ * The previous version returned ONE templated sentence chosen by a five-rule
+ * waterfall over the tension curve's shape. Run over 52 chapters of the two
+ * sample manuscripts it produced **six distinct sentences**:
+ *
+ *   17×  "Two peaks, near ¶N and ¶N, with a slack stretch between them."
+ *   11×  "No clear tension peak detected. If this is meant to be a significant…"
+ *   10×  "One spike at ¶N carries the chapter. The rest stays calm."
+ *    5×  "Tension peaks in the first N% of the chapter…"
+ *    4×  "Same double peak shape as the previous chapter."
+ *    1×  "X speaks N% of the dialogue across 29 turns."
+ *
+ * A third of all chapters got that first line verbatim. 31% got a diagnostic
+ * scold rather than an observation. 48% had no paragraph anchor at all, so there
+ * was nothing to click. And the ¶ numbers those templates cite were located by
+ * inverting the ≤30-bucket tension curve, which named a paragraph that was not
+ * at the chapter's peak in 47.5% of cases — a confident, checkable, wrong claim
+ * about the writer's own text.
+ *
+ * ─── WHAT IT DOES NOW ────────────────────────────────────────────────────────
+ *
+ * It answers the question the surface implies: what happens in this chapter.
+ *
+ * The lead line is built from the detected events, so it varies with the prose
+ * rather than with which of five shapes the curve fell into. Under it sit up to
+ * three anchored facts, each drawn from a DIFFERENT dimension so the box never
+ * repeats itself: where the pressure sits, who holds the floor, and one thing
+ * worth looking at. Every paragraph number comes from `analysis.peakParagraph`
+ * or from an event's own `paragraphIndex`, never from inverting the curve.
+ *
+ * It also stops competing with the widgets. Tension shape belongs to
+ * TensionWidget, the diagnostics list belongs to DiagnosticsWidget; this reports
+ * the one diagnostic that outranks everything else and leaves the rest there.
  */
 
-export interface ChapterObservation {
-  /** One plain sentence (or two short ones). Always concrete. */
+export interface BriefLine {
   text: string;
-  /** Paragraph the observation anchors to, for click-to-jump. */
+  /** 0-based paragraph, when the claim has a location worth jumping to. */
   paragraphIndex?: number;
-  /** Which dimension produced it — the UI can point at the matching widget. */
-  kind: "tension" | "dialogue" | "diagnostic" | "echo";
+  kind: "event" | "tension" | "dialogue" | "diagnostic" | "pacing" | "shape";
 }
 
-/** Map a tension-curve sample index to a paragraph index. */
-function curveToParagraph(curveIdx: number, curveLen: number, paraCount: number): number {
-  if (curveLen <= 1 || paraCount <= 0) return 0;
-  return Math.min(paraCount - 1, Math.round((curveIdx / (curveLen - 1)) * (paraCount - 1)));
+export interface ChapterBrief {
+  /** One plain sentence: what happens. Always present. */
+  headline: string;
+  /** Anchored supporting facts, each from a different dimension. Up to three. */
+  lines: BriefLine[];
+  /** The events behind the headline, for the caller to render inline. */
+  events: NarrativeEvent[];
+  /** True when the chapter has prose but no event cleared the bar. Honest
+   *  emptiness is a finding, not a gap to paper over. */
+  eventless: boolean;
 }
 
-function peakIndex(curve: number[]): number {
-  let best = 0;
-  for (let i = 1; i < curve.length; i++) if (curve[i] > curve[best]) best = i;
-  return best;
-}
-
-/** Latest index of the maximum — a curve that saturates early and holds must
- *  report where the high END is, not where it first arrived (ties → latest). */
-function lastPeakIndex(curve: number[]): number {
-  let best = 0;
-  for (let i = 1; i < curve.length; i++) if (curve[i] >= curve[best]) best = i;
-  return best;
-}
-
-/** First sample index of the longest high (≥0.66) run. */
-function highRunStart(curve: number[]): number {
-  let bestStart = -1;
-  let bestLen = 0;
-  let start = -1;
-  for (let i = 0; i <= curve.length; i++) {
-    const high = i < curve.length && curve[i] >= 0.66;
-    if (high && start < 0) start = i;
-    if (!high && start >= 0) {
-      if (i - start > bestLen) { bestLen = i - start; bestStart = start; }
-      start = -1;
-    }
-  }
-  return bestStart;
+/** Back-compat shape. The panel reads `ChapterBrief`; this keeps any other
+ *  caller (and the older suite) working. */
+export interface ChapterObservation {
+  text: string;
+  paragraphIndex?: number;
+  kind: BriefLine["kind"];
 }
 
 const P = (n: number) => `¶${n + 1}`; // display is 1-based
 
+/** Lower-case an event label for mid-sentence use without destroying a name.
+ *  "Helia authorizes firing" → "Helia authorizes firing" (name kept),
+ *  "Doors opens onto" → "doors opens onto". */
+function inline(label: string): string {
+  const first = label.split(/\s+/)[0] ?? "";
+  // A capitalised word that is not a sentence-initial artefact is a name.
+  const isName = /^[A-Z][a-z']+$/.test(first) && first.length > 2;
+  return isName ? label : label.charAt(0).toLowerCase() + label.slice(1);
+}
+
+function listOf(parts: string[]): string {
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and then ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and then ${parts[parts.length - 1]}`;
+}
+
+export function buildChapterBrief(
+  result: ChapterAnalysisResult,
+  prevResult?: ChapterAnalysisResult | null,
+): ChapterBrief | null {
+  const { analysis, paragraphs } = result;
+  const paraCount = paragraphs.length;
+  if (paraCount < 6) return null; // too little prose to claim anything
+
+  const events = detectNarrativeEvents(paragraphs, result.speechResults, {
+    knownNames: analysis.speakerCounts.map((s) => s.name).filter(Boolean),
+    tensionByParagraph: result.speechResults.map((r) =>
+      r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
+    ),
+  });
+
+  const major = events.filter((e) => e.salience === "major");
+  const lead = (major.length ? major : events).slice(0, 3);
+
+  // ── The lead line.
+  let headline: string;
+  if (lead.length === 0) {
+    // Deliberately not a scold. A chapter can be doing work — establishing a
+    // practice, holding a mood — without containing an event, and both quiet
+    // chapters in the gold set contain two events across 29 and 65 paragraphs.
+    headline =
+      "Nothing here reads as a turn: no decision, revelation or change of state clears the bar. " +
+      "If this chapter is meant to move the story, the move is currently implied rather than shown.";
+  } else {
+    const clauses = lead.map((e) => `${inline(e.label)} at ${P(e.paragraphIndex)}`);
+    headline = `${capitalizeFirst(listOf(clauses))}.`;
+  }
+
+  const lines: BriefLine[] = [];
+
+  // ── 1 · Where the pressure sits, against where the events are.
+  //
+  // This is the observation a writer cannot make from inside the prose: whether
+  // the chapter's tension is where its events are. Both numbers are now exact.
+  const curve = analysis.tensionCurve ?? [];
+  const maxTension = curve.length ? Math.max(...curve) : 0;
+  if (maxTension >= 0.5) {
+    const peak = analysis.peakParagraph;
+    const nearestEvent = lead.length
+      ? lead.reduce((a, b) => (Math.abs(a.paragraphIndex - peak) <= Math.abs(b.paragraphIndex - peak) ? a : b))
+      : null;
+    // With no events there is no gap to report. Guarding this is not decorative:
+    // without it the line read "Tension peaks at ¶29, Infinity paragraphs from
+    // the nearest turn."
+    const gap = nearestEvent ? Math.abs(nearestEvent.paragraphIndex - peak) : null;
+    const farAway = gap !== null && gap > Math.max(3, Math.round(paraCount * 0.12));
+    lines.push({
+      text:
+        gap === null
+          ? `Tension still peaks at ${P(peak)}, so the prose is doing something there that the events do not account for.`
+          : farAway
+            ? `Tension peaks at ${P(peak)}, ${gap} paragraphs from the nearest turn. The pressure and the event are in different places.`
+            : `Tension peaks at ${P(peak)}, which is where the chapter's turn lands.`,
+      paragraphIndex: peak,
+      kind: "tension",
+    });
+  } else if (analysis.arcShape !== "flat") {
+    lines.push({
+      text: `The tension curve reads ${analysis.arcShape.replace(/-/g, " ")} but never rises far. The shape is there; the stakes are not yet.`,
+      kind: "shape",
+    });
+  }
+
+  // ── 2 · Who holds the floor. Only when there is a real conversation to skew.
+  const speakers = analysis.speakerCounts ?? [];
+  const totalChars = speakers.reduce((a, s) => a + s.chars, 0);
+  if (speakers.length >= 2 && totalChars > 400) {
+    const leadSpeaker = speakers[0];
+    const share = Math.round((leadSpeaker.chars / totalChars) * 100);
+    if (share >= 65) {
+      lines.push({
+        text: `${leadSpeaker.name} holds ${share}% of the dialogue across ${leadSpeaker.turns} turns. The scene is one person talking.`,
+        kind: "dialogue",
+      });
+    } else if (events.some((e) => e.channel === "dialogue")) {
+      const spoken = events.filter((e) => e.channel === "dialogue").length;
+      lines.push({
+        text: `${spoken} of ${events.length} turns happen in dialogue rather than in narration.`,
+        kind: "dialogue",
+      });
+    }
+  }
+
+  // ── 3 · The single most actionable diagnostic. The rest stay in
+  //        DiagnosticsWidget, which already lists them all.
+  const warning = analysis.writerDiagnostics?.find((d) => d.severity === "warning");
+  if (warning && lines.length < 3) {
+    lines.push({ text: warning.message, kind: "diagnostic" });
+  }
+
+  // ── 4 · Cross-chapter echo, last, and only if there is room. It is the least
+  //        actionable thing here and it used to fire as a whole observation.
+  if (
+    lines.length < 3 &&
+    prevResult &&
+    prevResult.analysis.arcShape === analysis.arcShape &&
+    analysis.arcShape !== "flat"
+  ) {
+    lines.push({
+      text: `Same ${analysis.arcShape.replace(/-/g, " ")} shape as the previous chapter.`,
+      kind: "shape",
+    });
+  }
+
+  return { headline, lines: lines.slice(0, 3), events, eventless: lead.length === 0 };
+}
+
+function capitalizeFirst(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Back-compat wrapper. Returns the brief's headline as the old single-sentence
+ * observation, anchored to the first event.
+ */
 export function buildChapterObservation(
   result: ChapterAnalysisResult,
   prevResult?: ChapterAnalysisResult | null,
 ): ChapterObservation | null {
-  const { analysis, paragraphs } = result;
-  const paraCount = paragraphs.length;
-  if (paraCount < 6) return null; // too little prose for a shape claim
-
-  const curve = analysis.tensionCurve ?? [];
-  const peak = curve.length ? peakIndex(curve) : 0;
-  const peakPara = curveToParagraph(peak, curve.length, paraCount);
-  // A tension claim needs actual tension. Shape labels are relative (a calm
-  // chapter whose curve tops out at 0.26 can still be labelled "slope-up"),
-  // so every shape template is gated on the curve reaching a real peak.
-  const maxTension = curve.length ? Math.max(...curve) : 0;
-  const hasRealPeak = maxTension >= 0.5;
-
-  // 1 · Distinctive tension shapes read first. These are the observations a
-  //     writer cannot see while inside the prose.
-  if (curve.length >= 6 && hasRealPeak) {
-    switch (analysis.arcShape) {
-      case "plateau-high": {
-        const runStart = highRunStart(curve);
-        const startPara = runStart >= 0 ? curveToParagraph(runStart, curve.length, paraCount) : peakPara;
-        return {
-          text: `Tension holds high from ${P(startPara)} through the end and never releases.`,
-          paragraphIndex: startPara,
-          kind: "tension",
-        };
-      }
-      case "spike":
-        return {
-          text: `One spike at ${P(peakPara)} carries the chapter. The rest stays calm.`,
-          paragraphIndex: peakPara,
-          kind: "tension",
-        };
-      // "flat" carries no shape claim worth making: a flat-CALM chapter is
-      // covered by the engine's own no-climax diagnostic below, and a flat
-      // mid-tension chapter is not something to editorialise about.
-      case "valley": {
-        // Returning-tense point ≈ peak in the closing third.
-        return {
-          text: `Opens tense, goes quiet through the middle, then returns tense at ${P(peakPara)}.`,
-          paragraphIndex: peakPara,
-          kind: "tension",
-        };
-      }
-      case "double-peak": {
-        // Second peak = max of the samples after the midpoint. Only claim
-        // two peaks when both halves actually reach one (a degenerate curve
-        // under a stale shape label must fall through, not invent peaks).
-        const mid = Math.floor(curve.length / 2);
-        let second = mid;
-        for (let i = mid; i < curve.length; i++) if (curve[i] > curve[second]) second = i;
-        const first = peakIndex(curve.slice(0, mid));
-        const firstPara = curveToParagraph(first, curve.length, paraCount);
-        const secondPara = curveToParagraph(second, curve.length, paraCount);
-        if (firstPara !== secondPara && curve[first] >= 0.6 && curve[second] >= 0.6) {
-          return {
-            text: `Two peaks, near ${P(firstPara)} and ${P(secondPara)}, with a slack stretch between them.`,
-            paragraphIndex: firstPara,
-            kind: "tension",
-          };
-        }
-        break;
-      }
-    }
-  }
-
-  // 2 · A warning-grade diagnostic is inherently actionable. On a calm
-  //     chapter (no real peak) the engine's own info note is the honest
-  //     observation, so it qualifies too.
-  const warning = analysis.writerDiagnostics?.find((d) => d.severity === "warning")
-    ?? (!hasRealPeak ? analysis.writerDiagnostics?.[0] : undefined);
-  if (warning) {
-    return { text: warning.message, kind: "diagnostic" };
-  }
-
-  // 3 · Extreme dialogue dominance (needs a real conversation to mean much).
-  const speakers = analysis.speakerCounts ?? [];
-  const totalChars = speakers.reduce((a, s) => a + s.chars, 0);
-  if (speakers.length >= 2 && totalChars > 400) {
-    const lead = speakers[0];
-    const pct = Math.round((lead.chars / totalChars) * 100);
-    if (pct >= 72) {
-      return {
-        text: `${lead.name} speaks ${pct}% of the dialogue across ${lead.turns} turns.`,
-        kind: "dialogue",
-      };
-    }
-  }
-
-  // 4 · Rising/falling slopes, located. Climbs report the latest max so a
-  //     curve that saturates early doesn't claim an early "peak".
-  if (curve.length >= 6 && hasRealPeak && analysis.arcShape === "slope-up") {
-    const upPara = curveToParagraph(lastPeakIndex(curve), curve.length, paraCount);
-    const atClose = upPara >= Math.floor(paraCount * 0.8);
-    return {
-      text: atClose
-        ? `Tension climbs all chapter and peaks at ${P(upPara)}, right at the close.`
-        : `Tension builds to its peak at ${P(upPara)} and holds from there.`,
-      paragraphIndex: upPara,
-      kind: "tension",
-    };
-  }
-  if (curve.length >= 6 && hasRealPeak && analysis.arcShape === "slope-down") {
-    return {
-      text: `The peak lands at ${P(peakPara)} in the opening and everything after it descends.`,
-      paragraphIndex: peakPara,
-      kind: "tension",
-    };
-  }
-
-  // 5 · Cross-chapter echo.
-  if (prevResult && prevResult.analysis.arcShape === analysis.arcShape && analysis.arcShape !== "flat") {
-    return {
-      text: `Same ${analysis.arcShape.replace("-", " ")} shape as the previous chapter.`,
-      kind: "echo",
-    };
-  }
-
-  return null;
+  const brief = buildChapterBrief(result, prevResult);
+  if (!brief) return null;
+  return {
+    text: brief.headline,
+    paragraphIndex: brief.events[0]?.paragraphIndex,
+    kind: brief.eventless ? "diagnostic" : "event",
+  };
 }

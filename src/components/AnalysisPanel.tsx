@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
-import { buildChapterObservation } from "../lib/chapter-observation";
+import { buildChapterBrief } from "../lib/chapter-observation";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
@@ -751,8 +751,8 @@ export function AnalysisPanel({
 
   // One sentence about the chapter, with a location — the panel's entry
   // point. The widgets below remain the deep-dive (see chapter-observation.ts).
-  const observation = useMemo(
-    () => (displayed ? buildChapterObservation(displayed, prevResult) : null),
+  const brief = useMemo(
+    () => (displayed ? buildChapterBrief(displayed, prevResult) : null),
     [displayed, prevResult],
   );
 
@@ -943,24 +943,62 @@ export function AnalysisPanel({
           <div className={`analysis-inner ${isAnalyzing ? "analysis-inner--analyzing" : ""}`}>
             {hasContent ? (
               <>
-              {observation && (
+              {brief && (
                 <div
                   className="chapter-observation liquid-glass"
                   data-liquid-glass-scroll-adaptive="panel"
                 >
                   <span className="chapter-observation-eyebrow">This chapter</span>
-                  <p className="chapter-observation-text">
-                    {observation.text}
-                    {observation.paragraphIndex !== undefined && onJumpToParagraph && (
-                      <button
-                        type="button"
-                        className="chapter-observation-jump"
-                        onClick={() => onJumpToParagraph(observation.paragraphIndex!)}
-                      >
-                        Go to ¶{observation.paragraphIndex + 1}
-                      </button>
-                    )}
-                  </p>
+
+                  {/* The lead line: what happens. Built from the detected events,
+                      so it varies with the prose. The version this replaces chose
+                      one of six templated sentences and gave a third of all
+                      chapters the same one. */}
+                  <p className="chapter-observation-text">{brief.headline}</p>
+
+                  {/* Event chips. Each carries its own paragraph, so each is
+                      individually jumpable — the source clause is the title, which
+                      is the first time the panel has been able to show WHY an
+                      event was called an event. */}
+                  {brief.events.length > 0 && (
+                    <div className="chapter-brief-events">
+                      {brief.events.slice(0, 4).map((e, i) => (
+                        <button
+                          key={`${e.paragraphIndex}-${i}`}
+                          type="button"
+                          className="chapter-brief-chip"
+                          data-narrative-type={e.type}
+                          data-salience={e.salience}
+                          title={`${e.type} · ${Math.round(e.confidence * 100)}% · ¶${e.paragraphIndex + 1}\n\n${e.sentence}`}
+                          onClick={() => onJumpToParagraph?.(e.paragraphIndex)}
+                          disabled={!onJumpToParagraph}
+                        >
+                          <span className="chapter-brief-chip__label">{e.label}</span>
+                          <span className="chapter-brief-chip__at">¶{e.paragraphIndex + 1}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Supporting lines, each from a different dimension. */}
+                  {brief.lines.length > 0 && (
+                    <ul className="chapter-brief-lines">
+                      {brief.lines.map((line, i) => (
+                        <li key={i} className="chapter-brief-line" data-kind={line.kind}>
+                          <span>{line.text}</span>
+                          {line.paragraphIndex !== undefined && onJumpToParagraph && (
+                            <button
+                              type="button"
+                              className="chapter-observation-jump"
+                              onClick={() => onJumpToParagraph(line.paragraphIndex!)}
+                            >
+                              ¶{line.paragraphIndex + 1}
+                            </button>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
               <div className="widget-list-stack">

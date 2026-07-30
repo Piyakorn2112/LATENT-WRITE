@@ -244,6 +244,27 @@ function TimelineGraphImpl({
                     opacity={isActive ? 0.8 : 0.5}
                   />
                 )}
+                {/* ★ Event position ticks.
+                    `tensionPosition` was computed for every event and then never
+                    read by this component — chips stack by ARRAY INDEX, so two
+                    events at 10% and 90% of a chapter rendered with identical
+                    spacing and the timeline could not show where anything
+                    happened. The chips still stack, because they need the
+                    vertical room to stay legible, but the bar now carries the
+                    real positions so the row shows the chapter's shape at a
+                    glance. */}
+                {events.map((evt, ei) => (
+                  <rect
+                    key={`tick-${ch.id}-${ei}`}
+                    x={BAR_X + Math.min(BAR_MAX_W - 1.2, Math.max(0, evt.tensionPosition * BAR_MAX_W))}
+                    y={cy + BAR_Y_OFF - 2.5}
+                    width={1.2}
+                    height={BAR_H + 5}
+                    rx={0.6}
+                    fill={EVENT_COLOR[evt.type] ?? "#64748b"}
+                    opacity={evt.salience === "minor" ? 0.45 : 0.85}
+                  />
+                ))}
               </g>
             )}
 
@@ -287,6 +308,27 @@ function TimelineGraphImpl({
               const labelX = chipX + SIDE_PAD + detailW + (detail ? DETAIL_GAP : 0);
               return (
                 <g key={`evt-${ch.id}-${ei}`} opacity={0.9}>
+                  {/* ★ The first hover surface this timeline has ever had.
+                      An event label is capped at 28–36 characters, so the chip
+                      alone can never justify itself; the writer had no way to see
+                      what "Helia authorizes firing" referred to, or to check
+                      whether it was right. `sentence` used to be computed in
+                      story-graph.ts to derive the label and then discarded — it is
+                      persisted now, so the source clause can be shown.
+                      A <title> is deliberate rather than a custom popover: it
+                      works inside SVG, needs no portal, and survives the
+                      full-screen view's own stacking. */}
+                  <title>
+                    {[
+                      `${evt.narrativeType ?? evt.type}${evt.salience ? ` · ${evt.salience}` : ""}`,
+                      evt.paragraphIndex !== undefined
+                        ? `¶${evt.paragraphIndex + 1} · ${Math.round(evt.confidence * 100)}% confidence`
+                        : `${Math.round(evt.tensionPosition * 100)}% through the chapter · ${Math.round(evt.confidence * 100)}% confidence`,
+                      evt.sentence ? `\n${evt.sentence}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join("\n")}
+                  </title>
                   {/* Thin vertical tick from spine to first chip only */}
                   {ei === 0 && (
                     <line

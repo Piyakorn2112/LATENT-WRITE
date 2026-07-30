@@ -301,6 +301,34 @@ export interface MajorEvent {
   detailConfidence?: number;
   tensionPosition: number; // 0–1 position within chapter
   confidence: number;      // 0–1 scoring confidence
+
+  // ── Fields below are written by narrative-events.ts. All optional, because
+  //    entries persisted by an earlier version will not carry them.
+
+  /**
+   * The clause the event was detected in, verbatim.
+   *
+   * ★ This used to be computed and then thrown away: story-graph.ts selected a
+   * source sentence, derived a label from it, and dropped it. The timeline could
+   * therefore show a four-word chip with no way to see what it referred to and no
+   * way to check whether it was right. Persisting it is what makes an event
+   * inspectable, and it is what the hover card shows.
+   */
+  sentence?: string;
+  /** 0-based paragraph. Needed for click-to-jump; `tensionPosition` alone forces
+   *  a lossy round-trip through a fraction of the chapter. */
+  paragraphIndex?: number;
+  /** Offset of the clause inside its paragraph, for select-and-scroll. */
+  offsetInParagraph?: number;
+  /** The richer taxonomy from narrative-events.ts (decision, revelation,
+   *  state-change…). `type` above stays for the existing colour map. */
+  narrativeType?: string;
+  /** `major` = a chapter summary would mention it. */
+  salience?: "major" | "minor";
+  /** Resolved actor. */
+  agent?: string;
+  /** Which channel found it: an attributed utterance, or narration. */
+  channel?: "dialogue" | "narration";
 }
 
 export interface ChapterGraphEntry {

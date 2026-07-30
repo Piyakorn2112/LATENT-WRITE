@@ -1,0 +1,262 @@
+{
+  "$schema": "see scripts/test-event-detect.ts for the reader and the scoring rules",
+  "version": 1,
+  "created": "2026-07-30",
+  "about": [
+    "Gold events for the narrative event engine. Hand-annotated per chapter against",
+    "the paragraph numbering that scripts/print-chapter.ts prints, which is the same",
+    "split the engine uses (/\\n{2,}|\\n/ + trim + drop-empties). A shifted anchor",
+    "would make every score a plausible-looking near-miss, so that split is shared.",
+    "",
+    "DEFINITION. An event is a change of state a reader would mention when asked what",
+    "happens in the chapter. This is close to LitBank's 'asserted realis' event",
+    "(Sims, Park & Bamman, ACL 2019) with one deliberate divergence: LitBank excludes",
+    "negated events, and this set keeps them, because a refusal ('she did not answer')",
+    "is one of the strongest beats in this corpus. Salience follows Barthes' cardinal",
+    "function as used by Otake et al. (COLING 2020): major = removing it changes what",
+    "afterwards makes sense.",
+    "",
+    "EXCLUDED, and these are the traps: scene-setting however vivid, backstory,",
+    "interior musing that changes nothing, a topic merely being discussed, and the",
+    "chapter merely starting or ending.",
+    "",
+    "KNOWN LIMITATION. Both source manuscripts are in-distribution for the ENGINE THIS",
+    "REPLACES, whose phrase dictionaries were tuned on them (45% of its multi-word",
+    "phrases occur in Hollow Iris and not in The Root Crown). The replacement engine",
+    "carries no manuscript-derived phrases, so this set measures it fairly, but it",
+    "cannot by itself prove generalisation. scripts/ood-event-audit.ts covers that",
+    "with label-free metrics over both full books.",
+    "",
+    "EVENTFULNESS VARIES ON PURPOSE. 2, 9, 6, 2 and 3 events across five chapters.",
+    "A detector that emits a fixed three per chapter cannot score well here, and the",
+    "engine this replaces emitted 2.67 on average regardless of content."
+  ],
+  "typeNotes": {
+    "decision": "someone binds themselves to a course of action",
+    "revelation": "someone learns, or makes another know, something that changes belief",
+    "confrontation": "two parties come into open opposition",
+    "action": "a physical or documentary act with consequences",
+    "arrival": "someone or something enters the situation",
+    "departure": "someone or something leaves it",
+    "shift": "time or place moves",
+    "state-change": "a condition of the world changes"
+  },
+  "chapters": [
+    {
+      "book": "hollow-iris",
+      "chapter": 1,
+      "eventfulness": "quiet",
+      "whatHappens": "An ancient isolated entity who administers a planet through sentient infrastructure travels alone to the Vault, dwelling on the ache of a consciousness split across distant bodies.",
+      "events": [
+        {
+          "paragraph": 19,
+          "summary": "She arrives at the Vault's receiving bay",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "She stood and stepped out, and the bay received her"
+        },
+        {
+          "paragraph": 22,
+          "summary": "She releases the pull to stay",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "She did not stay. She released the moment"
+        }
+      ]
+    },
+    {
+      "book": "hollow-iris",
+      "chapter": 45,
+      "eventfulness": "eventful",
+      "whatHappens": "Reading an archived account, Nora learns how Helia's small rounding error triggered an atmospheric collapse on Crownfall that forced her to order a strike killing eleven thousand people to prevent a far larger catastrophe.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "Helia rounds a maintenance figure incorrectly",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Helia rounded it down. By 0.3 percent."
+        },
+        {
+          "paragraph": 4,
+          "summary": "Crownfall's atmospheric processors begin failing",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the atmospheric processors on Crownfall's southern hemisphere began to fail"
+        },
+        {
+          "paragraph": 5,
+          "summary": "Helia realizes the failure is hers",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "she understood, before the predictive models confirmed it, that the trend was hers"
+        },
+        {
+          "paragraph": 8,
+          "summary": "Helia orders the fatal orbital strike",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "Body-A sat in the plastic chair with its hands in its lap and made the gesture that ended eleven thousand lives."
+        },
+        {
+          "paragraph": 23,
+          "summary": "Helia listens to the dying settlements",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "the listening was the first installment of a debt that would never be paid"
+        },
+        {
+          "paragraph": 25,
+          "summary": "Helia writes and seals the audit report",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "She wrote the audit report. The report was classified. It was sealed."
+        },
+        {
+          "paragraph": 27,
+          "summary": "Helia accepts blame, adopts new protocols",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Helia accepted all recommendations. She implemented them through the lattice."
+        },
+        {
+          "paragraph": 28,
+          "summary": "The Axiom Spire departs Crownfall's orbit",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "The Axiom Spire departed Crownfall's orbit on the twelfth day."
+        },
+        {
+          "paragraph": 30,
+          "summary": "Nora returns and resumes reading",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "scene-break",
+          "evidence": "Nora returned from the bathroom. She sat at the archive table. She put her gloves back on."
+        }
+      ]
+    },
+    {
+      "book": "hollow-iris",
+      "chapter": 96,
+      "eventfulness": "moderate",
+      "whatHappens": "The oversight committee's fleet diversion is accepted, the atmospheric crisis and Helia's lattice strain both worsen, and the Crownfall restoration operation finally begins.",
+      "events": [
+        {
+          "paragraph": 6,
+          "summary": "Committee's decision to redeploy fleet is accepted",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "Kael accepted the decision."
+        },
+        {
+          "paragraph": 7,
+          "summary": "Two more domes cross the contamination threshold",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "The total affected population reached seventy-eight thousand"
+        },
+        {
+          "paragraph": 8,
+          "summary": "Lattice bandwidth deficit rises to thirty-one percent",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the additional consumption of the Crownfall operations pushed the total bandwidth deficit to thirty-one percent"
+        },
+        {
+          "paragraph": 10,
+          "summary": "Karath relay body disconnects, Helia loses a node",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "one more peripheral body went dark — the body at the Karath Station relay point"
+        },
+        {
+          "paragraph": 18,
+          "summary": "Iris suffers her fourth, shortest micro-disconnection",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "The fourth micro-disconnection happened at 03:14."
+        },
+        {
+          "paragraph": 26,
+          "summary": "Crownfall atmospheric restoration operations begin",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "The Crownfall restoration operations began on Day 64"
+        }
+      ]
+    },
+    {
+      "book": "root-crown",
+      "chapter": 16,
+      "eventfulness": "moderate",
+      "whatHappens": "While Tessa weaves through the night she tells Mira that her late father knew, and that she herself has long known, that Mira does not age like everyone else.",
+      "events": [
+        {
+          "paragraph": 22,
+          "summary": "Tessa reveals Brennan knew Mira doesn't age",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "That you weren't going to age the way the rest of us do"
+        },
+        {
+          "paragraph": 27,
+          "summary": "Tessa admits she's known since Mira was 24",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "I said I noticed when you were twenty-four."
+        }
+      ]
+    },
+    {
+      "book": "root-crown",
+      "chapter": 24,
+      "eventfulness": "moderate",
+      "whatHappens": "At a gathering of three practitioners, Pala reveals that their power varies with distance from an unknown centre to the south, and the youngest has a private three-year doubt confirmed.",
+      "events": [
+        {
+          "paragraph": 31,
+          "summary": "Pala reveals power varies by distance from center",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "The thing below hears differently at different distances from the center,"
+        },
+        {
+          "paragraph": 55,
+          "summary": "Edis's years-long private doubt is confirmed",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "a quality of having had something confirmed that she had been carrying as a private anxiety for three years"
+        },
+        {
+          "paragraph": 62,
+          "summary": "Mira and Edis agree to correspond",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "introduction",
+          "evidence": "\"You can write to me,\" Mira said. \"The letter will find me.\""
+        }
+      ]
+    }
+  ]
+}
