@@ -942,6 +942,31 @@ function findAttribution(
   const localAfter  = after.slice(0, LOCAL_VERB_WINDOW);
   const hasSpeechVerb = SPEECH_VERB_RE.test(localBefore + ' ' + localAfter);
 
+  // ── AN EXPLICIT TAG BEATS EVERY INFERENCE, even for an unknown name.
+  //
+  // `said Mr. Wilson` where "Wilson" is not in the resolved cast used to fall
+  // straight through to context-carry, which then confidently supplied whoever
+  // spoke last. Measured by test:attribution-corpus, that is where the residual
+  // honorific errors live: several books show 6 wrong out of 7, all of them a
+  // real tag overridden by an unrelated carried speaker.
+  //
+  // Guessing from context is reasonable when the text says nothing. It is never
+  // reasonable when the text names the speaker outright. Requires the honorific
+  // form specifically, so a bare capitalised word after "said" — which is often
+  // a place or an object — cannot reach it.
+  {
+    const tagged = `${localAfter}`.match(
+      new RegExp(`^\\s*[,]?\\s*\\b${SPEECH_VERB_PAT}\\b\\s+(${HONORIFIC_PAT})\\.?\\s+([A-Z][a-z']{1,})`, 'i'),
+    ) ?? `${localBefore}`.match(
+      new RegExp(`\\b${SPEECH_VERB_PAT}\\b\\s+(${HONORIFIC_PAT})\\.?\\s+([A-Z][a-z']{1,})\\s*$`, 'i'),
+    );
+    if (tagged) {
+      // The BARE NAME, not "Mr. Wilson" — every other path in this file returns a
+      // name without its honorific, and downstream label building assumes that.
+      return { speaker: tagged[2], type: 'speech', confidence: 0.9 };
+    }
+  }
+
   // ── No speech verb in local window ─────────────────────────────────────
   if (!hasSpeechVerb) {
     // A) Post-quote immediate name: "Yes." Iris looked → Iris spoke
