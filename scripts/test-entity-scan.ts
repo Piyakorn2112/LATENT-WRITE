@@ -86,10 +86,43 @@ const SOURCES: SourceSpec[] = [
     novelPath: path.join(workspaceRoot, "novel-reader", "public", "novels", "root-crown.txt"),
     preferredChapters: [1, 16, 20],
     novelIncludes: ["Vey", "Myrhold", "Mira"],
-    novelExcludes: ["Yes", "Morning", "Chapter", "Today", "Year", "Closed Thursday", "Gareth and Mira"],
+    novelExcludes: [
+      "Yes", "Morning", "Chapter", "Today", "Year", "Closed Thursday", "Gareth and Mira",
+      // "Perform the Growth" was a verb emitted as a named entity. Fixed.
+      "Perform the Growth",
+      // ★ KNOWN RESIDUAL, deliberately NOT listed as a failure: at whole-book
+      // scale "Classify Crown Prince" still survives. Two fixes for it were built
+      // and both reverted, because each cost more than it saved. Requiring the
+      // tail to be absent in lower case never fires, since "crown" appears
+      // throughout a novel called The Root Crown. Gating the trim on
+      // sentence-initial position does fire, and it breaks test-known-names by
+      // trimming real leading words out of the cold-start name ranking the app
+      // uses to know who its characters are. One stray name in 70 at whole-book
+      // scale is the better trade. It does not reach the chapter-level scans,
+      // which are what the UI shows, and those are clean.
+      //   "Classify Crown Prince",
+    ],
     chapterChecks: [
-      { chapter: 1, includes: ["Vey", "Myrhold"], excludes: ["Yes", "Morning"] },
-      { chapter: 16, includes: ["Mira"], excludes: ["Yes", "Today"] },
+      // ★ The `excludes` lists used to hold two placeholder words each, so the
+      // suite reported "false positives 0" while chapter 1 was actually naming
+      // NINE characters: Kinoko, Vey, and then Basement, Standing, Stone, Knees,
+      // Older, Cot and Arm. A metric that only checks for words the scanner was
+      // never going to produce measures nothing. These are the real failures,
+      // kept as a regression lock: every one of them was emitted as a CHARACTER
+      // before the positional and lowercase-form tests went into world-data.ts.
+      {
+        chapter: 1,
+        includes: ["Kinoko", "Vey", "Myrhold"],
+        excludes: [
+          "Yes", "Morning",
+          "Basement", "Standing", "Stone", "Knees", "Older", "Cot", "Arm",
+        ],
+      },
+      {
+        chapter: 16,
+        includes: ["Mira", "Tessa"],
+        excludes: ["Yes", "Today", "Knew", "Tonight Tessa", "Tonight"],
+      },
     ],
   },
   {

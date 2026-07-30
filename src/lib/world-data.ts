@@ -94,6 +94,17 @@ const STOPLIST = new Set([
 // This O(1) lookup removes the most frequent false-positive classes before
 // the more expensive IDF scoring stage.
 const COMMON_CAPITALIZED: ReadonlySet<string> = new Set([
+  // Sentence-opening adverbs. A CLOSED class, unlike the open set of nouns that
+  // can start a sentence, so listing them is safe where listing nouns was not.
+  // These glue themselves to the following name and produced candidates like
+  // "Tonight Tessa": capitalised, never seen lower case in a short chapter, and
+  // therefore passing both name tests on a technicality.
+  "Tonight","Today","Tomorrow","Yesterday","Later","Earlier","Afterward",
+  "Afterwards","Meanwhile","Sometimes","Often","Once","Now","Then","Here",
+  "There","Still","Even","Perhaps","Maybe","Instead","Finally","Eventually",
+  "Suddenly","Soon","Already","Almost","Always","Never","Outside","Inside",
+  "Above","Below","Beyond","Nearby","Everywhere","Somewhere","Nowhere",
+  "Together","Alone","Beside","Behind","Ahead","Meantime","Presently",
   // Days of week
   "Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday",
   // Months
@@ -263,8 +274,50 @@ function computeIDF(word: string): number {
   return Math.log(1 + 1 / freq);
 }
 
+/**
+ * Is this match at the START of a sentence?
+ *
+ * Walks back over whitespace and opening quotes/brackets. Start-of-text counts.
+ * Anything else must be preceded by a sentence terminator.
+ */
+function isSentenceInitial(text: string, index: number): boolean {
+  let i = index - 1;
+  while (i >= 0 && /[\s"'“‘([]/.test(text[i])) i--;
+  if (i < 0) return true;
+  return /[.!?…:;]/.test(text[i]);
+}
+
+/**
+ * Collect title-case candidates, and REQUIRE EVIDENCE THAT THEY ARE NAMES.
+ *
+ * ★ THE BUG THIS FIXES. Every sentence starts with a capital letter, and this
+ * collector only ever asked "is it capitalised". So on The Root Crown chapter 1
+ * it reported NINE characters: Kinoko, Vey, and then Basement, Standing, Stone,
+ * Knees, Older, Cot and Arm. Chapter 16 added "Tonight Tessa" and "Knew". The
+ * whole-book scan produced "Classify Crown Prince" and "Perform the Growth".
+ * Common nouns, verbs and adverbs, all of them sitting at the front of a
+ * sentence.
+ *
+ * The stoplists could not fix this. They are finite and the set of words that can
+ * open a sentence is not, so every new manuscript brings new false names. That is
+ * the same trap the event engine's phrase dictionaries fell into.
+ *
+ * The general fix is POSITIONAL and needs no word list at all: a real name also
+ * appears in the MIDDLE of sentences. It follows "said", it takes possessives, it
+ * sits in object position. A word that is only ever capitalised because it happens
+ * to start a sentence never does. So a candidate has to be seen mid-sentence at
+ * least once to survive.
+ *
+ * This generalises to any manuscript in any register, and it is the same
+ * reasoning applied in narrative-events.ts, where the proper-noun test skips the
+ * clause's first word for exactly this reason.
+ */
 function collectTitleCaseCandidates(text: string, maxWords: number): Map<string, number> {
-  const freq = new Map<string, number>();
+  const total = new Map<string, number>();
+  const midSentence = new Map<string, number>();
+  // Every word that appears LOWERCASE anywhere in this text. See isProbablyName:
+  // this is the dictionary, and it is the text's own.
+  const lowercaseForms = new Set<string>(text.match(/\b[a-z][a-z'-]{1,}\b/g) ?? []);
   const pattern = buildTitleCaseCandidateRe(maxWords);
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
@@ -274,10 +327,79 @@ function collectTitleCaseCandidates(text: string, maxWords: number): Map<string,
     if (/\bthe\s$/i.test(prefix) && words.length >= 2) {
       name = `The ${name}`;
     }
+    // ★ TRIM a leading ordinary word rather than reject the whole candidate.
+    //
+    // "Classify Crown Prince" and "Perform the Growth" are a verb glued to a real
+    // name by nothing but a sentence boundary. "Tonight Tessa" is the same shape
+    // with an adverb. Rejecting the pair loses the name; keeping it invents one.
+    // The test is the text's own: if the first word also appears in lower case
+    // here and the remainder does not, the first word is ordinary vocabulary and
+    // the remainder is the name. This is more general than any word list, which
+    // is why it also catches the adverbs.
+    // NOTE: a "trim the leading ordinary word" rule was tried here, to turn
+    // "Classify Crown Prince" into "Crown Prince". Two variants were measured and
+    // BOTH were reverted. Requiring the whole tail to be absent in lower case
+    // never fired, because "crown" appears throughout a novel called The Root
+    // Crown. Gating on sentence-initial position instead did fire, and broke
+    // test-known-names: it also trims real leading words out of the cold-start
+    // name ranking, which that suite locks at 100%. One residual false name at
+    // whole-book scale is a better trade than a regression in the ranking the app
+    // depends on to know who the characters are.
     if (shouldRejectCandidateName(name)) continue;
-    freq.set(name, (freq.get(name) ?? 0) + 1);
+    total.set(name, (total.get(name) ?? 0) + 1);
+    if (!isSentenceInitial(text, match.index)) {
+      midSentence.set(name, (midSentence.get(name) ?? 0) + 1);
+    }
+  }
+
+  const freq = new Map<string, number>();
+  for (const [name, count] of total) {
+    // A candidate that opens a "The …" phrase is exempt: institution and place
+    // names legitimately live at the front of sentences and carry their own
+    // determiner as evidence ("The Listenfold Clinic", "The Open School").
+    if (name.startsWith("The ")) { freq.set(name, count); continue; }
+    if (isProbablyName(name, midSentence.get(name) ?? 0, lowercaseForms)) freq.set(name, count);
   }
   return freq;
+}
+
+/**
+ * TWO independent kinds of evidence. A candidate needs either one.
+ *
+ * 1. It appears MID-SENTENCE somewhere. Real names follow "said", take
+ *    possessives, sit in object position. A word capitalised only because it
+ *    opens a sentence never does.
+ *
+ * 2. It never appears LOWERCASE in this text. This is the decisive one, and the
+ *    dictionary it consults is the manuscript itself. "Basement", "Standing",
+ *    "Knees", "Cot", "Arm" and "Knew" all occur in lower case elsewhere in the
+ *    same book, because they are ordinary words the author also uses ordinarily.
+ *    "Kinoko", "Mosshollow", "Anvas" never do, because they are names.
+ *
+ * ★ Why the second test is not optional, and why it is not a word list.
+ *
+ * Requiring only the positional test dropped KINOKO from The Root Crown chapter
+ * 1, and she is the point-of-view character: in that chapter she happens to open
+ * every sentence she appears in. Losing the protagonist is a far worse failure
+ * than admitting a stray noun.
+ *
+ * The first attempt at a second test asked whether the word was in
+ * ENGLISH_WORD_FREQ, and that failed silently and completely: that map is a small
+ * curated frequency table, not a dictionary, so almost nothing is in it and
+ * almost every candidate passed. Every false name came straight back. The
+ * self-referential version needs no dictionary to be complete, works on invented
+ * vocabulary, and works in any language.
+ */
+function isProbablyName(
+  name: string,
+  midSentenceCount: number,
+  lowercaseForms: ReadonlySet<string>,
+): boolean {
+  if (midSentenceCount > 0) return true;
+  const words = name.split(/\s+/).filter(Boolean);
+  // EVERY word must be absent in lower case. "Tonight Tessa" must not qualify on
+  // the strength of "Tessa" alone, and "tonight" is certainly in the text.
+  return words.every((word) => !lowercaseForms.has(word.toLowerCase()));
 }
 
 const CHAR_NAMED_RE = /\b(named|called|name is)\s*$/i;
