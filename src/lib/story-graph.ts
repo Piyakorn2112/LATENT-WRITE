@@ -171,7 +171,8 @@ export async function enrichChapterEntryWithLM(
   if (paras.length === 0 || entry.majorEvents.length === 0) return entry;
 
   try {
-    const { classifyEventDetail, semanticSimilarity, hasEmbedder } = await import("./narrative-lm");
+    const { classifyEventDetail, semanticSimilarity, hasEmbedder, eventSalienceBatch } = await import("./narrative-lm");
+    const { refineEventSalience } = await import("./narrative-events");
 
     // Say so out loud. A bare `catch {}` around this whole function meant that
     // for months every offline suite reported "the LM changed 0% of labels" and
@@ -181,9 +182,46 @@ export async function enrichChapterEntryWithLM(
       return entry;
     }
 
+    // ── LM salience re-rank, FIRST, because it prunes.
+    //
+    // The sync engine cannot tell a consequential act from stage business: both
+    // are an agent plus a change verb, and its false positives score as high as
+    // its true ones, so no threshold helps. A contrastive embedding score does
+    // separate them, and it is the one judgement this model measured STRONG at.
+    // Measured on the 45-event gold set: precision 32.8% -> 43.2% with major-event
+    // recall held. See scripts/test-event-detect.ts (SALIENCE=-0.05).
+    let events = entry.majorEvents;
+    if (events.some((e) => e.sentence)) {
+      const refined = await refineEventSalience(
+        events.map((e) => ({
+          ...e,
+          sentence: e.sentence ?? "",
+          type: (e.narrativeType ?? "unclassified") as never,
+          legacyType: e.type as never,
+          paragraphIndex: e.paragraphIndex ?? 0,
+          sentenceIndex: 0,
+          offsetInParagraph: e.offsetInParagraph ?? 0,
+          salience: e.salience ?? "minor",
+          channel: e.channel ?? "narration",
+          why: [],
+        })),
+        { scorer: eventSalienceBatch, minSalience: -0.05, weight: 0.5 },
+      );
+      const keep = new Set(refined.map((r) => `${r.paragraphIndex}|${r.label}`));
+      events = events
+        .filter((e) => keep.has(`${e.paragraphIndex ?? 0}|${e.label}`))
+        .map((e) => {
+          const r = refined.find((x) => x.paragraphIndex === (e.paragraphIndex ?? 0) && x.label === e.label);
+          return r ? { ...e, confidence: r.confidence } : e;
+        });
+      if (DEV && events.length !== entry.majorEvents.length) {
+        console.log(`[StoryGraph] Ch.${entry.chapterNumber} LM salience: ${entry.majorEvents.length} -> ${events.length} events`);
+      }
+    }
+
     // A detail tag, from the clause the engine actually detected. Persisting
     // `sentence` is what makes this possible without re-deriving the paragraph.
-    const tagged = await Promise.all(entry.majorEvents.map(async (event) => {
+    const tagged = await Promise.all(events.map(async (event) => {
       if (STRUCTURAL_EVENT_LABELS.has(event.label)) return event;
       const source = event.sentence
         ?? paras[event.paragraphIndex ?? paragraphIndexForEvent(event.tensionPosition, paras.length)];

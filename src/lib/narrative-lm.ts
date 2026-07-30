@@ -253,6 +253,22 @@ export function hasEmbedder(): boolean {
   return _embedderOverride !== null || _pipe !== null || getElectronAPI()?.narrativeLMEmbed !== undefined;
 }
 
+/**
+ * ⚠ THE BROWSER PATH IS UNSUPPORTED. Reported by the project owner: the LM works
+ * under Electron only, and this WASM fallback does not, despite the assets being
+ * present in public/ort-wasm. It is left in place rather than deleted because the
+ * Vite dev server still imports this module and a hard throw here would break
+ * `npm run dev` for everything else — but do not build a feature on it, and do
+ * not read a passing dev-mode page as evidence that it works.
+ *
+ * The two paths that DO work:
+ *   Electron  — IPC to the main process (onnxruntime-node, native binaries)
+ *   Node      — scripts/lm-node-backend.ts, which is what every suite uses
+ *
+ * Both are native onnxruntime, not WASM. The suites therefore exercise the same
+ * runtime the app ships, which is the only reason their numbers are worth
+ * anything.
+ */
 async function getEmbeddingPipeline(): Promise<EmbedFn> {
   if (_pipe) return _pipe;
   if (_loading) return _loading;
@@ -844,4 +860,78 @@ export async function classifyNarrativeType(
     margin: ranked[0].score - (ranked[1]?.score ?? 0),
     ranked,
   };
+}
+
+// ─── Salience: is this clause a plot event, or scene description? ─────────────
+/**
+ * A CONTRASTIVE two-way score, which is the shape this model is actually good at.
+ *
+ * `scripts/test-narrative-lm.ts` measured both jobs on the same model:
+ *
+ *   eight-way type classification   43.2% top-1   (worse than reading the verb)
+ *   paraphrase vs unrelated         margins 0.56 to 0.85, every pair
+ *
+ * So the model is weak at fine categorical judgement and strong at "are these two
+ * things alike". This function only ever asks it the second question. It scores a
+ * clause against a set of anchors describing consequential plot events and against
+ * a set describing stage business, and returns the DIFFERENCE. A single anchor set
+ * with a threshold would inherit all the calibration problems that made the
+ * eight-way version unreliable; a difference between two sets cancels the
+ * model's generic affinity for prose.
+ *
+ * This is the lever aimed at precision, which the heuristic engine could not move:
+ * its false positives score as high as its true positives because a change verb
+ * with an agent looks the same either way at the surface.
+ */
+const EVENT_SALIENCE_ANCHORS = [
+  "A decision is made that cannot be taken back.",
+  "Someone learns a fact that changes what they believe.",
+  "Two people come into open conflict about something that matters.",
+  "An institution rules, votes, or formally adopts a measure.",
+  "Someone dies, leaves for good, or is lost.",
+  "A person admits something they had kept hidden.",
+  "A measured condition crosses a threshold with consequences.",
+  "Someone refuses, and the refusal changes the situation.",
+];
+
+const DESCRIPTION_ANCHORS = [
+  "The room is described, its light and furniture and quiet.",
+  "A character makes a small gesture with their hands.",
+  "The weather changes and the season turns.",
+  "Someone crosses a room, sits down, or picks up a cup.",
+  "The narrator describes how something looked and smelled.",
+  "A habit is described as something that happens every day.",
+  "Someone remembers how things used to be.",
+  "A character walks from one part of the building to another.",
+];
+
+let _salienceAnchors: { event: Float32Array[]; description: Float32Array[] } | null = null;
+
+async function getSalienceAnchors() {
+  if (_salienceAnchors) return _salienceAnchors;
+  _salienceAnchors = {
+    event: await Promise.all(EVENT_SALIENCE_ANCHORS.map((s) => embed(s))),
+    description: await Promise.all(DESCRIPTION_ANCHORS.map((s) => embed(s))),
+  };
+  return _salienceAnchors;
+}
+
+/**
+ * Positive means "reads like a plot event"; negative means "reads like scene
+ * description". Roughly -0.3 to +0.3 in practice. Uses the mean of the top two
+ * anchors on each side, so one lucky phrasing cannot carry the verdict.
+ */
+export async function eventSalience(clause: string): Promise<number> {
+  const text = clause.replace(/\s+/g, " ").trim();
+  if (text.length < 8) return 0;
+  const { event, description } = await getSalienceAnchors();
+  const v = await embed(text.slice(0, 300));
+  return topTwoMean(v, event) - topTwoMean(v, description);
+}
+
+/** Batched, so a chapter's candidates share one anchor load and one cache. */
+export async function eventSalienceBatch(clauses: string[]): Promise<number[]> {
+  const out: number[] = [];
+  for (const c of clauses) out.push(await eventSalience(c));
+  return out;
 }

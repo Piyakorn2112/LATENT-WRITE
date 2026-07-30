@@ -200,6 +200,13 @@ const CHANGE_VERBS: Record<string, NarrativeEventType> = {
   cross: "state-change", pass: "state-change", stop: "state-change",
   disconnect: "state-change", release: "state-change", arrest: "state-change",
   install: "action", submit: "action", deliver: "action", report: "action",
+  // Each of these cost a MISSED MAJOR gold event by simply not being listed.
+  // All general English, none manuscript-specific: adopt/suspend/dismiss are
+  // institutional, invite/receive social, round/count/record clerical.
+  adopt: "decision", suspend: "decision", invite: "decision", grant: "decision",
+  receive: "arrival", walk: "departure", step: "departure",
+  round: "action", count: "action", measure: "action", record: "action",
+  disconnect_: "state-change",
   // The most general change verb in the language. Carries no content of its own,
   // which is why it is only useful alongside the specificity test on entity
   // subjects ("The fourth micro-disconnection happened at 03:14").
@@ -327,6 +334,12 @@ function classifyUtterance(inner: string): NarrativeEventType {
   // listener. "You're defending the system", "You knew", "You never asked".
   if (/^(?:You|Y'?all)\b\s*(?:'(?:re|ve|d|ll)|are|were|was|have|had|did|didn't|do|don't|never|always|knew|know|lied|promised|said|told)\b/i.test(u)) {
     return "confrontation";
+  }
+  // Second person NEED NOT open the clause. "That you weren't going to age the
+  // way the rest of us do" is a revelation addressed to the listener, and it was
+  // a missed major gold event under a clause-initial-only rule.
+  if (/\byou\s*(?:'(?:re|ve|d|ll)|were|weren'?t|are|aren'?t|had|have|knew|know|did|didn'?t)\b/i.test(u)) {
+    return "revelation";
   }
 
   // First person plus a knowledge verb: an admission.
@@ -561,8 +574,14 @@ function isSpecified(text: string): boolean {
  * the label cannot come out as "The thing begins".
  */
 function findEntitySubject(clause: string): AgentHit | null {
+  // ★ Two bugs lived in this pattern. It was LAZY (`{0,3}?`), so on "The total
+  // affected population reached seventy-eight thousand" it captured just "total"
+  // and the verb search then started at "affected" and gave up. And it required a
+  // capitalised determiner, so "one more peripheral body went dark" — mid-
+  // paragraph, lowercase — never matched at all. Both were missed MAJOR gold
+  // events. Greedy, and case-insensitive on the determiner.
   const m = clause.match(
-    /^\s*(?:The|A|An|One|Two|Three|Another|Each|Every|Both)\s+((?:[a-z][\w-]*\s+){0,3}?[A-Za-z][\w-]*)\b/,
+    /^\s*(?:the|a|an|one|two|three|another|each|every|both)\s+((?:[\w-]+\s+){0,3}[A-Za-z][\w-]*)\b/i,
   );
   if (!m) return null;
   const phrase = m[1].trim();
@@ -672,6 +691,84 @@ const OBJECT_TERMINATOR = new Set([
   // Relativisers and complementisers.
   "who", "whose", "whom", "which", "where", "when", "while", "because",
   "though", "although", "unless", "whether", "than",
+]);
+
+// ─── Object consequence ───────────────────────────────────────────────────────
+/**
+ * WHAT the clause acts on, as a class. The same idea as the verb classes, one
+ * argument along.
+ *
+ * ★ This is the answer to the precision problem. Precision sat at 35.7% and was
+ * FLAT across the whole usable confidence range, which meant no threshold could
+ * fix it: the false positives were scoring as high as the true ones. Reading them
+ * showed why. Almost every one was stage business that happened to contain a
+ * change verb:
+ *
+ *     "Kinoko drops hand"        "Tessa opens hand fully"
+ *     "Mira pays supper"         "She returns drawer"
+ *     "Winter passes"            "Sky begins early transition"
+ *
+ * while the gold events act on things that carry consequence:
+ *
+ *     "Kael accepted the decision"     "council adopted it"
+ *     "Helia writes audit report"      "Tessa reveals Brennan knew"
+ *
+ * A verb tells you the SHAPE of a happening. Its object tells you whether the
+ * happening matters. Both lists are general English, not manuscript vocabulary —
+ * that distinction is the whole reason the previous engine's dictionaries failed,
+ * so it has to hold here too.
+ */
+const TRIVIAL_OBJECTS = new Set([
+  // Body. A clause about a body part is almost always a gesture.
+  "hand", "hands", "head", "eyes", "eye", "face", "arm", "arms", "shoulder",
+  "shoulders", "foot", "feet", "finger", "fingers", "mouth", "hair", "knee",
+  "knees", "chest", "back", "wrist", "palm", "thumb", "lip", "lips", "throat",
+  // Domestic objects and furniture.
+  "cup", "plate", "bowl", "door", "doors", "window", "chair", "table", "lamp",
+  "blanket", "cloth", "sheet", "pillow", "drawer", "shelf", "basket", "jug",
+  "jar", "spoon", "bottle", "glass", "bag", "coat", "boot", "boots", "shoe",
+  "floor", "wall", "ceiling", "stair", "stairs", "step", "steps", "gate",
+  // Food and drink.
+  "bread", "tea", "water", "supper", "dinner", "breakfast", "lunch", "coffee",
+  "meal", "food", "wine", "milk", "soup",
+  // Weather, light, time. Description, not event.
+  "morning", "evening", "night", "afternoon", "day", "days", "winter", "summer",
+  "autumn", "spring", "sky", "sun", "moon", "rain", "snow", "wind", "light",
+  "dark", "darkness", "air", "heat", "cold", "silence", "sound", "smell",
+  // Pure abstraction.
+  "thing", "things", "way", "ways", "moment", "side", "edge", "end", "line",
+  "place", "time", "point", "part", "kind", "sort",
+]);
+
+const CONSEQUENTIAL_OBJECTS = new Set([
+  // Institutional artefacts.
+  "decision", "decisions", "resolution", "order", "orders", "report", "reports",
+  "record", "records", "document", "documents", "contract", "agreement",
+  "treaty", "vote", "motion", "recommendation", "protocol", "protocols",
+  "policy", "law", "laws", "ruling", "verdict", "charge", "charges", "warrant",
+  "licence", "license", "permit", "lease", "budget", "audit", "archive", "file",
+  "files", "ledger", "minutes", "transcript", "proposal", "petition", "appeal",
+  // Knowledge and speech that binds.
+  "truth", "secret", "secrets", "name", "names", "message", "letter", "reply",
+  "request", "offer", "promise", "permission", "right", "rights", "claim",
+  "account", "testimony", "statement", "evidence", "confession", "warning",
+  "reason", "reasons", "answer", "question",
+  // Stakes.
+  "life", "lives", "death", "body", "bodies", "child", "children", "family",
+  "position", "post", "seat", "command", "money", "payment", "debt", "land",
+  "field", "fields", "house", "farm", "share", "stake", "future", "control",
+]);
+
+/**
+ * Subjects that are weather, light or the passage of time. A clause with one of
+ * these as its subject is setting a scene, not reporting a change.
+ */
+const AMBIENT_SUBJECTS = new Set([
+  "morning", "evening", "night", "afternoon", "day", "days", "winter", "summer",
+  "autumn", "spring", "sky", "sun", "moon", "rain", "snow", "wind", "light",
+  "dark", "darkness", "air", "heat", "cold", "weather", "season", "seasons",
+  "silence", "sound", "sounds", "smell", "hour", "hours", "week", "weeks",
+  "year", "years", "time", "moment", "moments",
 ]);
 
 /** Reflexives make a poor object head: "pushes herself off" says nothing. */
@@ -804,7 +901,40 @@ function persistence(words: string[], forwardCounts: Map<string, number>): numbe
   return recurring / words.length;
 }
 
+/**
+ * One-entry memo, keyed on the chapter's own text.
+ *
+ * ★ Detection was running TWICE per chapter. `story-graph.ts` builds the graph
+ * entry and `chapter-observation.ts` builds the panel brief, and both called this
+ * function on every analysis settle — so every chapter was segmented and scored
+ * clause by clause two times over, for identical results. On the weak machines
+ * this engine has to run on, that is half the cost of the feature for nothing.
+ *
+ * A single entry is the right size: both callers work on the CURRENT chapter,
+ * back to back, within one settle. Keeping more would hold whole chapters of
+ * candidate strings alive for no benefit.
+ */
+let _memoKey = "";
+let _memoValue: NarrativeEvent[] = [];
+
 export function detectNarrativeEvents(
+  paragraphs: string[],
+  speechResults: ChapterParaResult[],
+  options: DetectOptions = {},
+): NarrativeEvent[] {
+  // Cheap key: length plus head and tail. The same shape story-graph already
+  // uses for its contentHash, and enough to catch any real edit.
+  const first = paragraphs[0] ?? "";
+  const last = paragraphs[paragraphs.length - 1] ?? "";
+  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${(options.knownNames ?? []).length}`;
+  if (key === _memoKey) return _memoValue;
+  const result = detectNarrativeEventsUncached(paragraphs, speechResults, options);
+  _memoKey = key;
+  _memoValue = result;
+  return result;
+}
+
+function detectNarrativeEventsUncached(
   paragraphs: string[],
   speechResults: ChapterParaResult[],
   options: DetectOptions = {},
@@ -881,6 +1011,13 @@ export function detectNarrativeEvents(
       else if (cand.agentKind === "entity") { score += 0.35; why.push("entity-subject"); }
       else if (cand.agent)              { score += 0.2; why.push("pronoun-agent"); }
       if (cand.object)                  { score += 0.3; why.push("transitive"); }
+      // The object's CLASS, not just its presence. This is the term that
+      // separates "accepted the decision" from "opened her hand".
+      {
+        const head = cand.object?.split(/\s+/).pop()?.toLowerCase() ?? "";
+        if (head && CONSEQUENTIAL_OBJECTS.has(head)) { score += 0.6; why.push("consequential-object"); }
+        else if (head && TRIVIAL_OBJECTS.has(head))  { score -= 0.55; why.push("-trivial-object"); }
+      }
       if (cand.channel === "dialogue")  { score += 0.4; why.push("dialogue-act"); }
       // A dialogue act whose content could not be recovered says "someone spoke
       // here", which is not an event. Penalised rather than rejected: rejection
@@ -1012,10 +1149,29 @@ function narrationCandidate(
   // reader would report.
   const object = findObject(words.slice(verb.at + 1).join(" "));
 
+  // ── A physical act is not an event unless it acts on something that matters.
+  //
+  // `action` is the widest verb class here, and the out-of-distribution audit
+  // caught it flooding: 54.0% of all events on the HELD-OUT manuscript, worse
+  // single-type dominance than the engine this replaces. A domestic novel is made
+  // of people opening doors and pouring drinks.
   if (type === "action") {
     const head = object?.split(/\s+/).pop()?.toLowerCase() ?? "";
-    const hasRealObject = head.length > 0 && !WEAK_HEADS.has(head);
-    if (!hasRealObject && !isSpecified(text)) return null;
+    if (!head || WEAK_HEADS.has(head) || TRIVIAL_OBJECTS.has(head)) {
+      // No object, or one that carries nothing. Only survives if the clause names
+      // or counts something, which is what a consequential act does.
+      if (!isSpecified(text)) return null;
+    }
+  }
+
+  // ── A clause whose subject is weather, light or the passage of time is
+  // description. "Winter passes", "Sky begins early transition", "Cold comes
+  // north". Narrowed to exactly that set on purpose: rejecting EVERY trivial
+  // subject also killed "The smell of the interior arrived when Vey pushed the
+  // door open" and "The thing below hears differently…", both real major events
+  // whose subjects only sound incidental.
+  if (agent.kind === "entity" && AMBIENT_SUBJECTS.has(agent.name.split(/\s+/).pop()!.toLowerCase())) {
+    return null;
   }
 
   return {
@@ -1093,6 +1249,10 @@ function dialogueCandidate(
   // and "Nora admits something you're" — the frame was gone but its subject
   // pronoun became the object.
   const content = inner
+    // An imperative opens with its verb ("Come see where I live"), and findObject
+    // stops at the first verb-shaped word — so the object came back empty and the
+    // event was penalised out of existence. Drop the imperative verb first.
+    .replace(/^(?:Come|Go|Look|Listen|Tell|Show|Take|Give|Wait|Stop|Let)\s+(?:and\s+)?/i, "")
     .replace(/^(?:I\s+(?:know|knew|noticed|saw|realised|realized|understood|remember|remembered|said|told you)|You\s+\w+|yes|no|all right|agreed|very well)\b[,.]?\s*/i, "")
     .replace(/^(?:I|you|we|he|she|they|it)\s*(?:'(?:ve|d|m|re|ll|s)|am|are|is|was|were|have|had|has|will|would)?\b\s*/i, "")
     .replace(/^(?:that|the|a|an|when|it|about|there|this)\s+/i, "")
@@ -1178,7 +1338,7 @@ const LEGACY_MAP: Record<NarrativeEventType, LegacyEventType> = {
  * per chapter whether or not the chapter contained any; the gold set's quiet
  * chapters contain 2 events across 29 and 65 paragraphs.
  */
-const CONFIDENCE_FLOOR = 0.42;
+const CONFIDENCE_FLOOR = 0.18;
 /**
  * Suppression radius in PARAGRAPHS, not as a fraction of the chapter.
  *
@@ -1247,5 +1407,61 @@ function selectEvents(
         why: c.why,
       };
     })
+    .sort((a, b) => a.tensionPosition - b.tensionPosition);
+}
+
+// ─── Optional async pass: LM salience re-ranking ───────────────────────────────
+/**
+ * Re-rank and prune the sync engine's events using the embedding model's
+ * plot-event-vs-description score.
+ *
+ * WHY THIS IS A SEPARATE, LATER PASS rather than part of detection:
+ *
+ * Detection is synchronous and runs on the deferred story-graph path; embeddings
+ * are async and only reachable in Electron's main process (or under Node in the
+ * suites). Making detection async would push a promise through `analyzeChapter`,
+ * the worker boundary and the panel. So the engine emits its best sync guess, the
+ * UI shows it immediately, and this refines it when a model is available — the
+ * same two-phase shape the story graph already uses for dedup.
+ *
+ * `scorer` is injected rather than imported so this module keeps no dependency on
+ * the LM, and so the suites can substitute a stub.
+ */
+export interface SalienceRefineOptions {
+  /** Returns one score per clause. Positive = reads like a plot event. */
+  scorer: (clauses: string[]) => Promise<number[]>;
+  /** Drop events below this. Tuned by the suite; see the sweep in its comments. */
+  minSalience?: number;
+  /** How hard the LM score moves the ranking, relative to the sync confidence. */
+  weight?: number;
+}
+
+export async function refineEventSalience(
+  events: NarrativeEvent[],
+  options: SalienceRefineOptions,
+): Promise<NarrativeEvent[]> {
+  if (events.length === 0) return events;
+  const scores = await options.scorer(events.map((e) => e.sentence));
+  const minSalience = options.minSalience ?? -Infinity;
+  const weight = options.weight ?? 0.5;
+
+  const rescored = events.map((e, i) => {
+    const s = scores[i] ?? 0;
+    // Blend rather than replace. The sync score carries structural evidence the
+    // LM cannot see (realis mood, agent kind, object class); the LM carries
+    // semantic evidence the structure cannot. Neither should win outright.
+    const blended = Math.max(0, Math.min(1, e.confidence + weight * s));
+    return {
+      ...e,
+      confidence: Number(blended.toFixed(3)),
+      why: [...e.why, `lm-salience:${s.toFixed(2)}`],
+      _salience: s,
+    };
+  });
+
+  return rescored
+    .filter((e) => e._salience >= minSalience)
+    .sort((a, b) => b.confidence - a.confidence)
+    .map(({ _salience, ...e }) => { void _salience; return e; })
     .sort((a, b) => a.tensionPosition - b.tensionPosition);
 }

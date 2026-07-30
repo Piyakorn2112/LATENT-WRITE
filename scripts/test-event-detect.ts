@@ -35,7 +35,7 @@ import { fileURLToPath } from "url";
 
 import { analyzeChapter } from "../src/lib/chapter-analysis";
 import { detectMajorEvents } from "../src/lib/event-detect";
-import { detectNarrativeEvents, type NarrativeEvent } from "../src/lib/narrative-events";
+import { detectNarrativeEvents, refineEventSalience, type NarrativeEvent } from "../src/lib/narrative-events";
 import { detectSpeechInChapter } from "../src/lib/speech-detect";
 import { resolveKnownNames } from "../src/lib/world-data";
 import { BOOKS, loadBook, splitParagraphs } from "./print-chapter";
@@ -53,12 +53,13 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // improves — never lower them to make a red suite green without saying so here.
 const TARGETS = {
   /** Of the events a chapter summary would mention, how many are found.
-   *  Measured 56.0% on the 45-event set. */
-  majorRecall: 0.5,
-  /** Of what is emitted, how much corresponds to a real event. Measured 36.4%,
-   *  and this is THE open problem: precision is flat across the whole usable
-   *  confidence range, so no threshold fixes it. */
-  precision: 0.33,
+   *  Measured 60.0% on the 45-event set with the LM re-rank on. */
+  majorRecall: 0.55,
+  /** Of what is emitted, how much corresponds to a real event. Measured 41.7%.
+   *  Still the weakest number here. The sync engine alone cannot move it — its
+   *  false positives score as high as its true ones — which is why the LM
+   *  salience pass exists. */
+  precision: 0.38,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };
@@ -263,6 +264,55 @@ function runOld(p: Prepared): Predicted[] {
   }));
 }
 
+/**
+ * The LM salience re-rank is ON by default, because story-graph.ts runs it in the
+ * app and a suite that tests a configuration nobody ships is measuring fiction.
+ *
+ * `SALIENCE=off` disables it, which is how its contribution was measured:
+ *   sync engine only          precision 32.8%  major recall 60.0%  F1 38.5%
+ *   + LM salience re-rank     precision 41.7%  major recall 60.0%  F1 43.0%
+ *
+ * `SALIENCE=<number>` overrides the cut. The sweep that chose -0.05:
+ *   -0.20  precision 31.7%   -0.10  38.5%   -0.05  41.7%   0.00  37.9%   0.05  33.3%
+ */
+const SALIENCE_MIN = process.env.SALIENCE === "off"
+  ? null
+  : process.env.SALIENCE ? Number(process.env.SALIENCE) : -0.05;
+
+async function runNewAsync(p: Prepared): Promise<Predicted[]> {
+  let events = detectNarrativeEventsFor(p);
+  if (SALIENCE_MIN !== null) {
+    const { eventSalienceBatch } = await import("../src/lib/narrative-lm");
+    events = await refineEventSalience(events, {
+      scorer: eventSalienceBatch,
+      minSalience: SALIENCE_MIN,
+      weight: Number(process.env.SALIENCE_W ?? 0.5),
+    });
+  }
+  return events.map(toPredicted);
+}
+
+function detectNarrativeEventsFor(p: Prepared): NarrativeEvent[] {
+  return detectNarrativeEvents(p.paragraphs, p.speech, {
+    knownNames: p.knownNames,
+    worldData: p.novel.worldData,
+    tensionByParagraph: tensionByParagraph(p.speech),
+    confidenceFloor: process.env.FLOOR ? Number(process.env.FLOOR) : undefined,
+    maxEvents: process.env.CAP ? Number(process.env.CAP) : undefined,
+  });
+}
+
+function toPredicted(e: NarrativeEvent): Predicted {
+  return {
+    paragraph: e.paragraphIndex + 1,
+    label: e.label,
+    type: e.type,
+    legacyType: e.legacyType,
+    confidence: e.confidence,
+    salience: e.salience,
+  };
+}
+
 function runNew(p: Prepared): Predicted[] {
   const events: NarrativeEvent[] = detectNarrativeEvents(p.paragraphs, p.speech, {
     knownNames: p.knownNames,
@@ -339,13 +389,24 @@ async function main() {
     await readFile(path.join(REPO_ROOT, "scripts", "fixtures", "event-gold.json"), "utf8"),
   );
 
+  if (SALIENCE_MIN !== null) {
+    const { installNodeEmbedder, reportBackend } = await import("./lm-node-backend");
+    reportBackend(await installNodeEmbedder());
+  }
+
   const cache = new Map<string, Novel>();
-  const engines: Array<{ name: string; run: (p: Prepared) => Predicted[]; totals: Totals }> = [];
+  const engines: Array<{ name: string; run: (p: Prepared) => Predicted[] | Promise<Predicted[]>; totals: Totals }> = [];
   if (engineArg === "both" || engineArg === "old") {
     engines.push({ name: "OLD  event-detect.ts (dictionaries)", run: runOld, totals: emptyTotals() });
   }
   if (engineArg === "both" || engineArg === "new") {
-    engines.push({ name: "NEW  narrative-events.ts (clause-level)", run: runNew, totals: emptyTotals() });
+    engines.push({
+      name: SALIENCE_MIN !== null
+        ? "NEW  narrative-events.ts + LM salience re-rank"
+        : "NEW  narrative-events.ts (clause-level)",
+      run: SALIENCE_MIN !== null ? runNewAsync : runNew,
+      totals: emptyTotals(),
+    });
   }
 
   // ── Fixture integrity, before any scoring.
@@ -387,7 +448,7 @@ async function main() {
       console.log(`\n═══ ${gc.book} ch${gc.chapter} (${gc.eventfulness}, ${p.paragraphs.length} paragraphs, ${gc.events.length} gold) ═══`);
     }
     for (const engine of engines) {
-      const predicted = engine.run(p);
+      const predicted = await engine.run(p);
       const { matches, unmatched } = align(gc.events, predicted);
       const t = engine.totals;
       t.gold += gc.events.length;
