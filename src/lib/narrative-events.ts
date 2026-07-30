@@ -137,6 +137,26 @@ export interface DetectOptions {
  *  Build to the lower bound so nothing is ever cut mid-word. */
 const LABEL_BUDGET = 28;
 
+/**
+ * Reject a dialogue act whose content could not be recovered, rather than only
+ * scoring it down.
+ *
+ * ★ MEASURED TWICE, LOSES BOTH TIMES. Default OFF.
+ *
+ *   45 events, 1 author    major recall 56.0% -> 44.0%
+ *   67 events, 4 authors   major recall 35.9% -> 28.2%, precision 35.6% -> 34.0%
+ *
+ * Which settles something more useful than the flag itself. These acts ARE the
+ * largest single class of false positive (six of nine on one Austen chapter were
+ * an ordinary conversational turn emitted as "<Name> tells"), and yet removing
+ * them loses MORE real events than false ones. So the true positives and the
+ * false positives are the same shape, and the problem is not the decision to keep
+ * them: it is that CONTENT EXTRACTION from dialogue is too weak to tell them
+ * apart. Fix the extraction, not the threshold. The flag stays only so the claim
+ * can be re-tested when the extraction improves.
+ */
+const STRICT_DIALOGUE_CONTENT = process.env.STRICT_DIALOGUE === "on";
+
 // ─── Verb classes ─────────────────────────────────────────────────────────────
 // Verbs are a closed class and generalise across manuscripts; multi-word idioms
 // do not, which is exactly how the previous dictionaries ended up memorising
@@ -1271,13 +1291,33 @@ function dialogueCandidate(
     .replace(/^(?:I|you|we|he|she|they|it)\s*(?:'(?:ve|d|m|re|ll|s)|am|are|is|was|were|have|had|has|will|would)?\b\s*/i, "")
     .replace(/^(?:that|the|a|an|when|it|about|there|this)\s+/i, "")
     .trim();
-  const object = findObject(content.length >= 4 ? content : inner);
+  // ── Object selection for dialogue, by INFORMATIVENESS rather than position.
+  //
+  // findObject takes the first one or two content words, which is right for
+  // narration ("closed the door") and wrong for speech, where the informative
+  // part can be anywhere. Darcy's answer to "who?" is the whole utterance
+  // "Miss Elizabeth Bennet.", and taking the first content words gave "Miss".
+  //
+  // A proper noun inside an utterance is the strongest available signal of what
+  // the utterance is ABOUT, so prefer one when it is present and is not merely
+  // the sentence-initial capital.
+  const properNoun = (content.length >= 4 ? content : inner)
+    .replace(/^\s*\S+\s*/, "")
+    .match(/\b((?:Miss|Mrs|Mr|Lady|Lord|Sir|Doctor|Dr)\.?\s+)?[A-Z][a-z']{2,}(?:\s+[A-Z][a-z']{2,})?/);
+  const object =
+    (properNoun && !SENTENCE_OPENERS.has(properNoun[0].trim().split(/\s+/)[0].toLowerCase())
+      ? properNoun[0].replace(/^(?:Miss|Mrs|Mr|Lady|Lord|Sir|Doctor|Dr)\.?\s+/, "").trim()
+      : null) ?? findObject(content.length >= 4 ? content : inner);
 
-  // A speech act with no recoverable content ("Edis tells", "Qesh tells") points
-  // at nothing and was the largest class of false positive on the 45-event gold
-  // set. REJECTING them outright was tried and cost more true positives than it
-  // saved false ones (major recall 56% -> 44%), because some real events have
-  // content the extractor cannot reach. It is scored down instead, in the caller.
+  // A speech act with no recoverable content ("Edis tells", "Qesh tells", and on
+  // Austen "Elizabeth tells", "Bingley tells", "Lady Catherine tells") points at
+  // nothing. It is the largest class of false positive on every gold set measured
+  // so far. Whether to REJECT or merely penalise is an empirical question that
+  // changed answer once the corpus stopped being one author, so it is a flag.
+  if (STRICT_DIALOGUE_CONTENT) {
+    const head = object?.split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (!head || PRONOUN_HEADS.has(head)) return null;
+  }
 
   return {
     paragraphIndex: pi,

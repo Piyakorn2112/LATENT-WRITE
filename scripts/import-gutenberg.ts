@@ -90,6 +90,44 @@ const BOOKS: BookSpec[] = [
     titleOf: (line) => line.trim(),
   },
   {
+    key: "dracula",
+    title: "Dracula",
+    gutenbergId: 345,
+    // EPISTOLARY and multi-voice: journals, letters, telegrams, ship's logs, each
+    // in a different narrator's register inside one book. Structurally the least
+    // like a conventional novel of anything in this corpus.
+    headingRe: /^CHAPTER ([IVXLC]+)\s*$/,
+    titleOf: (line) => line.trim(),
+  },
+  {
+    key: "carol",
+    title: "A Christmas Carol",
+    gutenbergId: 46,
+    // Dickens. Very tight novella, one large supernatural event per stave, and a
+    // narrator who addresses the reader directly.
+    headingRe: /^STAVE\s+([IVX]+):\s*(.+)$/i,
+    titleOf: (line) => line.replace(/^STAVE\s+[IVX]+:\s*/i, "").trim(),
+  },
+  {
+    key: "frankenstein",
+    title: "Frankenstein",
+    gutenbergId: 84,
+    // NESTED narration: letters framing a first-person account which itself
+    // frames the creature's account. Tests whether attribution survives a story
+    // inside a story.
+    headingRe: /^(?:Letter|Chapter)\s+(\d+)\s*$/,
+    titleOf: (line) => line.trim(),
+  },
+  {
+    key: "expectations",
+    title: "Great Expectations",
+    gutenbergId: 1400,
+    // Retrospective first person, long, with events often revealed well after
+    // they happen. The closest thing here to a deliberately oblique narrator.
+    headingRe: /^Chapter ([IVXLC]+)\.$/,
+    titleOf: (line) => line.trim(),
+  },
+  {
     key: "worlds",
     title: "The War of the Worlds",
     gutenbergId: 36,

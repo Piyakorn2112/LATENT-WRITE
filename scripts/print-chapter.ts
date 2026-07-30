@@ -40,6 +40,10 @@ export const CORPUS_BOOKS: Record<string, string> = {
   sherlock: "sherlock.txt",
   pride: "pride.txt",
   worlds: "worlds.txt",
+  dracula: "dracula.txt",
+  carol: "carol.txt",
+  frankenstein: "frankenstein.txt",
+  expectations: "expectations.txt",
 };
 
 /** The engine's paragraph split. Single source of truth for the harness. */
