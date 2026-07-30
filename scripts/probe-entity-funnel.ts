@@ -68,6 +68,25 @@ async function main() {
   console.log(`  ${"SURVIVED to a candidate".padEnd(46)} ${String(f.entitySurvived).padStart(4)}  (${pct(f.entitySurvived, f.entityFound)})`);
   console.log(`\n  (isSpecified now only tags, does not kill: ${f.entityUnspecified} tagged)`);
 
+
+  const person = f.personNoVerb + f.personVerbNotChange + f.personSurvived;
+  console.log(`\n── the NAMED / PRONOUN path, ${person} subjects found ──`);
+  console.log(`  no verb found after the subject   ${String(f.personNoVerb).padStart(4)}  (${pct(f.personNoVerb, person)})`);
+  console.log(`  verb not in CHANGE_VERBS          ${String(f.personVerbNotChange).padStart(4)}  (${pct(f.personVerbNotChange, person)})`);
+  console.log(`  SURVIVED to a candidate           ${String(f.personSurvived).padStart(4)}  (${pct(f.personSurvived, person)})`);
+
+  const pv = new Map<string, number>();
+  const pex = new Map<string, string>();
+  for (const s of _funnelSamples.personNotChange) {
+    const [v, rest] = s.split("\t");
+    pv.set(v, (pv.get(v) ?? 0) + 1);
+    if (!pex.has(v)) pex.set(v, rest);
+  }
+  console.log(`\n── unrecognised verbs on the PERSON path, by frequency ──`);
+  for (const [v, n] of [...pv].sort((a, b) => b[1] - a[1]).slice(0, 30)) {
+    console.log(`  ${String(n).padStart(3)}×  ${v.padEnd(14)} ${pex.get(v)?.slice(0, 84) ?? ""}`);
+  }
+
   const N = Number(process.env.SAMPLES ?? 40);
   console.log(`\n── ${N} of the ${f.entityNoVerb} "no verb found" cases  [subject] ⟩⟩ remainder ──`);
   for (const s of _funnelSamples.noVerb.slice(0, N)) console.log(`  ${s}`);

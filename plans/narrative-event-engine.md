@@ -405,3 +405,70 @@ FLOOR=0.4 npm run test:event-detect       # sweep the operating point
 npm run audit:ood-events                  # label-free, in-dist vs held-out
 npm run print:chapter root-crown 16       # numbered paragraphs, for annotation
 ```
+
+---
+
+## The precision/recall frontier, mapped (2026-07-31)
+
+Target for this stretch was **+5 points on all five metrics at once**. That is not
+available, and the useful outcome is knowing exactly why rather than another
+round of guessing. Baseline, and everything measured against it:
+
+    baseline                      p@3 50.9  majShown 22.0  majRecall 45.8  prec 35.3  F1 40.5
+
+**Levers that move ALONG the frontier and cannot leave it**
+
+| change | p@3 | majShown | majRecall | prec | F1 |
+|---|---|---|---|---|---|
+| prune cut -0.14 | 47.4 | 25.4 | 54.2 | 29.0 | 37.8 |
+| prune cut -0.11 | 48.2 | 23.7 | 50.8 | 30.1 | 38.0 |
+| prune cut -0.03 | 46.2 | 23.7 | 42.4 | 35.0 | 37.3 |
+| confidence floor 0.40 | 49.1 | 25.4 | 39.0 | 33.0 | 34.4 |
+| confidence floor 0.55 | 47.8 | 20.3 | 25.4 | 44.3 | 32.9 |
+| +event anchors, cut -0.05 | 49.1 | 25.4 | 50.8 | 31.3 | 38.7 |
+| +event anchors, cut -0.11 | 45.6 | 23.7 | 54.2 | 28.0 | 37.0 |
+| +both anchor sets, cut -0.05 | 47.4 | 27.1 | 50.8 | 31.0 | 37.2 |
+| +description anchors only | 47.2 | 20.3 | 42.4 | 34.7 | 37.9 |
+
+Every row trades. The best recall point costs ~4 points of precision; the best
+precision point costs ~20 points of major recall. Nothing dominates the baseline,
+so the baseline ships.
+
+**Levers measured and found empty**
+
+- **Refitting the scorer weights.** Saturated. Three attempts; the first won 15
+  points because the SIGNS were wrong, the next two lost. Lift is a marginal
+  association, not a conditional effect, and the features are correlated.
+- **Expanding CHANGE_VERBS.** Rejected on BOTH paths, for different reasons.
+  Entity path: flat tail, top ten verbs are 24% of 152 and mostly non-events
+  ("The tea cooled"). Person path: this is the single largest funnel loss in the
+  engine — 450 of 886 subjects, 50.8% — but the verbs are `looked, stood, sat,
+  felt, saw, knew, heard, seemed`. Perception and posture. Admitting them
+  recreates the "She thinks about hands" defect the engine was built to fix. The
+  gate is doing deliberate work; the 50.8% is not a bug.
+- **Crossing a subject's prepositional post-modifier.** 17 subjects recovered,
+  ZERO gold events.
+- **Fronted adverbials** ("With an effort I turned", "…, he hurled the woman").
+  Linguistically real and it fires 78 times, but exactly neutral at the shipped
+  anchors — the recovered clauses die at the same verb gate. NOTE: it turns
+  POSITIVE (+1.7 p@3, +1.6 majRecall) when combined with the extended event
+  anchors, because those let the clauses survive the prune. If the anchors are
+  ever revisited, revisit this with them; alone it is worth nothing.
+- **Blending LM salience into confidence, retested with better anchors.**
+  Still monotonically harmful (w=0 → 0.4 → 0.8 → 1.5 falls 49.1 → 49.1 → 47.4 →
+  42.1). The earlier conclusion was not an artifact of weak anchors. MiniLM
+  prunes well and ranks badly, full stop.
+
+**Where the frontier actually comes from**
+
+Of 59 major events the engine finds 27, and 13 of those 27 reach the three chips.
+So two independent ceilings:
+
+1. **Recall.** The 24 never found split 33% first-person subject, 33%
+   third-person named, 25% verbless or elliptical fragments.
+2. **Three slots.** Even perfect ranking caps majShown at 3×19/59 = 96.6%, and
+   every minor event that is genuinely correct competes for the same slots.
+
+Moving majShown to 80% needs recall well above 80% AND near-perfect ranking. It
+is not reachable by tuning; it needs a detector for interior/first-person
+decisions, which is a different mechanism from anything in the file today.

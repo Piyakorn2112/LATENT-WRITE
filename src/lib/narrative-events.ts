@@ -1043,9 +1043,12 @@ export const _funnel = {
   entityActionWeakObject: 0,
   entityAmbient: 0,
   entitySurvived: 0,
+  personNoVerb: 0,
+  personVerbNotChange: 0,
+  personSurvived: 0,
 };
 const FUNNEL_SAMPLE_CAP = 300;
-export const _funnelSamples: { noVerb: string[]; notChange: string[] } = { noVerb: [], notChange: [] };
+export const _funnelSamples: { noVerb: string[]; notChange: string[]; personNotChange: string[] } = { noVerb: [], notChange: [], personNotChange: [] };
 function sample(bucket: string[], line: string) {
   if (bucket.length < FUNNEL_SAMPLE_CAP) bucket.push(line);
 }
@@ -1053,6 +1056,7 @@ export function _resetFunnel() {
   for (const k of Object.keys(_funnel)) (_funnel as Record<string, number>)[k] = 0;
   _funnelSamples.noVerb.length = 0;
   _funnelSamples.notChange.length = 0;
+  _funnelSamples.personNotChange.length = 0;
 }
 
 interface Candidate {
@@ -1405,6 +1409,7 @@ function narrationCandidate(
   const verb = findVerb(words);
   if (!verb) {
     if (ENT) { _funnel.entityNoVerb++; sample(_funnelSamples.noVerb, `[${agent.name}] ⟩⟩ ${after.trim().slice(0, 90)}`); }
+    else _funnel.personNoVerb++;
     return null;
   }
 
@@ -1414,6 +1419,7 @@ function narrationCandidate(
   // chip that says one is worse than no chip.
   if (!verb.base || !CHANGE_VERBS[verb.base]) {
     if (ENT) { _funnel.entityVerbNotChange++; sample(_funnelSamples.notChange, `${verb.surface}\t[${agent.name}] ⟩⟩ ${text.slice(0, 78)}`); }
+    else { _funnel.personVerbNotChange++; sample(_funnelSamples.personNotChange, `${verb.surface}\t[${agent.name}] ⟩⟩ ${text.slice(0, 78)}`); }
     return null;
   }
 
@@ -1494,7 +1500,7 @@ function narrationCandidate(
     _funnel.entityAmbient++;
     return null;
   }
-  if (ENT) _funnel.entitySurvived++;
+  if (ENT) _funnel.entitySurvived++; else _funnel.personSurvived++;
 
   return {
     paragraphIndex: pi,
