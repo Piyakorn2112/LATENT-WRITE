@@ -1,673 +1,560 @@
-# Glass Editor / Latent Write, Architecture Map
+# Glass Editor / Latent Write, architecture map
 
-Written 2026-07-30 as a top-down orientation document, not a line-by-line audit. It
-verifies and corrects `README.md` and `CLAUDE.md` against the actual code, using
-entry points, exports, section headers, and git history rather than reading every
-file end to end. Where a claim is inferred rather than directly read, it says
-"looks like."
+Written as a top-down orientation document for a developer who already owns this
+code but cannot hold all of it in their head at once. It is not a line-by-line
+audit. `src/lib/speech-detect.ts` (2540 lines), `src/lib/chapter-analysis.ts`
+(2274 lines) and `src/lib/world-data.ts` (1358 lines) were read only for their
+exported signatures and section-header comments (`grep ^export`, `grep "^// ───"`),
+not end to end. Everything else named below was either read in full or spot
+checked with `grep`/`git log`/`git show`. Where a claim is inferred rather than
+directly read, it says "looks like."
 
-This document assumes you have read `README.md` once. It does not repeat the
-README's diagrams. It tells you where they are right, where they are stale, and
-what they leave out entirely.
+**Read this first if you are only going to read one paragraph.** README.md and
+CLAUDE.md were both last edited at commit `39e3f57`. The repository has since
+moved 10 commits further (current HEAD is `8efca8d`, branch
+`narrative-event-engine`), and several of those commits changed load-bearing
+numbers that README and CLAUDE.md still quote from before the change. The
+biggest one: the event-detection gold set grew from 22 events / 5 chapters / 1
+book to **103 events / 19 chapters / 8 books / 7 authors**, and the honest
+precision on that larger set is **28.4%**, not the 57.1% both docs still cite.
+This is explained in full under System 9 and section 6. Prefer
+`scripts/test-event-detect.ts`'s own header comment over any prose description,
+including this one, because it is the file that actually gates the build.
 
 ---
 
-## 1. The one-picture data flow
+## 1. One picture: keystroke to screen
 
-From a keystroke to widgets and timeline updating, there are five independent
-timers running off the same edit, not one pipeline:
+There is no single pipeline. A keystroke fans out into five independently timed
+paths, all triggered off the same `App.tsx` state update.
 
 ```mermaid
 flowchart TD
     K[Keystroke in Editor textarea] --> OC[onContentChange]
     OC --> SN[App.tsx setNovel]
 
-    SN --> LIVE[Live paragraph highlight, 0ms, synchronous, resolveLiveKnownNames on caret paragraph only]
-    SN --> PERSIST[localStorage save, 350ms debounce, saveNovel]
-    SN --> ANALYSIS[useAnalysis debounce, 1000ms, fast tier]
+    SN --> LIVE["Live paragraph highlight (0ms)\nresolveLiveKnownNames on caret paragraph only"]
+    SN --> PERSIST["localStorage save (350ms debounce)"]
+    SN --> ANALYSIS["useAnalysis debounce (1000ms), fast tier"]
 
     ANALYSIS --> WORKER{Worker available?}
     WORKER -->|yes| AW[analysis-worker.ts]
-    WORKER -->|no, or rejects| MAIN[runChapterAnalysis on main thread]
-    AW --> RESULT[ChapterAnalysisResult, fast]
+    WORKER -->|no or later rejects| MAIN[runChapterAnalysis on main thread]
+    AW --> RESULT[ChapterAnalysisResult, fast tier]
     MAIN --> RESULT
 
-    RESULT --> HL[HighlightLayer settled/snapshot path, speech + action + grammar labels]
-    RESULT --> SG[Story graph update, +120ms deferred]
-    SG --> LM[narrative-lm.ts async enrichment, dedup + detail tags, no relabel]
-    SG --> PANEL[StoryGraphPanel / TimelineGraph]
+    RESULT --> HL[HighlightLayer settled/snapshot path]
+    RESULT --> SG["Story graph rebuild (+120ms deferred)"]
+    SG --> EV["narrative-events.ts detection, synchronous"]
+    EV --> LM["async: LM salience pruning + dedup/detail tags"]
+    SG --> PANEL[StoryGraphPanel / TimelineGraphFull]
 
-    RESULT -->|converge mode only, idle 1600ms after fast result| REFINE["re-run at high tier"]
+    RESULT -->|"auto mode only, +1600ms idle"| REFINE["re-run at high tier"]
     REFINE --> RESULT
 ```
 
-Five clocks, all independent, all keyed off the same `novel` state change:
-
 | What | Delay | File |
 |---|---|---|
-| Live entity highlight in the paragraph under the caret | 0ms (every keystroke) | `src/components/Editor.tsx` (`resolveLiveKnownNames`, called directly in a `useMemo`, no debounce) |
-| localStorage persistence of the whole novel | 350ms | `src/App.tsx:576-582` |
-| Chapter analysis dispatch, "fast" tier | 1000ms (`analysisDebounceMs`) | `src/lib/use-analysis.ts:96,190` |
-| Grammar check + full snapshot markup | 1000ms (same value, passed in as `typingSettleMs`) | `src/components/Editor.tsx:151-152,196-199` |
-| "High" tier refinement, converge mode only | +1600ms after the fast result lands (`CONVERGE_IDLE_MS`) | `src/lib/use-analysis.ts:64,235-256` |
-| Story graph entry rebuild + LM enrichment | +120ms after analysis settles | `src/App.tsx:615-635` |
-| World-data auto-extraction rescan (only when there's no explicit world data) | 2000ms on the chapters reference | `src/lib/use-analysis.ts:130` |
+| Live entity highlight in the paragraph under the caret | 0ms, every keystroke | `src/components/Editor.tsx`, `resolveLiveKnownNames` called directly in a `useMemo` |
+| Whole-novel localStorage save | 350ms | `src/App.tsx:582` |
+| Chapter analysis dispatch, fast tier | 1000ms (`analysisDebounceMs`) | `src/App.tsx:425`, `src/lib/use-analysis.ts:96` |
+| Grammar check plus full snapshot markup | 1000ms (same value, passed to Editor as `typingSettleMs`) | `src/components/Editor.tsx:151` |
+| High-tier refinement, auto mode only | +1600ms after the fast result lands (`CONVERGE_IDLE_MS`) | `src/lib/use-analysis.ts:64,255` |
+| Story graph entry rebuild, then LM enrichment | +120ms after analysis settles | `src/App.tsx:622,632` ("yield current frame; 120ms is imperceptible for graph updates") |
+| Whole-novel entity rescan, only when there is no explicit world data | 2000ms on the chapters reference | `src/lib/use-analysis.ts:130` |
 
-Two things worth naming explicitly:
+Two things worth knowing cold:
 
-- **The live highlight path never touches the worker.** It resolves names only in
-  the paragraph under the caret (`src/components/Editor.tsx:158-170`), which is
-  why typing feels instant even though full analysis is a worker round trip.
-- **The "high" refinement only exists when converge mode is on**, and converge
-  mode is now the only mode a user can pick. See section 2, System 3 below: the
-  intelligence dial README describes is gone.
+- **The live highlight path never touches the worker.** It resolves names only
+  in the paragraph under the caret, which is why typing feels instant even
+  though the full pipeline is a worker round trip.
+- **The intelligence dial the README describes no longer exists.** `App.tsx:306`
+  declares `useState<"off" | "auto">`, not `"low" | "default" | "high"`. Under
+  auto mode, `use-analysis.ts:96-100` hardcodes the first pass to `"fast"` and
+  the refinement to `"high"` ("Under converge the first pass is always fast and
+  the refinement is always high; the caller's level applies only to the
+  classic single-pass path"). There are exactly two user-facing states now:
+  off, or auto, which always converges fast to high on every idle pause. The
+  background adjacent-chapter pre-analysis that used to be opt-in under "high"
+  now also fires under auto (`use-analysis.ts:278`), so that background cost is
+  the default writing experience for anyone who has not turned analysis off.
 
 ---
 
-## 2. The subsystems, and who owns what
+## 2. The subsystems
 
-The app has closer to **11 real subsystems** than the README's 9. Two are missing
-entirely (custom tools, and text/EPUB export is folded silently into "PDF
-export"), and one described system (the intelligence dial) has been replaced by
-something structurally different. Numbering below follows the README's System
-1-9 where they still apply, then adds what's missing.
-
-### System 1: App Shell and State Orchestration
-**Job:** owns `novel` state, chapter selection, preferences, and every store
-(annotation, adaptive, story graph, review results). Fans them out to children
-and persists them.
-**Entry point:** `src/App.tsx` (2000+ lines; this is the composition root, not a
-place to add logic, it wires everything below).
-**Consumes:** localStorage loaders (`storage.ts`, `preferences.ts`, `story-graph.ts`,
-`renderer-review.ts`, `annotation-store.ts`, `adaptive-store.ts`), Electron menu
-commands, keyboard shortcuts.
-**Produces:** the `novel`, `currentId`, `intelMode`, and every store's state.
-Persists all of them on a debounce.
+### System 1: App shell and state orchestration
+Owns `novel` state, chapter selection, preferences, and every store (annotation,
+adaptive, story graph, review results), and fans them out to children.
+**Entry point:** `src/App.tsx` (1925 lines; this is the composition root, not a
+place to add analysis logic).
+**Consumes:** localStorage loaders (`storage.ts`, `preferences.ts`,
+`story-graph.ts`, `renderer-review.ts`, `annotation-store.ts`,
+`adaptive-store.ts`), Electron menu commands, keyboard shortcuts.
+**Produces:** `novel`, `currentId`, `intelMode`, and every store's state;
+persists all of them on a debounce.
 **Consumed by:** every other system.
-**Verified change from README:** the README's "Data Ownership Summary" is
-accurate for this system. One addition worth naming: `src/lib/license.ts` and
-`src/lib/features.ts` gate Pro-only features (`Tier = "free" | "pro"`) as a
-cross-cutting concern threaded through App.tsx rather than a subsystem of its
-own. Small enough (105 lines total) that it doesn't need a System number.
+A small cross-cutting concern lives here rather than as its own system:
+`src/lib/license.ts` (79 lines) and `src/lib/features.ts` (26 lines) gate
+Pro-only features (`Tier = "free" | "pro"`), threaded through `App.tsx`.
 
-### System 2: Editor and Highlight Layer
-**Job:** the live typing surface, plus the two-speed overlay (instant
-paragraph-scoped entity highlight vs. debounced full markup).
-**Entry point:** `src/components/Editor.tsx` (302 lines, read in full).
-**Consumes:** `chapter.content`, the current `ChapterAnalysisResult`, known names.
+### System 2: Editor and highlight layer
+The live typing surface, plus a two-speed overlay: instant paragraph-scoped
+entity highlight versus a debounced full markup pass.
+**Entry point:** `src/components/Editor.tsx` (302 lines).
+**Consumes:** `chapter.content`, the current `ChapterAnalysisResult`, known
+names.
 **Produces:** textarea edit events back to `App.tsx`; the highlight overlay via
-`HighlightLayer` (956 lines).
+`HighlightLayer.tsx` (956 lines).
 **Consumed by:** `App.tsx`, `EntityPopover`, `AnnotationPopover`.
-**Confirmed accurate:** the two-path split (live paragraph vs. frozen snapshot) is
-real and exactly as README describes it.
-**Missing from README:** `src/lib/confidence-bands.ts` (39 lines, exports
-`bandFor()`, `BAND_CERTAIN = 0.85`, `BAND_LIKELY = 0.58`) is a new file, imported
-by `HighlightLayer.tsx`, that decides whether a speech/action attribution
-renders as asserted, hedged, or not-asserted-at-all. This is the "ink only what
-you're sure of" confidence-aware rendering. It exists in code now and is not
-mentioned in README's System 2 at all.
+`src/lib/confidence-bands.ts` (39 lines: `bandFor()`, `BAND_CERTAIN = 0.85`,
+`BAND_LIKELY = 0.58`) is imported by `HighlightLayer.tsx` and decides whether a
+speech/action attribution renders as asserted, hedged, or not shown at all.
+README does not mention this file; it is the "only ink what you're sure of"
+rule made concrete.
 
-### System 3: Chapter Analysis Pipeline
-**Job:** runs speech detection, action detection, and chapter-level stats
-(tension, register, rhythm, pacing) for the current chapter.
+### System 3: Chapter analysis pipeline
+Runs speech detection, action detection, and chapter-level stats (tension,
+register, rhythm, pacing) for the current chapter.
 **Entry point:** `src/lib/use-analysis.ts` (the hook) and
 `src/lib/chapter-analysis-runner.ts` (the pure function both the worker and the
-main-thread fallback call). It composes `detectSpeechInChapter` from
+main-thread fallback call; it composes `detectSpeechInChapter` from
 `speech-detect.ts`, `findActionSentences`/`predictActionActor` from
-`action-detect.ts`, and `analyzeChapter` from `chapter-analysis.ts`. It does
-**not** call `narrative-events.ts`; that seam is one level up, in
-`story-graph.ts`.
+`action-detect.ts`, and `analyzeChapter` from `chapter-analysis.ts`; it does
+**not** call `narrative-events.ts`, that seam is one level up in `story-graph.ts`).
 **Consumes:** chapter text, previous chapter's `endContext`, sibling chapter
 stats, resolved character names, the `converge` flag.
-**Produces:** `ChapterAnalysisResult` (current, prev, next), consumed by Editor,
-AnalysisPanel, and the story graph.
+**Produces:** `ChapterAnalysisResult` (current, prev, next).
+**Consumed by:** Editor, AnalysisPanel, story graph.
+The tension curve fix README describes is real and unchanged: `analyzeChapter`
+used to point-sample one paragraph per bucket, dropping the true peak in 15% of
+chapters; buckets now aggregate, and a separate `analysis.peakParagraph` field
+locates the real peak. Read that field; never invert `tensionCurve` to find a
+paragraph, since a bucket index maps to a bucket centre, not a paragraph.
 
-**The README is stale here, and this is the single biggest correction in this
-document.** README's System 3 describes an "Intelligence level (low, default,
-high, or auto-resolved)" as a user-facing input, and its bottleneck section is
-built entirely around "high mode" being manually selected. As of git commit
-`6777ee0` ("Language accuracy + UX upgrade... The intelligence tier dial is
-gone"), that dial does not exist in the UI any more:
+### System 4: World data and entity scan
+Entity extraction and classification (characters, places, factions, entities),
+name resolution, and rename operations.
+**Entry point:** `src/lib/world-data.ts` (1358 lines; `scanAndClassify` at
+line 876, `resolveKnownNames`/`resolveLiveKnownNames` at 1192/1203).
+**Consumes:** novel or chapter text, existing world data, manual edits.
+**Produces:** `worldData` buckets, the name list used by highlighting and
+speech detection, rename operations.
+**Consumed by:** highlight layer, speech detection, story graph, `WorldDataView`.
+A defect fixed the day before this document was updated (commit `bc2c826`,
+"Fix the character scan: 9 false names to 0 on the test chapter"): the scanner
+was calling sentence-opening common nouns and verbs characters, because a
+capital letter at the start of a sentence carries no information. Two new
+per-candidate tests were added, both using the manuscript itself as the
+dictionary so neither goes stale on a new book: does the word also appear
+mid-sentence (POSITION), and does a lowercase form of the same word appear
+elsewhere in the text (a common noun the author also uses ordinarily). A
+closed list of sentence-opening adverbs ("Tonight", "Meanwhile", ...) was added
+to `COMMON_CAPITALIZED` for the same reason. Not mentioned in README at all:
+`src/components/CastConfirmOverlay.tsx` (396 lines), a cold-start screen shown
+after a scan that asks the writer to confirm the detected cast, wired into
+`App.tsx` at lines 341, 868, 1230 and 1703.
 
-- `src/App.tsx:306-307`: the actual state is `useState<"off" | "auto">`, not
-  `"low" | "default" | "high"`.
-- `src/lib/use-analysis.ts:96-100`: when `converge` is on (i.e. `intelMode !==
-  "off"`), the first pass is hardcoded to `"fast"` and the refinement is
-  hardcoded to `"high"`. The caller's `level` option is only honored on a
-  classic single-pass path that App.tsx no longer uses.
-- `src/components/Toolbar.tsx:19`, `AnalysisPanel.tsx:57`, `WorldDataView.tsx:33`
-  still declare a wider `IntelMode` type (`"off"|"fast"|"default"|"high"|"auto"`)
-  for internal bookkeeping (e.g. `resolvedLevel` display), but nothing in
-  `App.tsx` lets a user pick `"fast"`, `"default"`, or `"high"` directly any
-  more. There are exactly two user-facing states: off, or auto (which converges
-  fast to high on idle).
-
-Practically: "high mode is materially heavier" is still true as a fact about
-the engine, but it is no longer something the writer chooses. It now always
-runs, 1600ms after the writer stops typing (`CONVERGE_IDLE_MS`), replacing the
-fast result. The old adjacent-chapter pre-analysis logic that used to gate on
-`level === "high"` now also fires under `converge` (`use-analysis.ts:279`), so
-that background cost is now the default writing experience for anyone who
-hasn't turned analysis off, not an opt-in.
-
-The tension-curve fix and `analysis.peakParagraph` field described in README
-are real and unchanged (verified against `chapter-observation.ts`, see System
-9).
-
-### System 4: World Data and Entity Scan
-**Job:** entity extraction and classification (characters/places/factions/
-entities), name resolution, rename operations.
-**Entry point:** `src/lib/world-data.ts`.
-**Consumes:** novel/chapter text, existing world data, manual edits.
-**Produces:** `worldData` buckets, the name list used by highlighting and speech
-detection, rename operations.
-
-**A defect the README doesn't mention, that was live in this codebase until
-very recently and is now fixed.** `src/lib/world-data.ts:522-539`
-(`autoExtractKnownNamesFast`, the private function that actually feeds
-`resolveKnownNames()` and therefore speech attribution and the live highlight
-layer) used to rank name candidates by **string length** before truncating to
-30, while the public, unused-for-this-path `autoExtractEntities` (line 500)
-ranked by relevance. Sorting by length is correct for building a highlight
-regex (longest match first) and catastrophic as a selection filter: a
-four-letter protagonist can never outrank thirty longer institutional nouns.
-This shipped with 0% main-cast recall and roughly 53% of dialogue unattributed
-on a real manuscript, documented in the committed report
-`language-system-audit.html`, dated 2026-07-29. The fix, ranking by occurrence
-count with length only as a tiebreak, is already in the code you're reading. It
-landed in git commit `6777ee0` the next day, with a comment at
-`world-data.ts:527-533` explaining exactly why the old comparator was wrong. If
-you're auditing this codebase from the README alone you would never learn this
-happened. It's only visible in `language-system-audit.html` and the git log.
-
-**Missing from README's System 4 diagram entirely:** `src/components/
-CastConfirmOverlay.tsx` (396 lines), a genuinely wired cold-start screen. It is
-imported and rendered in `App.tsx` (state `castConfirmOpen`, `App.tsx:341`,
-triggers around `App.tsx:868` and `:1230`, rendered at `:1702-1705`). It shows
-the cast the scanner found, with mention counts and a line of dialogue each,
-and asks the writer to confirm. This is the "turn the cold start into the best
-moment" idea from the audit report, already shipped, and the README's System 4
-section was never updated to include it.
-
-Semantic-assist gating (hard-disabled outside Electron) is confirmed as
-described.
-
-### System 5: Story Graph and Timeline Stack
-**Job:** turns per-chapter analysis into persisted graph entries and renders
-them as a compact side panel and a fullscreen timeline.
+### System 5: Story graph and timeline stack
+Turns per-chapter analysis into persisted graph entries and renders them as a
+compact side panel and a fullscreen timeline.
 **Entry point:** `src/lib/story-graph.ts` (`buildChapterEntry`,
-`enrichChapterEntryWithLM`), presentation in `src/components/StoryGraphPanel.tsx`
-(293 lines) and `src/components/TimelineGraphFull.tsx` (818 lines).
-**Confirmed accurate:** `story-graph.ts:4` imports `detectNarrativeEvents` from
-`narrative-events.ts` exactly as README's System 5 diagram shows
-(`A[ChapterAnalysisResult] --> A2[narrative-events.ts] --> B[buildChapterEntry]`).
-The LM pass does dedup + detail tags, confirmed not to overwrite `type` (a code
-comment at `story-graph.ts` says so explicitly: "The type is NOT overwritten").
-The two fixed defects README records (tension position never rendered; source
-clause computed and discarded) are both still fixed, unchanged.
+`enrichChapterEntryWithLM`), presentation in `StoryGraphPanel.tsx` (293 lines)
+and `TimelineGraphFull.tsx` (818 lines).
+**Consumes:** `ChapterAnalysisResult`, `worldData` names and aliases.
+**Produces:** persisted story graph entries, compact and fullscreen timeline
+views, event chip hover text (type, salience, paragraph, confidence, and the
+source clause).
+**Consumed by:** `StoryGraphPanel`, `TimelineGraphFull`, chapter navigation.
+`story-graph.ts:4` imports `detectNarrativeEvents` from `narrative-events.ts`
+directly, exactly as README's diagram shows. Beyond what README or the plan
+document mention: `story-graph.ts:175` also dynamically imports
+`refineEventSalience` from `narrative-events.ts`, a newer LM-based salience
+pruning pass (drops low-value events) that is separate from the "dedup plus
+detail tags only" role assigned to the LM elsewhere. A code comment at
+`story-graph.ts:230` confirms the LM does not overwrite `type`.
 
-**One thing beyond what README and the plan document:** `story-graph.ts:175`
-dynamically imports `refineEventSalience` from `narrative-events.ts`, a newer
-LM-based salience-*pruning* pass (drops low-value events, gated on a
-`SALIENCE=-0.05` threshold) that is separate from the "dedup + detail tags
-only" role the plan assigns the LM. README doesn't mention this pass at all.
+### System 6: Annotation and adaptive learning
+Learns speaker/action disambiguation from the writer's manual corrections.
+**Entry point:** `src/lib/annotation-store.ts` (raw corrections, 93 lines),
+`src/lib/adaptive-store.ts` (persisted model state, 238 lines).
+**Consumes:** manual speech/action corrections, prediction traces from
+analysis, current chapter id and world data.
+**Produces:** learned bias for speaker/action disambiguation, adaptive model
+state and metrics, immediate overlay correction colors and labels.
+**Consumed by:** `useAnalysis` (via `buildAdaptiveInferenceContext`), overlay
+rendering.
+File by file: `annotation-learn.ts` (539 lines) computes `computeLearnedBias`
+and `characterBreakdown`, gated on 10 corrections (`LEARN_THRESHOLD`).
+`adaptive-inference.ts` (131 lines) builds the per-analysis context.
+`adaptive-ranker.ts` (160 lines) does the online update and retrain.
+`adaptive-similarity.ts` and `adaptive-memory.ts` are pure math helpers with no
+state of their own. A real gap, not a code bug: `src/components/Onboarding.tsx`
+has no mention of "annotation" or "correction" anywhere in its source, so the
+only path that starts this learning loop is never introduced to a new user.
 
-### System 6: Annotation and Adaptive Learning
-**Job:** learns speaker/action disambiguation from the writer's manual
-corrections.
-**Entry point:** `src/lib/annotation-store.ts` (raw corrections),
-`src/lib/adaptive-store.ts` (persisted model state).
-**Shape, file by file:** `annotation-store.ts` owns load/save/add/clear/export
-of corrections. `annotation-learn.ts` computes `computeLearnedBias` and
-`characterBreakdown` (gated on a `LEARN_THRESHOLD` of 10 corrections).
-`adaptive-store.ts` persists model state and metrics. `adaptive-inference.ts`
-builds the per-analysis context (`buildAdaptiveInferenceContext`,
-`rerankAdaptiveCandidates`). `adaptive-ranker.ts` does the online update and
-retrain (`applyOnlineAdaptiveUpdate`, `retrainAdaptiveModels`). `adaptive-
-similarity.ts` and `adaptive-memory.ts` are pure helper math (cosine
-similarity, context-memory scoring) with no state of their own.
-**Confirmed weak spot, not a code bug but a UX one:** `src/components/
-Onboarding.tsx` has zero mentions of "annotation" or "correction" anywhere in
-its source. The only path that starts the learning loop is not introduced to a
-new user anywhere in onboarding. This matches a finding in
-`language-system-audit.html` and nothing in the codebase has changed it since.
-**Confidence-threshold sprawl, partially addressed:** the audit report flagged
-eight uncoordinated hard-coded thresholds (0.50 through 0.85) spread across
-modules. `confidence-bands.ts` (System 2) now centralizes the *display*
-decision (certain/likely/unsure), but a rough grep of those same literal values
-across `src/lib/*.ts` still hits speech-detect.ts, chapter-analysis.ts,
-action-detect.ts, narrative-events.ts, adaptive-ranker.ts, world-data.ts, and
-event-detect.ts. The *detection*-side thresholds are exactly as scattered as
-the audit described. Only the rendering layer got a single owner.
-
-### System 7: Renderer Workspace, Review, and Export
-**Job:** the in-app Claude chat bound to the project directory, a separate
-remote-model prose review path, and file export.
+### System 7: Renderer workspace, review, and export
+The in-app Claude chat bound to the project directory, a separate remote-model
+prose review path, and file export.
 **Entry point:** `src/components/RendererPanel.tsx` (2042 lines) for chat,
 `src/lib/project-manager.ts` for the typed Electron bridge.
+**Consumes:** project-backed chapter files, `novel.txt`, renderer chat
+messages, slash commands, API key and selected review model.
+**Produces:** persisted Claude sessions with streamed assistant/thinking/tool
+lanes, review results, exported files.
+**Consumed by:** the writer directly, plus `AnalysisPanel` (review flags).
+This system has more moving parts than README's single diagram implies. The
+fullscreen renderer workspace is a **second real Electron window**, not an
+overlay in the same DOM: `electron/main.cjs:359` creates a `BrowserWindow` that
+loads the same bundle via a `#workspace` hash route, read by `src/main.tsx` to
+render `WorkspaceWindow` instead of `App`. Because `main.tsx` runs
+unconditionally, opening it also spins up a second copy of the liquid glass
+worker and edge-color loop (Systems 8). A third, hidden `BrowserWindow` handles
+PDF/print rendering (`main.cjs:567`, `pdfWin`). There are three separate
+AI-touching paths from the main process, not one: the Claude CLI subprocess for
+renderer chat (`electron/claude-code.cjs`, channels `claude:run/stream/cancel/
+pipeline`), a direct HTTPS call to `api.anthropic.com` from the main process
+for renderer review (`main.cjs:511`, API key kept out of the sandboxed
+renderer), and the narrative-LM embedding path (`main.cjs:497`, warmed at
+`app.whenReady()`). Export is also bigger than README shows: besides
+`pdf-export.ts`, `src/lib/text-export.ts` exports `novelToMarkdown`,
+`novelToDocx` and `novelToEpub`, all three wired into
+`PdfExportOverlay.tsx`, whose name undersells that it handles four formats.
+The instructions behind `/draft`, `/review`, `/lore` etc. are markdown protocol
+files in a sibling directory, `../novel-writing-system/`, not part of this
+repo; CLAUDE.md's "do not modify them" is why.
 
-**The fullscreen renderer workspace is a second, real Electron window, not an
-overlay in the same DOM. README's diagram doesn't say this and it matters for
-performance.** `electron/main.cjs:337-419` creates `_workspaceWindow`, a
-`BrowserWindow` that loads the *same bundle* via `dist/index.html` with a
-`{ hash: 'workspace' }` route. `src/main.tsx:26-31` reads
-`window.location.hash.startsWith("#workspace")` and renders `WorkspaceWindow`
-(a 43-line component that mounts one `RendererPanel` in `windowMode`) instead
-of the full `App`. The two windows sync over `workspace:window-state` IPC
-broadcasts (`main.cjs:348`) and share state only through project files and the
-main process, not through any in-memory React state. Opening it is a second
-full Electron renderer process, with its own JS heap, its own DOM, and
-(because `main.tsx` runs unconditionally) its own instance of
-`initLiquidGlassFilter()` and `initEdgeColor()` (System 8 and its worker) spun
-up again. On a weak machine, opening the renderer workspace is closer in cost
-to opening a second copy of the app than to opening a panel.
-
-There is a third `BrowserWindow` too: a hidden one used for PDF/print rendering
-(`main.cjs:567`, `pdfWin`).
-
-**Three separate AI-touching paths from the main process, not one:**
-1. **Renderer chat.** `electron/claude-code.cjs` spawns the Claude CLI as a
-   subprocess and streams `stream-json` events back over IPC
-   (`claude:run/stream/cancel/pipeline`, 5 channels, `claude-code.cjs:290-441`).
-2. **Renderer review** (README's "remote review model"). `main.cjs:511-547`
-   makes a direct HTTPS POST to `api.anthropic.com/v1/messages` **from the main
-   process**, with the API key attached there so it never has to live in the
-   sandboxed renderer. Confirmed via the code comment at `main.cjs:507-510`.
-   This really is a second, independent path from the CLI subprocess, exactly
-   as README implies by drawing it separately.
-3. **Narrative LM embeddings** (System 5/9). `narrative-lm-embed`
-   (`main.cjs:495-503`) runs `@xenova/transformers` locally, in the main
-   process, warmed at `app.whenReady()`. README's System 7 diagram doesn't
-   mention this third path at all, though it does show up in System 9.
-
-**Slash commands confirmed wired, matching CLAUDE.md's table exactly:**
-`/init`, `/context`, `/draft`, `/review`, `/lore`, `/assemble`, `/update` map to
-pipeline ops in a table at `RendererPanel.tsx:118-124`. `/scan` is a distinct
-branch (`RendererPanel.tsx:1357`), confirming the compact-vs-full-context split
-is real code, not just documented policy. The extra-context gate for `/lore`
-and `/review` is a literal array check at `RendererPanel.tsx:1486`.
-
-**The instructions behind `/draft`, `/review`, `/lore`, etc. are not in this
-repo.** `electron/claude-code.cjs` builds prompts that tell the Claude CLI to
-read files under `novel-writing-system/`. For example, `claude-code.cjs:451`
-reads: "Read novel-writing-system/SYSTEM_INDEX.md first... then
-novel-writing-system/FROM_SCRATCH_PIPELINE.md." That directory is a sibling
-project (`../novel-writing-system/`, confirmed to exist with
-`CANONICAL_PIPELINE.md`, `PROSE_REVIEW_PROTOCOL.md`, etc.), bundled into the
-shipped app via `electron-builder.yml`'s `extraResources` entry. The actual
-"what makes a good chapter" logic that the renderer commands invoke lives in
-markdown protocol documents outside this repo, not in glass-editor's
-TypeScript. CLAUDE.md notes "do not modify them"; worth knowing this is why.
-They aren't part of this codebase's ownership at all.
-
-**Export is bigger than README's diagram shows.** README's System 7 diagram
-has one export node, `pdf-export.ts`. In fact there are two export files:
-`src/lib/pdf-export.ts` (PDF/print HTML, six typeset presets) and
-`src/lib/text-export.ts` (`novelToMarkdown`, `novelToDocx`, `novelToEpub`, all
-three confirmed exported and wired). `novelToMarkdown`/`novelToDocx` are used
-directly from `App.tsx:1126-1133`. All three, including EPUB, are used from
-`src/components/PdfExportOverlay.tsx:32,222`, whose name undersells what it
-does: it's the export overlay for all four formats, not just PDF. README never
-mentions `text-export.ts` at all.
-
-### System 8: Liquid Glass and Compositing
-**Job:** the backdrop-filter glass effect across panels/tabs/overlays,
-computed via a per-pixel displacement map worker, cached and idle-scheduled.
+### System 8: Liquid glass and compositing
+The backdrop-filter glass effect across panels, tabs and overlays, computed via
+a per-pixel displacement-map worker, cached and idle-scheduled.
 **Entry point:** `src/lib/liquid-glass-filter.ts` (`initLiquidGlassFilter()`,
-called once from `src/main.tsx:9`).
-**Confirmed:** worker instantiated at `liquid-glass-filter.ts:129`
-(`new Worker(...)`); `ResizeObserver` at line 588; `requestIdleCallback`
-scheduling at line 657.
+called once from `src/main.tsx`).
+**Consumes:** DOM elements matching the glass selector, element geometry.
+**Produces:** per-element SVG filter ids applied as backdrop filters.
+**Consumed by:** every glass surface in the app.
+Treat this file and `src/lib/liquid-glass-worker.ts` as pixel-frozen; CLAUDE.md
+is explicit that blur, bezel, refraction and saturation are signed off and not
+to be retuned while optimising, and the fold-over artifact in the refraction is
+understood and deliberately kept (see CLAUDE.md's "Liquid glass" section for
+the arithmetic on why). The three overlay freeze modes are not equivalent:
+`PAUSE_BODY_CLASSES` in `liquid-glass-filter.ts` actually stops the worker/idle
+loop for the timeline and renderer-workspace overlays, but the onboarding
+overlay's freeze is a pure CSS rule that hides the visual result without
+stopping the JS-side computation behind it. A related, separate file not
+mentioned in README at all: `src/lib/edge-color/edge-color.ts`
+(`initEdgeColor()`, called from `main.tsx`), a body-glow and specular-rim
+effect reading color from the highlight layer's palette, geometry-driven and
+idle-free. Small enough to fold into this system for this map, but it is its
+own file and its own init call, worth knowing about if you go looking for "the
+glass code" and only find `liquid-glass-*.ts`.
 
-**The three overlay freeze modes are not equivalent, and README implies they
-are.** `liquid-glass-filter.ts:38` defines `PAUSE_BODY_CLASSES =
-["timeline-overlay-freeze", "renderer-workspace-freeze",
-"electron-window-unfocused", "scroll-edge-idle"]`. This is the list that
-actually pauses the worker/filter computation. `onboarding-overlay-freeze` is
-**not** in that list. Grepping `styles.css:13568-13580` confirms onboarding's
-freeze is a pure CSS rule (`backdrop-filter: none !important` on specific
-selectors). It flattens the *visual* result but does not stop the JS-side
-`ResizeObserver`/idle-scheduling loop from continuing to compute displacement
-maps behind the onboarding overlay. Timeline and renderer-workspace freezes
-stop the actual computation; onboarding only hides its output. This may be
-intentional (onboarding may have fewer live glass surfaces behind it to worry
-about) but it is a real, verified asymmetry the README's one-line description
-("Freeze modes for the fullscreen timeline, fullscreen renderer workspace, and
-onboarding overlay") doesn't capture.
+### System 9: Narrative event engine
+Decides what actually happens in a chapter, at clause granularity, and
+generates each event's label from the same clause that triggered detection.
+This is what fills the arc timeline's event chips and the lead line of the
+"This chapter" brief.
+**Entry point:** `src/lib/narrative-events.ts` (1536 lines). Exports
+`detectNarrativeEvents` (line 954) and the async `refineEventSalience`
+(line 1508). Read its header before changing it; every rule answers a
+measured failure.
+**Consumes:** paragraphs and `speech-detect` segments for the same
+paragraphs, known names, per-paragraph tension (the derivative, not the level).
+**Produces:** `NarrativeEvent[]`, each carrying label, type, salience,
+paragraph, offset, and the verbatim clause it came from.
+**Consumed by:** `story-graph.ts` (timeline), `chapter-observation.ts` (the
+"This chapter" brief).
 
-**Not in README at all: the edge-color layer.** `src/lib/edge-color/edge-color.ts`
-(`initEdgeColor()`, called from `main.tsx:20-22`) is a second, related visual
-system: a body-glow plus specular-rim effect around glass surfaces, reading
-color directly from the highlight layer's palette by geometry, event-driven
-and idle-free. It's closely coupled to System 8 (same selector list) but is
-its own file and its own initialization call. Small enough to fold into System
-8 for this map, but worth knowing it exists as a separate concern if you go
-looking for "the glass code" and only find `liquid-glass-*.ts`.
+```mermaid
+flowchart TD
+    A[paragraphs] --> B[sentence split per paragraph]
+    C[speech-detect segments] --> D{inside attributed dialogue?}
+    B --> D
+    D -->|yes| E[DIALOGUE channel: speaker + speech act + content]
+    D -->|no| F[NARRATION channel: agent + change verb + object]
+    E --> G[score the clause, realis test, tension derivative]
+    F --> G
+    G --> H[calibrate within chapter, confidence floor]
+    H --> I[NarrativeEvent with its source clause]
+    I --> J[story-graph entries, timeline]
+    I --> K[chapter-observation brief]
+    I --> L["narrative-lm.ts: async dedup + detail tags + salience pruning"]
+```
 
-### System 9: Narrative Event Engine
-**Job:** decides what actually happens in a chapter, at clause granularity,
-and generates the event label from the same clause that triggered it.
-**Entry point:** `src/lib/narrative-events.ts` (1467 lines; read its header
-before changing it, per its own comment; every rule answers a measured failure
-recorded in `plans/narrative-event-engine.md`).
-**Confirmed structurally, via section headers, not full read:** exports
-`detectNarrativeEvents` (line 920) and the async `refineEventSalience` (line
-1439, see System 5). Section markers confirm the two-channel design (utterance-
-act detection near line 287), the realis test (near line 489), agent/object
-extraction (near lines 522-830), and per-chapter calibration/labelling (near
-line 1285). This matches both README's System 9 diagram and the plan document
-closely; nothing material is stale here.
-**`chapter-observation.ts` (218 lines, read in full)** matches README's "This
-chapter" brief description exactly, and enforces the rule CLAUDE.md states: it
-gates the tension-peak claim on `maxTension >= 0.5` (near line 128) and always
-reads `analysis.peakParagraph` or an event's own `paragraphIndex`, never
-inverts `tensionCurve`.
-**`event-detect.ts` status confirmed:** imported by exactly two files,
-`scripts/test-event-detect.ts` and `scripts/ood-event-audit.ts`, both for
-old-vs-new scoring. Zero imports anywhere in `src/`. README and CLAUDE.md's
-"superseded but kept for scoring" claim is accurate, unembellished.
-**The embedding seam (narrative-lm.ts)** confirmed to have three paths:
-Electron IPC, browser WASM, and the `setEmbedder` injection point used by
-`scripts/lm-node-backend.ts`. This matches the plan's description in
-`plans/narrative-event-engine.md`, section "The Embedding Seam."
+**The single biggest correction in this document.** README and CLAUDE.md both
+quote "22 events, 5 chapters, 1 author, precision 57.1%, major recall 63.6%,
+F1 55.8%" as the current gold-set numbers, and CLAUDE.md states the suite
+"gates on precision >=50% and major-event recall >=55%". Neither is true of the
+code at HEAD. `scripts/test-event-detect.ts` (lines 56-59) records the full
+history of the gold set, verified by reading the file directly:
 
-**Even `plans/narrative-event-engine.md` is already one commit stale.** The
-plan says, in its own "what is still wrong, honestly" section, that precision
-is "the open problem: 35.7%, and it is FLAT across the whole usable confidence
-range," and frames an LM-based fix as future work not yet attempted ("The LLM
-path, and why it is not in this change"). `git log -- plans/narrative-event-engine.md`
-shows the file was last touched in commit `8c51eba`. The actual HEAD of the
-repo is one commit later, `beccf08`, titled "Bring in the LM for salience,
-precision 32.8% to 41.7%," and that work is already live in the code: the
-`refineEventSalience` function this document already noted above
-(`story-graph.ts:175`, dynamically imported from `narrative-events.ts`) is
-exactly that LM salience re-rank, gated on a `SALIENCE` threshold. So the plan
-document, written specifically to be the up-to-date reference for this
-subsystem, was already superseded by the very next commit and was never
-updated to say so. Read the git log for this subsystem, not just the plan
-file, before trusting a precision number quoted from it.
+| Gold set | Precision | Major recall | F1 |
+|---|---|---|---|
+| 22 events, 5 chapters, 1 author | 57.1% | 63.6% | 55.8% |
+| 45 events, 11 chapters, 1 author | 35.7% | 60.0% | 39.6% |
+| 67 events, 15 chapters, 4 books | 35.6% | 35.9% | 33.3% |
+| 103 events, 19 chapters, **8 books** | **28.4%** | **27.1%** | **26.2%** |
 
-### System 10: Custom Tool Import (not in README at all)
-**Job:** a per-project plugin system letting a project bring its own custom
-analysis "tools" (small React-like components compiled and run inside the
-app), separate from both the built-in widgets and the renderer chat.
-**Entry point:** `src/lib/tool-registry.ts` (214 lines; header states it
-"discovers, validates, and stores per-project custom tools... called on
-project open when customToolsEnabled is true") and `src/lib/tool-runner.ts`
-(276 lines, builds the execution context/prompt for running a tool).
-**The bridge into the widget grid:** `src/components/widgets/ToolWidgetSlot.tsx`
-imports `* as ToolKit from "../../tools/tool-kit"`. `tool-kit.ts` is the sole
-importer of `src/tools/primitives/*.tsx` (18 files: ToolArcRing, ToolButton,
-ToolCard, ToolDataTable, ToolHeatmap, etc.), a small design-system kit that
-exists only to be composed by dynamically-loaded, per-project custom tool
-code, not by the app's own built-in widgets.
-**IPC-backed, real, and shipped:** `project-fs.cjs` registers `tool:compile`,
-`tool:scanProject`, `tool:importTools` channels; `esbuild-wasm` is a runtime
-dependency in `package.json` (used to compile tool source at runtime);
-`src/components/ToolImportOverlay.tsx` is the user-facing overlay, imported and
-wired in `App.tsx`; `project-manager.ts` exports `scanExternalProject` and
-`importTools` for it.
-**Why it gets its own System number:** it has its own IPC channels, its own
-compiler, its own component-primitive kit, and its own overlay UI, a fully
-separate seam from every other system. README's "Files To Start With" list
-doesn't mention a single one of these files.
+The file's own comment calls this "not the engine getting worse, it is the
+measurement getting honest": each smaller set was drawn from prose the engine
+had been shaped against. The eight-book set (Austen, Doyle, Wells, Dickens
+twice, Shelley, Stoker, and two in-house manuscripts) is the one the suite
+gates on today, at `TARGETS = { majorRecall: 0.25, precision: 0.26,
+labelFitRate: 0.95 }` (`test-event-detect.ts:77-88`), not the 50%/55% CLAUDE.md
+describes. For scale, the dictionary engine this replaced scores precision
+30.2%, major recall 13.6% on the same eight-book set, so the rebuild is still
+roughly 2x better at finding the events that matter, and the gates are set
+just under measured performance on purpose, as a regression lock rather than
+an aspiration.
 
----
+`plans/narrative-event-engine.md` is itself one step behind: its own tables
+stop at the 45-event expansion (its "3a" section) and its LM numbers predate
+commit `8efca8d`, which moved the LM type-accuracy gate from 0.40 to 0.28 to
+match an eight-book measurement of 31.6% top-1 (down from 42.2% on a
+single-author 44-clause set, the same monotonic slide as the event suite, same
+cause). Treat the plan document as the *design rationale* (clause-level
+detection, the realis test, the two-channel dialogue/narration split, why
+`unclassified` exists on purpose) and the code (`test-event-detect.ts`,
+`test-narrative-lm.ts`) as the source of truth for *current numbers*.
 
-## 3. The seams, specifically
+The embedding seam (`narrative-lm.ts`) runs MiniLM three ways: Electron IPC to
+the main process, browser WASM, and, via `setEmbedder`, an injected Node
+backend used only by `scripts/lm-node-backend.ts` for the test suites. Keep
+this seam; an engine whose only inference path is inside Electron cannot be
+measured by a script.
 
-Three seams the task asked about directly:
+`src/lib/event-detect.ts` is the engine this replaced. Confirmed imported by
+exactly two files, `scripts/test-event-detect.ts` and
+`scripts/ood-event-audit.ts`, and by nothing in `src/`. It stays, on purpose,
+so the suites can score old against new.
 
-**The analysis worker boundary** (`src/lib/analysis-worker-client.ts` and
-`src/lib/analysis-worker.ts`): message IN is `{ id, payload:
-RunChapterAnalysisInput }`, message OUT is `{ id, ok: true, result } | { id,
-ok: false, error }`. Two independent fallback layers exist, not one: (a) if
-`Worker` construction itself fails, `ensureWorker()` marks the worker
-unavailable and calls `runChapterAnalysis` directly on the main thread; (b)
-`use-analysis.ts` also wraps every call in `.catch(() =>
-runChapterAnalysis(input))` in case a constructed worker's promise later
-rejects. **There is no client-side timeout.** If `postMessage` succeeds but the
-worker never replies (hangs, e.g. on a pathological input), the calling
-promise never resolves. The only way analysis recovers is the worker's own
-`onerror` firing, not a deadline the client enforces.
-
-**The Electron main/renderer IPC boundary:** `electron/preload.cjs` exposes
-`window.electronAPI` with channel families for export, menu commands,
-project/file IO (13 methods), Claude CLI (5 methods plus 6 streaming events),
-renderer review, narrative LM embedding, edge-color capture, workspace window
-control, and custom tools. Handlers are split cleanly by concern:
-`project:*`/`tool:*` in `electron/project-fs.cjs`, `claude:*` in
-`electron/claude-code.cjs`, everything else (`workspace:*`, `renderer-review`,
-`export-pdf`, `narrative-lm-*`, `edge-color:capture`, `draft-guard:update`) in
-`electron/main.cjs`. Every `project-manager.ts` export spot-checked has a
-matching preload method and IPC channel with consistent naming.
-
-**The sync/async split around the language model:** the narrative-events
-engine itself is fully synchronous and runs inline in the analysis pipeline (a
-per-chapter cost, not per-keystroke; it runs on the same deferred story-graph
-path as everything else in System 5). The LM only touches two things
-asynchronously, after the synchronous detection already produced a result:
-salience pruning (`refineEventSalience`) and dedup/detail-tag enrichment
-(`enrichChapterEntryWithLM`), both dynamically imported from `story-graph.ts`
-and both allowed to fail silently (wrapped in a bare `catch`) without blocking
-the UI. The renderer-review and renderer-chat AI paths are fully async and
-IPC/subprocess-based, entirely outside the analysis pipeline. The
-`narrative-lm-embed` main-process path is warmed eagerly at `app.whenReady()`
-so the first embedding call in a session doesn't pay a cold-start cost.
+### System 10: Custom tool import (not in README at all)
+A per-project plugin system letting a project bring its own small
+analysis "tools" (React-like components, compiled and run inside the app),
+separate from both the 18 built-in widgets and the renderer chat.
+**Entry point:** `src/lib/tool-registry.ts` (214 lines, discovers/validates/
+stores per-project tools on project open) and `src/lib/tool-runner.ts`
+(276 lines, builds the execution context for running a tool).
+**Consumes:** per-project tool source files, compiled via `esbuild-wasm`
+(a real runtime dependency in `package.json`).
+**Produces:** dynamically loaded widget slots.
+**Consumed by:** `src/components/widgets/ToolWidgetSlot.tsx`, which imports
+`* as ToolKit from "../../tools/tool-kit"`. `tool-kit.ts` is the sole importer
+of `src/tools/primitives/*.tsx` (18 files), a small component kit that exists
+only to be composed by dynamically loaded custom tool code, not by the app's
+own built-in widgets. IPC-backed and real: `project-fs.cjs` registers
+`tool:compile`, `tool:scanProject`, `tool:importTools`; the user-facing overlay
+is `src/components/ToolImportOverlay.tsx`, wired into `App.tsx`.
 
 ---
 
-## 4. What runs when, a summary table
+## 3. What runs when
 
 | Trigger | What runs | Where |
 |---|---|---|
 | Every keystroke | Live paragraph-scoped entity highlight | main thread, `Editor.tsx` |
-| Every keystroke | Textarea resize (rAF-scheduled) | main thread |
 | 350ms after last edit | Save whole novel to localStorage | main thread |
-| 1000ms after last edit | Fast-tier chapter analysis (speech, action, chapter stats) | worker, fallback main thread |
-| 1000ms after last edit | Grammar check + full snapshot highlight markup | main thread |
-| 1600ms after the fast result (converge/auto mode only) | High-tier refinement, replaces displayed result | worker, fallback main thread |
-| Whenever converge/auto is on and an adjacent chapter is unanalyzed | Background pre-analysis of neighbor chapters, idle-scheduled | worker, fallback main thread |
-| 120ms after analysis settles | Story graph entry rebuild (`narrative-events.ts` detection, synchronous) | main thread |
-| After story graph entry builds | LM salience pruning + dedup/detail-tag enrichment | async, Electron IPC or WASM |
-| 2000ms on chapters reference, only with no explicit world data | Whole-novel entity auto-extraction rescan | main thread |
-| On project open, if custom tools enabled | Tool discovery/compile via esbuild-wasm | Electron main + renderer |
-| Continuously, idle-scheduled | Liquid glass filter map (re)generation on resize | worker |
+| 1000ms after last edit | Fast-tier chapter analysis (speech + action + chapter stats) | worker, falls back to main thread |
+| 1000ms after last edit | Grammar check plus full snapshot highlight markup | main thread |
+| +1600ms after the fast result (auto mode only) | High-tier refinement, replaces the displayed result | worker, falls back to main thread |
+| Whenever auto mode is on and a neighbor chapter is unanalyzed | Background pre-analysis of adjacent chapters, idle-scheduled | worker, falls back to main thread |
+| +120ms after analysis settles | Story graph entry rebuild, including synchronous `narrative-events.ts` detection | main thread |
+| After the story graph entry builds | LM salience pruning and dedup/detail-tag enrichment | async, Electron IPC or WASM, wrapped in a bare catch |
+| 2000ms on the chapters reference, only with no explicit world data | Whole-novel entity auto-extraction rescan | main thread |
+| On project open, if custom tools are enabled | Tool discovery and compile via `esbuild-wasm` | Electron main plus renderer |
+| Continuously, idle-scheduled | Liquid glass filter map regeneration on resize | worker |
 | Continuously, geometry-driven, idle-free | Edge-color glow/rim tracking | main thread |
-| On opening the fullscreen renderer workspace | A second full Electron renderer process boots (new liquid-glass worker, new edge-color loop, shared state only via project files + IPC) | new `BrowserWindow` |
-| On `/scan`, `/draft`, `/context`, `/review`, `/lore`, `/assemble`, `/update`, `/init` | Claude CLI subprocess spawned/reused, streams back over IPC | Electron main (`claude-code.cjs`) |
-| On a review trigger | Direct HTTPS call to `api.anthropic.com` from the main process | Electron main (`main.cjs`) |
+| On opening the fullscreen renderer workspace | A second full Electron renderer process boots, with its own liquid-glass worker and edge-color loop | new `BrowserWindow` |
+| On `/scan`, `/draft`, `/context`, `/review`, `/lore`, `/assemble`, `/update`, `/init` | Claude CLI subprocess spawned or reused, streams back over IPC | Electron main, `claude-code.cjs` |
+| On a review trigger | Direct HTTPS call to `api.anthropic.com` from the main process | Electron main, `main.cjs` |
 
-For a weak machine, two costs are easy to miss from the README alone. First,
-converge/auto mode means the expensive "high" tier now runs by default on
-every idle pause, not just when a user opts into "high": the old opt-in
-framing in README's bottleneck section no longer matches how often it actually
-runs. Second, opening the renderer workspace is a second Electron renderer
-process with its own copy of the glass/edge-color systems, not a lightweight
-panel.
+For a weak machine, two costs are easy to miss from README alone: **(1)** auto
+mode means the expensive high tier now runs by default on every idle pause, not
+only when a user opts into a "high" setting that no longer exists in the UI;
+**(2)** opening the renderer workspace is a second Electron renderer process
+with its own copy of the glass and edge-color systems, not a lightweight panel.
+High mode is roughly 4.8x the cost of low/fast mode on sampled chapters, per
+`scripts/test-analysis-responsiveness.ts` (low ~44ms, default ~58ms, high
+~215ms average, numbers as quoted in README and not contradicted by anything
+found here).
+
+---
+
+## 4. The three seams that matter
+
+**The analysis worker boundary**
+(`src/lib/analysis-worker-client.ts` and `src/lib/analysis-worker.ts`). Message
+in is `{ id, payload: RunChapterAnalysisInput }`; message out is
+`{ id, ok: true, result }` or `{ id, ok: false, error }`. What crosses: plain
+serializable chapter text, names, and options. What does not cross: DOM nodes,
+React state, or anything from Electron's main process (the worker only ever
+talks to the renderer that spawned it). Two independent fallbacks exist: if
+`Worker` construction itself fails, `ensureWorker()` marks the worker
+unavailable and calls `runChapterAnalysis` directly on the main thread; if a
+constructed worker's promise later rejects, `use-analysis.ts` also wraps every
+call in `.catch(() => runChapterAnalysis(input))`. There is no client-side
+timeout: if `postMessage` succeeds but the worker never replies, the calling
+promise never resolves, and recovery depends on the worker's own `onerror`
+firing rather than a deadline the client enforces.
+
+**The Electron main/renderer IPC boundary**
+`electron/preload.cjs` exposes `window.electronAPI` with channel families for
+export, menu commands, project/file IO, Claude CLI, renderer review, narrative
+LM embedding, edge-color capture, workspace window control, and custom tools.
+What crosses: only what `ipcRenderer.invoke`/`.send` can serialize (strings,
+plain objects, buffers), never live objects or functions. What cannot cross:
+direct access to Node or Electron APIs from the renderer; the renderer is
+sandboxed and every filesystem, subprocess, or network action goes through a
+named IPC channel handled in the main process. Handlers split cleanly by
+concern: `project:*` and `tool:*` in `electron/project-fs.cjs`, `claude:*` in
+`electron/claude-code.cjs`, everything else (`workspace:*`, `renderer-review`,
+`export-pdf`, `narrative-lm-*`, `edge-color:capture`, `draft-guard:update`) in
+`electron/main.cjs`.
+
+**The synchronous-detection versus asynchronous-language-model split**
+`narrative-events.ts`'s detection is fully synchronous and runs inline on the
+deferred story-graph path (a per-chapter cost, not a per-keystroke one). The LM
+only touches two things, both after synchronous detection already produced a
+result, both dynamically imported from `story-graph.ts`, and both allowed to
+fail silently in a bare `catch` without blocking the UI: salience pruning
+(`refineEventSalience`) and dedup/detail-tag enrichment
+(`enrichChapterEntryWithLM`). What can cross this seam: the already-detected
+`NarrativeEvent[]` and its clause text, going in; a pruned/annotated version,
+coming back, on its own schedule. What cannot cross: the LM is never allowed to
+relabel or retype an event (a code comment at `story-graph.ts:230` states the
+type is not overwritten), because a past version of this exact pass caused the
+truncated labels the plan document diagnoses. Renderer-review and renderer-chat
+are fully async and IPC/subprocess-based, entirely outside the analysis
+pipeline. The `narrative-lm-embed` main-process path is warmed eagerly at
+`app.whenReady()` so the first embedding call in a session is not a cold start.
 
 ---
 
 ## 5. Dead or orphaned code
 
-**`src/components/widgets/WidgetGrid.tsx`, confirmed dead, safe to delete.**
-Nothing imports it anywhere in `src/` (`grep -rln "WidgetGrid" src/` outside
-its own file returns zero results). `AnalysisPanel.tsx` builds its widget grid
-inline instead, driven by `src/lib/widget-config.ts`'s `WIDGET_REGISTRY` (18
-entries, one per user-toggleable widget) rather than by `WidgetGrid.tsx`'s
-hardcoded list. This confirms the user's own prior knowledge that it's dead.
+**`src/components/widgets/WidgetGrid.tsx`, safe to delete.** Confirmed: nothing
+outside its own file imports it (`grep -rln WidgetGrid src` returns only
+itself). `AnalysisPanel.tsx` builds the widget grid inline, driven by
+`src/lib/widget-config.ts`'s `WIDGET_REGISTRY` (18 entries), not by this file.
 
-**Four widgets are dead only because their sole importer is the dead
-`WidgetGrid.tsx`, safe to delete alongside it, or keep if you plan to revive
-the grid:** `ComparativeWidget.tsx`, `DialogueWidget.tsx`, `PacingWidget.tsx`,
-`RegisterWidget.tsx`. Each is imported by `WidgetGrid.tsx` and by nothing else
-(verified per-file with targeted greps against `src/`).
+**`ComparativeWidget.tsx`, `DialogueWidget.tsx`, `PacingWidget.tsx`,
+`RegisterWidget.tsx`, safe to delete alongside `WidgetGrid.tsx`, or keep if you
+plan to revive the grid.** Each is imported only by `WidgetGrid.tsx`, verified
+per file. (A naive substring grep for "PacingWidget" also matches
+`CrossPacingWidget.tsx`, which is a real, live, separately named widget; it is
+not evidence `PacingWidget.tsx` itself is used anywhere but `WidgetGrid.tsx`.)
 
-**Two widgets are orphaned outright, zero imports anywhere including from
-`WidgetGrid.tsx`, safe to delete:** `DeepAnalysisWidget.tsx`,
-`TextureWidget.tsx`.
+**`DeepAnalysisWidget.tsx`, `TextureWidget.tsx`, safe to delete.** Zero imports
+anywhere, including from `WidgetGrid.tsx`.
 
-**`DialRing.tsx` looks orphaned by the same test but is not: it is live via
-System 10**, the same way as `ArcRing.tsx`/`WidgetCard.tsx` below.
-`src/tools/primitives/ToolDialRing.tsx:2` imports it directly (`import {
-DialRing } from "../../components/widgets/DialRing"`), and `tool-kit.ts:30`
-re-exports `ToolDialRing`. Do not delete it.
+**`WidgetCard.tsx`, `ArcRing.tsx`, `DialRing.tsx`, keep, they are live shared
+sub-components, not top-level widgets.** They back the shell/dial of most of
+the 18 registry widgets (for example `CastWidget.tsx`, `SensoryBalanceWidget.tsx`,
+`ProseProfileWidget.tsx`) and are also re-wrapped as primitives for System 10's
+tool kit (`ToolCard.tsx` to `WidgetCard`, `ToolArcRing.tsx` to `ArcRing`,
+`ToolDialRing.tsx` to `DialRing`). `ToolWidgetSlot.tsx` is likewise live, the
+bridge into System 10, imported directly by `AnalysisPanel.tsx`.
 
-**Live, and worth knowing why they don't show up in a naive "who imports this
-widget" grep against `AnalysisPanel.tsx`:** `WidgetCard.tsx`, `ArcRing.tsx`,
-and `DialRing.tsx` are shared sub-components, not top-level widgets. Two
-things keep each of them alive. Other widgets use them as their shell/dial
-(`WidgetCard` in `CastWidget.tsx:3`, `SensoryBalanceWidget.tsx:4`,
-`ProseProfileWidget.tsx:6`, and most of the 18 registry widgets; `ArcRing`
-alongside `WidgetCard` in the same three files), and System 10's tool-kit
-wraps all three as primitives (`ToolCard.tsx:2` uses `WidgetCard`,
-`ToolArcRing.tsx:2` uses `ArcRing`, `ToolDialRing.tsx:2` uses `DialRing`) for
-dynamically-loaded custom tools. `ToolWidgetSlot.tsx` is also live, imported
-directly by `AnalysisPanel.tsx`. It's the bridge into System 10, not a dead
-widget.
+Reconciling the directory: 30 files in `src/components/widgets/`, of which
+18 are registry widgets, 1 is `PlaceholderWidget.tsx` (fallback for an
+unrecognized id), 1 is `ToolWidgetSlot.tsx`, 3 are the shared sub-components
+above, and the remaining 7 are the dead files listed here.
 
-**`WIDGET_REGISTRY` (18 ids) vs. the 30 physical files in
-`src/components/widgets/` reconciles exactly:** 18 registry widgets, plus
-`PlaceholderWidget.tsx` (fallback for an unrecognized or unconfigured id, not
-itself in the registry), plus `ToolWidgetSlot.tsx` (System 10 bridge), plus
-`WidgetCard.tsx`/`ArcRing.tsx`/`DialRing.tsx` (shared sub-components, also used
-by System 10), totals **23 legitimately live files**. The other **7** are
-dead: `WidgetGrid.tsx` itself, the four widgets whose only importer was
-`WidgetGrid.tsx` (`ComparativeWidget`, `DialogueWidget`, `PacingWidget`,
-`RegisterWidget`), and the two orphaned outright (`DeepAnalysisWidget`,
-`TextureWidget`). 23 plus 7 equals 30, matching the directory exactly.
-`language-system-audit.html`'s "29 widgets" figure appears to be counting raw
-files in the directory (minus one, perhaps `WidgetGrid.tsx` itself) rather
-than distinct live analysis widgets. Reconcile any "29" you see quoted
-elsewhere against this list rather than assuming it means 29 independently
-useful metrics.
+**`src/lib/event-detect.ts`, keep, superseded on purpose.** Imported by exactly
+`scripts/test-event-detect.ts` and `scripts/ood-event-audit.ts`, zero imports
+in `src/`. Deleting it breaks the ability to prove the new engine is better,
+which is the entire point of both suites (see System 9 and section 6).
 
-**`src/lib/event-detect.ts`, confirmed superseded-but-intentionally-kept, not
-orphaned.** Imported by exactly two files: `scripts/test-event-detect.ts` and
-`scripts/ood-event-audit.ts`, both for old-vs-new scoring. Zero imports in
-`src/`. Keep it. Deleting it breaks the ability to prove the new engine is
-better, which is the entire point of both suites.
+**`src/tools/primitives/*.tsx` (18 files) and `src/tools/tool-kit.ts`, keep,
+live for System 10 only.** If you are in `src/tools/` expecting it to back the
+18 built-in widgets, it does not; it exists solely to be composed by
+dynamically loaded, per-project custom tool code.
 
-**`src/tools/primitives/*.tsx` (18 files) and `src/tools/tool-kit.ts`, live,
-but only for System 10.** `tool-kit.ts` re-exports every primitive (`ToolCard`,
-`ToolOverlay`, `ToolButton`, etc., verified via its own export list) and is
-imported by exactly one file outside `src/tools/`:
-`src/components/widgets/ToolWidgetSlot.tsx`. If you're looking at `src/tools/`
-expecting it to back the built-in widgets, it doesn't. It exists solely to be
-composed by dynamically-loaded, per-project custom tool code (System 10).
+**Dev-only diagnostic entry points, keep.** `src/orb-dev.tsx`,
+`src/glass-shear.ts`, `src/glass-glow-bench.ts`, `src/glass-gpu-bench.ts`,
+`src/glass-verify.ts`, `src/glass-direction.ts`, `src/edge-color-dev.ts`,
+`src/lens-dev.tsx` each back a matching root-level `.html` file, used only
+through `npm run dev` or the `electron scripts/glass-*.cjs` harnesses CLAUDE.md
+requires before touching liquid glass code. `vite.config.ts` has no
+`build.rollupOptions.input` entry, so the default single-entry build only
+bundles `index.html`; none of these reach the packaged app.
 
-**The dev-only diagnostic entry points are not dead code, and not shipped in
-the built app.** `src/orb-dev.tsx`, `src/glass-shear.ts`,
-`src/glass-glow-bench.ts`, `src/glass-gpu-bench.ts`, `src/glass-verify.ts`,
-`src/glass-direction.ts`, `src/edge-color-dev.ts`, `src/lens-dev.tsx` each back
-a matching root-level `.html` file (`orb-dev.html`, `glass-shear.html`, etc.)
-used only through `npm run dev` or the dedicated `electron scripts/glass-*.cjs`
-harnesses named in CLAUDE.md. Confirmed these never reach the packaged app:
-`vite.config.ts` has no `build.rollupOptions.input` entry, so Vite's default
-single-entry build only bundles `index.html`. `dist/` (checked directly)
-contains only `index.html`, not the diagnostic pages. Keep all of these; they
-are the actual verification harnesses CLAUDE.md's "Liquid glass" section
-requires you to run before touching that code.
-
-**`src/lib/renderer-text.ts`, `src/lib/renderer-text-wall-worker.ts`,
-`src/lib/renderer-active-store.ts`, `src/components/RendererTextWall.tsx`, all
-live**, imported by `RendererPanel.tsx` and/or `AnalysisPanel.tsx` (verified by
-grep). Not orphaned despite not being mentioned in README's "Files To Start
-With" list.
-
-**`src/lib/auto-intel.ts` (36 lines) looks orphaned.** No file outside itself
-imports anything from it (`grep -rn "auto-intel" src/` outside the file itself
-returns nothing), and it exports `IntelligenceLevel`-adjacent auto-resolution
-logic that predates the converge-on-idle rebuild (System 3). Given the
-intelligence dial it supported no longer exists in the UI, this is a
-reasonable candidate for deletion, though it wasn't traced deeply enough to be
-certain nothing dynamically references it. Verify with a repo-wide search
-before removing.
+**`src/lib/auto-intel.ts` (36 lines), looks orphaned, candidate for deletion.**
+No file outside itself imports from it, and it exports intelligence-level
+auto-resolution logic that predates the auto/off rebuild described in section 1.
+Not traced deeply enough to be fully certain nothing dynamically references
+it; check with a fresh repo-wide search before removing.
 
 ---
 
-## 6. The test and verification story
+## 6. The verification story
 
-`scripts/` holds roughly 40 files. Not all of them are tests, and not all
-tests gate anything. Three real categories:
+`scripts/` holds 44 files. Not all are tests, and not all tests gate anything.
 
-**Gated accuracy suites** exit with a non-zero code if a measured accuracy
-falls under a target, and are meant to be run before/after touching the
-`src/lib/` module they cover (this is what CLAUDE.md means by "TDD accuracy
-test suites"). Confirmed gated (checked for `process.exit(1)` or
-`process.exitCode = 1` in each): `accuracy-suite.ts` (speech, per-tier ranges:
-fast 60-78%, default 75-92%, high 90-100%; CLAUDE.md's prose table simplifies
-this to flat floors, which is close but not exact), `scan-accuracy-suite.ts`,
+**Gated accuracy suites** (exit non-zero if a measured accuracy falls under a
+target; run before and after touching the `src/lib/` module they cover):
+`accuracy-suite.ts` (speech, per-tier: fast 60-78%, default 75-92%, high
+90-100%), `scan-accuracy-suite.ts` (recall >=70%, precision >=80%),
 `test-chapter-analysis.ts`, `test-repetition.ts`, `test-prose-profile.ts`,
 `test-grammar-check.ts`, `test-continuity-voice.ts`, `test-chapter-dna.ts`,
-`test-paragraph-risk.ts`, `test-chapter-diff.ts`, `test-prose-segments.ts`,
-`test-auto-format.ts`, `test-tension-scene.ts`, `test-cast-roles.ts`,
-`test-known-names.ts`, `test-chapter-observation.ts`, `test-event-detect.ts`,
-`test-liquid-glass-exact.ts`, `test-liquid-glass-fuzz.ts`,
-`test-narrative-lm.ts` (this one hard-gates on the LM backend actually
-loading, not just on accuracy; see the plan's "Embedding Seam" section), and
-three that exist, are gated, and have npm aliases in `package.json`, but have
-**no documentation anywhere** (not in README, not in CLAUDE.md's command
-table): `test-chapter-roles.ts`, `test-entity-scan.ts`, `test-local-review.ts`.
+`test-paragraph-risk.ts`, `test-chapter-diff.ts`, `test-prose-segments.ts`
+(>=95%), `test-auto-format.ts` (>=90%), `test-tension-scene.ts` (>=85%),
+`test-cast-roles.ts`, `test-known-names.ts` (100%, regression lock),
+`test-chapter-observation.ts` (100%, contract not wording),
+`test-event-detect.ts` (gated on the eight-book measurement, see System 9),
+`test-liquid-glass-exact.ts`, `test-liquid-glass-fuzz.ts`, and
+`test-narrative-lm.ts` (hard-gates on the LM backend actually loading, not just
+on accuracy). Three have npm aliases in `package.json` but no documentation in
+README or CLAUDE.md: `test-chapter-roles.ts`, `test-entity-scan.ts`,
+`test-local-review.ts`. `test-name-bucket-accuracy.ts` is also gated (three
+`process.exit(1)` calls) but has **no npm alias at all**, and its own header
+comment requires a special invocation:
+`NODE_OPTIONS="--require /tmp/stub-sharp.cjs" npx tsx
+scripts/test-name-bucket-accuracy.ts`. It is the least discoverable suite in
+the repo. `test-event-lm.ts` is gated too, and has neither an alias nor any
+mention in README, CLAUDE.md, or the plan document; it looks like an orphaned
+leftover, superseded in spirit by `test-narrative-lm.ts`.
 
-`test-name-bucket-accuracy.ts` is also gated (three `process.exit(1)` calls)
-but is the least discoverable suite in the repo: it has **no npm alias at
-all** (checked `package.json` directly; it isn't there), no README or
-CLAUDE.md mention, and its own header comment says it must be invoked with a
-special stub-injection flag, `NODE_OPTIONS="--require /tmp/stub-sharp.cjs" npx
-tsx scripts/test-name-bucket-accuracy.ts`, not a plain `tsx` run.
+**Report-only audits** (never gate on the number reported, on purpose, because
+tuning against a held-out measure would destroy the point of having it):
+`ood-language-audit.ts` and `ood-event-audit.ts`. Confirmed: neither has a
+`process.exit`/`process.exitCode` call tied to its metrics; `ood-event-audit.ts`
+does have one `process.exitCode = 1` at line 348, but it sits inside a generic
+`main().catch(e => { console.error(e); process.exitCode = 1 })` crash handler,
+not a gate on the audit's findings. `test-event-labels.ts` is report-only in
+practice too, the suite that reported "0/6 relabeled" for months while
+silently measuring nothing, per the plan document's diagnosis.
 
-`test-event-lm.ts` is gated too and has neither an npm alias nor any mention
-in README, CLAUDE.md, or the plan's file list. It appears to be an orphaned
-leftover test for the LM path, superseded in spirit by `test-narrative-lm.ts`.
-
-**Report-only audits** deliberately never gate on the number they report,
-because gating would destroy the thing that makes them useful (tuning against
-a held-out measure defeats its purpose, and CLAUDE.md says so explicitly).
-Confirmed: `ood-language-audit.ts` and `ood-event-audit.ts` have zero
-`process.exit` calls tied to their metrics (only a crash handler).
-`test-event-labels.ts` is also report-only/legacy in practice. It's the suite
-that reported "0/6 relabeled" for months while silently measuring nothing, per
-the plan's diagnosis.
-
-**Perf/bench, not accuracy:** `test-analysis-responsiveness.ts` (the numbers
-README quotes directly in System 3), `test-edge-color-perf.ts` (named
-RED/GREEN gates, still a pass/fail exit code, but timing-based not
-accuracy-based), `glass-gpu-bench.cjs`/`glass-glow-bench.cjs` (measurement
-only, need a real GPU and a running dev server, exactly as CLAUDE.md
-describes), `glass-pixel-diff.cjs` (a real green/red gate, but its baseline is
-a saved *screenshot*, distinct from `liquid-glass-baseline.ts`'s frozen *math*
-oracle used by the exact/fuzz suites; easy to conflate the two "baselines,"
-they check different things), and `glass-app-profile.cjs` (pure profiling, not
-pass/fail).
+**Perf and bench, not accuracy:** `test-analysis-responsiveness.ts` (the
+numbers quoted in section 3), `test-edge-color-perf.ts` (named RED/GREEN
+gates, timing-based), `glass-gpu-bench.cjs`/`glass-glow-bench.cjs`
+(measurement only, need a real GPU and a running dev server),
+`glass-pixel-diff.cjs` (a real pass/fail gate, but its baseline is a saved
+screenshot, distinct from `liquid-glass-baseline.ts`'s frozen math oracle used
+by the exact/fuzz suites), and `glass-app-profile.cjs` (pure profiling).
 
 **One-off tools, not tests:** `print-chapter.ts`, `glass-shear.cjs` (manual
 diagnostics), `lm-node-backend.ts` and `liquid-glass-baseline.ts` (helper
-modules imported by other suites, never run standalone), `export-orb-svg.ts`
-(build tool for the app icon), and three `.mjs` files this document's earlier
-file listing missed entirely because it only searched for
-`.ts`/`.tsx`/`.cjs`/`.js`: `scripts/capture-shots.mjs` ("the product shots the
-marketing site uses"), `scripts/demo-manuscript.mjs` (synthetic manuscript
-"written for the capture, not for the reader," feeds `capture-shots.mjs`), and
-`scripts/generate-license-code.mjs` (Pro license-code generator, pairs with
-`src/lib/license.ts`). None of these three have npm aliases or any mention in
-README or CLAUDE.md.
+modules imported by other suites), `export-orb-svg.ts` (app icon build tool),
+`import-gutenberg.ts` (built the eight-book corpus under
+`scripts/fixtures/corpus/`), and three `.mjs` files with no npm alias or doc
+mention: `capture-shots.mjs` (product shots), `demo-manuscript.mjs` (synthetic
+manuscript feeding the capture script), `generate-license-code.mjs` (pairs with
+`src/lib/license.ts`).
 
-**A naming check worth recording:** `npm run audit:ood` maps to
-`ood-language-audit.ts` and `npm run audit:ood-events` maps to
-`ood-event-audit.ts`. These do match despite the filenames being easy to
-transpose from memory. The real doc/code gap isn't naming drift, it's the
-gated suites above with no prose documentation at all.
+---
 
-**`language-system-audit.html`'s provenance.** This is a committed, static
-HTML file at the repo root (not auto-generated; grepping for its filename
-across `scripts/` and `src/` turns up nothing outside the file itself), dated
-29 July 2026, one day before the git commit (`6777ee0`, 30 July) that fixed
-the exact defect it diagnosed (the world-data.ts name-ranking comparator,
-System 4 above). It reads as a hand/agent-authored audit deliverable that
-motivated that fix, not a build artifact. Treat it as a historical diagnostic
-record, not live documentation. Its headline numbers (52.9% unattributed
-dialogue, 0% cast recall) describe a bug that no longer exists in the tree,
-though the report itself is still useful for how it found the bug
-(whole-manuscript, label-free auditing against two full novels, contrasted
-with curated-fixture suites).
+## 7. If you are changing X, read Y first
+
+| Changing... | Read first |
+|---|---|
+| Anything in `src/App.tsx` | Section 1 above (the five timers), so you know which debounce your change lands inside |
+| `speech-detect.ts` or `action-detect.ts` | `CLAUDE.md`'s test table; run `accuracy-suite.ts` before and after |
+| `world-data.ts` extraction or ranking | `git show bc2c826` (the position/lowercase-form fix), then `npm run audit:ood` |
+| `narrative-events.ts` | The file's own header comment, then `plans/narrative-event-engine.md` for the design rationale, then `scripts/test-event-detect.ts`'s header for the *current* numbers (the plan document is one generation behind the code) |
+| `story-graph.ts` | System 5 above, specifically the `refineEventSalience` dynamic import that neither README nor the plan document mention |
+| `chapter-analysis.ts` tension curve | The "Tension Curve" note in README's System 3 and `chapter-observation.ts`'s `maxTension >= 0.5` gate; never invert `tensionCurve` |
+| `liquid-glass-filter.ts` or `liquid-glass-worker.ts` | CLAUDE.md's "Liquid glass" section in full before touching anything; run all three harnesses (`test:glass-exact`, `test:glass-fuzz`, `test:glass-pixels`) |
+| Anything in `electron/main.cjs` or `preload.cjs` | Section 4 above (the IPC boundary), and check whether a change needs to reach the workspace window too, since it loads the same bundle |
+| The renderer chat slash commands | CLAUDE.md's decision table, and `RendererPanel.tsx:118-124` for the actual command-to-pipeline map |
+| Widgets in `src/components/widgets/` | Section 5 above before assuming a file is dead or safe to extend; check `widget-config.ts`'s `WIDGET_REGISTRY` first |
+| A test suite's target numbers | CLAUDE.md's rule: raise targets as the engine improves, never lower them to turn a red suite green without recording why at the site |

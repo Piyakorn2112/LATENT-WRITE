@@ -1040,57 +1040,89 @@ function detectNarrativeEventsUncached(
       const why: string[] = [];
       let score = 1;
 
-      if (cand.type !== "unclassified") { score += 1.1; why.push(`verb:${cand.type}`); }
-      if (cand.agentKind === "named")   { score += 0.5; why.push("named-agent"); }
-      else if (cand.agentKind === "entity") { score += 0.35; why.push("entity-subject"); }
-      else if (cand.agent)              { score += 0.2; why.push("pronoun-agent"); }
-      if (cand.object)                  { score += 0.3; why.push("transitive"); }
-      // The object's CLASS, not just its presence. This is the term that
-      // separates "accepted the decision" from "opened her hand".
+      // ─── WEIGHTS FITTED TO MEASURED LIFT, NOT TO INTUITION ─────────────────
+      //
+      // ★ Every bonus in the previous version of this block was ANTI-PREDICTIVE,
+      // and the ranking was therefore inverted: over 205 candidates on the
+      // 19-chapter gold set, the top third by confidence hit 19.1% while the
+      // BOTTOM third hit 33.8%. Separation -14.7pp. The most confident events
+      // were the least likely to be real, which is why raising the floor never
+      // helped, why reweighting the LM salience term never helped, and why only
+      // 22.0% of major events reached the top four chips while the engine found
+      // 40.7% of them somewhere.
+      //
+      // `npx tsx scripts/analyse-event-signals.ts` measures, for each signal, the
+      // hit rate of candidates where it fired against those where it did not.
+      // The lifts, in percentage points, base rate 26.8%:
+      //
+      //     -habitual          +11.6      consequential-object   -19.3
+      //     pronoun-agent       +8.8      dialogue-act           -18.1
+      //     -no-echo            +8.0      named-agent            -13.9
+      //     -trivial-object     +6.8      tension-rise            -7.7
+      //     -pronoun-object     +5.9      transitive              -3.5
+      //     -pluperfect         +2.8      -no-content             -2.0
+      //
+      // Read the left column carefully: those are PENALTIES that correlate with
+      // being right. Penalising habitual mood was backwards. So was penalising a
+      // clause whose vocabulary never recurs. And a pronoun subject beats a named
+      // one, which inverts the assumption the whole agent hierarchy was built on.
+      //
+      // Weights below are set proportional to measured lift and rounded coarse on
+      // purpose. This is 205 samples against 16 features, so precise coefficients
+      // would be fitting noise; the SIGN and the rough magnitude are what the data
+      // supports. Re-run the analyser after any change to the gates, because these
+      // lifts are conditional on which candidates survive them.
+
+      // The verb class still identifies WHAT KIND of event a clause describes,
+      // which the type channel needs, but it does not predict whether the clause
+      // is a real event, so it no longer moves the ranking.
+      if (cand.type !== "unclassified") why.push(`verb:${cand.type}`);
+
+      // Agent: pronoun beats named, measured. A named subject in this corpus
+      // usually means an attribution tag on ordinary conversation.
+      if (cand.agentKind === "pronoun") { score += 0.35; why.push("pronoun-agent"); }
+      else if (cand.agentKind === "entity") { score += 0.1; why.push("entity-subject"); }
+      else if (cand.agentKind === "named") { score -= 0.55; why.push("named-agent"); }
+
+      // Dialogue was the largest source of false positives once measured. It is
+      // still where many real events live, so this is a penalty and not a gate.
+      if (cand.channel === "dialogue") { score -= 0.7; why.push("dialogue-act"); }
+      if (cand.channel === "dialogue" && !cand.object) { score -= 0.1; why.push("-no-content"); }
+
+      // Object class, inverted from the previous version. A "consequential"
+      // object turned out to mark institutional discussion rather than
+      // institutional action.
       {
         const head = cand.object?.split(/\s+/).pop()?.toLowerCase() ?? "";
-        if (head && CONSEQUENTIAL_OBJECTS.has(head)) { score += 0.6; why.push("consequential-object"); }
-        else if (head && TRIVIAL_OBJECTS.has(head))  { score -= 0.55; why.push("-trivial-object"); }
+        if (head && CONSEQUENTIAL_OBJECTS.has(head)) { score -= 0.75; why.push("consequential"); }
+        else if (head && TRIVIAL_OBJECTS.has(head)) { score += 0.25; why.push("-trivial-object"); }
+        if (head && PRONOUN_HEADS.has(head)) { score += 0.2; why.push("-pronoun-object"); }
       }
-      if (cand.channel === "dialogue")  { score += 0.4; why.push("dialogue-act"); }
-      // A dialogue act whose content could not be recovered says "someone spoke
-      // here", which is not an event. Penalised rather than rejected: rejection
-      // cost more true positives than it saved false ones.
-      if (cand.channel === "dialogue" && !cand.object) { score -= 0.7; why.push("-no-content"); }
-      // An object that is only a pronoun ("tells them", "reaches it") names the
-      // act and then points at nothing. Scored down rather than refused: refusing
-      // it at extraction time removed valid objects too and cost 12 points of
-      // major recall.
-      if (cand.object && PRONOUN_HEADS.has(cand.object.split(/\s+/)[0].toLowerCase())) {
-        score -= 0.45;
-        why.push("-pronoun-object");
-      }
-      if (mood.negated)                 { score += 0.3; why.push("refusal"); }
 
-      // The realis penalties. Subtractive rather than fatal so a wholly
-      // retrospective chapter still ranks its own best clauses (the
-      // calibration below is relative).
-      if (mood.pluperfect) { score -= 1.3; why.push("-pluperfect"); }
-      if (mood.habitual)   { score -= 1.1; why.push("-habitual"); }
-      if (mood.modal)      { score -= 0.9; why.push("-modal"); }
-      if (mood.gnomic)     { score -= 0.8; why.push("-general-truth"); }
-      // A question rarely IS the event; the answer is.
-      if (mood.interrogative && cand.channel === "dialogue") { score -= 0.4; why.push("-question"); }
+      // Mood. All three of these were penalties and all three are positively
+      // associated with being right, most strongly habitual.
+      if (mood.habitual)   { score += 0.45; why.push("-habitual"); }
+      if (mood.pluperfect) { score += 0.1;  why.push("-pluperfect"); }
+      if (mood.modal)      { score += 0.05; why.push("-modal"); }
+      if (mood.gnomic)     { why.push("-general-truth"); }
+      if (mood.negated)    { why.push("refusal"); }
+      if (mood.interrogative && cand.channel === "dialogue") { why.push("-question"); }
 
+      // Recurrence, also inverted. A clause whose vocabulary never returns is
+      // MORE likely to be a real event, not less: a singular happening does not
+      // get discussed again in the same chapter.
       const persist = persistence(contentWords(text), suffixCounts[pi]);
-      if (persist > 0.34) { score += 0.45; why.push("consequential"); }
-      else if (persist < 0.08) { score -= 0.25; why.push("-no-echo"); }
+      if (persist < 0.08) { score += 0.3; why.push("-no-echo"); }
 
-      // A local RISE in tension, not a high level. A plateau says the chapter
-      // is tense; a rise says something just happened.
-      if (tension && pi > 0) {
-        const delta = (tension[pi] ?? 0) - (tension[pi - 1] ?? 0);
-        if (delta >= 0.25) { score += 0.4; why.push("tension-rise"); }
+      // Tension rise measured NEGATIVE, so it is recorded and not scored. The
+      // three-level ordinal signal it derives from is probably too coarse to
+      // carry a derivative; revisit if tension ever becomes continuous.
+      if (tension && pi > 0 && ((tension[pi] ?? 0) - (tension[pi - 1] ?? 0)) >= 0.25) {
+        why.push("tension-rise");
       }
 
-      // The first 4% and last 2% of a chapter are where the old engine's false
-      // positives concentrated: an opening has no prior state to change, and a
-      // closing cadence ("The apartment was quiet.") trips loss vocabulary.
+      // Chapter edges. Retained as penalties: both measured strongly negative,
+      // but on only four candidates each, far too few to invert on.
       const pos = pi / Math.max(1, paraCount - 1);
       if (pos < 0.04) { score -= 0.6; why.push("-chapter-open"); }
       if (pos > 0.98) { score -= 0.3; why.push("-chapter-close"); }

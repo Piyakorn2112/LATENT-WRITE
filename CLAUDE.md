@@ -45,8 +45,8 @@ do not extend it.
 
 Two suites, and they do different jobs:
 
-- `test:event-detect` scores 22 hand-annotated events across 5 chapters with **±1
-  paragraph tolerance** and gates on precision ≥50% and major-event recall ≥55%.
+- `test:event-detect` scores **103 hand-annotated events across 19 chapters of
+  EIGHT books by seven authors** with ±1 paragraph tolerance.
   This is what you tune against. `--detail` prints every miss and false positive;
   `FLOOR=0.4` sweeps the operating point.
 - `audit:ood-events` reports label-free health over both whole manuscripts, split
@@ -68,8 +68,23 @@ Three rules that are easy to break by "simplifying":
    fragments came from. It does dedup and detail tags only.
 
 Type accuracy is reported, not gated: a trained-literary-scholar event typology
-reached Krippendorff's α of only 0.57–0.75 on a coarser scheme than this one, so
+reached Krippendorff's α of only 0.57-0.75 on a coarser scheme than this one, so
 moderate type agreement is a property of the domain, not a bug.
+
+**The number that describes the PRODUCT is precision@4**, because the timeline
+renders four chips. Current, on the eight-book set: precision@4 45.9%, major
+events reaching the top four 25.4%, major events found anywhere 39.0%, overall
+precision 26.6%. Quote precision@4, and never quote a figure without saying which
+gold set produced it. Every smaller set was flattering: 1 author / 22 events gave
+precision 57.1%, and it meant nothing.
+
+**Run `npm run analyse:event-signals` before touching any scoring weight.** It
+measures, per signal, the hit rate of candidates where that signal fired against
+those where it did not. That measurement found every bonus in the scorer to be
+ANTI-predictive and the ranking inverted: top third by confidence hit 19.1%,
+bottom third 33.8%. Weights are now fitted to measured lift, and the lifts are
+conditional on which candidates survive the gates, so re-run it after any gate
+change.
 
 **Known weakness, deliberately left:** `action` is 54.0% of events on the held-out
 manuscript. It is the widest verb class and a domestic novel is made of people
