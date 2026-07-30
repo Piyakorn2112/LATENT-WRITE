@@ -15,14 +15,31 @@
 
 import { readFile } from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
 import { parseNovel } from "../src/lib/parser";
 
 const NOVELS_DIR = "/Users/piyakorn/Desktop/Testwriting/novel-reader/public/novels";
+const CORPUS_DIR = path.resolve(fileURLToPath(new URL("./fixtures/corpus/", import.meta.url)));
 
+/**
+ * The in-house manuscripts, plus three published novels by other authors.
+ *
+ * The Gutenberg imports exist because the whole gold set was one author's voice,
+ * and a detector measured only on the voice it was built against cannot be said
+ * to work. See scripts/import-gutenberg.ts for the licence reasoning, which is
+ * the reason this route was chosen over BookSum and Shmoop.
+ */
 export const BOOKS: Record<string, string> = {
   "hollow-iris": "hollow-iris.txt",
   "root-crown": "root-crown.txt",
   sample: "sample-novel.txt",
+};
+
+/** Imported public-domain books, resolved from the committed corpus directory. */
+export const CORPUS_BOOKS: Record<string, string> = {
+  sherlock: "sherlock.txt",
+  pride: "pride.txt",
+  worlds: "worlds.txt",
 };
 
 /** The engine's paragraph split. Single source of truth for the harness. */
@@ -34,8 +51,14 @@ export function splitParagraphs(content: string): string[] {
 }
 
 export async function loadBook(key: string) {
+  if (CORPUS_BOOKS[key]) {
+    return parseNovel(await readFile(path.join(CORPUS_DIR, CORPUS_BOOKS[key]), "utf8"));
+  }
   const file = BOOKS[key];
-  if (!file) throw new Error(`unknown book "${key}" — one of: ${Object.keys(BOOKS).join(", ")}`);
+  if (!file) {
+    const all = [...Object.keys(BOOKS), ...Object.keys(CORPUS_BOOKS)].join(", ");
+    throw new Error(`unknown book "${key}" — one of: ${all}`);
+  }
   return parseNovel(await readFile(path.join(NOVELS_DIR, file), "utf8"));
 }
 

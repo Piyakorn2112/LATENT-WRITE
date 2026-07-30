@@ -62,6 +62,8 @@ import { resolveKnownNames } from "../src/lib/world-data";
 import { parseNovel } from "../src/lib/parser";
 import type { Novel } from "../src/types";
 
+import { loadBook } from "./print-chapter";
+
 const NOVELS = "/Users/piyakorn/Desktop/Testwriting/novel-reader/public/novels";
 const STRIDE = Number(process.env.STRIDE ?? 3);
 const LIMIT = Number(process.env.LIMIT ?? 60);
@@ -79,13 +81,31 @@ interface Row {
 
 interface Corpus {
   label: string;
-  file: string;
-  distribution: "in-distribution" | "held-out";
+  /** Key for scripts/print-chapter.ts's loader. */
+  key: string;
+  distribution: "in-distribution" | "held-out" | "other-author";
 }
 
+/**
+ * ★ The last three are PUBLISHED NOVELS BY OTHER AUTHORS, and they are the point.
+ *
+ * Both in-house manuscripts share one voice, so a detector that only works on
+ * that voice would score identically on both and look general. These three do not
+ * share it, or each other's: Austen's social comedy where events happen inside
+ * dialogue, Wells's first-person disaster action, and Doyle's plot-driven
+ * detective stories. If the engine has quietly learned this author's habits, the
+ * "other-author" columns are where that shows.
+ *
+ * Licence: Gutenberg text with the trademark boilerplate stripped is unrestricted.
+ * See scripts/import-gutenberg.ts, which explains why this route was chosen over
+ * BookSum and Shmoop (their summaries are research-only).
+ */
 const CORPORA: Corpus[] = [
-  { label: "Hollow Iris", file: "hollow-iris.txt", distribution: "in-distribution" },
-  { label: "The Root Crown", file: "root-crown.txt", distribution: "held-out" },
+  { label: "Hollow Iris", key: "hollow-iris", distribution: "in-distribution" },
+  { label: "The Root Crown", key: "root-crown", distribution: "held-out" },
+  { label: "Pride & Prejudice", key: "pride", distribution: "other-author" },
+  { label: "War of the Worlds", key: "worlds", distribution: "other-author" },
+  { label: "Sherlock Holmes", key: "sherlock", distribution: "other-author" },
 ];
 
 function splitParagraphs(content: string): string[] {
@@ -93,7 +113,7 @@ function splitParagraphs(content: string): string[] {
 }
 
 async function collect(corpus: Corpus, engine: "old" | "new"): Promise<Row[]> {
-  const novel: Novel = parseNovel(await readFile(path.join(NOVELS, corpus.file), "utf8"));
+  const novel: Novel = await loadBook(corpus.key);
   const knownNames = resolveKnownNames(novel);
   const rows: Row[] = [];
   const chapters = novel.chapters.filter((_, i) => i % STRIDE === 0).slice(0, LIMIT);
@@ -264,9 +284,11 @@ const num = (x: number, d = 2) => x.toFixed(d).padStart(7);
 function print(engineName: string, byCorpus: Array<{ corpus: Corpus; report: Report }>) {
   console.log(`\n╔══ ${engineName} ${"═".repeat(Math.max(0, 56 - engineName.length))}`);
   const [a, b] = byCorpus;
-  const head = byCorpus.map(({ corpus }) => corpus.label.padStart(15)).join("");
+  const head = byCorpus.map(({ corpus }) => corpus.label.slice(0, 14).padStart(15)).join("");
+  const tag = (d: Corpus["distribution"]) =>
+    (d === "held-out" ? "(held out)" : d === "other-author" ? "(other author)" : "(in-distrib)").padStart(15);
   console.log(`  ${"".padEnd(34)}${head}`);
-  console.log(`  ${"".padEnd(34)}${byCorpus.map(({ corpus }) => (corpus.distribution === "held-out" ? "     (HELD OUT)" : "  (in-distrib)")).join("")}`);
+  console.log(`  ${"".padEnd(34)}${byCorpus.map(({ corpus }) => tag(corpus.distribution)).join("")}`);
   const line = (label: string, fmt: (r: Report) => string) =>
     console.log(`  ${label.padEnd(34)}${byCorpus.map(({ report }) => fmt(report).padStart(15)).join("")}`);
 
