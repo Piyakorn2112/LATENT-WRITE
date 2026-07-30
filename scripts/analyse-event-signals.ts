@@ -127,6 +127,34 @@ async function main() {
     );
   }
 
+  // ── Which signals predict hitting a MAJOR event specifically?
+  //
+  // A different question from the one above, and the one that matters most for
+  // the product: the engine finds 39.0% of major events but only 25.4% of them
+  // reach the top four chips. Closing that needs a signal that separates major
+  // from minor, not just real from false.
+  console.log("\nsignal                    fires   MAJOR|fired  MAJOR|absent    LIFT");
+  console.log("─".repeat(70));
+  const majRows: Array<{ name: string; lift: number; fired: number; withRate: number }> = [];
+  for (const sig of all) {
+    const withSig = samples.filter((s) => s.signals.some((w) => w.split(":")[0] === sig));
+    const without = samples.filter((s) => !s.signals.some((w) => w.split(":")[0] === sig));
+    if (withSig.length < 4 || without.length < 4) continue;
+    const a = withSig.filter((s) => s.hitMajor).length / withSig.length;
+    const b = without.filter((s) => s.hitMajor).length / without.length;
+    majRows.push({ name: sig, lift: a - b, fired: withSig.length, withRate: a });
+  }
+  majRows.sort((x, y) => y.lift - x.lift);
+  for (const r of majRows) {
+    const flag = r.lift > 0.08 ? "  ← ranks MAJORS up" : r.lift < -0.05 ? "  ← ranks MAJORS down" : "";
+    console.log(
+      `${r.name.padEnd(24)} ${String(r.fired).padStart(5)}   ${(r.withRate * 100).toFixed(1).padStart(6)}%   ` +
+      `${(((r.withRate - r.lift)) * 100).toFixed(1).padStart(6)}%   ${(r.lift * 100).toFixed(1).padStart(6)}pp${flag}`,
+    );
+  }
+  const majBase = samples.filter((s) => s.hitMajor).length / total;
+  console.log(`base MAJOR hit rate: ${(majBase * 100).toFixed(1)}%`);
+
   // Does confidence rank? Compared WITHIN each chapter, because confidence is a
   // z-score calibrated inside the chapter and is therefore not comparable across
   // chapters at all. An earlier version of this check pooled every candidate
