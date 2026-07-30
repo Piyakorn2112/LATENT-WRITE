@@ -173,6 +173,10 @@ const SPEECH_VERBS = [
 ];
 
 const SPEECH_VERB_PAT = `(?:${SPEECH_VERBS.join('|')})`;
+/** Honorifics that carry an abbreviating period, which reads as a sentence end. */
+const HONORIFIC_PAT = "(?:Mr|Mrs|Ms|Miss|Dr|Prof|Rev|St|Capt|Col|Sgt|Lt|Gen|Sir|Lady|Lord|Madam|Master|Mister)";
+
+
 // (?<!to ) excludes bare infinitives like "to ask", "to say" which are NOT speech attribution
 const SPEECH_VERB_RE  = new RegExp(`(?<!to )\\b${SPEECH_VERB_PAT}\\b`, 'i');
 
@@ -302,7 +306,16 @@ class NameRegexCache {
   getDirectInvRe(name: string): RegExp {
     let re = this.directInvRe.get(name);
     if (!re) {
-      re = new RegExp(`\\b${SPEECH_VERB_PAT}\\b[^.!?\\u201c\\u201d\\u201e\\u2018\\u2019"']{0,70}\\b${esc(name)}\\b(?!['\\u2018\\u2019]s)`, 'i');
+      // ★ The gap excludes '.' so the search cannot cross a sentence boundary —
+      // correct, and it also broke every "said Mr. Wilson." in the corpus, because
+      // the abbreviating period in the honorific looks exactly like a full stop.
+      // Measured at scale by test:attribution-corpus: 243 honorific tags, 52.3%
+      // confidently WRONG, failing across pride, sherlock, dracula, carol,
+      // expectations, gatsby, anne and awakening.
+      //
+      // An OPTIONAL honorific is now allowed to sit immediately before the name,
+      // with its period, without opening the gap to sentence boundaries generally.
+      re = new RegExp(`\\b${SPEECH_VERB_PAT}\\b[^.!?\\u201c\\u201d\\u201e\\u2018\\u2019"']{0,70}(?:\\b${HONORIFIC_PAT}\\.?\\s+)?\\b${esc(name)}\\b(?!['\\u2018\\u2019]s)`, 'i');
       this.directInvRe.set(name, re);
     }
     return re;
