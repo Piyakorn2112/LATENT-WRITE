@@ -1490,6 +1490,32 @@ function findAttribution(
     };
   }
 
+  // ★ TWO TARGETED FIXES TRIED HERE AND BOTH REJECTED — read before trying a third.
+  //
+  // HIGH mode is the WORST of the three on definite descriptions (33 wrong against
+  // fast's 16 on the 16-book corpus) while being 8.9x slower, and its descriptive
+  // RECALL is identical to fast's — it converts unattributed into wrong, not into
+  // correct. Two explanations were tested:
+  //
+  //   1. Generic speakers resolve after known names inside `findDirectName`, so a
+  //      distant name beats an adjacent tag. Putting adjacent generics first LOST
+  //      in every mode (176 -> 173 correct) because it fires on "the doctor said"
+  //      where the doctor IS a named character.
+  //   2. Step 4 below reaches back six paragraphs in high mode, so a local
+  //      descriptive tag should block it. Guarding Step 4 on a local generic match
+  //      left HIGH COMPLETELY UNCHANGED — the errors never reach Step 4 at all.
+  //
+  // Together those RULE OUT both the ordering and the fallback. What is left is
+  // the only remaining difference: high builds `before`/`after` from extCtxDepth 6
+  // where fast uses 1, so the SAME 120-char matcher slides over six paragraphs of
+  // text and finds names that are not in this paragraph. The window feeding the
+  // direct matcher is the mechanism, not anything downstream of it.
+  //
+  // That machinery is also what earns high its 97% on accuracy-suite's hard
+  // cases, so narrowing it wholesale would trade the mode's reason to exist. A
+  // real fix has to make the matcher aware of WHICH PARAGRAPH a name came from,
+  // and prefer same-paragraph evidence — a structural change, not a parameter.
+
   // ── Step 4: extended context (previous paragraphs) ──
   if (extCtx) {
     const extName = findDirectName(extCtx, knownNames, cache);
