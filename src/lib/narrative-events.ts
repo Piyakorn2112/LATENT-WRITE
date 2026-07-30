@@ -864,6 +864,33 @@ const NP_BOUNDARY = new Set([
   "my", "our", "your", "some", "any", "no",
 ]);
 
+/**
+ * Words that open a sentence with a capital and are NEVER a character.
+ *
+ * The unlisted-proper-noun fallback below takes a capitalised sentence-initial
+ * word as an agent when it RECURS, which is how a character is recognised before
+ * the manuscript has been scanned. Quantifiers and discourse openers recur more
+ * than any real name does, so they sailed through it: The Great Gatsby produced
+ * "Some buys dozen volumes", "Some tells how I" and "You stops" as timeline
+ * chips. This is the single largest source of nonsense labels in the whole
+ * corpus, and it is worst exactly where the engine is weakest — modern prose
+ * that opens sentences with these words far more often than Victorian prose does.
+ */
+const NEVER_A_NAME = new Set([
+  "some", "any", "many", "most", "much", "more", "few", "several", "each",
+  "every", "all", "none", "both", "either", "neither", "another", "one", "two",
+  "you", "your", "yours", "they", "them", "their", "we", "our", "his", "her",
+  "him", "hers", "its", "this", "that", "these", "those", "there", "here",
+  "then", "now", "once", "when", "while", "after", "before", "since", "until",
+  "yes", "not", "nor", "and", "but", "for", "the", "she", "was", "were",
+  "well", "why", "how", "what", "who", "whom", "whose", "where", "which",
+  "oh", "ah", "still", "even", "just", "only", "perhaps", "maybe", "indeed",
+  "already", "always", "never", "often", "sometimes", "suddenly", "finally",
+  "instead", "besides", "however", "therefore", "meanwhile", "nevertheless",
+  "everyone", "everybody", "someone", "somebody", "anyone", "anybody",
+  "nobody", "nothing", "something", "anything", "everything",
+]);
+
 /** Heads that are pure abstraction and make a useless label subject. */
 const WEAK_HEADS = new Set([
   "thing", "things", "way", "ways", "moment", "moments", "time", "times",
@@ -1004,7 +1031,7 @@ function findAgent(
   // after the entity scan has run is an event engine that does not work on a
   // new project.
   const cap = clause.match(/^\s*([A-Z][a-z']{2,})\b/);
-  if (cap) {
+  if (cap && !NEVER_A_NAME.has(cap[1].toLowerCase())) {
     const lower = cap[1].toLowerCase();
     // It must RECUR. A character comes back; a place named once in passing does
     // not, and admitting the singletons cost real precision on the gold set
@@ -1748,7 +1775,14 @@ function narrationCandidate(
   // names something. "Helia writes audit report" survives; "Mira opens hand"
   // does not, because a body part is not a thing acted upon in any sense a
   // reader would report.
-  const object = findObject(words.slice(verb.at + 1).join(" "));
+  let object = findObject(words.slice(verb.at + 1).join(" "));
+  // A label whose object repeats its own agent says nothing: "Tom commits Tom",
+  // "Tom accuses Tom". It happens when the attribution name also appears inside
+  // the utterance, which modern dialogue does constantly. Drop the object rather
+  // than the candidate — the act is still real, only the content is unusable.
+  if (object && agent.name && object.toLowerCase().includes(agent.name.toLowerCase())) {
+    object = null;
+  }
 
   // ── A physical act is not an event unless it acts on something that matters.
   //
@@ -1878,6 +1912,11 @@ function dialogueCandidate(
     (properNoun && !SENTENCE_OPENERS.has(properNoun[0].trim().split(/\s+/)[0].toLowerCase())
       ? properNoun[0].replace(/^(?:Miss|Mrs|Mr|Lady|Lord|Sir|Doctor|Dr)\.?\s+/, "").trim()
       : null) ?? findObject(content.length >= 4 ? content : inner);
+  // NOTE: dropping an object that merely REPEATS the speaker ("Tom accuses Tom")
+  // was tried here and cost 0.5 points of precision@3 without moving Gatsby at
+  // all. The echo is ugly in a label but it is apparently carrying signal — a
+  // speaker named inside their own utterance is often being addressed BY someone,
+  // which is a real cue. Left in place deliberately.
 
   // A speech act with no recoverable content ("Edis tells", "Qesh tells", and on
   // Austen "Elizabeth tells", "Bingley tells", "Lady Catherine tells") points at
