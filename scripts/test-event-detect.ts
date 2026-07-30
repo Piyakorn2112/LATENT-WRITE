@@ -115,10 +115,10 @@ const TARGETS = {
    * numbers were gated, which meant the suite could stay green through a change
    * that made the visible output worse.
    */
-  precisionAtBudget: 0.44,
+  precisionAtBudget: 0.46,
   /** Of the events a chapter summary would mention, how many are actually SHOWN.
    *  The weakest number here by a distance, and the one the goal is about. */
-  majorInBudget: 0.20,
+  majorInBudget: 0.21,
   /** Of the events a chapter summary would mention, how many are found at all. */
   majorRecall: 0.40,
   /** Of everything emitted, how much corresponds to a real event. Still the

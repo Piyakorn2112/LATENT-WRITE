@@ -93,6 +93,30 @@ const STOPLIST = new Set([
 // starts in every novel but are never characters, places, or factions.
 // This O(1) lookup removes the most frequent false-positive classes before
 // the more expensive IDF scoring stage.
+/**
+ * ★ A BARE HONORIFIC IS NEVER A CHARACTER.
+ *
+ * Measured across the 16-book corpus by `test:cast-corpus`: the token "Mrs"
+ * alone reaches the top-30 extracted cast in NINE of sixteen books. It then wins
+ * attribution matches outright — `"Mrs. Joe" -> speaker "Mrs"` — which is worse
+ * than failing to attribute, because a confidently wrong speaker propagates into
+ * event labels and the cast list a writer is shown.
+ *
+ * This is one of the two mechanisms behind honorific attribution being 52.3%
+ * WRONG on 243 corpus-wide tags (`test:attribution-corpus`). The other is the
+ * period in "Mr." breaking the attribution regex, which is a separate fix.
+ *
+ * Kept separate from COMMON_CAPITALIZED because these are not common words that
+ * happen to be capitalised — they are name FRAGMENTS, and the right handling for
+ * a fragment is to fuse it with what follows, not to admit it alone.
+ */
+const BARE_HONORIFIC: ReadonlySet<string> = new Set([
+  "mr", "mrs", "ms", "miss", "dr", "prof", "professor", "sir", "madam", "madame",
+  "lord", "lady", "master", "mistress", "rev", "reverend", "capt", "captain",
+  "col", "colonel", "gen", "general", "lt", "lieutenant", "sgt", "sergeant",
+  "st", "saint", "aunt", "uncle", "grandma", "grandpa", "papa", "mama",
+]);
+
 const COMMON_CAPITALIZED: ReadonlySet<string> = new Set([
   // Sentence-opening adverbs. A CLOSED class, unlike the open set of nouns that
   // can start a sentence, so listing them is safe where listing nouns was not.
@@ -254,7 +278,7 @@ function shouldRejectCandidateName(name: string): boolean {
   const words = name.split(/\s+/).filter(Boolean);
   const first = words[0];
   if (!first || name.length < 3) return true;
-  if (STOPLIST.has(first) || COMMON_CAPITALIZED.has(first)) {
+  if (STOPLIST.has(first) || COMMON_CAPITALIZED.has(first) || BARE_HONORIFIC.has(first)) {
     return !allowLeadingArticle(words);
   }
   if (words.length > 1) {
@@ -654,7 +678,15 @@ function autoExtractKnownNamesFast(novel: Novel, minFreq = 2, max = 30): string[
   // Longest-first ordering for regex alternation is buildEntityPattern's
   // job — it re-sorts internally.
   return [...freq.entries()]
-    .filter(([name, n]) => n >= minFreq && computeIDF(name) >= MIN_IDF_SOLO)
+    // ★ A BARE HONORIFIC IS NEVER A CHARACTER. "Mrs" alone reached the top-30
+    // extracted cast in NINE of sixteen books, measured by test:cast-corpus, and
+    // then WON attribution matches outright — `"Mrs. Joe" -> speaker "Mrs"`.
+    // A confidently wrong speaker is worse than none: it propagates into event
+    // labels and into the cast list a writer is shown.
+    .filter(([name, n]) =>
+      n >= minFreq
+      && computeIDF(name) >= MIN_IDF_SOLO
+      && !BARE_HONORIFIC.has(name.toLowerCase().replace(/\.$/, "")))
     .sort((a, b) => b[1] - a[1] || b[0].length - a[0].length)
     .slice(0, max)
     .map(([name]) => name);
