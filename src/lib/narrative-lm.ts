@@ -971,11 +971,15 @@ export async function chapterCentrality(
   if (sample.length < 3) return clauses.map(() => 0);
 
   const paraEmbeddings = await Promise.all(sample.map((p) => embed(p.slice(0, 400))));
-  const centroid = new Float32Array(EMBED_DIM);
+  // Width comes from the vectors themselves, not the MiniLM constant, so a model
+  // with a different output width does not silently produce a half-length
+  // centroid and a meaningless cosine.
+  const width = paraEmbeddings[0]?.length ?? EMBED_DIM;
+  const centroid = new Float32Array(width);
   for (const v of paraEmbeddings) {
-    for (let i = 0; i < EMBED_DIM; i++) centroid[i] += v[i];
+    for (let i = 0; i < width; i++) centroid[i] += v[i];
   }
-  for (let i = 0; i < EMBED_DIM; i++) centroid[i] /= paraEmbeddings.length;
+  for (let i = 0; i < width; i++) centroid[i] /= paraEmbeddings.length;
 
   const out: number[] = [];
   for (const c of clauses) {

@@ -545,3 +545,53 @@ built from the current fixture. So:
 If that annotation ever happens, start from: pointwise logistic, LEAN feature set,
 L2 ≈ 0.3, leave-one-book-out. Do not start from pairwise, and do not add
 structural features until the sample supports them — both are measured above.
+
+---
+
+## Would a bigger embedding model help? (2026-07-31)
+
+**No. Measured, not assumed — and the reason generalises.**
+
+The owner's instruction was to test small first and go bigger only if the
+direction looked promising. It does not. Four models, each swept over its OWN
+prune threshold, because the salience score distribution differs per model and
+comparing them at a single fixed cut is not a comparison at all:
+
+| model | params | disk | best precision@3 | majShown | precision | F1 |
+|---|---|---|---|---|---|---|
+| **all-MiniLM-L12-v2** (shipped) | 33M | 33MB | **50.9%** | 22.0 | **35.3** | **40.5** |
+| bge-small-en-v1.5 | 33M | 33MB | 48.1% | 23.7 | 32.7 | 38.7 |
+| gte-small | 34M | 34MB | 42.1% | 23.7 | 28.3 | 36.6 |
+| bge-base-en-v1.5 | 110M | 113MB | 48.1% | 27.1 | 32.9 | 38.6 |
+
+The incumbent wins, and two results here are worth more than the table:
+
+1. **MTEB does not predict this task.** bge-small scores about 2.4 points ABOVE
+   MiniLM-L12 on the general embedding benchmark and loses on every metric here.
+   Do not pick a model for this pipeline from a leaderboard.
+2. **3.4x the parameters buys nothing.** bge-base's only edge is major coverage
+   at 27.1% — and MiniLM reaches exactly 27.1% by moving its own threshold to
+   -0.16, at higher precision@3, for a third of the disk. That is not a model
+   difference; it is the same precision/recall frontier reached two ways.
+
+Both bigger and better-benchmarked models also SATURATE: below about -0.10 their
+scores stop spreading and the threshold stops mattering. Their contrastive
+event-vs-description scores are compressed on this corpus, which is the opposite
+of what more capacity was supposed to buy.
+
+**Why capacity does not help here.** The embedding is only asked one question —
+"does this clause read like a plot event or like description" — and it is asked
+only about clauses the RULE ENGINE already produced. Its ceiling is set by
+candidate generation upstream, not by embedding quality. A better model cannot
+find an event the extractor never proposed.
+
+Downloaded models were deleted after measuring; `public/models` is tracked in
+git and 180MB of losing candidates does not belong in it. `EMBED_MODEL=<id>` in
+`scripts/lm-node-backend.ts` re-runs any bake-off after re-downloading.
+
+**One real bug fixed on the way.** The Node backend hard-sliced every embedding
+to `out.data.slice(0, 384)` — correct for MiniLM L6/L12, and it would have
+silently truncated the 768-dim bge-base to its first half and produced a
+confidently wrong bake-off. `chapterCentrality` allocated its centroid from the
+same constant. Both now take the width from the vectors themselves. Verified
+byte-identical results for MiniLM before and after.

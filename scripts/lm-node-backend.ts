@@ -69,6 +69,13 @@ const PREFERRED_MODEL_IDS = [
   "Xenova/all-MiniLM-L6-v2",
 ] as const;
 
+/**
+ * `EMBED_MODEL=<id>` forces one model, so a bake-off can hold everything else
+ * fixed. Comparing embedding backends is only meaningful if the ONLY thing that
+ * changes is the backend.
+ */
+const FORCED = process.env.EMBED_MODEL;
+
 export interface LmBackendInfo {
   modelId: string;
   loadMs: number;
@@ -97,7 +104,8 @@ export async function installNodeEmbedder(): Promise<LmBackendInfo | null> {
   e.allowLocalModels = true;
   e.useBrowserCache = false;
 
-  for (const modelId of PREFERRED_MODEL_IDS) {
+  const candidates = FORCED ? [FORCED] : PREFERRED_MODEL_IDS;
+  for (const modelId of candidates) {
     const t0 = Date.now();
     let pipe: unknown;
     try {
@@ -117,10 +125,10 @@ export async function installNodeEmbedder(): Promise<LmBackendInfo | null> {
 
     setEmbedder(async (text: string) => {
       const out = await run(text.slice(0, 500), { pooling: "mean", normalize: true });
-      // 384 = MiniLM's output width for both L6 and L12. Slicing rather than
-      // trusting the length keeps a future model swap from silently changing
-      // vector width under the cosine code.
-      return out.data.slice(0, 384) as Float32Array;
+      // Keep the model's NATURAL width. This used to hard-slice to 384 — right
+      // for MiniLM L6/L12, but it would have silently truncated a 768-dim model
+      // to its first half during a bake-off and produced a quietly wrong answer.
+      return out.data as Float32Array;
     });
 
     installed = { modelId, loadMs, firstEmbedMs };
