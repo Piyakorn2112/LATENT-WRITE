@@ -50,8 +50,8 @@ do not extend it.
 
 Two suites, and they do different jobs:
 
-- `test:event-detect` scores **103 hand-annotated events across 19 chapters of
-  EIGHT books by seven authors** with ±1 paragraph tolerance.
+- `test:event-detect` scores **279 hand-annotated events across 41 chapters of
+  NINE books by eight authors** with ±1 paragraph tolerance.
   This is what you tune against. `--detail` prints every miss and false positive;
   `FLOOR=0.4` sweeps the operating point.
 - `audit:ood-events` reports label-free health over both whole manuscripts, split
@@ -78,8 +78,8 @@ moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@BUDGET**, where the budget
 is `TIMELINE_CHIP_BUDGET` in `narrative-events.ts` — currently 3. Current, on the
-eight-book set: precision@3 50.9%, major events SHOWN 22.0%, major events found
-anywhere 45.8%, overall precision 35.3%. Quote precision@3, and never quote a
+nine-book set: precision@3 46.1%, major events SHOWN 17.2%, major events found
+anywhere 39.6%, overall precision 33.1%. Quote precision@3, and never quote a
 figure without saying which gold set produced it. Every smaller set was
 flattering: 1 author / 22 events gave precision 57.1%, and it meant nothing.
 
@@ -154,6 +154,24 @@ a small CLOSED class, which is why the cut generalises to registers unlike
 Austen's. Narrowing to it: precision 28.9% → 33.3%, F1 35.7% → 39.2%, Austen
 entropy 0.57 → 0.78, Doyle 0.66 → 0.81, and it *gained* a gold match while
 removing 19 false positives.
+
+**Two things measured and REJECTED — do not re-derive them.**
+A trained ranker (`train:event-ranker`, logistic over the engine's own features,
+leave-one-BOOK-out) beats the hand-written weights by +1.8pp on 204 candidates
+and only **+0.8pp on 435** — the advantage SHRINKS as data grows, so labelled
+data is not the constraint. And a model bake-off (`EMBED_MODEL=<id>`) found the
+33MB MiniLM-L12 beating bge-small, gte-small AND the 113MB bge-base on every
+metric; MTEB does not predict this task and 3.4x the parameters buys nothing.
+Both point the same way: the limit is EXTRACTION — a better model or better
+weights cannot find an event the extractor never proposed.
+
+**Adding gold data LOWERS every number, five times running.** 22 events → 45 →
+67 → 103 → 279, and precision@3 fell at each step with the engine untouched.
+That is the ruler getting honest. Re-baseline the targets and record the reason
+at the constant; never lower one for any weaker reason. Annotate with
+`scripts/fixtures/ANNOTATION-GUIDE.md` and verify with `npm run gold:validate`
+BEFORE merging — its one non-negotiable is that an annotator must never look at
+the detector's output first.
 
 **Previous known weakness, now closed:** `action` was 54.0% of events on the
 held-out manuscript. It is 29.4% in-distribution / 36.2% held-out today, and no
