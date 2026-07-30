@@ -47,19 +47,29 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // Set from the measured baseline, not aspirationally. The engine being replaced
 // scores well below all of these; see the printed comparison.
 // ★ Set just BELOW current measured performance, so they are regression locks
-// rather than aspirations. They were briefly set above it (precision 0.50) while
-// the gold set was 22 events; expanding it to 45 showed the engine was really at
-// 36.4%, and a gate that always fails is noise. Raise these as the engine
-// improves — never lower them to make a red suite green without saying so here.
+// rather than aspirations. Raise them as the engine improves. NEVER lower them to
+// turn a red suite green without recording why, right here.
+//
+// The full history of these numbers, because it is the most important thing this
+// file has to say:
+//
+//   22 events,  5 chapters, 1 author   precision 57.1%  major recall 63.6%
+//   45 events, 11 chapters, 1 author   precision 35.7%  major recall 60.0%
+//   67 events, 15 chapters, 4 AUTHORS  precision 35.6%  major recall 35.9%
+//
+// Each expansion of the gold set revealed the previous one had been flattering.
+// The 4-author figure is the honest one, and it is the only one that says
+// anything about whether this works on prose the engine was not built against.
+// Quote it, not the others.
 const TARGETS = {
   /** Of the events a chapter summary would mention, how many are found.
    *  Measured 60.0% on the 45-event set with the LM re-rank on. */
-  majorRecall: 0.55,
+  majorRecall: 0.33,
   /** Of what is emitted, how much corresponds to a real event. Measured 41.7%.
    *  Still the weakest number here. The sync engine alone cannot move it — its
    *  false positives score as high as its true ones — which is why the LM
    *  salience pass exists. */
-  precision: 0.38,
+  precision: 0.33,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
 };

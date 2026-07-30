@@ -337,8 +337,10 @@ function classifyUtterance(inner: string): NarrativeEventType {
   }
   // Second person NEED NOT open the clause. "That you weren't going to age the
   // way the rest of us do" is a revelation addressed to the listener, and it was
-  // a missed major gold event under a clause-initial-only rule.
-  if (/\byou\s*(?:'(?:re|ve|d|ll)|were|weren'?t|are|aren'?t|had|have|knew|know|did|didn'?t)\b/i.test(u)) {
+  // a missed major gold event under a clause-initial-only rule. Bounded to
+  // negated or knowledge-bearing predicates for the same reason as the
+  // first-person rule below: unbounded, it fires on ordinary conversation.
+  if (/\byou\s*(?:weren'?t|aren'?t|didn'?t|don'?t|won'?t|never|knew|know|lied|promised|owe|must)\b/i.test(u)) {
     return "revelation";
   }
 
@@ -361,12 +363,24 @@ function classifyUtterance(inner: string): NarrativeEventType {
   }
   if (/^(?:Come|Go|Look|Listen|Tell|Show|Take|Give|Wait|Stop|Let)\b/.test(u)) return "decision";
 
-  // First person identity or capability claim: "I'm outside it", "I breathe with
-  // it", "I am the one who signed it". This is the widest of the rules, so it
-  // requires enough words to be a real assertion rather than a fragment.
-  if (words >= 4 && /\bI\s*(?:'m|'ve|'d|'ll)?\s*(?:am|was|have|had|do|did|[a-z]+(?:ed|e|s))\b/i.test(u)) {
-    return "revelation";
-  }
+  // First-person identity or capability claim: "I'm outside it", "I breathe with
+  // it", "I am the one who signed it".
+  //
+  // ★ THIS RULE USED TO BE A CATCH-ALL AND IT BROKE ON ANOTHER AUTHOR. The verb
+  // slot was `[a-z]+(?:ed|e|s)`, which matches essentially any verb, so ANY
+  // four-word utterance containing "I <verb>" became a revelation. On the
+  // in-house manuscripts, whose dialogue is sparse, that looked fine. On Pride
+  // and Prejudice it collapsed the whole taxonomy: type entropy fell to 0.38 and
+  // 84.4% of every detected event in the book was typed "revelation". Sherlock
+  // was 67.5%. Austen's dialogue is almost entirely first-person declaratives.
+  //
+  // The verb now has to actually carry a claim about knowledge, state or
+  // commitment. An utterance that is merely first-person and fluent is
+  // conversation, not an event, and returning `unclassified` here means the
+  // dialogue channel declines it rather than inventing a type for it.
+  const FIRST_PERSON_CLAIM =
+    /\bI\s*(?:'m|'ve|'d|'ll)?\s*(?:am|was|have|had|been|do|did|see|saw|find|found|hear|heard|feel|felt|mean|meant|think|thought|hope|wish|fear|doubt|admit|admitted|confess|confessed|owe|owed|swear|swore|refuse|refused|agree|agreed|decided|chose|promise|promised|told|tell|say|said|beg|assure|declare|intend)\b/i;
+  if (words >= 4 && FIRST_PERSON_CLAIM.test(u)) return "revelation";
 
   return "unclassified";
 }

@@ -345,6 +345,86 @@
       ]
     },
     {
+      "book": "pride",
+      "chapter": 5,
+      "eventfulness": "moderate",
+      "whatHappens": "Despite his early disdain Darcy grows attracted to Elizabeth, asks her to dance and is refused, then admits to Miss Bingley that he admires her.",
+      "events": [
+        {
+          "paragraph": 13,
+          "summary": "Darcy begins finding Elizabeth's eyes attractive",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "he began to find it was rendered uncommonly intelligent by the beautiful expression of her dark eyes"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Darcy starts observing Elizabeth, who notices",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "attended to her conversation with others. His doing so drew her notice."
+        },
+        {
+          "paragraph": 42,
+          "summary": "Darcy asks Elizabeth to dance and she refuses",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "requested to be allowed the honour of her hand, but in vain"
+        },
+        {
+          "paragraph": 52,
+          "summary": "Darcy admits to Miss Bingley he admires Elizabeth",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Miss Elizabeth Bennet."
+        }
+      ]
+    },
+    {
+      "book": "pride",
+      "chapter": 34,
+      "eventfulness": "quiet",
+      "whatHappens": "Darcy and Colonel Fitzwilliam depart Rosings, and Elizabeth's anger at Darcy's letter softens into gratitude and respect while she still stands by her refusal.",
+      "events": [
+        {
+          "paragraph": 2,
+          "summary": "Darcy and Colonel Fitzwilliam leave Rosings",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "The two gentlemen left Rosings the next morning"
+        },
+        {
+          "paragraph": 15,
+          "summary": "Elizabeth declines Lady Catherine's carriage offer",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "but I believe we must abide by our original plan"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Elizabeth's feelings toward Darcy soften to respect",
+          "salience": "major",
+          "type": "shift",
+          "legacyType": "revelation",
+          "evidence": "His attachment excited gratitude, his general character respect"
+        },
+        {
+          "paragraph": 24,
+          "summary": "Party takes formal leave of Lady Catherine's family",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "wished them a good journey, and invited them to come to Hunsford again next year"
+        }
+      ]
+    },
+    {
       "book": "root-crown",
       "chapter": 5,
       "eventfulness": "moderate",
@@ -485,6 +565,134 @@
           "type": "state-change",
           "legacyType": "climax",
           "evidence": "He did not walk to the Mosshollow again."
+        }
+      ]
+    },
+    {
+      "book": "worlds",
+      "chapter": 5,
+      "eventfulness": "eventful",
+      "whatHappens": "A human deputation approaches the Martian pit under a flag of truce and is annihilated by the Heat-Ray, which sets the common ablaze while the narrator escapes.",
+      "events": [
+        {
+          "paragraph": 9,
+          "summary": "deputation advances on pit waving white flag",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "advancing from the direction of Horsell, I noted a little black knot of men, the foremost of whom was waving a white flag."
+        },
+        {
+          "paragraph": 14,
+          "summary": "Heat-Ray apparatus rises and flickers from pit",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Slowly a humped shape rose out of the pit, and the ghost of a beam of light seemed to flicker out from it."
+        },
+        {
+          "paragraph": 15,
+          "summary": "Heat-Ray incinerates the deputation of men",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "flashes of actual flame, a bright glare leaping from one to another, sprang from the scattered group of men."
+        },
+        {
+          "paragraph": 17,
+          "summary": "fires ignite across the common and buildings",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "every dry furze bush became with one dull thud a mass of flames."
+        },
+        {
+          "paragraph": 18,
+          "summary": "Heat-Ray shuts off, device sinks into pit",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the hissing and humming ceased, and the black, dome-like object sank slowly out of sight into the pit."
+        },
+        {
+          "paragraph": 23,
+          "summary": "narrator turns and flees across the heath",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "With an effort I turned and began a stumbling run through the heather."
+        }
+      ]
+    },
+    {
+      "book": "worlds",
+      "chapter": 10,
+      "eventfulness": "eventful",
+      "whatHappens": "Riding back to Maybury the narrator sees a third cylinder fall and a fighting-machine up close, crashes his cart, finds the innkeeper dead, and bolts himself into his house.",
+      "events": [
+        {
+          "paragraph": 5,
+          "summary": "Narrator departs Leatherhead alone for Maybury",
+          "salience": "major",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "It was nearly eleven when I started to return."
+        },
+        {
+          "paragraph": 9,
+          "summary": "Third Martian cylinder falls nearby",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "It was the third falling star!"
+        },
+        {
+          "paragraph": 10,
+          "summary": "Horse bolts, terrified by thunder",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "The horse took the bit between his teeth and bolted."
+        },
+        {
+          "paragraph": 13,
+          "summary": "Narrator sees first Martian fighting-machine clearly",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "A monstrous tripod, higher than many houses, striding over the young pine trees, and smashing them aside in its career"
+        },
+        {
+          "paragraph": 14,
+          "summary": "Dog cart crashes, horse killed",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "the dog cart had heeled over upon the horse; the shafts smashed noisily"
+        },
+        {
+          "paragraph": 21,
+          "summary": "Narrator evades machines, reaches woods unseen",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "succeeded in crawling, unobserved by these monstrous machines, into the pine woods towards Maybury"
+        },
+        {
+          "paragraph": 27,
+          "summary": "Dead man identified as innkeeper landlord",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "It was the landlord of the Spotted Dog, whose conveyance I had taken."
+        },
+        {
+          "paragraph": 29,
+          "summary": "Narrator reaches home, bolts himself in",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "transition",
+          "evidence": "I let myself in with my latchkey, closed, locked and bolted the door, staggered to the foot of the staircase, and sat down."
         }
       ]
     }

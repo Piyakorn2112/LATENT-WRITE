@@ -166,13 +166,24 @@ async function main() {
       }
     }
 
-    const best = results[results.length - 1];
+    // ★ Gate on the SHIPPED configuration, which is five anchors UNCALIBRATED.
+    // This used to gate on the calibrated variant, and once `calibrate` was
+    // defaulted to false that became a gate on code nobody runs: the suite went
+    // red while the shipped path was fine. Exactly the mistake already fixed in
+    // test-event-detect.ts, made again one file over. A suite must measure what
+    // ships.
+    const shipped = results[1];
     const baseline = results[0];
-    ok(best.acc >= TYPE_ACCURACY_TARGET,
-      `calibrated top-1 accuracy ${(best.acc * 100).toFixed(1)}% meets the ${(TYPE_ACCURACY_TARGET * 100).toFixed(0)}% floor`);
+    ok(shipped.acc >= TYPE_ACCURACY_TARGET,
+      `shipped top-1 accuracy ${(shipped.acc * 100).toFixed(1)}% meets the ${(TYPE_ACCURACY_TARGET * 100).toFixed(0)}% floor`);
+    // Calibration is measured every run and reported, never gated. On 44 clauses
+    // from one author it cost 2 points; on 64 clauses from four authors it costs
+    // 8. Consistently negative, which is why the default is off.
+    const calibrated = results[2];
+    console.log(`    null calibration is worth ${((calibrated.acc - shipped.acc) * 100).toFixed(1)} points — it is OFF by default for this reason`);
     // Not a pass/fail — the honest question is whether the extra work earns
     // anything, and the answer belongs in the log either way.
-    const delta = (best.acc - baseline.acc) * 100;
+    const delta = (shipped.acc - baseline.acc) * 100;
     console.log(`    calibration + multi-anchor is worth ${delta >= 0 ? "+" : ""}${delta.toFixed(1)} points over the old shape`);
   }
 
