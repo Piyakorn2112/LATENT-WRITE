@@ -472,3 +472,76 @@ So two independent ceilings:
 Moving majShown to 80% needs recall well above 80% AND near-perfect ranking. It
 is not reachable by tuning; it needs a detector for interior/first-person
 decisions, which is a different mechanism from anything in the file today.
+
+---
+
+## Does a trained model beat the hand-written rules? (2026-07-31)
+
+Answer: **not today, and the reason is labelled data rather than model class.**
+`scripts/train-event-ranker.ts` is the experiment; it stays in the repo because
+the question will be asked again.
+
+**Why a model was worth trying at all.** Not a general appeal to ML. The
+hand-fitted weights saturated for a SPECIFIC reason: `analyse-event-signals.ts`
+measures each signal's MARGINAL association with being right, and the features
+overlap heavily, so fitting each to its own marginal double-counts what they
+share. A logistic regression fits them JOINTLY. That is precisely and only the
+thing hand-fitting cannot do.
+
+**Evaluation protocol.** Leave-one-BOOK-out, always. 204 candidates against 30
+features will memorise happily, and rows from one book share an author's voice,
+so any split that mixes them measures memorisation. The hand-fitted weights are
+scored on the identical held-out split.
+
+| model | held-out precision@3 | vs hand-fitted 47.4% |
+|---|---|---|
+| pointwise logistic, lean features, L2=0.3 | **49.1%** | **+1.8pp** |
+| pointwise, L2=0.6 | 47.4% | 0.0 |
+| pointwise, L2=0.03 (underregularised) | 43.9% | −3.5 |
+| pointwise + 5 structural features | 43.9% | −3.5 |
+| pairwise / RankNet, lean | 40.4% | −7.0 |
+| pairwise, L2 ≥ 0.3 | 36.8% | −10.5 |
+
+**+1.8pp is one chip out of 57. That is not a result**, and it should not be
+shipped as one.
+
+Three things worth keeping from it:
+
+1. **More features made it WORSE.** Adding baseConf, centrality, peak-distance,
+   sentence length and candidate density took held-out precision from 49.1% to
+   43.9%. On 204 rows that is the signature of too many parameters, and
+   leave-one-book-out is what makes it visible — in-sample it looked better.
+2. **Pairwise learning-to-rank LOST BADLY**, which was not the expectation. The
+   reasoning for trying it was sound (the product needs an ORDER, not a
+   probability, and pairs multiply the training signal ~30x from the same
+   labels). It fails anyway, most likely because pairs discard the absolute
+   calibration the hand engine's confidence already encodes, and because chapters
+   with many candidates dominate the pair count. Recorded so the idea is not
+   re-derived from first principles and re-run.
+3. **The strongest learned coefficient was `position` (+0.565)** — where in the
+   chapter the clause sits. The hand rules only penalise the extreme first and
+   last 4%. That is the model pointing at a genuinely under-used STRUCTURAL
+   signal, and it is the most useful thing the exercise produced.
+
+**The learning curve is the decisive measurement.** Train on k books, evaluate on
+the rest, sweep k:
+
+    2 books  38.3%
+    3 books  40.9%
+    4 books  40.6%
+    5 books  43.8%
+    6 books  36.6%      (noise — the test set is only 2 books here)
+    7 books  48.7%      ← crosses the hand-written baseline of 47.4%
+
+Noisy, because the test set shrinks as k grows. But it has **not plateaued**, and
+it crosses the hand-written rules exactly at the largest training set that can be
+built from the current fixture. So:
+
+> The constraint is GOLD DATA, not the model. A trained ranker is worth revisiting
+> at roughly 2–3x the current annotation (say 20+ books, 250+ events), and is not
+> worth shipping below that. Until then the hand-written rules are both more
+> accurate and far lighter, which is the outcome the owner preferred anyway.
+
+If that annotation ever happens, start from: pointwise logistic, LEAN feature set,
+L2 ≈ 0.3, leave-one-book-out. Do not start from pairwise, and do not add
+structural features until the sample supports them — both are measured above.
