@@ -41,6 +41,254 @@
   },
   "chapters": [
     {
+      "book": "carol",
+      "chapter": 1,
+      "eventfulness": "moderate",
+      "whatHappens": "On Christmas Eve Scrooge turns away his nephew and two charity collectors, then is visited by the ghost of Marley, who warns that three spirits will come.",
+      "events": [
+        {
+          "paragraph": 29,
+          "summary": "Scrooge refuses nephew's Christmas dinner invitation",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "he would see him in that extremity first"
+        },
+        {
+          "paragraph": 58,
+          "summary": "Scrooge refuses to fund charity for the poor",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "Scrooge replied."
+        },
+        {
+          "paragraph": 69,
+          "summary": "Scrooge threatens carol singer, who flees",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "confrontation",
+          "evidence": "Scrooge seized the ruler with such energy of action, that the singer fled in terror"
+        },
+        {
+          "paragraph": 80,
+          "summary": "Door knocker transforms into Marley's face",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "revelation",
+          "evidence": "not a knocker, but Marley's face"
+        },
+        {
+          "paragraph": 92,
+          "summary": "House bells ring on their own",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "revelation",
+          "evidence": "he saw this bell begin to swing"
+        },
+        {
+          "paragraph": 96,
+          "summary": "Marley's Ghost passes through the locked door",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "it came on through the heavy door, and passed into the room before his eyes"
+        },
+        {
+          "paragraph": 158,
+          "summary": "Ghost announces three spirits will visit",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "resumed the Ghost"
+        },
+        {
+          "paragraph": 169,
+          "summary": "Ghost departs, floating into the night",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "floated out upon the bleak, dark night"
+        },
+        {
+          "paragraph": 171,
+          "summary": "Scrooge sees sky filled with chained phantoms",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "The air was filled with phantoms, wandering hither and thither in restless haste"
+        }
+      ]
+    },
+    {
+      "book": "dracula",
+      "chapter": 3,
+      "eventfulness": "eventful",
+      "whatHappens": "Certain the Count is not human, Harker is forced to extend his stay, then after disobeying a warning is nearly bitten by three vampire women until Dracula intervenes.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "Harker realizes the Count drove the coach himself",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "it must have been the Count himself who was the driver of the coach that brought me here"
+        },
+        {
+          "paragraph": 16,
+          "summary": "Count forces Harker to stay a month",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "you shall stay with me until a month from now"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Harker decides to write secretly in shorthand",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "to write fully to Mr. Hawkins in secret, and also to Mina, for to her I could write in shorthand"
+        },
+        {
+          "paragraph": 23,
+          "summary": "Count warns Harker never to sleep elsewhere",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "confrontation",
+          "evidence": "should you leave these rooms you will not by any chance go to sleep in any other part of the castle"
+        },
+        {
+          "paragraph": 27,
+          "summary": "Harker witnesses Count crawling down castle wall",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "begin to crawl down the castle wall over that dreadful abyss"
+        },
+        {
+          "paragraph": 30,
+          "summary": "Harker forces open a locked castle door",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "with many efforts forced it back so that I could enter"
+        },
+        {
+          "paragraph": 36,
+          "summary": "Harker decides to sleep in forbidden room",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "I determined not to return to-night to the gloom-haunted rooms, but to sleep here"
+        },
+        {
+          "paragraph": 37,
+          "summary": "Three vampire women appear before Harker",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "In the moonlight opposite me were three young women, ladies by their dress and manner."
+        },
+        {
+          "paragraph": 40,
+          "summary": "Fair vampire's teeth touch Harker's throat",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "the hard dents of two sharp teeth, just touching and pausing there"
+        },
+        {
+          "paragraph": 41,
+          "summary": "Count violently stops the vampire's attack",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "climax",
+          "evidence": "With a fierce sweep of his arm, he hurled the woman from him"
+        },
+        {
+          "paragraph": 44,
+          "summary": "Count promises Harker to the women later",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "when I am done with him you shall kiss him at your will"
+        },
+        {
+          "paragraph": 45,
+          "summary": "Bag reveals a half-smothered child inside",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "there was a gasp and a low wail, as of a half-smothered child"
+        }
+      ]
+    },
+    {
+      "book": "frankenstein",
+      "chapter": 9,
+      "eventfulness": "moderate",
+      "whatHappens": "Victor receives a reassuring letter from Elizabeth, recovers enough to leave his sickroom, and a walking tour with Clerval restores his health.",
+      "events": [
+        {
+          "paragraph": 1,
+          "summary": "Clerval delivers Elizabeth's letter to Victor",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Clerval then put the following letter into my hands."
+        },
+        {
+          "paragraph": 14,
+          "summary": "Victor recovers enough to leave his sickroom",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "In another fortnight I was able to leave my chamber."
+        },
+        {
+          "paragraph": 15,
+          "summary": "Victor introduces Clerval to his professors",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "introduction",
+          "evidence": "to introduce Clerval to the several professors of the university"
+        },
+        {
+          "paragraph": 18,
+          "summary": "Victor takes up oriental-language studies with Clerval",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "I was easily induced to enter on the same studies."
+        },
+        {
+          "paragraph": 19,
+          "summary": "Victor's return to Geneva is delayed",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "my journey was retarded until the ensuing spring"
+        },
+        {
+          "paragraph": 20,
+          "summary": "Clerval proposes and Victor agrees to tour",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Henry proposed a pedestrian tour in the environs of Ingolstadt"
+        },
+        {
+          "paragraph": 21,
+          "summary": "Victor's health and spirits fully recover",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "I became the same happy creature who, a few years ago, loved and beloved by all, had no sorrow or care."
+        }
+      ]
+    },
+    {
       "book": "hollow-iris",
       "chapter": 1,
       "eventfulness": "quiet",
@@ -565,6 +813,78 @@
           "type": "state-change",
           "legacyType": "climax",
           "evidence": "He did not walk to the Mosshollow again."
+        }
+      ]
+    },
+    {
+      "book": "sherlock",
+      "chapter": 1,
+      "eventfulness": "eventful",
+      "whatHappens": "A masked King of Bohemia hires Holmes to recover a compromising photograph from Irene Adler, but she outwits him, marries, and flees the country.",
+      "events": [
+        {
+          "paragraph": 43,
+          "summary": "Masked King of Bohemia arrives at Baker Street",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "A man entered who could hardly have been less than six feet six inches in height"
+        },
+        {
+          "paragraph": 57,
+          "summary": "King removes mask, reveals his identity",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "he tore the mask from his face and hurled it upon the ground"
+        },
+        {
+          "paragraph": 115,
+          "summary": "King pays Holmes a large retainer",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "There are three hundred pounds in gold and seven hundred in notes"
+        },
+        {
+          "paragraph": 144,
+          "summary": "Irene Adler marries Godfrey Norton suddenly",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "generally assisting in the secure tying up of Irene Adler, spinster, to Godfrey Norton, bachelor"
+        },
+        {
+          "paragraph": 196,
+          "summary": "Holmes's fire ruse tricks Irene Adler",
+          "salience": "major",
+          "type": "action",
+          "legacyType": "climax",
+          "evidence": "I tossed my rocket into the room with a cry of"
+        },
+        {
+          "paragraph": 241,
+          "summary": "Housekeeper reveals Irene has fled England",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "She left this morning with her husband by the 5:15 train from Charing Cross for the Continent"
+        },
+        {
+          "paragraph": 248,
+          "summary": "Letter reveals Irene will spare the king",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "climax",
+          "evidence": "As to the photograph, your client may rest in peace"
+        },
+        {
+          "paragraph": 258,
+          "summary": "Holmes requests Irene's photograph as payment",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "This photograph!"
         }
       ]
     },
