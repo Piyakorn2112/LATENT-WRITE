@@ -27,9 +27,7 @@
     "cannot by itself prove generalisation. scripts/ood-event-audit.ts covers that",
     "with label-free metrics over both full books.",
     "",
-    "EVENTFULNESS VARIES ON PURPOSE. 2, 9, 6, 2 and 3 events across five chapters.",
-    "A detector that emits a fixed three per chapter cannot score well here, and the",
-    "engine this replaces emitted 2.67 on average regardless of content."
+    "EVENTFULNESS VARIES ON PURPOSE. 2, 5, 9, 3, 6, 4, 2, 6, 2, 3, 3 events across 11 chapters. A detector that emits a fixed three per chapter cannot score well here, and the engine this replaces emitted 2.67 on average regardless of content."
   ],
   "typeNotes": {
     "decision": "someone binds themselves to a course of action",
@@ -63,6 +61,54 @@
           "type": "decision",
           "legacyType": "transition",
           "evidence": "She did not stay. She released the moment"
+        }
+      ]
+    },
+    {
+      "book": "hollow-iris",
+      "chapter": 12,
+      "eventfulness": "moderate",
+      "whatHappens": "Iris invites Nora into her private quarters for the first time and reveals she is physically bonded to Ananke's systems.",
+      "events": [
+        {
+          "paragraph": 3,
+          "summary": "Iris invites Nora into her private quarters",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "Come see where I live."
+        },
+        {
+          "paragraph": 18,
+          "summary": "Iris reveals her body runs abnormally warm",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Most residents are within the system's standard tolerance. I'm outside it."
+        },
+        {
+          "paragraph": 28,
+          "summary": "Iris reveals she breathes with the building",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "When this building breathes, I breathe with it."
+        },
+        {
+          "paragraph": 39,
+          "summary": "Nora recognizes Iris resembles the figure in white",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "The resemblance was to the figure in white."
+        },
+        {
+          "paragraph": 42,
+          "summary": "Iris admits she wants someone to know",
+          "salience": "minor",
+          "type": "decision",
+          "legacyType": "revelation",
+          "evidence": "I want someone to know."
         }
       ]
     },
@@ -148,6 +194,38 @@
     },
     {
       "book": "hollow-iris",
+      "chapter": 68,
+      "eventfulness": "moderate",
+      "whatHappens": "A disagreement about a Council report escalates into mutual accusation, and the unresolved fight leaves Nora and Iris physically farther apart.",
+      "events": [
+        {
+          "paragraph": 9,
+          "summary": "Nora accuses Iris of defending the system",
+          "salience": "major",
+          "type": "confrontation",
+          "legacyType": "confrontation",
+          "evidence": "\"You're defending the system,\" Nora said."
+        },
+        {
+          "paragraph": 18,
+          "summary": "Iris names the archive as the cause of Nora's change",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "\"Since Ananke. Since the archive.\""
+        },
+        {
+          "paragraph": 31,
+          "summary": "The physical distance between them in bed doubles",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the three inches of mattress that normally separated their bodies expanded to six"
+        }
+      ]
+    },
+    {
+      "book": "hollow-iris",
       "chapter": 96,
       "eventfulness": "moderate",
       "whatHappens": "The oversight committee's fleet diversion is accepted, the atmospheric crisis and Helia's lattice strain both worsen, and the Crownfall restoration operation finally begins.",
@@ -199,6 +277,126 @@
           "type": "action",
           "legacyType": "transition",
           "evidence": "The Crownfall restoration operations began on Day 64"
+        }
+      ]
+    },
+    {
+      "book": "hollow-iris",
+      "chapter": 120,
+      "eventfulness": "moderate",
+      "whatHappens": "Nora publicly names a child killed by institutional decision-making and demands the right to know when reasoning has been hidden, while Iris watches as a person rather than a governance function.",
+      "events": [
+        {
+          "paragraph": 19,
+          "summary": "Nora publicly blames institutional decision for Talis's death",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "the decision-makers did not know who would pay for the decision, and Talis paid"
+        },
+        {
+          "paragraph": 33,
+          "summary": "Nora demands public right to know suppressed reasoning",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "climax",
+          "evidence": "the right for the people affected by the decisions to know that the compression happened"
+        },
+        {
+          "paragraph": 35,
+          "summary": "Iris suspends her governance monitoring to attend as herself",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "The ops center's colleague had been informed that the fragment's availability was suspended for the speech's duration."
+        },
+        {
+          "paragraph": 53,
+          "summary": "Nora and Iris leave the plaza together silently",
+          "salience": "minor",
+          "type": "departure",
+          "legacyType": "transition",
+          "evidence": "They walked out of the plaza together."
+        }
+      ]
+    },
+    {
+      "book": "hollow-iris",
+      "chapter": 160,
+      "eventfulness": "quiet",
+      "whatHappens": "Six months into living as a single embodied person, Ananke moves through a day of established routines and comes to see an unconscious bodily habit as the beginning of a personal vocabulary.",
+      "events": [
+        {
+          "paragraph": 20,
+          "summary": "committee reaches provisional recommendation on frontier provisions",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "The committee's resolution was a provisional recommendation to the Assembly's frontier provisions oversight body"
+        },
+        {
+          "paragraph": 80,
+          "summary": "she reframes an unconscious gesture as personal vocabulary",
+          "salience": "minor",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "was vocabulary, she thought, or was the thing that vocabulary was for"
+        }
+      ]
+    },
+    {
+      "book": "root-crown",
+      "chapter": 5,
+      "eventfulness": "moderate",
+      "whatHappens": "Kinoko and Vey walk to the Listenfold Clinic, where the healer Anwen treats Kinoko's wounds and deliberately withholds the usual questions.",
+      "events": [
+        {
+          "paragraph": 12,
+          "summary": "The warmth in Kinoko's chest rises higher",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "The warmth below her sternum moved upward. Toward her ribs."
+        },
+        {
+          "paragraph": 18,
+          "summary": "Kinoko and Vey arrive at the Listenfold Clinic",
+          "salience": "major",
+          "type": "arrival",
+          "legacyType": "introduction",
+          "evidence": "The smell of the interior arrived when Vey pushed the door open"
+        },
+        {
+          "paragraph": 35,
+          "summary": "Anwen cleans and dresses Kinoko's forearm graze",
+          "salience": "minor",
+          "type": "action",
+          "legacyType": "transition",
+          "evidence": "Three strips of dressing, each pressed down with the ball of her thumb."
+        },
+        {
+          "paragraph": 43,
+          "summary": "Anwen decides not to question Kinoko's past",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "the expression of someone who had decided something and was now acting from the decision rather than the deliberation"
+        },
+        {
+          "paragraph": 55,
+          "summary": "Kinoko starts walking beside Vey, not behind",
+          "salience": "minor",
+          "type": "shift",
+          "legacyType": "transition",
+          "evidence": "Kinoko walked beside Vey rather than behind her"
+        },
+        {
+          "paragraph": 60,
+          "summary": "Kinoko realizes Anwen belongs among people who see",
+          "salience": "major",
+          "type": "revelation",
+          "legacyType": "revelation",
+          "evidence": "Kinoko was building a category she had no name for yet: people who see, and choose what to do with seeing."
         }
       ]
     },
@@ -255,6 +453,38 @@
           "type": "state-change",
           "legacyType": "introduction",
           "evidence": "\"You can write to me,\" Mira said. \"The letter will find me.\""
+        }
+      ]
+    },
+    {
+      "book": "root-crown",
+      "chapter": 28,
+      "eventfulness": "moderate",
+      "whatHappens": "Across two prosperous years, Lyssa's proposal is formally adopted by the regional council and Gareth makes what turns out to be his last walk to the Mosshollow.",
+      "events": [
+        {
+          "paragraph": 15,
+          "summary": "council adopts Lyssa's water-rights resolution",
+          "salience": "major",
+          "type": "decision",
+          "legacyType": "transition",
+          "evidence": "The council adopted it, with modifications."
+        },
+        {
+          "paragraph": 19,
+          "summary": "family concludes river-strip lease over harvest table",
+          "salience": "minor",
+          "type": "state-change",
+          "legacyType": "transition",
+          "evidence": "the river-strip lease concluded over the harvest table"
+        },
+        {
+          "paragraph": 36,
+          "summary": "Gareth walks to the Mosshollow for the last time",
+          "salience": "major",
+          "type": "state-change",
+          "legacyType": "climax",
+          "evidence": "He did not walk to the Mosshollow again."
         }
       ]
     }

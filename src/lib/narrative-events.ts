@@ -277,6 +277,87 @@ const NOUNY_HOMOGRAPHS = new Set([
   "carry", "reach", "reaches", "vote", "votes", "warn", "offer", "offers",
 ]);
 
+// ─── What an utterance DOES ───────────────────────────────────────────────────
+/**
+ * The act of a quoted utterance, from its own shape rather than from its tag.
+ *
+ * ★ THIS IS THE HIGHEST-VALUE RULE IN THE FILE, and getting it wrong cost the
+ * most recall. Expanding the gold set from 5 chapters to 11 exposed it: one
+ * chapter lost ALL FIVE of its events, and every one was an ordinary
+ * `"…," she said` line whose act lives entirely in the content —
+ *
+ *     "Come see where I live."
+ *     "Most residents are within the system's standard tolerance. I'm outside it."
+ *     "When this building breathes, I breathe with it."
+ *     "You're defending the system,"          ← a textbook accusation
+ *     "I want someone to know."
+ *
+ * The previous version required either a coloured attribution verb (`admitted`,
+ * `insisted`) or one of four hand-written openings. Literary dialogue almost
+ * always tags with "said", and no realistic number of regex shapes covers what
+ * people actually say. Enumerating them is the same mistake the phrase
+ * dictionaries made, one level down.
+ *
+ * The general rule instead: a quoted utterance is an EVENT when it makes a
+ * first- or second-person CLAIM — about knowledge, capability, intent or
+ * identity — or when it is an imperative. That is what distinguishes speech that
+ * changes something from speech that fills a scene. Contractions must be handled
+ * ("You're", "I'm", "I've"), because that is how the claims are actually written.
+ *
+ * What is deliberately NOT an event: a bare affirmative, a question, and anything
+ * too short to carry a claim. An earlier draft accepted bare "Yes" and produced
+ * four identical "<Name> agrees yes" chips in a single chapter.
+ */
+const UTTERANCE_VERB: Partial<Record<NarrativeEventType, string>> = {
+  revelation: "tells",
+  confrontation: "accuses",
+  decision: "commits",
+};
+
+function classifyUtterance(inner: string): NarrativeEventType {
+  const u = inner.trim();
+  const words = u.split(/\s+/).length;
+
+  // Too short to carry a claim, or asking rather than asserting.
+  if (words < 3) return "unclassified";
+  if (/^(?:yes|no|all right|agreed|very well|of course|maybe|perhaps)\b[.,!]?$/i.test(u)) return "unclassified";
+  if (u.endsWith("?")) return "unclassified";
+
+  // Second person plus a finite verb: an accusation or a characterisation of the
+  // listener. "You're defending the system", "You knew", "You never asked".
+  if (/^(?:You|Y'?all)\b\s*(?:'(?:re|ve|d|ll)|are|were|was|have|had|did|didn't|do|don't|never|always|knew|know|lied|promised|said|told)\b/i.test(u)) {
+    return "confrontation";
+  }
+
+  // First person plus a knowledge verb: an admission.
+  if (/\bI\s*(?:'ve|'d)?\s*(?:know|knew|noticed|saw|realised|realized|understood|remember|remembered|thought|believed|felt)\b/i.test(u)) {
+    return "revelation";
+  }
+
+  // First person plus intent or refusal: a commitment.
+  if (/\bI\s*(?:'m|'ll|'d)?\s*(?:will|won'?t|refuse|want|need|am going to|intend|promise|can'?t|cannot|won't)\b/i.test(u)) {
+    return "decision";
+  }
+
+  // An imperative opening: "Come see where I live", "Tell me what happened".
+  // A bare verb-initial clause addressed to someone is an instruction, and an
+  // instruction in dialogue moves the scene.
+  const first = u.split(/\s+/)[0]?.replace(/[^A-Za-z']/g, "").toLowerCase() ?? "";
+  if (first && !STATE_VERBS.has(first) && CHANGE_VERBS[first] !== undefined && /^[A-Z]/.test(u)) {
+    return "decision";
+  }
+  if (/^(?:Come|Go|Look|Listen|Tell|Show|Take|Give|Wait|Stop|Let)\b/.test(u)) return "decision";
+
+  // First person identity or capability claim: "I'm outside it", "I breathe with
+  // it", "I am the one who signed it". This is the widest of the rules, so it
+  // requires enough words to be a real assertion rather than a fragment.
+  if (words >= 4 && /\bI\s*(?:'m|'ve|'d|'ll)?\s*(?:am|was|have|had|do|did|[a-z]+(?:ed|e|s))\b/i.test(u)) {
+    return "revelation";
+  }
+
+  return "unclassified";
+}
+
 function stripTrailingPunct(word: string): string {
   return word.replace(/^[^A-Za-z']+/, "").replace(/[^A-Za-z']+$/, "").toLowerCase();
 }
@@ -599,6 +680,18 @@ const REFLEXIVE = new Set([
 ]);
 
 /**
+ * Pronouns and bare deictics cannot BE an object worth showing. "She reaches it",
+ * "Mira tells them", "Nora tells it" — the chip names an action and then points
+ * at nothing. Rejected as heads so the label either finds a real object or
+ * carries none.
+ */
+const PRONOUN_HEADS = new Set([
+  "it", "them", "him", "her", "us", "me", "you", "they", "she", "he", "we", "i",
+  "this", "that", "these", "those", "there", "here", "one", "some", "any", "all",
+  "something", "anything", "nothing", "everything", "someone", "anyone",
+]);
+
+/**
  * The head of the clause's object, as one or two content words. Long noun phrases
  * are what produced the old engine's sentence-length labels, so this takes the
  * head and stops.
@@ -621,7 +714,16 @@ function findObject(rest: string): string | null {
     // the lower-cased form is what turned proper nouns inside an object into
     // "Nora admits dr altai's" and "She reaches iris". A name in a label has to
     // look like a name.
-    out.push(w.replace(/^[^A-Za-z'"“]+/, "").replace(/[^A-Za-z's]+$/, ""));
+    // Strip surrounding punctuation INCLUDING quote marks. Leaving them in
+    // produced labels like `Iris commits "I` and `Tessa commits "I want` — the
+    // opening quote of the utterance survived into the object.
+    const word = w.replace(/^[^A-Za-z']+/, "").replace(/[^A-Za-z's]+$/, "");
+    if (!word) continue;
+    // NOTE: rejecting pronoun heads here was tried and measured as a net LOSS
+    // (major recall 56% -> 44%): it removed valid objects along with the useless
+    // ones. The uselessness of "tells them" is handled by scoring, not by
+    // refusing to extract.
+    out.push(word);
     if (out.length === 2) break;
   }
   const phrase = out.filter(Boolean).join(" ").trim();
@@ -780,6 +882,18 @@ export function detectNarrativeEvents(
       else if (cand.agent)              { score += 0.2; why.push("pronoun-agent"); }
       if (cand.object)                  { score += 0.3; why.push("transitive"); }
       if (cand.channel === "dialogue")  { score += 0.4; why.push("dialogue-act"); }
+      // A dialogue act whose content could not be recovered says "someone spoke
+      // here", which is not an event. Penalised rather than rejected: rejection
+      // cost more true positives than it saved false ones.
+      if (cand.channel === "dialogue" && !cand.object) { score -= 0.7; why.push("-no-content"); }
+      // An object that is only a pronoun ("tells them", "reaches it") names the
+      // act and then points at nothing. Scored down rather than refused: refusing
+      // it at extraction time removed valid objects too and cost 12 points of
+      // major recall.
+      if (cand.object && PRONOUN_HEADS.has(cand.object.split(/\s+/)[0].toLowerCase())) {
+        score -= 0.45;
+        why.push("-pronoun-object");
+      }
       if (mood.negated)                 { score += 0.3; why.push("refusal"); }
 
       // The realis penalties. Subtractive rather than fatal so a wholly
@@ -963,19 +1077,8 @@ function dialogueCandidate(
   // absent i" at 0.90). A speech act is what the utterance opens by doing.
   const inner = (text.match(/["“]([^"”]{4,})["”]/)?.[1] ?? text).trim();
   if (act === "unclassified") {
-    // The optional "I said" / "I told you" frame matters: the gold event at
-    // root-crown 16 ¶27 is the utterance "I said I noticed when you were
-    // twenty-four." An anchor that does not allow the frame misses it.
-    if (/^(?:I (?:said|told you)[,:]?\s+)?I\s+(?:know|knew|noticed|saw|realised|realized|understood|remember|remembered)\b/i.test(inner)) {
-      act = "revelation"; verbSurface = "admits";
-    } else if (/^(?:You|He|She|They)\s+(?:knew|lied|promised)\b/i.test(inner)) {
-      act = "confrontation"; verbSurface = "accuses";
-    } else if (/^(?:I\s+(?:will not|won't|refuse|am not going to|can't|cannot)\b)/i.test(inner)) {
-      act = "decision"; verbSurface = "refuses";
-    }
-    // A bare affirmative is NOT an event. "Yes," on its own produced four
-    // identical "<Name> agrees yes" chips in one chapter of the gold set, and
-    // an agreement whose object cannot be recovered says nothing a reader can use.
+    act = classifyUtterance(inner);
+    verbSurface = UTTERANCE_VERB[act] ?? "says";
   }
 
   // "says" with nothing else is not an event. Skip rather than emit a chip
@@ -995,6 +1098,12 @@ function dialogueCandidate(
     .replace(/^(?:that|the|a|an|when|it|about|there|this)\s+/i, "")
     .trim();
   const object = findObject(content.length >= 4 ? content : inner);
+
+  // A speech act with no recoverable content ("Edis tells", "Qesh tells") points
+  // at nothing and was the largest class of false positive on the 45-event gold
+  // set. REJECTING them outright was tried and cost more true positives than it
+  // saved false ones (major recall 56% -> 44%), because some real events have
+  // content the extractor cannot reach. It is scored down instead, in the caller.
 
   return {
     paragraphIndex: pi,
@@ -1046,32 +1155,30 @@ const LEGACY_MAP: Record<NarrativeEventType, LegacyEventType> = {
  * Chosen by sweeping the gold set, not by taste. `FLOOR=x npx tsx
  * scripts/test-event-detect.ts --engine new` reproduces this table:
  *
- *   floor   emitted   precision   recall   major recall   F1    type
- *   0.28      22        54.5%      54.5%      63.6%      54.5%  50.0%
- *   0.34      21        57.1%      54.5%      63.6%      55.8%  50.0%   ← here
- *   0.40      19        57.9%      50.0%      54.5%      53.7%  54.5%
- *   0.46      16        62.5%      45.5%      54.5%      52.6%  60.0%
- *   0.52      15        66.7%      45.5%      54.5%      54.1%  60.0%
- *   0.60      13        69.2%      40.9%      45.5%      51.4%  55.6%
+ *   floor   emitted   precision   major recall   F1      type
+ *   0.34      61        32.8%        56.0%       37.7%   55.0%
+ *   0.42      55        36.4%        56.0%       40.0%   55.0%   <- here
+ *   0.48      52        36.5%        52.0%       39.2%   57.9%
+ *   0.54      46        34.8%        44.0%       35.2%   56.3%
  *
- * Worth understanding rather than just copying: an earlier sweep, taken before
- * the object-extraction and motion-verb rules below existed, put the best point
- * at 0.55. Cleaning up the CANDIDATES moved the optimum DOWN, because the floor
- * had been doing a job that now happens at the source — it was suppressing junk
- * by suppressing everything. A threshold that has to be high is a symptom.
+ * ★ These numbers are from the 45-event / 11-chapter gold set. An earlier
+ * 22-event / 5-chapter version of the same set reported F1 55.8% for the SAME
+ * code. The larger set is the honest one; the small one was optimistic by nearly
+ * twenty points. Do not quote a figure without saying which set produced it.
  *
- * 21 emitted against 22 gold is also the yield behaving: the old engine reported
- * 2.67 events per chapter whether or not the chapter had any.
- *
- * This is tuned against 22 gold events across 5 chapters, far too small a sample
- * to trust to two decimal places. Re-run the sweep whenever the gold set grows.
+ * Two things the sweeps have now shown twice, worth internalising:
+ *   · the optimum floor MOVES when the candidates change, so re-sweep after any
+ *     change to the gates, never carry a threshold forward
+ *   · precision here is flat across the whole usable range (32-37%), which means
+ *     the threshold cannot fix it. The false positives score as high as the true
+ *     positives. That is a candidate-quality problem and it is the open one.
  *
  * The floor is also what lets a quiet chapter return one event or none. The old
  * engine took its top three clusters unconditionally and reported 2.67 events
  * per chapter whether or not the chapter contained any; the gold set's quiet
  * chapters contain 2 events across 29 and 65 paragraphs.
  */
-const CONFIDENCE_FLOOR = 0.34;
+const CONFIDENCE_FLOOR = 0.42;
 /**
  * Suppression radius in PARAGRAPHS, not as a fraction of the chapter.
  *

@@ -7,6 +7,14 @@ import { fileURLToPath } from "url";
 import type { Novel, WorldData } from "../src/types";
 import { parseNovel } from "../src/lib/parser";
 import { scanAndClassify, type ScanResult } from "../src/lib/world-data";
+// ★ This suite DID NOT RUN. It exited 1 on an unhandled `sharp` import error,
+// because world-data.ts lazily imports narrative-lm.ts for its semantic entity
+// assist and @xenova/transformers v2 statically imports sharp, whose native
+// binary is not built in this store. Installing the Node backend both stubs
+// sharp and gives the semantic-assist path a real model, so the numbers below
+// finally describe the pipeline the app actually runs. The same failure hid the
+// event-label suite; see scripts/lm-node-backend.ts.
+import { installNodeEmbedder, reportBackend } from "./lm-node-backend";
 
 type SourceKey = "Hollow Iris" | "Root Crown" | "Last Wanderer";
 
@@ -98,6 +106,7 @@ const SOURCES: SourceSpec[] = [
 ];
 
 async function main() {
+  reportBackend(await installNodeEmbedder());
   const options = parseArgs(process.argv.slice(2));
   const selectedSources = SOURCES.filter((source) =>
     !options.sourceFilter || source.name.toLowerCase().includes(options.sourceFilter),

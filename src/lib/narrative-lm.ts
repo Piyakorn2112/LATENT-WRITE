@@ -649,3 +649,199 @@ export async function semanticSimilarity(text: string, anchor: string): Promise<
   const textEmb = await embed(text.slice(0, 300));
   return cosine(textEmb, anchorEmb);
 }
+
+// ─── Narrative-type classification, calibrated ────────────────────────────────
+/**
+ * Classify a clause into the `narrative-events.ts` taxonomy from embeddings.
+ *
+ * ─── WHY THIS IS SHAPED DIFFERENTLY FROM THE ANCHORS ABOVE ───────────────────
+ *
+ * `EVENT_ANCHORS` gives each type ONE hand-written sentence and takes a raw
+ * cosine. Two documented problems with that, and neither is "embeddings are bad":
+ *
+ * 1. ONE ANCHOR IS HIGH-VARIANCE. A single sentence per class makes the score
+ *    brittle to its exact phrasing, and label-expansion work (QZero and similar)
+ *    reports consistent gains from embedding several paraphrases per class and
+ *    aggregating. So each type here carries five anchors in deliberately
+ *    different registers — plain, institutional, physical, interior — and the
+ *    score is the MEAN of the top two, which keeps one lucky paraphrase from
+ *    carrying a class while still rewarding agreement.
+ *
+ * 2. RAW COSINE IS UNCALIBRATED. Some anchors sit closer to all prose than
+ *    others, so a class can win on generic affinity rather than on fit. The fix
+ *    is the embedding-space analogue of "Calibrate Before Use" (Zhao et al.,
+ *    ICML 2021): score a content-free NULL input and subtract that bias per
+ *    class. Cheap, no new model, and it targets exactly the failure mode where a
+ *    detector looks confident and is measuring nothing.
+ *
+ * ─── WHAT THE MEASUREMENT ACTUALLY SAID ──────────────────────────────────────
+ *
+ * `scripts/test-narrative-lm.ts` prints all three variants. On 44 gold clauses:
+ *
+ *   single anchor, uncalibrated (the old shape)   top-1 27.3%   top-2 34.1%
+ *   five anchors, uncalibrated                    top-1 43.2%   top-2 52.3%
+ *   five anchors + null calibration               top-1 40.9%   top-2 47.7%
+ *
+ * So: MULTI-ANCHOR IS A LARGE, REAL WIN. The single-anchor shape sat at 27.3%
+ * against a 12.5% chance baseline for eight classes — it was barely working, and
+ * that is the honest diagnosis of "anchor cosine is weak" rather than a property
+ * of embeddings.
+ *
+ * NULL CALIBRATION DID NOT HELP, and `calibrate` therefore defaults to FALSE.
+ * The published result it comes from ("Calibrate Before Use") is about
+ * generative label scoring, and the correction evidently does not transfer to
+ * cosine over multi-anchor means here. It costs ~2 points consistently. The code
+ * stays because the option makes the claim testable rather than folklore; if the
+ * gold set grows and the sign flips, flip the default and say so.
+ *
+ * AND THE CONCLUSION THAT MATTERS MOST: 43.2% is WORSE than the 55.0% that
+ * `narrative-events.ts` gets by reading the clause's VERB. So this classifier is
+ * NOT wired into the type path. A verb is stronger evidence of what a clause
+ * does than a cosine against a description of a category. Do not "improve" the
+ * engine by blending it in without re-running both suites first — at n=22 the
+ * LM appeared to win, and that reversed at n=44.
+ */
+export type NarrativeTypeName =
+  | "decision" | "revelation" | "confrontation" | "action"
+  | "arrival" | "departure" | "shift" | "state-change";
+
+const NARRATIVE_TYPE_ANCHORS: Record<NarrativeTypeName, string[]> = {
+  decision: [
+    "A character decides to do something and commits to it.",
+    "She refuses, and the refusal cannot be walked back.",
+    "The committee accepts the recommendation and adopts it as policy.",
+    "He agrees to the terms and signs his name to them.",
+    "She chose the harder option knowing what it would cost.",
+  ],
+  revelation: [
+    "A character learns something that changes what they believe.",
+    "She told him the truth she had been keeping.",
+    "He understood, for the first time, what had actually happened.",
+    "The record revealed a fact nobody had admitted before.",
+    "She admitted that she had known about it for years.",
+  ],
+  confrontation: [
+    "Two characters come into open opposition.",
+    "She accused him directly and he denied it.",
+    "They argued about what the decision had really meant.",
+    "He challenged her account in front of everyone.",
+    "She raised her voice and refused to let it pass.",
+  ],
+  action: [
+    "A character does something physical that has consequences.",
+    "She wrote the report and sealed it in the archive.",
+    "He broke the seal and took the documents out.",
+    "She handed over the key and closed the case.",
+    "They installed the replacement and brought it online.",
+  ],
+  arrival: [
+    "Someone arrives and their presence changes the situation.",
+    "She reached the station after four days of transit.",
+    "The delegation entered the chamber and took their seats.",
+    "He came back into the room and everyone stopped talking.",
+    "A new liaison joined the committee that morning.",
+  ],
+  departure: [
+    "Someone leaves, and the leaving matters.",
+    "She walked out of the hall and did not return.",
+    "The ship departed its orbit on the twelfth day.",
+    "He left the house before anyone else was awake.",
+    "They withdrew from the negotiation entirely.",
+  ],
+  shift: [
+    "Time passes or the scene moves elsewhere.",
+    "The next morning the work resumed.",
+    "Three weeks later the situation had changed.",
+    "That evening, in a different room, the conversation continued.",
+    "By the time winter came it was already settled.",
+  ],
+  "state-change": [
+    "A condition of the world changes measurably.",
+    "The affected population reached seventy-eight thousand.",
+    "The deficit rose to thirty-one percent that week.",
+    "One more relay went dark and the count dropped to ten.",
+    "The atmospheric processors began to fail across the hemisphere.",
+  ],
+};
+
+/**
+ * Content-free inputs. Their similarity to each class anchor IS that class's
+ * bias, and subtracting it is the whole calibration.
+ */
+const NULL_ANCHORS = [
+  "N/A",
+  "The text continues.",
+  "This is a sentence from a book.",
+  "Something is described here.",
+];
+
+let _typeAnchors: Record<NarrativeTypeName, Float32Array[]> | null = null;
+let _typeBias: Record<NarrativeTypeName, number> | null = null;
+
+async function getTypeAnchors(): Promise<{
+  anchors: Record<NarrativeTypeName, Float32Array[]>;
+  bias: Record<NarrativeTypeName, number>;
+}> {
+  if (_typeAnchors && _typeBias) return { anchors: _typeAnchors, bias: _typeBias };
+
+  const anchors = {} as Record<NarrativeTypeName, Float32Array[]>;
+  for (const [type, sentences] of Object.entries(NARRATIVE_TYPE_ANCHORS) as Array<[NarrativeTypeName, string[]]>) {
+    anchors[type] = await Promise.all(sentences.map((s) => embed(s)));
+  }
+
+  const nulls = await Promise.all(NULL_ANCHORS.map((s) => embed(s)));
+  const bias = {} as Record<NarrativeTypeName, number>;
+  for (const type of Object.keys(anchors) as NarrativeTypeName[]) {
+    let sum = 0;
+    for (const n of nulls) sum += topTwoMean(n, anchors[type]);
+    bias[type] = sum / nulls.length;
+  }
+
+  _typeAnchors = anchors;
+  _typeBias = bias;
+  return { anchors, bias };
+}
+
+/** Mean of the two best anchor similarities. One anchor is noisy; the max of
+ *  five rewards an outlier; the top two require a little agreement. */
+function topTwoMean(v: Float32Array, anchors: Float32Array[]): number {
+  const sims = anchors.map((a) => cosine(v, a)).sort((x, y) => y - x);
+  return sims.length >= 2 ? (sims[0] + sims[1]) / 2 : (sims[0] ?? 0);
+}
+
+export interface NarrativeTypePrediction {
+  type: NarrativeTypeName;
+  /** Calibrated score of the winner. */
+  score: number;
+  /** Gap to the runner-up. A small margin means "the LM does not really know". */
+  margin: number;
+  ranked: Array<{ type: NarrativeTypeName; score: number }>;
+}
+
+export async function classifyNarrativeType(
+  clause: string,
+  opts: { calibrate?: boolean; singleAnchor?: boolean } = {},
+): Promise<NarrativeTypePrediction | null> {
+  const text = clause.replace(/\s+/g, " ").trim();
+  if (text.length < 8) return null;
+
+  const { anchors, bias } = await getTypeAnchors();
+  const v = await embed(text.slice(0, 300));
+  const calibrate = opts.calibrate ?? false;
+
+  const ranked = (Object.keys(anchors) as NarrativeTypeName[])
+    .map((type) => {
+      const raw = opts.singleAnchor
+        ? cosine(v, anchors[type][0]) // the old shape, for comparison
+        : topTwoMean(v, anchors[type]);
+      return { type, score: calibrate ? raw - bias[type] : raw };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return {
+    type: ranked[0].type,
+    score: ranked[0].score,
+    margin: ranked[0].score - (ranked[1]?.score ?? 0),
+    ranked,
+  };
+}

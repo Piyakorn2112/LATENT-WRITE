@@ -198,7 +198,66 @@ constant.
 
 ---
 
+## 3a · CORRECTION: the 5-chapter numbers were optimistic
+
+The table above was measured on a 22-event / 5-chapter gold set. Expanding it to
+**45 events across 11 chapters** re-scored the SAME code far lower:
+
+| | 22 events, 5 chapters | 45 events, 11 chapters |
+|---|---|---|
+| precision | 57.1% | 35.7% |
+| recall on major events | 63.6% | 56.0% |
+| F1 | 55.8% | 39.6% |
+| type correct | 50.0% | 55.0% |
+
+The larger set is the honest one. Never quote a figure without saying which set
+produced it. Two further reversals came out of the same expansion:
+
+- **The dialogue channel was far weaker than it looked.** One new chapter lost
+  ALL FIVE of its events, every one an ordinary `"…," she said` line whose act
+  lives in the content ("You're defending the system", "I want someone to know").
+  Requiring a coloured attribution verb or one of four hand-written openings was
+  the phrase-dictionary mistake one level down. Replaced with a general rule:
+  a first- or second-person claim, or an imperative. Major recall 44.0% → 56.0%.
+- **The LM lost.** At n=22 anchor classification appeared to beat the engine's
+  verb-based typing (63.6% vs 50.0%); at n=44 it is 43.2% against 55.0%. It is
+  therefore NOT wired into the type path. A verb is stronger evidence of what a
+  clause does than a cosine against a description of a category.
+
+## 3b · The LM, now tested
+
+`npm run test:narrative-lm`. Until it existed, no test had executed a single
+embedding, for the reason in section 1. Its first assertion is a hard gate on the
+backend loading and must never be softened into a skip.
+
+| variant | top-1 | top-2 |
+|---|---|---|
+| single anchor, uncalibrated (the shape that shipped) | 27.3% | 34.1% |
+| five anchors per class, uncalibrated | **43.2%** | **52.3%** |
+| five anchors + null-anchor calibration | 40.9% | 47.7% |
+
+**Multi-anchor is a large real win.** The single-anchor shape sat at 27.3% against
+a 12.5% chance baseline for eight classes: it was barely working. That, not "the
+embeddings are bad", is the honest diagnosis.
+
+**Null calibration did not help** and defaults off. "Calibrate Before Use" is
+about generative label scoring and the correction does not appear to transfer to
+cosine over multi-anchor means. It costs ~2 points consistently. The option stays
+so the claim remains testable rather than folklore.
+
+Also measured: **4.0 ms per embed**, so a p90 chapter (270 sentences) costs ~1.1 s
+of embedding. That is the headroom that makes a bigger embedding model viable and
+a generative model not, on a weak machine.
+
 ## 4 · What is still wrong, honestly
+
+**Precision is the open problem: 35.7%, and it is FLAT across the whole usable
+confidence range (32–37%).** No threshold fixes it — the false positives score as
+high as the true positives, so it is a candidate-quality problem. Two attempts
+that measured as net losses and were reverted, recorded so they are not retried
+blind: rejecting content-less dialogue acts outright (cost 12 points of major
+recall), and rejecting pronoun object heads at extraction time (same). Both are
+handled by scoring now instead.
 
 **`action` dominates the held-out book at 54.0%**, and the type entropy gap
 between in-distribution and held-out (0.11) is slightly *worse* than the old

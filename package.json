@@ -14,8 +14,6 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test:event-labels": "tsx scripts/test-event-labels.ts",
-    "test:event-lm": "tsx scripts/test-event-lm.ts",
     "test:entity-scan": "tsx scripts/test-entity-scan.ts",
     "test:local-review": "tsx scripts/test-local-review.ts",
     "test:chapter-roles": "tsx scripts/test-chapter-roles.ts",
@@ -39,7 +37,8 @@
     "electron:build": "npm run build && electron-builder --mac --config electron-builder.yml",
     "test:event-detect": "tsx scripts/test-event-detect.ts",
     "audit:ood-events": "tsx scripts/ood-event-audit.ts",
-    "print:chapter": "tsx scripts/print-chapter.ts"
+    "print:chapter": "tsx scripts/print-chapter.ts",
+    "test:narrative-lm": "tsx scripts/test-narrative-lm.ts"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",
