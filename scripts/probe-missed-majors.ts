@@ -34,7 +34,7 @@ async function main() {
   ) as { chapters: Array<{ book: string; chapter: number; events: GoldEvent[] }> };
 
   const cache = new Map<string, Novel>();
-  const missed: Array<{ book: string; ch: number; g: GoldEvent }> = [];
+  const missed: Array<{ book: string; ch: number; g: GoldEvent; para: string }> = [];
   let totalMajor = 0;
 
   for (const gc of gold.chapters) {
@@ -55,7 +55,7 @@ async function main() {
       if (g.salience !== "major") continue;
       totalMajor++;
       const found = events.some((e) => Math.abs(g.paragraph - 1 - e.paragraphIndex) <= TOLERANCE);
-      if (!found) missed.push({ book: gc.book, ch: gc.chapter, g });
+      if (!found) missed.push({ book: gc.book, ch: gc.chapter, g, para: paragraphs[g.paragraph - 1] ?? "" });
     }
   }
 
@@ -72,7 +72,12 @@ async function main() {
   };
   for (const m of missed) {
     const e = m.g.evidence;
-    if (/["“”]/.test(e)) buckets["inside quoted dialogue"].push(m.g);
+    // ★ Check the SOURCE PARAGRAPH for quotes, not the evidence clause. Annotators
+    // copy the inner utterance without its quote marks, so testing the clause put
+    // every missed line of dialogue into the "first-person" bucket and hid the
+    // largest failure class behind a grammatical label.
+    const inQuotes = /["“”]/.test(m.para);
+    if (inQuotes) buckets["inside quoted dialogue"].push(m.g);
     else if (/\b(?:I|we|my|our|me|us)\b/.test(e)) buckets["first-person subject (I/we/my)"].push(m.g);
     else if (/\b(?:was|were|been|is|are)\s+\w+(?:ed|en)\b/.test(e) || /^There\b/.test(e)) buckets["passive or existential"].push(m.g);
     else if (/^[A-Z][a-z]+\b/.test(e)) buckets["third-person named subject"].push(m.g);

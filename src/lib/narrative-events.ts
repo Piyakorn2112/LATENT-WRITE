@@ -357,7 +357,17 @@ const UTTERANCE_VERB: Partial<Record<NarrativeEventType, string>> = {
 };
 
 function classifyUtterance(inner: string): NarrativeEventType {
-  const u = inner.trim();
+  // ★ STRIP A LEADING QUOTE MARK, or every `^`-anchored rule below silently fails.
+  //
+  // Detection runs per SENTENCE. When an utterance spans several sentences, the
+  // caller's `["“]([^"”]{4,})["”]` cannot find a closing quote inside the first
+  // one and falls back to the raw text — so the string arriving here is
+  // `“No more work to-night.` with the opening quote still attached, and `^No`
+  // does not match it. Every anchored rule in this function had that exposure,
+  // and the anchoring is deliberate (unanchored patterns produced the three
+  // highest-confidence false positives on the gold set), so the fix belongs here
+  // rather than in each pattern.
+  const u = inner.trim().replace(/^["“”'‘’\s]+/, "");
   const words = u.split(/\s+/).length;
 
   // Too short to carry a claim, or asking rather than asserting.
@@ -434,6 +444,80 @@ function classifyUtterance(inner: string): NarrativeEventType {
   const PERFORMATIVE =
     /\bI\s*(?:'m|'ve|'d|'ll)?\s*(?:admit|admitted|confess|confessed|promise|promised|swear|swore|refuse|refused|decline|declined|agree|agreed|decide|decided|assure|declare|insist|insisted|beg|owe|owed|intend|vow|vowed|apologise|apologize|accept|accepted|forbid|deny|denied|grant|granted|consent)\b/i;
   if (words >= 4 && PERFORMATIVE.test(u)) return "revelation";
+
+  // ── DECLARATIONS: saying it IS the act, and it changes a standing status.
+  //
+  // The list above is all COMMISSIVE — the speaker binding their own future
+  // conduct. Austin's other performative class changes the relation between two
+  // people at the moment of utterance: releasing someone from an obligation,
+  // forgiving, disowning, resigning. "I do; and I release you" ends an
+  // engagement, and was a missed MAJOR gold event.
+  //
+  // Also a closed class and a small one, which is what keeps it safe. Bounded to
+  // FIRST PERSON with a direct object, because "he released her hand" is a
+  // physical act while "I release you" is a social one.
+  if (words >= 3 && /\bI\s+(?:release|free|forgive|pardon|absolve|disown|renounce|resign|withdraw|dismiss)\b/i.test(u)) {
+    return "decision";
+  }
+
+  // ── A PROHIBITION, which is a directive with the verb left out.
+  //
+  // "No more work to-night. Christmas Eve, Dick." — Fezziwig closing the
+  // warehouse, a missed MAJOR gold event. Every rule above looks for a verb and
+  // this utterance has none: "No more <noun>" is an order by ellipsis, and it
+  // ends the working day for everyone in the room.
+  //
+  // Narrow on purpose. "No more" as a quantifier inside a longer clause ("there
+  // was no more bread") is not a prohibition, so it has to OPEN the utterance.
+  if (/^(?:and\s+)?no\s+more\b/i.test(u)
+      || /\b(?:you|we)\s+(?:shall|will|must)\s+not\b/i.test(u)
+      || /\bnever\s+again\b/i.test(u)) {
+    return "decision";
+  }
+
+  // ── A PREDICTION whose outcome is grave.
+  //
+  // "If these shadows remain unaltered by the future, the child will die" — a
+  // missed MAJOR gold event, and one that no rule above could reach because the
+  // subject is third person and the speaker commits to nothing.
+  //
+  // `will` on its own is one of the commonest words in dialogue, so the rule is
+  // carried entirely by a CLOSED SET of grave outcomes. A prophecy that someone
+  // will die, hang or be ruined changes a scene; "I will call tomorrow" does not,
+  // and the verb list is what separates them.
+  if (/\b(?:will|shall|'ll)\s+(?:die|perish|hang|starve|drown|fall|end|fail|be\s+(?:dead|lost|killed|destroyed|ruined|undone|hanged|taken))\b/i.test(u)) {
+    return "revelation";
+  }
+
+  // ── A COMMITMENT stated as settled intention rather than a promise.
+  //
+  // "I mean to give him the same chance every year, whether he likes it or not" —
+  // a missed MAJOR gold event. `intend` was already in the performative list but
+  // almost nobody says "I intend to"; in narrative dialogue the same act is
+  // "I mean to", "I am going to", "I shall".
+  //
+  // The infinitive is required. "I mean THAT…" is a clarification of something
+  // already said, and "I mean, …" is a filler — neither commits the speaker to
+  // anything, and both are extremely common in conversation.
+  if (/\bI\s+(?:mean|meant)\s+to\s+[a-z]/i.test(u)
+      || /\bI\s+(?:am|'m)\s+going\s+to\s+[a-z]/i.test(u)) {
+    return "decision";
+  }
+
+  // ── The speaker ANNOUNCES THEIR OWN ARRIVAL, and says what for.
+  //
+  // "I have come to bring you home, dear brother!" — a missed MAJOR gold event.
+  // A character reporting that they are now here, for a reason, is the arrival
+  // stated from the inside; the narration channel only ever catches it from the
+  // outside ("the door opened and a girl came in").
+  //
+  // The exclusion is the whole rule. "I have come to BELIEVE that…" is an idiom
+  // for a slowly-formed opinion and not an arrival at all, so a mental verb after
+  // the infinitive disqualifies it.
+  if (/\bI\s+(?:have\s+|had\s+)?(?:come|came)\s+(?:here\s+)?(?:to|for)\b/i.test(u)
+      && !/\b(?:come|came)\s+(?:here\s+)?to\s+(?:think|believe|realise|realize|understand|know|see|feel|suppose|regard|expect|accept|love|hate|fear|doubt)\b/i.test(u)) {
+    return "arrival";
+  }
 
   return "unclassified";
 }
