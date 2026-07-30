@@ -648,3 +648,32 @@ model size, not annotation volume.**
 The expanded fixture is still worth every token it cost. Every number the project
 reports is now measured against 279 events across nine authors instead of 103,
 which is the difference between a plausible claim and a defensible one.
+
+---
+
+## Re-testing every reverted experiment on the tripled fixture (2026-07-31)
+
+Three separate conclusions this session were overturned by a bigger sample, so
+the reverted pile was re-run systematically rather than trusted:
+
+| experiment | on 103 events | on 279 events | verdict |
+|---|---|---|---|
+| **fronted adverbials** | exactly neutral | **+2.5 precision@3, +2.3 major recall** | **RE-ADMITTED** |
+| extended event anchors | +5 recall / −4 precision | 49.2% vs 53.8% precision@3 | stays out |
+| PP post-modifier crossing | 17 subjects, 0 gold events | 53.0% vs 53.8% | stays out |
+| prune cut re-sweep | −0.05 optimal | −0.05 still optimal | unchanged |
+
+One of four flipped. That is the right hit rate to expect, and it is why the
+sweep was worth running rather than assuming either "they all still lose" or
+"more data fixes everything".
+
+**The standing rule this produces:** a neutral or losing measurement on a small
+fixture is NOT evidence of no effect — it is often evidence the fixture cannot
+resolve the effect. Record the number and a note saying what would justify a
+retest, then actually retest when the fixture grows. Every revert in this project
+carries that note now, and it is what made recovering the fronted-adverbial rule
+a ten-minute job instead of a rediscovery.
+
+The same lesson appeared three times in one session, in three different places:
+the trained ranker's "still-climbing" learning curve (noise), the scorer weights'
+"saturation" (four flipped signs, invisible at n=212), and this.
