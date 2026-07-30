@@ -78,8 +78,8 @@ moderate type agreement is a property of the domain, not a bug.
 
 **The number that describes the PRODUCT is precision@BUDGET**, where the budget
 is `TIMELINE_CHIP_BUDGET` in `narrative-events.ts` — currently 3. Current, on the
-nine-book set: precision@3 46.1%, major events SHOWN 17.2%, major events found
-anywhere 39.6%, overall precision 33.1%. Quote precision@3, and never quote a
+nine-book set: precision@3 50.4%, major events SHOWN 18.7%, major events found
+anywhere 41.0%, overall precision 33.1%. Quote precision@3, and never quote a
 figure without saying which gold set produced it. Every smaller set was
 flattering: 1 author / 22 events gave precision 57.1%, and it meant nothing.
 
@@ -113,13 +113,15 @@ reports that are easy to misread:
   because the ranking is sharp at the top and noisy through the middle. Only the
   top-N cut costs a writer anything. It currently separates by ~20pp.
 
-**The scorer's weights have SATURATED — do not refit them expecting a gain.**
-Three refits were run; the first won 15 points because the SIGNS were wrong, and
-sign errors dominate everything else. The second and third both LOST. Lift is a
-MARGINAL association, not a conditional effect, and these features are correlated
-(`-no-content` fires only inside `dialogue-act`, itself mostly inside
-`named-agent`), so fitting each to its own marginal double-counts the shared
-part. Remaining headroom is in extraction or in a signal that does not exist yet.
+**A FAILED REFIT MEANS "NOT ENOUGH DATA TO FIT", NOT "NOTHING LEFT TO FIT".**
+Fit #3 lost on 212 candidates and I concluded the weights had saturated. Wrong.
+When the fixture tripled to 444, FOUR signs were wrong (`pronoun-agent` -0.20 vs
+measured +6.3pp, `-pluperfect` -0.12 vs +5.4, `-chapter-close` -0.30 vs +11.8,
+`-modal` +0.05 vs -3.7) and fixing them took precision@3 46.1% -> 50.4%. 212
+candidates against 16 features cannot resolve a 5-point lift, so fit #3 was
+fitting noise. **Re-run the analyser whenever the FIXTURE grows, not only when
+the gates change.** A fifth pass tuning the largest remaining gaps then lost
+(50.4% -> 49.6%), which is the real saturation point for this sample size.
 
 **The LM PRUNES well and RANKS badly, and those are separate settings.**
 `refineEventSalience` filters on the raw contrastive score and separately blends

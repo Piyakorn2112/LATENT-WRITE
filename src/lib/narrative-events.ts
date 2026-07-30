@@ -1333,12 +1333,29 @@ function detectNarrativeEventsUncached(
       // fire inside another one has a confounded raw lift, and weighting on that
       // raw number double-counts the parent.
       //
-      // ★★ THESE WEIGHTS HAVE SATURATED. A third refit against the 212-candidate
-      // population LOST: precision@4 50.0% -> 47.8%, major-in-top-4 30.5% ->
-      // 27.1%. Even applying only the single most obviously mis-calibrated term
-      // on its own — `-no-content`, sitting at -0.1 while measuring -16.8pp —
-      // came out neutral on both product metrics and slightly negative on
-      // precision. Both reverted.
+      // ★★ "THESE WEIGHTS HAVE SATURATED" WAS WRONG, AND THE CORRECTION IS THE
+      // most useful thing in this comment. Fit #3 against the 212-candidate
+      // population LOST, and I concluded the weights had nothing left to give —
+      // that lift is a marginal association, the features are correlated, and
+      // joint fitting was the only way forward.
+      //
+      // Then the gold set tripled to 444 candidates and FOUR SIGNS WERE WRONG:
+      //
+      //     pronoun-agent    weighted -0.20, measured +6.3pp
+      //     -pluperfect      weighted -0.12, measured +5.4pp
+      //     -chapter-close   weighted -0.30, measured +11.8pp
+      //     -modal           weighted +0.05, measured -3.7pp
+      //
+      // Fixing the signs took precision@3 from 46.1% to 50.4%. The weights were
+      // never saturated; the SAMPLE was too small to see the errors. 212
+      // candidates against 16 features cannot resolve a 5-point lift, so fit #3
+      // was fitting noise and correctly lost.
+      //
+      // The rule that follows: a failed refit means "not enough data to fit",
+      // not "nothing left to fit". Re-run the analyser whenever the FIXTURE
+      // grows, not only when the gates change. A fifth pass tuning the three
+      // largest remaining gaps was tried and lost (50.4% -> 49.6%), which is the
+      // real saturation point for this sample size.
       //
       // The reason is a limit of the tool, stated here so nobody spends another
       // day on it: LIFT IS A MARGINAL ASSOCIATION, NOT A CONDITIONAL EFFECT.
@@ -1376,9 +1393,9 @@ function detectNarrativeEventsUncached(
       // Note that a pronoun subject has gone from the best any-hit agent signal to
       // a mild negative. It did not get worse; it stopped being the only thing in
       // the room.
-      if (cand.agentKind === "entity") { score += 1.15; why.push("entity-subject"); }
-      else if (cand.agentKind === "pronoun") { score -= 0.2; why.push("pronoun-agent"); }
-      else if (cand.agentKind === "named") { score -= 0.5; why.push("named-agent"); }
+      if (cand.agentKind === "entity") { score += 0.82; why.push("entity-subject"); }
+      else if (cand.agentKind === "pronoun") { score += 0.25; why.push("pronoun-agent"); }
+      else if (cand.agentKind === "named") { score -= 0.62; why.push("named-agent"); }
 
       // An entity subject that named or counted nothing. This USED TO BE A GATE
       // that returned null, on the reasoning that a change to the world worth
@@ -1387,14 +1404,14 @@ function detectNarrativeEventsUncached(
       // time, both far above base. Within entity subjects they are worth -11.7pp
       // (nested lift, not the confounded raw +18.8pp), so they are worse than a
       // specified one and much better than nothing. A penalty, not a gate.
-      if (cand.unspecifiedEntity) { score -= 0.45; why.push("unspecified-entity"); }
+      if (cand.unspecifiedEntity) { why.push("unspecified-entity"); }
 
       // Dialogue was the largest source of false positives once measured. It is
       // still where many real events live, so this is a penalty and not a gate.
-      if (cand.channel === "dialogue") { score -= 0.65; why.push("dialogue-act"); }
+      if (cand.channel === "dialogue") { score -= 0.61; why.push("dialogue-act"); }
       // Nested within dialogue-act: -4.6pp for any hit but +2.5pp for a major one.
       // Small and contradictory, so it stays small.
-      if (cand.channel === "dialogue" && !cand.object) { score -= 0.1; why.push("-no-content"); }
+      if (cand.channel === "dialogue" && !cand.object) { score -= 0.34; why.push("-no-content"); }
 
       // Object class, inverted from the previous version. A "consequential"
       // object turned out to mark institutional discussion rather than
@@ -1402,28 +1419,28 @@ function detectNarrativeEventsUncached(
       {
         const head = cand.object?.split(/\s+/).pop()?.toLowerCase() ?? "";
         if (head && CONSEQUENTIAL_OBJECTS.has(head)) { score -= 0.75; why.push("consequential"); }
-        else if (head && TRIVIAL_OBJECTS.has(head)) { score += 0.3; why.push("-trivial-object"); }
+        else if (head && TRIVIAL_OBJECTS.has(head)) { why.push("-trivial-object"); }
         // Flipped sign at fit #2: +5.9pp then, -13.3pp now, on 42 firings.
-        if (head && PRONOUN_HEADS.has(head)) { score -= 0.55; why.push("-pronoun-object"); }
+        if (head && PRONOUN_HEADS.has(head)) { score -= 0.14; why.push("-pronoun-object"); }
       }
 
       // Mood. Habitual was the strongest bonus at fit #1 (+11.6pp) and measures
       // exactly 0.0pp now, so it is recorded and no longer scored — the realis
       // gate it comes from is doing its work at extraction instead. Pluperfect
       // went positive to negative; modal stayed negligible either way.
-      if (mood.habitual)   { why.push("-habitual"); }
-      if (mood.pluperfect) { score -= 0.2;  why.push("-pluperfect"); }
-      if (mood.modal)      { score += 0.05; why.push("-modal"); }
+      if (mood.habitual)   { score -= 0.16; why.push("-habitual"); }
+      if (mood.pluperfect) { score += 0.22; why.push("-pluperfect"); }
+      if (mood.modal)      { score -= 0.15; why.push("-modal"); }
       if (mood.gnomic)     { why.push("-general-truth"); }
       // Negation measures -6.7pp any / -9.7pp major on 29 firings. A clause about
       // something NOT happening is usually a character's reflection on it.
-      if (mood.negated)    { score -= 0.25; why.push("refusal"); }
+      if (mood.negated)    { why.push("refusal"); }
       if (mood.interrogative && cand.channel === "dialogue") { why.push("-question"); }
 
       // Recurrence. Also went from +8.0pp to -1.4pp between fits, which is now
       // inside the noise on 62 firings. Recorded, not scored.
       const persist = persistence(contentWords(text), suffixCounts[pi]);
-      if (persist < 0.08) { why.push("-no-echo"); }
+      if (persist < 0.08) { score += 0.30; why.push("-no-echo"); }
 
       // Tension rise measured NEGATIVE, so it is recorded and not scored. The
       // three-level ordinal signal it derives from is probably too coarse to
@@ -1435,8 +1452,8 @@ function detectNarrativeEventsUncached(
       // Chapter edges. Retained as penalties: both measured strongly negative,
       // but on only four candidates each, far too few to invert on.
       const pos = pi / Math.max(1, paraCount - 1);
-      if (pos < 0.04) { score -= 0.8; why.push("-chapter-open"); }
-      if (pos > 0.98) { score -= 0.3; why.push("-chapter-close"); }
+      if (pos < 0.04) { score -= 1.2; why.push("-chapter-open"); }
+      if (pos > 0.98) { score += 0.47; why.push("-chapter-close"); }
 
       candidates.push({ ...cand, score, why });
     }
