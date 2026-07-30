@@ -663,6 +663,61 @@ function findVerb(words: string[]): VerbHit | null {
  * plus an irregular table, checked against a closed lexicon. A wrong guess
  * simply fails to match, which costs recall and never precision.
  */
+/** Words that can open a FRONTED ADVERBIAL — a phrase preceding the subject. */
+const FRONTED_OPENER = new Set([
+  "with", "without", "after", "before", "during", "despite", "besides",
+  "among", "between", "in", "on", "at", "from", "by", "for", "through",
+  "across", "against", "beneath", "beyond", "under", "over", "upon",
+  "within", "toward", "towards", "near", "beside", "behind", "above", "below",
+  "when", "while", "as", "although", "though", "because", "since", "if",
+  "unless", "once", "whenever", "until",
+  "then", "now", "later", "suddenly", "finally", "meanwhile", "presently",
+  "afterwards", "immediately", "instead", "meantime", "thereupon",
+  "here", "there", "thus", "therefore", "however", "indeed", "perhaps",
+  "certainly", "yesterday", "today", "tonight", "still", "nevertheless",
+]);
+
+/**
+ * Characters of fronted adverbial to step over before looking for the subject,
+ * or 0 to leave the clause alone.
+ *
+ * ★ MEASURED NEUTRAL ONCE, REVERTED, AND RE-ADMITTED ON EVIDENCE. Both subject
+ * finders are anchored at position 0, so a clause opening with a prepositional or
+ * participial phrase has no findable subject at all:
+ *
+ *   "With an effort I turned and began a stumbling run"
+ *   "With a fierce sweep of his arm, he hurled the woman from him"
+ *   "advancing from the direction of Horsell, I noted a little black knot of men"
+ *
+ * All three are MAJOR gold events. A first version fired 78 times and moved
+ * nothing, because the recovered clauses died at the same verb gate as everything
+ * else, and it was reverted with that number recorded. It is back because those
+ * three are still in the miss list and the engine around it has changed. If it
+ * measures neutral again, revert again — but MEASURE, do not assume either way.
+ *
+ * Resumes ONLY at a personal pronoun, or at a subject-shaped token immediately
+ * after a comma. That second condition is what stops "advancing from the
+ * direction of Horsell, I noted…" resuming at "Horsell" and inventing a subject.
+ */
+function frontedAdverbialLength(text: string): number {
+  const opener = text.match(/^\s*([A-Za-z']+)/);
+  if (!opener) return 0;
+  const first = opener[1].toLowerCase();
+  if (!FRONTED_OPENER.has(first) && !/(?:ing|ed)$/.test(first)) return 0;
+  const tok = /\S+/g;
+  let index = 0;
+  let afterComma = false;
+  let t: RegExpExecArray | null;
+  while ((t = tok.exec(text)) !== null && index < 10) {
+    index++;
+    if (index === 1) { afterComma = /,$/.test(t[0]); continue; }
+    if (/^(?:She|He|They|I|We|It)\b/.test(t[0])) return t.index;
+    if (afterComma && /^(?:[A-Z][a-z']{2,}|[Tt]he|[Aa]n?|[Oo]ne)\b/.test(t[0])) return t.index;
+    afterComma = /,$/.test(t[0]);
+  }
+  return 0;
+}
+
 function verbLookup(raw: string): string | null {
   const w = stripTrailingPunct(raw);
   if (!w) return null;
@@ -1537,13 +1592,23 @@ function narrationCandidate(
   _funnel.sentences++;
   const primary = findAgent(text, nameRe, carried, recurringCaps);
   if (primary) _funnel.agentNamedOrPronoun++; else _funnel.entityTried++;
-  const agent = primary ?? findEntitySubject(text);
+  let agent = primary ?? findEntitySubject(text);
+  // Fallback ONLY — cannot change any clause that already finds a subject.
+  let bodyOffset = 0;
+  if (!agent) {
+    bodyOffset = frontedAdverbialLength(text);
+    if (bodyOffset > 0) {
+      const body = text.slice(bodyOffset);
+      agent = findAgent(body, nameRe, carried, recurringCaps) ?? findEntitySubject(body);
+      if (!agent) bodyOffset = 0;
+    }
+  }
   if (!agent) return null;
   const ENT = agent.kind === "entity";
   if (ENT) _funnel.entityFound++;
   let unspecifiedEntity = false;
 
-  const after = text.slice(agent.end);
+  const after = text.slice(bodyOffset + agent.end);
   const words = after.split(/\s+/).filter(Boolean);
 
   const verb = findVerb(words);
