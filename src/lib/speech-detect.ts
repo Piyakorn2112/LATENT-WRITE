@@ -550,7 +550,28 @@ function findDirectName(
   knownNames: string[],
   cache?: NameRegexCache,
 ): string | undefined {
-  // Known names: subject pattern — Name ... verb
+  // ★ THIS LOOP IS OVER NAMES, NOT POSITIONS, and `knownNames` is sorted by
+  // FREQUENCY. So across a long context window this returns the book's
+  // most-mentioned character rather than whoever is nearest the quote — a
+  // frequency prior where a recency prior belongs.
+  //
+  // Harmless in fast mode, which sees one preceding paragraph. In HIGH mode,
+  // which sees six by design, it means more context makes the protagonist more
+  // likely to appear and therefore more likely to win.
+  //
+  // A nearest-wins variant WAS built and measured: corpus completely unchanged
+  // (high still 176 correct / 33 wrong on descriptions) and accuracy-suite
+  // DEFAULT fell 182 -> 181. Reverted. So the frequency prior is real but it is
+  // NOT where high's descriptive errors come from — those never reach the
+  // extended-context step at all, which the Step 4 guard experiment already
+  // showed independently.
+  //
+  // Three explanations are now eliminated by measurement: generic/name ordering,
+  // the Step 4 fallback, and the frequency prior. The 17 cases where fast says
+  // UNATTRIBUTED and high says WRONG are resolved by a high-only path further
+  // up — subjectWeights, the dialogue thread, extCtx density, or
+  // pronounMinScore 12 vs fast's higher floor. Instrument WHICH source sets the
+  // speaker on those 17 before attempting a fourth fix.
   for (const name of knownNames) {
     const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:to|toward|at|with|for)\\s+${esc(name)}\\b`, 'i');
     if (objTest.test(text)) continue;
@@ -1505,16 +1526,23 @@ function findAttribution(
   //      descriptive tag should block it. Guarding Step 4 on a local generic match
   //      left HIGH COMPLETELY UNCHANGED — the errors never reach Step 4 at all.
   //
-  // Together those RULE OUT both the ordering and the fallback. What is left is
-  // the only remaining difference: high builds `before`/`after` from extCtxDepth 6
-  // where fast uses 1, so the SAME 120-char matcher slides over six paragraphs of
-  // text and finds names that are not in this paragraph. The window feeding the
-  // direct matcher is the mechanism, not anything downstream of it.
+  //   3. `findDirectName` loops over knownNames sorted by FREQUENCY, so a long
+  //      window returns the protagonist rather than the nearest speaker. A
+  //      nearest-wins variant left the corpus UNCHANGED and cost accuracy-suite
+  //      DEFAULT a point. Reverted.
   //
-  // That machinery is also what earns high its 97% on accuracy-suite's hard
-  // cases, so narrowing it wholesale would trade the mode's reason to exist. A
-  // real fix has to make the matcher aware of WHICH PARAGRAPH a name came from,
-  // and prefer same-paragraph evidence — a structural change, not a parameter.
+  // ★ AND NOTE WHAT IS *NOT* THE ANSWER. The depth-6 window, the cross-paragraph
+  // reach and the next/previous-chapter context are high mode's DESIGN, verified
+  // during its development, and must not be narrowed. The goal is to make high
+  // use that data more intelligently, not to give it less.
+  //
+  // Three explanations are now eliminated by measurement. The 17 cases where fast
+  // says UNATTRIBUTED and high says WRONG are set by a high-only path further up:
+  // subjectWeights, the dialogue thread, extCtx density, or pronounMinScore 12
+  // against fast's higher floor. INSTRUMENT WHICH SOURCE sets the speaker on those
+  // 17 before attempting a fourth fix — every attempt so far has been a
+  // well-reasoned guess at the wrong layer, and the harness can answer this
+  // directly.
 
   // ── Step 4: extended context (previous paragraphs) ──
   if (extCtx) {
