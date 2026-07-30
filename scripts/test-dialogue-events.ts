@@ -122,6 +122,53 @@ const MORE: Case[] = [
   },
 ];
 
+const MORE2: Case[] = [
+  {
+    name: "self-identification",
+    from: "gatsby ch3 — Gatsby tells Nick who he is",
+    paragraphs: [
+      "He smiled understandingly, and I realised I had been talking to him for some minutes.",
+      "\u201cI\u2019m Gatsby,\u201d he said suddenly.",
+      "The smile vanished and I was looking at an elegant young roughneck.",
+    ],
+    target: 1,
+    speakers: ["Gatsby", "Nick"],
+  },
+  {
+    name: "negative volition",
+    from: "anne ch3 — Marilla refuses to keep Anne",
+    paragraphs: [
+      "Marilla folded her hands and looked at Matthew across the table.",
+      "\u201cI\u2019m not going to keep her,\u201d said Marilla.",
+      "Matthew said nothing and studied his plate.",
+    ],
+    target: 1,
+    speakers: ["Marilla", "Matthew"],
+  },
+  {
+    name: "a death reported in speech",
+    from: "sherlock ch3 — a death reported to Holmes",
+    paragraphs: [
+      "She twisted her handkerchief between her fingers before she could go on.",
+      "\u201cAnd my poor father died quite suddenly that evening,\u201d said Miss Stoner.",
+      "Holmes leaned back with his eyes closed.",
+    ],
+    target: 1,
+    speakers: ["Miss Stoner", "Holmes"],
+  },
+  {
+    name: "a standing revoked",
+    from: "webnovel ch4 — guild membership revoked",
+    paragraphs: [
+      "Kessler set the tablet face down on the desk.",
+      "\"Rank stripped,\" Kessler said. \"Guild membership revoked, effective now.\"",
+      "The room had gone very quiet.",
+    ],
+    target: 1,
+    speakers: ["Kessler", "Jonah"],
+  },
+];
+
 /**
  * KNOWN GAPS — reported every run, NOT gated.
  *
@@ -263,6 +310,7 @@ async function main() {
   console.log("\n══ Utterances that ARE events (currently missed MAJOR gold events) ══");
   for (const c of SHOULD_DETECT) check(c, true);
   for (const c of MORE) check(c, true);
+  for (const c of MORE2) check(c, true);
 
   console.log("\n══ Utterances that are NOT events (the flood, pinned) ══");
   for (const c of SHOULD_NOT_DETECT) check(c, false);

@@ -379,6 +379,18 @@ function classifyUtterance(inner: string): NarrativeEventType {
     .replace(/[’‘ʼ]/g, "'");
   const words = u.split(/\s+/).length;
 
+  // ── SELF-IDENTIFICATION runs BEFORE the length gate below, because the whole
+  // act fits in two words. "I'm Gatsby," he said suddenly — a missed MAJOR gold
+  // event and the hinge of that chapter: Nick has been talking to a stranger for
+  // several minutes without knowing it. Naming yourself to someone who did not
+  // know you changes the relation between two people, which is what an event is.
+  //
+  // Requires a CAPITALISED name after the copula, so "I'm tired" and "I'm the one
+  // who has to fix it" cannot reach it.
+  if (/\bI\s*(?:'m|\s+am)\s+(?:Mr\.?|Mrs\.?|Miss|Dr\.?|Lord|Lady)?\s*[A-Z][a-z']{2,}\b/.test(u)) {
+    return "revelation";
+  }
+
   // Too short to carry a claim, or asking rather than asserting.
   if (words < 3) return "unclassified";
   if (/^(?:yes|no|all right|agreed|very well|of course|maybe|perhaps)\b[.,!]?$/i.test(u)) return "unclassified";
@@ -467,6 +479,37 @@ function classifyUtterance(inner: string): NarrativeEventType {
   // physical act while "I release you" is a social one.
   if (words >= 3 && /\bI\s+(?:release|free|forgive|pardon|absolve|disown|renounce|resign|withdraw|dismiss)\b/i.test(u)) {
     return "decision";
+  }
+
+  // ── NEGATIVE VOLITION. "I'm not going to keep her."
+  //
+  // The commissive rules above only catch a refusal phrased as one ("I refuse").
+  // In speech the same act is almost always negated intention, which is a
+  // decision every bit as much as its positive form — and this one turns the
+  // whole first act of Anne of Green Gables.
+  if (/\bI\s*(?:'m|\s+am)\s+not\s+going\s+to\s+[a-z]/i.test(u)
+      || /\bI\s*(?:'d|\s+would|\s+will|'ll)\s+(?:sooner|rather)\b/i.test(u)
+      || /\bI\s*(?:will|'ll|shall)\s+not\s+[a-z]/i.test(u)) {
+    return "decision";
+  }
+
+  // ── A DEATH REPORTED IN SPEECH.
+  //
+  // "And my poor father died quite suddenly that evening." The narration channel
+  // catches a death it witnesses; nothing caught one that a character REPORTS,
+  // which in detective and epistolary fiction is how most deaths arrive.
+  if (/\b(?:died|is\s+dead|was\s+killed|were\s+killed|has\s+died|had\s+died|passed\s+away|was\s+murdered)\b/i.test(u)) {
+    return "state-change";
+  }
+
+  // ── A STANDING REVOKED. "Rank stripped. Guild membership revoked."
+  //
+  // Institutional acts performed BY SPEAKING — the utterance is the act. Closed
+  // on the revocation word. Distinct from the termination rule below, which ends
+  // an arrangement; this one strips a person of a status.
+  if (/\b(?:revoked|stripped\s+of|expelled|dismissed\s+from|discharged|disbarred|excommunicated|disowned|disinherited|demoted)\b/i.test(u)
+      || /\b(?:rank|membership|title|commission|licence|license)\s+(?:stripped|revoked|forfeit)\b/i.test(u)) {
+    return "state-change";
   }
 
   // ── A THREAT. The speaker undertakes to do harm.
