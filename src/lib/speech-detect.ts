@@ -1607,7 +1607,19 @@ function findAttribution(
   // directly.
 
   // ── Step 4: extended context (previous paragraphs) ──
-  if (extCtx) {
+  //
+  // ★ ALSO YIELDS TO AN EXPLICIT TAG, for the same reason branch C does. This
+  // step reaches back six paragraphs in high mode — by design, and that reach is
+  // what lets it resolve speakers the local paragraph never names. But reaching
+  // back is the wrong move when the local text says "said the child": a name from
+  // four paragraphs ago cannot outrank the words touching the quote.
+  //
+  // Ablation on the post-branch-C baseline showed every high-only MECHANISM is
+  // neutral on the remaining descriptive errors, and only reducing extCtxDepth
+  // 6 -> 3 moved them (26 wrong -> 22). Cutting the depth is not an option — it is
+  // the mode's design and its reach. Yielding to explicit evidence gets the same
+  // errors back while keeping every paragraph.
+  if (extCtx && !hasExplicitTrailingTag(after)) {
     const extName = findDirectName(extCtx, knownNames, cache);
     if (extName) {
       // Validate with recency: only use if this character was recently active
