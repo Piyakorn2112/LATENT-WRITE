@@ -10302,30 +10302,35 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   to   { opacity: 1; transform: scale(1); }
 }
 
-/* ─── Fun mode: the orb settles back as the eyes land ──────────────────────
-   A short dip in the orb's own brightness at each moment the eyes ARRIVE back
-   at centre, so the return reads as a settle rather than the eyes simply
-   stopping. Two beats, both borrowed from `intel-eye-move`'s 8s timeline and
-   deliberately sharing its duration so they can never drift apart: 28% (back
-   from the glance right) and 66% (back from the glance up).
+/* ─── Fun mode: the orb fades toward its CENTRE ────────────────────────────
+   A radial fade, not a timed one. The eyes sit dead centre on a 26px orb, and
+   the orb is at its brightest and busiest in exactly that spot, so the two
+   compete: the eyes read as sitting ON a light rather than as a face. Fading
+   the orb toward the middle gives them something quiet to sit on, and the rim
+   — which is what makes it read as an orb at all — is untouched.
 
-   `:not(.intel-eyes)` is what makes this the ORB fading and not the face — the
-   eyes are a sibling of the orb canvas inside the same box, so dimming the
+   Alpha in a mask is coverage: 0.55 at the centre keeps a little over half the
+   orb there, easing back to fully opaque by 62% of the radius. Deliberately
+   gentle; the point is to seat the eyes, not to punch a hole.
+
+   `:not(.intel-eyes)` is what makes this the ORB fading and not the face. The
+   eyes are a SIBLING of the orb canvas inside the same box, so masking the
    parent would take them with it. */
 .intel-orb-live--fun > :not(.intel-eyes) {
-  animation: intel-orb-fun-settle 8s ease-in-out infinite;
-}
-
-@keyframes intel-orb-fun-settle {
-  0%, 24%   { opacity: 1; }
-  28%       { opacity: 0.72; }
-  34%, 62%  { opacity: 1; }
-  66%       { opacity: 0.72; }
-  72%, 100% { opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .intel-orb-live--fun > :not(.intel-eyes) { animation: none; }
+  -webkit-mask-image: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.68) 28%,
+    rgba(0, 0, 0, 0.92) 48%,
+    #000 62%
+  );
+  mask-image: radial-gradient(
+    circle at 50% 50%,
+    rgba(0, 0, 0, 0.55) 0%,
+    rgba(0, 0, 0, 0.68) 28%,
+    rgba(0, 0, 0, 0.92) 48%,
+    #000 62%
+  );
 }
 
 .intel-eye {

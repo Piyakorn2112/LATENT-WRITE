@@ -39,6 +39,15 @@ interface Props {
  */
 export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
   const [pressed, setPressed] = useState(false);
+  // ★ The knob is still SHRINKING for ~280ms after the finger lifts, and the
+  // glass has to survive that shrink or it pops off at the very moment the eye
+  // is following the knob back down. The version this replaces got that right
+  // by accident, via `glassActive || pressAnimating || releaseAnimating`; my
+  // first rewrite dropped the class the instant `pressed` went false and broke
+  // the tail of the expansion. `settling` is that tail, ended by the knob's own
+  // transitionend rather than by a duration guessed here.
+  const [settling, setSettling] = useState(false);
+  const settleTimerRef = useRef<number | null>(null);
   const [dragPreview, setDragPreview] = useState<boolean | null>(null);
   const dragPreviewRef = useRef<boolean | null>(null);
   const pointerIdRef = useRef<number | null>(null);
@@ -56,21 +65,42 @@ export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
     releaseTimerRef.current = null;
   };
 
+  const clearSettleTimer = () => {
+    if (settleTimerRef.current === null) return;
+    window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = null;
+  };
+
   const press = () => {
     clearReleaseTimer();
+    clearSettleTimer();
+    setSettling(false);
     pressedAtRef.current = performance.now();
     setPressed(true);
+  };
+
+  /** Begin the shrink: keep the glass on until the transform transition ends. */
+  const beginSettle = () => {
+    setPressed(false);
+    setSettling(true);
+    clearSettleTimer();
+    // Safety net: if the knob was already at rest no transition runs and
+    // transitionend never fires, which would strand the glass on forever.
+    settleTimerRef.current = window.setTimeout(() => {
+      settleTimerRef.current = null;
+      setSettling(false);
+    }, 420);
   };
 
   /** Release, but never sooner than MIN_PRESS_MS after the press landed. */
   const release = (immediate = false) => {
     clearReleaseTimer();
-    if (immediate) { setPressed(false); return; }
+    if (immediate) { beginSettle(); return; }
     const remaining = MIN_PRESS_MS - (performance.now() - pressedAtRef.current);
-    if (remaining <= 0) { setPressed(false); return; }
+    if (remaining <= 0) { beginSettle(); return; }
     releaseTimerRef.current = window.setTimeout(() => {
       releaseTimerRef.current = null;
-      setPressed(false);
+      beginSettle();
     }, remaining);
   };
 
@@ -82,7 +112,7 @@ export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
     setDragPreview(null);
   };
 
-  useEffect(() => clearReleaseTimer, []);
+  useEffect(() => () => { clearReleaseTimer(); clearSettleTimer(); }, []);
 
   return (
     <button
@@ -162,7 +192,14 @@ export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
           The knob is opaque white at rest, so the glass is only ever visible
           while pressed — and a press does not move the knob. Attaching it for
           exactly that moment is both the cheapest and the original design. */}
-      <span className={pressed ? "glass-toggle-knob liquid-glass-control-knob" : "glass-toggle-knob"} />
+      <span
+        className={pressed || settling ? "glass-toggle-knob liquid-glass-control-knob" : "glass-toggle-knob"}
+        onTransitionEnd={(e) => {
+          // Only the scale tail decides; `left` and `background` finish on
+          // their own schedules and must not cut the glass short.
+          if (e.propertyName === "transform") { clearSettleTimer(); setSettling(false); }
+        }}
+      />
     </button>
   );
 }
