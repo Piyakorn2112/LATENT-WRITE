@@ -1081,6 +1081,23 @@ function findAttribution(
     // This leverages the 6-paragraph context window to bootstrap the
     // alternation pattern even when no prior quotes exist in the recent
     // window (e.g. after a narrative-only paragraph).
+    // ★★ ABLATION RESULT — the dialogue thread is high mode's most valuable
+    // mechanism AND the source of its worst corpus errors. Both, measured:
+    //
+    //   ABLATE=thread   accuracy-suite HIGH  210/217 -> 183/217  (BELOW target)
+    //   ABLATE=thread   corpus descriptive   33 wrong -> 26 wrong
+    //
+    // Every other high-only mechanism is EXACTLY NEUTRAL on those descriptions —
+    // pronoun floor (12 vs 16), subject weights, extCtx density, and the
+    // confidence upgrade/demotion pass all leave 33/176/10 untouched. The thread
+    // alone owns 7 of the 33, and it alone owns 27 of high's hard-case wins.
+    //
+    // So the goal is NOT to weaken it. It is to make it yield where the text is
+    // explicit and keep it everywhere else. Guarding THIS branch on `after`
+    // carrying an attribution tag was tried and changed nothing, which means the
+    // 7 come through one of the thread's OTHER two consumers — the two-compatible
+    // -names branch below, or the activeSubject branch after it. That is where a
+    // fourth attempt should start, with the same ablation harness to confirm.
     if (before.trim().length === 0 && thread) {
       const lastK = activeSubject ? normKey(activeSubject)
         : (recentSpeakers?.length ? normKey(recentSpeakers[recentSpeakers.length - 1]) : undefined);
