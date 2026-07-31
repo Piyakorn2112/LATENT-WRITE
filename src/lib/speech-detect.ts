@@ -1123,7 +1123,11 @@ function buildGenderMap(
       // Last resort: name-morphology heuristic for names with no text signals.
       // Common name endings provide weak but useful gender hints in fiction.
       const lower = name.toLowerCase();
-      if (/(?:a|ia|ine|elle|ette|ora|ila|ola|ina|ela|isa|ara|ira)$/.test(lower)) result.set(k, 'F');
+      // ★ -beth is FEMININE and must be tested before the -eth masculine rule:
+      // the old order classified Elizabeth — the most common female name with
+      // that ending — as male, which then vetoed every "she" from resolving to
+      // her. Kenneth and Gareth still land on -eth below.
+      if (/(?:a|ia|ine|elle|ette|ora|ila|ola|ina|ela|isa|ara|ira|beth)$/.test(lower)) result.set(k, 'F');
       else if (/(?:en|eth|on|us|ar|or|ur|an|el|ren|ard|ald)$/.test(lower)) result.set(k, 'M');
       else result.set(k, 'N');
     }
@@ -3608,6 +3612,158 @@ function retroSandwichPass(
       }
     }
   }
+}
+
+/**
+ * PRONOUN OWNERSHIP, surfaced — who does each `he` / `she` refer to?
+ *
+ * The engine has always resolved pronouns internally to predict speakers (the
+ * gender map, the Bayesian pronoun stage, the singleton rule). This function
+ * surfaces that underlayer as a first-class per-paragraph annotation so the
+ * highlight layer can show a writer what the engine believes, instead of only
+ * using the belief silently.
+ *
+ * Honest scope, matching what the machinery actually knows:
+ *   - Pronouns INSIDE quotation marks are NOT resolved. Dialogue pronouns are
+ *     the speaker's deixis ("she" said by a character can be anyone in the
+ *     story), and the engine has no model of that — claiming otherwise would
+ *     surface noise with a straight face.
+ *   - TAG pronouns (`"…," she said`) take the segment's attributed speaker —
+ *     the exact answer the attribution ladder produced, highest confidence.
+ *   - NARRATIVE pronouns resolve to the most recent gender-compatible
+ *     antecedent: name mentions and attributed speakers, in textual order,
+ *     tracked across paragraphs. Gender comes from the same buildGenderMap the
+ *     attribution machinery uses; identity goes through the same alias map.
+ *
+ * Confidence encodes the source: 0.9 tag-adjacent, 0.7 gender-known
+ * antecedent, 0.5 fallback to the last known name when gender is unknown.
+ */
+export interface PronounOwner {
+  /** Paragraph-relative character span of the pronoun token. */
+  start: number;
+  end: number;
+  pronoun: string;
+  /** Canonical display name of the guessed owner. */
+  owner: string;
+  confidence: number;
+  source: 'tag' | 'context';
+}
+
+const PRONOUN_TOKEN_RE = /\b(he|him|his|she|her|hers)\b/gi;
+
+export function resolvePronounOwners(
+  paragraphs: string[],
+  results: ChapterParaResult[],
+  knownNames: string[],
+  aliasCanon?: ReadonlyMap<string, string>,
+): PronounOwner[][] {
+  const canon = (n: string): string => aliasCanon?.get(normKey(n)) ?? n;
+  const cache = getNameRegexCache(knownNames);
+  const genderMap = buildGenderMap(paragraphs, knownNames, cache);
+  const genderOf = (n: string): GenderHint | undefined =>
+    genderMap.get(normKey(canon(n))) ?? genderMap.get(normKey(n));
+
+  let lastM: string | undefined;
+  let lastF: string | undefined;
+  let lastAny: string | undefined;
+  const out: PronounOwner[][] = [];
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i];
+    const owners: PronounOwner[] = [];
+    const segs = (results[i]?.segments ?? []).filter((sg) => sg.type === 'speech');
+    const inQuote = (pos: number) => segs.some((sg) => pos > sg.start && pos < sg.end - 1);
+
+    // Antecedent events — name mentions outside quotes, plus attributed
+    // speakers at their segment positions — consumed in textual order so a
+    // pronoun only sees what precedes it.
+    type Ev = { pos: number; name: string };
+    const evs: Ev[] = [];
+    for (const name of knownNames) {
+      const re = cache.getMentionGi(name);
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(para)) !== null) {
+        if (!inQuote(m.index)) evs.push({ pos: m.index, name: canon(name) });
+      }
+    }
+    for (const sg of segs) {
+      if (sg.speaker && sg.confidence >= 0.65) evs.push({ pos: sg.start, name: canon(sg.speaker) });
+    }
+    evs.sort((a, b) => a.pos - b.pos);
+
+    const consume = (upTo: number, from: { ei: number }) => {
+      while (from.ei < evs.length && evs[from.ei].pos <= upTo) {
+        const e = evs[from.ei++];
+        const g = genderOf(e.name);
+        if (g === 'M') lastM = e.name;
+        else if (g === 'F') lastF = e.name;
+        lastAny = e.name;
+      }
+    };
+
+    const cursor = { ei: 0 };
+    PRONOUN_TOKEN_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = PRONOUN_TOKEN_RE.exec(para)) !== null) {
+      consume(m.index, cursor);
+      if (inQuote(m.index)) continue;
+      const lower = m[0].toLowerCase();
+      const masc = lower === 'he' || lower === 'him' || lower === 'his';
+
+      let owner: string | undefined;
+      let confidence = 0;
+      let source: PronounOwner['source'] = 'context';
+
+      // Tag adjacency: within 40 chars of an attributed segment's edge, the
+      // pronoun IS the attribution — surface the ladder's own answer.
+      for (const sg of segs) {
+        if (!sg.speaker || sg.confidence < 0.65) continue;
+        const near =
+          (m.index >= sg.end - 1 && m.index - sg.end <= 40) ||
+          (m.index < sg.start && sg.start - m.index <= 40);
+        if (!near) continue;
+        const c = canon(sg.speaker);
+        const g = genderOf(c);
+        if (masc ? g === 'F' : g === 'M') continue;
+        owner = c;
+        // A gender-confirmed tag is the ladder's own answer; an unknown-gender
+        // one is still the best guess but must not claim the same certainty.
+        // 'N' is a stored value, not knowledge — only M/F count as confirmed.
+        confidence = g === 'M' || g === 'F' ? 0.9 : 0.75;
+        source = 'tag';
+        break;
+      }
+
+      if (!owner) {
+        const gendered = masc ? lastM : lastF;
+        if (gendered) {
+          owner = gendered;
+          confidence = 0.7;
+        } else if (lastAny) {
+          const g = genderOf(lastAny);
+          if (!(masc ? g === 'F' : g === 'M')) {
+            owner = lastAny;
+            confidence = 0.5;
+          }
+        }
+      }
+
+      if (owner) {
+        owners.push({
+          start: m.index,
+          end: m.index + m[0].length,
+          pronoun: m[0],
+          owner,
+          confidence,
+          source,
+        });
+      }
+    }
+    consume(para.length, cursor);
+    out.push(owners);
+  }
+  return out;
 }
 
 /**

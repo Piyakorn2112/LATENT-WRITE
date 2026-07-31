@@ -1,4 +1,5 @@
 import React, { memo, useMemo, type ReactNode, type CSSProperties } from "react";
+import type { PronounOwner } from "../lib/speech-detect";
 import { PenLine, MapPin, Flag, Tag } from "lucide-react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildSpeakerPalette, IOS_COLORS, getSpeakerColor, type ColorPair } from "../lib/palette";
@@ -128,12 +129,14 @@ function renderInline(
   annotationMode?: boolean,
   toolLocal?: ToolHighlight[],
   entityTypeMap?: Map<string, "character" | "place" | "faction" | "entity">,
+  pronounLocal?: PronounOwner[],
 ): ReactNode[] {
   // Build a unified list of decoration ranges sorted by start.
   type Deco =
     | { kind: "entity"; start: number; end: number; matched: string }
     | { kind: "grammar"; start: number; end: number; suggestion: string; gkind: GrammarSuggestion["kind"] }
-    | { kind: "tool"; start: number; end: number; label: string; severity: ToolHighlight["severity"] };
+    | { kind: "tool"; start: number; end: number; label: string; severity: ToolHighlight["severity"] }
+    | { kind: "pronoun"; start: number; end: number; owner: string; conf: number };
 
   const decos: Deco[] = [];
 
@@ -150,9 +153,12 @@ function renderInline(
   for (const t of toolLocal ?? []) {
     decos.push({ kind: "tool", start: t.start, end: t.end, label: t.label, severity: t.severity });
   }
+  for (const t of pronounLocal ?? []) {
+    decos.push({ kind: "pronoun", start: t.start, end: t.end, owner: t.owner, conf: t.confidence });
+  }
 
-  // Sort by start; priority on ties: grammar > tool > entity.
-  const DECO_PRIORITY: Record<string, number> = { grammar: 0, tool: 1, entity: 2 };
+  // Sort by start; priority on ties: grammar > tool > entity > pronoun.
+  const DECO_PRIORITY: Record<string, number> = { grammar: 0, tool: 1, entity: 2, pronoun: 3 };
   decos.sort((a, b) => a.start - b.start || (DECO_PRIORITY[a.kind] ?? 9) - (DECO_PRIORITY[b.kind] ?? 9));
 
   // Drop any deco that overlaps an earlier one (grammar takes priority).
@@ -226,6 +232,30 @@ function renderInline(
           {text.slice(d.start, d.end)}
         </span>,
       );
+    } else if (d.kind === "pronoun") {
+      // The engine's guessed antecedent, kept deliberately quiet: a faint
+      // dotted underline, owner on hover. Reading must stay undisturbed.
+      parts.push(
+        <span
+          key={`${keyPrefix}-pn${i++}`}
+          className="pronoun-owner"
+          data-owner={d.owner}
+          data-conf={d.conf >= 0.9 ? "high" : d.conf >= 0.7 ? "mid" : "low"}
+          style={baseStyle}
+          // Same caret-preservation contract as the grammar ghost spans:
+          // pointer-events are on so :hover can reveal the owner, and mousedown
+          // is cancelled so the textarea keeps focus.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={!annotationMode ? (e) => {
+            (e.currentTarget as HTMLElement)
+              .closest(".editor-wrap")
+              ?.querySelector<HTMLTextAreaElement>("textarea")
+              ?.focus();
+          } : undefined}
+        >
+          {text.slice(d.start, d.end)}
+        </span>,
+      );
     } else {
       // tool highlight
       parts.push(
@@ -278,9 +308,10 @@ function renderActionable(
   annotationMode?: boolean,
   toolLocal?: ToolHighlight[],
   entityTypeMap?: Map<string, "character" | "place" | "faction" | "entity">,
+  pronounLocal?: PronounOwner[],
 ): ReactNode[] {
   if (actionsLocal.length === 0) {
-    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode, toolLocal, entityTypeMap);
+    return renderInline(text, speakerNames, palette, baseStyle, grammarLocal, keyPrefix, onEntityClick, annotationMode, toolLocal, entityTypeMap, pronounLocal);
   }
 
   const parts: ReactNode[] = [];
@@ -294,7 +325,7 @@ function renderActionable(
       const toolChunk = clipToolHighlights(toolLocal, cursor, a.start);
       parts.push(
         <span key={`${keyPrefix}-pre${i}`}>
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode, toolChunk, entityTypeMap)}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-pre${i}`, onEntityClick, annotationMode, toolChunk, entityTypeMap, clipPronouns(pronounLocal, cursor, a.start))}
         </span>,
       );
     }
@@ -321,7 +352,7 @@ function renderActionable(
             onActionClick(actionIdx, chunk, actor, (e.currentTarget as HTMLElement).getBoundingClientRect());
           } : undefined}
         >
-          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode, clipToolHighlights(toolLocal, a.start, a.end), entityTypeMap)}
+          {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-act${i}`, onEntityClick, annotationMode, clipToolHighlights(toolLocal, a.start, a.end), entityTypeMap, clipPronouns(pronounLocal, a.start, a.end))}
         </span>
         {hasOvr && renderAnnotationPill(`${keyPrefix}-act${i}`, actor, colorVal || "var(--text-secondary)", "action")}
         {annotationMode && needsReview && !hasOvr && renderReviewPill(`${keyPrefix}-act${i}`, colorVal || ACTION_TEXT, "action")}
@@ -336,7 +367,7 @@ function renderActionable(
     const toolChunk = clipToolHighlights(toolLocal, cursor, text.length);
     parts.push(
       <span key={`${keyPrefix}-post${actionsLocal.length}`}>
-        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode, toolChunk, entityTypeMap)}
+        {renderInline(chunk, speakerNames, palette, baseStyle, grammarChunk, `${keyPrefix}-post${actionsLocal.length}`, onEntityClick, annotationMode, toolChunk, entityTypeMap, clipPronouns(pronounLocal, cursor, text.length))}
       </span>,
     );
   }
@@ -453,12 +484,15 @@ interface Props {
   annotationOverrides?: Map<string, string | null>;
   speechPredictions?: AdaptivePredictionTrace[];
   actionPredictions?: ActionPrediction[][];
+  /** Guessed pronoun owners per paragraph (paragraph-relative offsets) —
+   *  the engine's pronoun resolution surfaced. See resolvePronounOwners. */
+  pronounOwners?: PronounOwner[][] | null;
 }
 
 function HighlightLayerImpl({
   content, snapshotContent, paragraphs, speechResults, knownNames, entityNameMap, liveKnownNames, liveParagraphRange, visible = true,
   grammarSuggestions = [], toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
-  annotationOverrides, speechPredictions, actionPredictions,
+  annotationOverrides, speechPredictions, actionPredictions, pronounOwners,
 }: Props) {
   // Build a lowercase-name → entity-type map for type-aware tag rendering.
   const entityTypeMap = useMemo<Map<string, "character" | "place" | "faction" | "entity">>(() => {
@@ -553,6 +587,9 @@ function HighlightLayerImpl({
       // Grammar for THIS paragraph, shifted to para-relative.
       const paraGrammar = pos.matched ? sliceGrammar(grammarSuggestions, paraStart, paraEnd) : [];
       const paraToolHL = pos.matched ? sliceToolHighlights(toolHighlights, paraStart, paraEnd) : [];
+      // Pronoun offsets are already paragraph-relative; an edited (unmatched)
+      // paragraph gets none until analysis catches up, same as everything else.
+      const paraPron = pos.matched ? pronounOwners?.[pi] : undefined;
 
       const paraNodes: ReactNode[] = [];
 
@@ -613,6 +650,7 @@ function HighlightLayerImpl({
                 annotationMode,
                 gapToolHL,
                 entityTypeMap,
+                clipPronouns(paraPron ?? undefined, pc, seg.start),
               )}
             </span>,
           );
@@ -756,6 +794,7 @@ function HighlightLayerImpl({
               annotationMode,
               tailToolHL,
               entityTypeMap,
+              clipPronouns(paraPron ?? undefined, pc, para.length),
             )}
           </span>,
         );
@@ -944,6 +983,17 @@ function sliceToolHighlights(list: ToolHighlight[] | undefined, from: number, to
   }
   return out;
 }
+function clipPronouns(list: PronounOwner[] | undefined, from: number, to: number): PronounOwner[] | undefined {
+  if (!list?.length) return undefined;
+  const out: PronounOwner[] = [];
+  for (const t of list) {
+    if (t.end <= from || t.start >= to) continue;
+    if (t.start < from || t.end > to) continue;
+    out.push({ ...t, start: t.start - from, end: t.end - from });
+  }
+  return out.length ? out : undefined;
+}
+
 function clipToolHighlights(list: ToolHighlight[] | undefined, from: number, to: number): ToolHighlight[] | undefined {
   if (!list?.length) return undefined;
   const out: ToolHighlight[] = [];

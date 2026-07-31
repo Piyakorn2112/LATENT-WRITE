@@ -14495,3 +14495,52 @@ body.electron-window-unfocused .wc-panel::after {
 .onb-pro-status--success {
   color: color-mix(in srgb, #22c55e 70%, var(--panel-text));
 }
+
+/* ── Pronoun-owner ghosts ───────────────────────────────────────────────────
+   The engine's guessed antecedent for he/she/him/her, surfaced quietly: a
+   faint dotted underline, and the owner's name as ghost text on hover — the
+   same interaction contract as the grammar style ghosts (pointer-events on,
+   mousedown cancelled in HighlightLayer to keep textarea focus). Confidence
+   maps to underline presence only; the layer must never shout. */
+.pronoun-owner {
+  position: relative;
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: color-mix(in srgb, currentColor 24%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  pointer-events: auto;
+  cursor: text;
+}
+.pronoun-owner[data-conf="low"] {
+  text-decoration-color: color-mix(in srgb, currentColor 13%, transparent);
+}
+.pronoun-owner::before {
+  content: "\2192\00a0" attr(data-owner);
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  font-family: var(--font-ui);
+  font-size: 0.62em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  background: var(--bg-glass-strong, var(--bg-glass));
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 1px 7px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+.pronoun-owner:hover {
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+}
+.pronoun-owner:hover::before {
+  opacity: 1;
+  transform: translateY(0);
+}

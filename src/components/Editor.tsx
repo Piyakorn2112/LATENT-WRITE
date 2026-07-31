@@ -261,6 +261,7 @@ export function Editor({
             snapshotContent={analysisSnapshotContent}
             paragraphs={analysisResult.paragraphs}
             speechResults={analysisResult.speechResults}
+            pronounOwners={analysisResult.pronounOwners}
             knownNames={knownNames}
             entityNameMap={entityNameMap}
             liveKnownNames={liveKnownNames}

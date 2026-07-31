@@ -6,9 +6,11 @@ import type {
 } from "../types";
 import {
   detectSpeechInChapter,
+  resolvePronounOwners,
   type ChapterParaResult,
   type ChapterEndContext,
   type IntelligenceLevel,
+  type PronounOwner,
 } from "./speech-detect";
 import {
   analyzeChapter,
@@ -28,6 +30,11 @@ export interface ChapterAnalysisResult {
   actionPredictions: ActionPrediction[][];
   analysis: ChapterAnalysis;
   endContext: ChapterEndContext | null;
+  /**
+   * Guessed pronoun owners per paragraph — the engine's internal pronoun
+   * resolution surfaced for the highlight layer. See resolvePronounOwners.
+   */
+  pronounOwners: PronounOwner[][] | null;
   /**
    * The timeline engine's events, computed HERE so they ride the worker.
    *
@@ -189,6 +196,8 @@ export function runChapterAnalysis({
       })
     : [];
 
+  const pronounOwners = resolvePronounOwners(paragraphs, speechResults, knownNames, aliasCanon);
+
   return {
     contentSnapshot: chapter.content,
     paragraphs,
@@ -198,5 +207,6 @@ export function runChapterAnalysis({
     analysis,
     endContext: contextOut.value,
     narrativeEvents,
+    pronounOwners,
   };
 }
