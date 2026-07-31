@@ -1061,14 +1061,37 @@ function buildGenderMap(
         if (isMasc) mScore.set(k, (mScore.get(k) ?? 0) + 1);
         if (isFem)  fScore.set(k, (fScore.get(k) ?? 0) + 1);
       } else if (nearbyNames.length === 0 && knownNames.length === 2) {
+        // ★ ELIMINATION MUST USE THE CLASSIFIER'S OWN STANDARD, NOT RAW COUNTS.
+        //
+        // This branch reasons "one of the two is the other gender, so this
+        // pronoun belongs to the second one" — and it used to treat a single
+        // raw proximity hit as an established gender. Proximity hits are
+        // noisy: in "She uncorked the vial, and immediately Marcus felt…" the
+        // window hands Marcus one feminine point for a pronoun whose referent
+        // is the OTHER character. With Marcus at m=3/f=1 — plainly male — the
+        // f>0 test still read him as feminine, so a later "he breathed" was
+        // pinned on KAEL by elimination, flipping her to ambiguous and taking
+        // down every "she"-based attribution in the chapter, including the
+        // opening line. An inference by elimination is only as good as what it
+        // eliminates, so it now asks the same dominance question the final
+        // classification asks.
+        const leans = (k: string): GenderHint | undefined => {
+          const mm = mScore.get(k) ?? 0, ff = fScore.get(k) ?? 0;
+          if (mm >= 1 && ff === 0) return 'M';
+          if (ff >= 1 && mm === 0) return 'F';
+          if (mm >= 2 && mm >= ff * 2) return 'M';
+          if (ff >= 2 && ff >= mm * 2) return 'F';
+          return undefined;
+        };
         const [n1, n2] = knownNames;
         const k1 = normKey(n1), k2 = normKey(n2);
+        const g1 = leans(k1), g2 = leans(k2);
         if (isMasc) {
-          if ((fScore.get(k1) ?? 0) > 0 && (mScore.get(k2) ?? 0) === 0) mScore.set(k2, (mScore.get(k2) ?? 0) + 1);
-          else if ((fScore.get(k2) ?? 0) > 0 && (mScore.get(k1) ?? 0) === 0) mScore.set(k1, (mScore.get(k1) ?? 0) + 1);
+          if (g1 === 'F' && !g2) mScore.set(k2, (mScore.get(k2) ?? 0) + 1);
+          else if (g2 === 'F' && !g1) mScore.set(k1, (mScore.get(k1) ?? 0) + 1);
         } else if (isFem) {
-          if ((mScore.get(k1) ?? 0) > 0 && (fScore.get(k2) ?? 0) === 0) fScore.set(k2, (fScore.get(k2) ?? 0) + 1);
-          else if ((mScore.get(k2) ?? 0) > 0 && (fScore.get(k1) ?? 0) === 0) fScore.set(k1, (fScore.get(k1) ?? 0) + 1);
+          if (g1 === 'M' && !g2) fScore.set(k2, (fScore.get(k2) ?? 0) + 1);
+          else if (g2 === 'M' && !g1) fScore.set(k1, (fScore.get(k1) ?? 0) + 1);
         }
       }
     }
@@ -1538,6 +1561,21 @@ function findAttribution(
       if (partner) return { speaker: partner, type: 'speech', confidence: 0.73 };
     }
 
+    // ── TWO-CAST ALTERNATION FROM A ROSTER OF ONE (high only) ────────────
+    // A bare reply after a single attested speaker, in a scene whose cast has
+    // exactly two members: the other member speaks. The thread's A2 branch
+    // already reasons this way but requires a TEXTUAL tag in the context
+    // window to establish who spoke, and a colon-introduced or inferred
+    // attribution never re-parses as one — so the exchange that opened
+    // `... and said: "Q"` left the thread empty and the reply unanswered.
+    // The roster records what the engine actually concluded, textual or not.
+    if (before.trim().length === 0 && thread && knownNames.length === 2
+        && recentSpeakers && recentSpeakers.length >= 1) {
+      const lastK = normKey(recentSpeakers[recentSpeakers.length - 1]);
+      const other = knownNames.find(n => normKey(n) !== lastK);
+      if (other) return { speaker: other, type: 'speech', confidence: 0.72 };
+    }
+
     // THREAD-INFERRED ALTERNATION (HIGH only):
     // When a bare opening quote has insufficient recentSpeakers for
     // alternation (< 2) BUT we can infer the alternation partner from
@@ -1812,6 +1850,27 @@ function findAttribution(
           return true;
         })
       : knownNames;
+
+    // ── A CANDIDATE SET OF SIZE ONE IS AN ANSWER, NOT A WEAK POSTERIOR ────
+    //
+    //     "The forgetting isn't natural," she began, ...
+    //
+    // — the opening line of a chapter, a cast of two, one of each gender.
+    // Gender exclusion leaves exactly ONE compatible candidate, yet the
+    // Bayesian stage below returned UNKNOWN: its posterior is built from
+    // recency and mention weights, and at paragraph zero nothing has been
+    // seen, so the only possible speaker scored 0 and lost to the threshold.
+    //
+    // The threshold exists to stop a weak winner among RIVALS. With no rivals
+    // there is nothing to be weak against — every other cast member is
+    // positively excluded by grammar, the strongest evidence this stage gets.
+    // The guard is stricter than it looks: an unknown-gender member survives
+    // the filter, so a singleton only occurs when every OTHER member has a
+    // known opposite gender.
+    if ((isMasc || isFem) && genderMap && genderFilteredNames.length === 1
+        && knownNames.length >= 2) {
+      return { speaker: genderFilteredNames[0], type: 'speech', confidence: 0.82 };
+    }
 
     // H1 — Turn-taking: use detectTurnPattern for N-deep sequence analysis
     // (replaces the previous hardcoded ABA/ABAB/ABABA pattern matching).
