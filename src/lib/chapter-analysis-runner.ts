@@ -16,6 +16,8 @@ import {
   type ChapterStats,
 } from "./chapter-analysis";
 import { findActionSentences, predictActionActor, type ActionPrediction } from "./action-detect";
+import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
+import type { WorldData } from "../types";
 
 export interface ChapterAnalysisResult {
   contentSnapshot: string;
@@ -25,6 +27,17 @@ export interface ChapterAnalysisResult {
   actionPredictions: ActionPrediction[][];
   analysis: ChapterAnalysis;
   endContext: ChapterEndContext | null;
+  /**
+   * The timeline engine's events, computed HERE so they ride the worker.
+   *
+   * Both consumers used to run detectNarrativeEvents themselves on the
+   * renderer main thread — buildChapterBrief inside a useMemo on every panel
+   * update, buildChapterEntry inside the story-graph effect — which put a
+   * two-thousand-line clause engine on the UI thread twice per chapter for
+   * the same answer this worker had all the inputs to produce once. Null on
+   * results predating this field; consumers fall back to computing locally.
+   */
+  narrativeEvents: NarrativeEvent[] | null;
 }
 
 export interface RunChapterAnalysisInput {
@@ -36,6 +49,9 @@ export interface RunChapterAnalysisInput {
   learnedBias?: LearnedBias;
   adaptiveContext?: AdaptiveInferenceContext;
   collectPredictionDetails?: boolean;
+  /** Enables the aliases in the event engine's name list — optional because
+   *  harness callers predate it; omitting it only narrows the names. */
+  worldData?: WorldData;
 }
 
 function clipActionSpans(spans: Array<{ start: number; end: number }>, from: number, to: number) {
@@ -110,6 +126,7 @@ export function runChapterAnalysis({
   learnedBias,
   adaptiveContext,
   collectPredictionDetails = false,
+  worldData,
 }: RunChapterAnalysisInput): ChapterAnalysisResult {
   const paragraphs = toParagraphs(chapter.content);
   const contextOut: { value: ChapterEndContext | null } = { value: null };
@@ -134,6 +151,25 @@ export function runChapterAnalysis({
       )
     : [];
   const analysis = analyzeChapter(paragraphs, speechResults, siblingStats);
+
+  // Timeline events, computed off the main thread alongside everything else.
+  // The name list is buildChapterEntry's exact recipe (worldData characters
+  // with aliases, then attributed speakers) so the story graph sees the same
+  // events it used to compute for itself.
+  const eventNames = [
+    ...(worldData?.characters ?? []).flatMap((c) => [c.name, ...(c.aliases ?? [])]),
+    ...analysis.speakerCounts.map((sc) => sc.name),
+  ].filter((n): n is string => Boolean(n) && n.length >= 2);
+  const narrativeEvents = chapter.content.trim().length > 100
+    ? detectNarrativeEvents(paragraphs, speechResults, {
+        knownNames: eventNames,
+        worldData,
+        tensionByParagraph: speechResults.map((r) =>
+          r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
+        ),
+      })
+    : [];
+
   return {
     contentSnapshot: chapter.content,
     paragraphs,
@@ -142,5 +178,6 @@ export function runChapterAnalysis({
     actionPredictions,
     analysis,
     endContext: contextOut.value,
+    narrativeEvents,
   };
 }

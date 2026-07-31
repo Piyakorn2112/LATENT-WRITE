@@ -91,17 +91,24 @@ export function buildChapterEntry(
     ...analysis.speakerCounts.map((s) => s.name),
   ].filter((n): n is string => Boolean(n) && n.length >= 2);
 
-  const majorEvents: MajorEvent[] = chapter.content.trim().length > 100
-    ? detectNarrativeEvents(result.paragraphs, result.speechResults, {
-        knownNames,
-        worldData,
-        // One value per paragraph, no subsampling. The engine reads the
-        // DERIVATIVE of this: a local rise is evidence that something happened,
-        // where a high plateau only says the chapter is tense.
-        tensionByParagraph: result.speechResults.map((r) =>
-          r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
-        ),
-      }).map((e) => ({
+  // ★ Precomputed in the analysis WORKER whenever the result carries them —
+  // this function runs on the renderer main thread, and the event engine has
+  // no business there. The local computation remains only as the fallback for
+  // results cached before the field existed.
+  const events = result.narrativeEvents
+    ?? (chapter.content.trim().length > 100
+      ? detectNarrativeEvents(result.paragraphs, result.speechResults, {
+          knownNames,
+          worldData,
+          // One value per paragraph, no subsampling. The engine reads the
+          // DERIVATIVE of this: a local rise is evidence that something happened,
+          // where a high plateau only says the chapter is tense.
+          tensionByParagraph: result.speechResults.map((r) =>
+            r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
+          ),
+        })
+      : []);
+  const majorEvents: MajorEvent[] = events.map((e) => ({
         label: e.label,
         type: e.legacyType,
         tensionPosition: e.tensionPosition,
@@ -113,8 +120,7 @@ export function buildChapterEntry(
         salience: e.salience,
         agent: e.agent,
         channel: e.channel,
-      }))
-    : [];
+      }));
 
   return {
     chapterId: chapter.id,

@@ -210,7 +210,8 @@ export function useAnalysis(
             chapter,
             prevContext,
             siblingStats,
-            knownNames: characterNames, // speech-detect only receives character names
+            knownNames: characterNames,
+            worldData: novel.worldData, // speech-detect only receives character names
             level,
             learnedBias: options.learnedBias,
             adaptiveContext: options.adaptiveContext,
@@ -334,6 +335,7 @@ export function useAnalysis(
             prevContext: prevCtx,
             siblingStats: buildSiblings(prevChapter.id),
             knownNames: characterNames,
+            worldData: novel.worldData,
             level: converge ? refineLevel : level,
             learnedBias: options.learnedBias,
           };
@@ -352,6 +354,7 @@ export function useAnalysis(
             prevContext: currentCached.endContext,
             siblingStats: buildSiblings(nextChapter.id),
             knownNames: characterNames,
+            worldData: novel.worldData,
             level: converge ? refineLevel : level,
             learnedBias: options.learnedBias,
           };

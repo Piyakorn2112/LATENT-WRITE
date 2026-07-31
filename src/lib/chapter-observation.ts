@@ -93,12 +93,17 @@ export function buildChapterBrief(
   const paraCount = paragraphs.length;
   if (paraCount < 6) return null; // too little prose to claim anything
 
-  const events = detectNarrativeEvents(paragraphs, result.speechResults, {
-    knownNames: analysis.speakerCounts.map((s) => s.name).filter(Boolean),
-    tensionByParagraph: result.speechResults.map((r) =>
-      r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
-    ),
-  });
+  // ★ Precomputed in the analysis worker when available — this runs inside a
+  // useMemo on the renderer main thread, and recomputing a two-thousand-line
+  // clause engine there on every panel update was the single heaviest thing
+  // left on the UI thread. Fallback kept for results predating the field.
+  const events = result.narrativeEvents
+    ?? detectNarrativeEvents(paragraphs, result.speechResults, {
+      knownNames: analysis.speakerCounts.map((s) => s.name).filter(Boolean),
+      tensionByParagraph: result.speechResults.map((r) =>
+        r.meta.tension === "high" ? 1 : r.meta.tension === "rising" ? 0.5 : 0,
+      ),
+    });
 
   const major = events.filter((e) => e.salience === "major");
   const lead = (major.length ? major : events).slice(0, 3);
