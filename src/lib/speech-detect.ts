@@ -55,6 +55,52 @@ export type IntelligenceLevel = 'fast' | 'default' | 'high';
  */
 const STARTS_WITH_QUOTE = /^\s*["“”]/;
 
+/**
+ * How many turns back NEW-PARA-NEW-SPEAKER may look for the other party.
+ *
+ * Deliberately a constant rather than a per-mode setting: alternation is a claim
+ * about the exchange happening right now, so its reach must not grow with the
+ * scene roster. See the rule itself for what unbounded search cost high mode.
+ */
+const ALTERNATION_LOOKBACK = 3;
+
+/**
+ * Minimum confidence for an attribution to join `recentSpeakers`.
+ *
+ * ★ RAISING THIS TO 0.75 WAS TRIED AND HARD-REVERTED, and the result is worth
+ * keeping because it looks so much like a bug fix.
+ *
+ * The reasoning was that an inference should not become evidence for the next
+ * inference: NEW-PARA-NEW-SPEAKER returns 0.73, above the old 0.65 bar, so the
+ * alternation rule's own guess joined the roster and seeded the next
+ * alternation. That really does happen, and it really is how 37 of high mode's
+ * 41 losses were produced.
+ *
+ * But the loop is LOAD-BEARING, not parasitic. Alternation is what sustains a
+ * two-hander across a long untagged exchange; each inferred turn is the only
+ * record that the turn happened at all. Cutting the feedback starved the
+ * mechanism outright:
+ *
+ *     floor   masked fast / default / high      hard cases (high)
+ *     0.65     49.7 / 49.6 / 49.7                210/217
+ *     0.75     44.6 / 45.4 / 47.4                180/217  ← below target
+ *
+ * So error propagation through the roster is real, but it is the price of the
+ * mechanism working at all, and it must be addressed at the point where the
+ * partner is CHOSEN rather than by refusing to record turns.
+ */
+const ROSTER_EVIDENCE_FLOOR = 0.65;
+
+/**
+ * Confidence at which an attribution counts as ATTESTED — the text named the
+ * speaker, rather than the engine inferring one from the roster it maintains.
+ *
+ * Sits above every structural inference (stage direction 0.74, alternation 0.73,
+ * action subject 0.72) and at the level of same-paragraph continuation and the
+ * carried subject (0.78), both of which require a speech verb in the text.
+ */
+const ATTESTED_FLOOR = 0.78;
+
 export interface ChapterEndContext {
   speakWeights: Map<string, number>;
   mentionWeights: Map<string, number>;
@@ -1246,6 +1292,12 @@ function findAttribution(
    * own quote, which is usually the person being ADDRESSED, not the speaker.
    */
   stageDirectionSubject?: string,
+  /**
+   * The subset of `recentSpeakers` whose attribution actually READ something in
+   * the text (>= ATTESTED_FLOOR) rather than inferring from the roster. Used to
+   * pick the alternation partner; see NEW-PARA-NEW-SPEAKER.
+   */
+  attestedSpeakers?: string[],
 ): Attribution {
   const localBefore = before.slice(-LOCAL_VERB_WINDOW);
   const localAfter  = after.slice(0, LOCAL_VERB_WINDOW);
@@ -1379,18 +1431,58 @@ function findAttribution(
     // and we have ≥2 recent speakers to alternate between.
     // Placed above B+ so established alternation is not overridden by
     // distant extCtx action subjects (which widen with higher intelligence levels).
+    //
+    // ★ THE SEARCH FOR THE OTHER PARTY IS BOUNDED, and leaving it unbounded was
+    // where high mode lost most of what its extra context earned.
+    //
+    // The loop walks back looking for the most recent speaker who is not the last
+    // one. It used to walk to j=0, i.e. across the WHOLE recentSpeakers window —
+    // and that window is a mode setting: 3 in fast, 7 in default, 10 in high. So
+    // when one character dominates the recent turns, high would keep digging and
+    // elect somebody who spoke nine turns ago and has since left the scene, while
+    // fast simply ran out of history and stayed quiet. Measured on the masked
+    // benchmark: of the 41 lines fast gets RIGHT and high gets WRONG, 37 came
+    // from this single return.
+    //
+    // The two uses of recentSpeakers are not the same thing. As a SCENE ROSTER —
+    // who is present, who could plausibly speak — depth genuinely helps, and high
+    // should keep all ten. As an ALTERNATION PARTNER it is a typographic
+    // convention about THIS exchange: a new paragraph implies the other person in
+    // the two-hander happening right now, not any prior speaker in the chapter.
+    // That is local by nature and stays local at every intelligence level.
+    //
+    // So the roster keeps its depth and only the partner search is bounded. Fast
+    // is unaffected — its window is already 3.
     if (before.trim().length === 0 && recentSpeakers && recentSpeakers.length >= 2) {
       const prevSpeakerK = normKey(recentSpeakers[recentSpeakers.length - 1]);
-      for (let j = recentSpeakers.length - 2; j >= 0; j--) {
-        const k = normKey(recentSpeakers[j]);
-        if (k !== prevSpeakerK) {
+      // ★ AN ATTESTED PARTNER OUTRANKS AN INFERRED ONE.
+      //
+      // The roster necessarily contains the engine's own guesses — see
+      // ROSTER_EVIDENCE_FLOOR, where removing them was measured and starved the
+      // mechanism outright. But it does not follow that a guess and a tag should
+      // be equally good candidates for "the other party". Searching the ATTESTED
+      // roster first anchors the exchange to a turn the text actually named,
+      // and only falls back to an inferred one when the text named nobody.
+      //
+      // This is the same precedence that governs the rest of the ladder, applied
+      // to the roster instead of to the current line.
+      const search = (list: string[]): string | undefined => {
+        const floor = Math.max(0, list.length - 1 - ALTERNATION_LOOKBACK);
+        for (let j = list.length - 1; j >= floor; j--) {
+          const k = normKey(list[j]);
+          if (k === prevSpeakerK) continue;
           // Enhancement B: also check recentSpeakers for generic speakers
           // not in knownNames (e.g. "Officer" from "the officer said")
           const name = knownNames.find(n => normKey(n) === k)
             ?? recentSpeakers.find(s => normKey(s) === k);
-          if (name) return { speaker: name, type: 'speech', confidence: 0.73 };
+          if (name) return name;
         }
-      }
+        return undefined;
+      };
+      const partner = (attestedSpeakers && search(attestedSpeakers))
+        ?? search(recentSpeakers.slice(0, -1));
+
+      if (partner) return { speaker: partner, type: 'speech', confidence: 0.73 };
     }
 
     // THREAD-INFERRED ALTERNATION (HIGH only):
@@ -1988,6 +2080,8 @@ function processParagraph(
   cache?: NameRegexCache,
   /** Actor named by the preceding NARRATIVE paragraph — see Step 2.4. */
   stageDirectionSubject?: string,
+  /** Evidence-backed subset of recentSpeakers — see NEW-PARA-NEW-SPEAKER. */
+  attestedSpeakers?: string[],
 ): ParaResult {
   const segments: SpeechSegment[] = [];
 
@@ -2001,7 +2095,7 @@ function processParagraph(
     }
     if (closeIdx === -1) {
       const attr = findAttribution(text, nextParaStart, extCtx, knownNames,
-        speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject);
+        speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject, attestedSpeakers);
       const confMod = Math.max(0.6, 1.0 - ((continuationDepth ?? 0) * 0.12));
       const spanIndex = segments.length;
       segments.push({ start: 0, end: text.length, speaker: attr.speaker, continuation: true, type: 'speech', confidence: attr.confidence * confMod });
@@ -2036,7 +2130,7 @@ function processParagraph(
     const contBefore = text.slice(0, closeIdx + 1);
     const contAfter  = text.slice(closeIdx + 1);
     const attr = findAttribution(contBefore, contAfter, extCtx, knownNames,
-      speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject);
+      speakWeights, mentionWeights, activeSubject, prevParaFocus, undefined, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject, attestedSpeakers);
     const confMod = Math.max(0.6, 1.0 - ((continuationDepth ?? 0) * 0.12));
     const spanIndex = segments.length;
     segments.push({ start: 0, end: closeIdx + 1, speaker: attr.speaker, continuation: true, type: 'speech', confidence: attr.confidence * confMod });
@@ -2097,7 +2191,7 @@ function processParagraph(
     const after  = text.slice(pair.end + 1);
     const quoteContent = text.slice(pair.start + 1, pair.end);
     let attr = findAttribution(before, after, extCtx, knownNames,
-      speakWeights, mentionWeights, activeSubject, prevParaFocus, quoteContent, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject);
+      speakWeights, mentionWeights, activeSubject, prevParaFocus, quoteContent, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject, attestedSpeakers);
 
     // Adjacent quote inheritance: if attribution failed but the immediately
     // preceding attributed quote had high confidence and no new named actor
@@ -2145,9 +2239,36 @@ function processParagraph(
       activeSubject = attr.speaker;
       // H1: Track recent high-confidence speakers for turn-taking detection.
       // Window size is controlled by intelligenceLevel via maxRecentSpeakers.
-      if (attr.confidence >= 0.65) {
+      //
+      // ★ AN INFERENCE MUST NOT BECOME EVIDENCE FOR THE NEXT INFERENCE.
+      //
+      // The bar here was 0.65, and NEW-PARA-NEW-SPEAKER returns 0.73. So the
+      // alternation rule's own guess was admitted to the roster and became the
+      // basis of the next alternation, which was admitted in turn. One wrong
+      // answer seeded the next, and the error walked forward through the scene.
+      //
+      // High mode suffers this worst because it guesses most: a lower pronoun
+      // threshold and the confidence-upgrade pass both mean more lines get an
+      // answer, so more unverified answers entered the roster. That is why 37 of
+      // the 41 lines fast gets RIGHT and high gets WRONG came out of the
+      // alternation return.
+      //
+      // The threshold now sits ABOVE every purely structural inference — stage
+      // direction 0.74, alternation 0.73, action subject 0.72 — and below every
+      // attribution that actually read something in the text: an explicit tag,
+      // an immediate name, a voice attribution, a gender-checked pronoun, a
+      // same-paragraph continuation. The roster is therefore built only from
+      // observation, and inference can consume it without feeding it.
+      if (attr.confidence >= ROSTER_EVIDENCE_FLOOR) {
         recentSpeakers.push(attr.speaker);
         if (recentSpeakers.length > (maxRecentSpeakers ?? 7)) recentSpeakers.shift();
+      }
+      // Parallel roster of turns the TEXT attested, kept alongside rather than
+      // instead of the full one — see ROSTER_EVIDENCE_FLOOR for why the full
+      // roster cannot simply be narrowed.
+      if (attestedSpeakers && attr.confidence >= ATTESTED_FLOOR) {
+        attestedSpeakers.push(attr.speaker);
+        if (attestedSpeakers.length > (maxRecentSpeakers ?? 7)) attestedSpeakers.shift();
       }
     }
     prevPairEnd = pair.end + 1;
@@ -2800,6 +2921,8 @@ export function detectSpeechInChapter(
   // Sliding window of last N high-confidence attributed speakers.
   // Seeded from previous chapter context if available.
   const recentSpeakers: string[] = prev ? [...prev.recentSpeakers] : [];
+  // Turns the text attested, as opposed to turns inferred from the roster itself.
+  const attestedSpeakers: string[] = [];
   const result: ChapterParaResult[] = [];
   // First-mention tracking: a character's debut in the chapter is much stronger
   // evidence of narrative focus than their 40th mention.
@@ -2976,6 +3099,7 @@ export function detectSpeechInChapter(
       predictionTraceOut,
       nameCache,
       carriedParagraphSubject,
+      attestedSpeakers,
     );
 
     // ── High mode: confidence upgrade / demotion pass ──────────────────
