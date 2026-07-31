@@ -13554,6 +13554,453 @@ body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input
   border-radius: 2px;
 }
 
+/* ── Insight strip — cross-chapter findings above the canvas ─────────────── */
+
+.timeline-insight-strip {
+  flex-shrink: 0;
+  padding: 8px 22px 10px;
+  border-bottom: 1px solid var(--divider-line);
+}
+
+.timeline-insight-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.timeline-insight-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.timeline-insight-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--divider-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.timeline-insight-chip:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.timeline-insight-chip--active {
+  border-color: color-mix(in srgb, var(--text) 26%, transparent);
+  color: var(--text);
+}
+
+.timeline-insight-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.timeline-insight-chip[data-severity="attention"] .timeline-insight-dot {
+  background: #f59e0b;
+}
+
+.timeline-insight-detail {
+  margin: 7px 0 0;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+/* ── Canvas + inspector rail share one positioning context ───────────────── */
+
+.timeline-full-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.timeline-full-body .timeline-full-scroll {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Event hover card — the event, allowed to justify itself ─────────────── */
+
+.timeline-hover-card {
+  position: absolute;
+  width: 280px;
+  transform: translate(-50%, -100%);
+  padding: 10px 12px 9px;
+  border-radius: 14px;
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--divider-line);
+  box-shadow: var(--shadow-glass);
+  pointer-events: none;
+  z-index: 5;
+  animation: fade-in 0.12s ease;
+}
+
+.timeline-hover-card[data-below] {
+  transform: translate(-50%, 0);
+}
+
+.timeline-hover-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.timeline-hover-card-type {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.timeline-hover-card-salience {
+  font-family: var(--font-ui);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  border: 1px solid var(--divider-line);
+  border-radius: 999px;
+  padding: 0.5px 5px;
+}
+
+.timeline-hover-card-loc {
+  margin-left: auto;
+  font-family: var(--font-ui);
+  font-size: 9px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline-hover-card-agent {
+  margin-top: 4px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.timeline-hover-card-clause {
+  margin: 5px 0 0;
+  font-family: var(--font-body);
+  font-style: italic;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.timeline-hover-card-hint {
+  margin-top: 6px;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+
+/* ── Chapter inspector rail ──────────────────────────────────────────────── */
+
+.timeline-inspector {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 304px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 14px;
+  border-radius: 22px;
+  background: var(--bg-glass-strong);
+  border: 1px solid var(--divider-line);
+  box-shadow: var(--shadow-glass);
+  z-index: 6;
+  animation: timeline-inspector-in 0.18s ease;
+}
+
+@keyframes timeline-inspector-in {
+  from { opacity: 0; transform: translateX(10px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.timeline-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.timeline-inspector-eyebrow {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.timeline-inspector-title {
+  margin: 2px 0 10px;
+  font-family: var(--font-body);
+  font-size: 16px;
+  font-style: italic;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.timeline-inspector-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--divider-line) transparent;
+  margin: 0 -6px;
+  padding: 0 6px;
+}
+
+.timeline-inspector-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.timeline-inspector-role {
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.timeline-inspector-stale {
+  margin: 9px 0 0;
+  padding: 7px 9px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, #f59e0b 35%, transparent);
+  background: color-mix(in srgb, #f59e0b 8%, transparent);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.timeline-inspector-section {
+  margin-top: 14px;
+}
+
+.timeline-inspector-label {
+  margin: 0 0 5px;
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.timeline-inspector-spark {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.timeline-inspector-events {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline-inspector-event {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  padding: 6px 7px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.timeline-inspector-event:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.timeline-inspector-event:disabled {
+  cursor: default;
+}
+
+.timeline-inspector-event-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-top: 3px;
+  flex-shrink: 0;
+  background: var(--evt-color, var(--text-tertiary));
+}
+
+.timeline-inspector-event-dot[data-salience="minor"] {
+  background: transparent;
+  border: 1.5px solid var(--evt-color, var(--text-tertiary));
+}
+
+.timeline-inspector-event-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.timeline-inspector-event-label {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.timeline-inspector-event-meta {
+  font-family: var(--font-ui);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  color: var(--text-tertiary);
+}
+
+.timeline-inspector-event-clause {
+  margin-top: 2px;
+  font-family: var(--font-body);
+  font-style: italic;
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.timeline-inspector-quiet {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
+.timeline-inspector-cast {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.timeline-inspector-cast-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+.timeline-inspector-cast-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.timeline-inspector-open {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding: 8px 0;
+  width: 100%;
+  border: 1px solid var(--divider-line);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.timeline-inspector-open:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-color: color-mix(in srgb, var(--text) 24%, transparent);
+}
+
+/* ── Panel insight lines (compact story-graph panel) ─────────────────────── */
+
+.sg-insights {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 8px;
+}
+
+.sg-insight-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.14s ease;
+}
+
+.sg-insight-line:hover {
+  background: color-mix(in srgb, var(--panel-text) 6%, transparent);
+}
+
+.sg-insight-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+  background: var(--panel-text-4);
+}
+
+.sg-insight-line[data-severity="attention"] .sg-insight-dot {
+  background: #f59e0b;
+}
+
+.sg-insight-text {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--panel-text-3);
+}
+
 /* Fullscreen timeline mode: the overlay covers the entire app, so keep all
    background glass surfaces flat instead of maintaining live backdrop-filter
    compositing behind it. */

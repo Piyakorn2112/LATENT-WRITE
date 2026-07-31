@@ -7,6 +7,7 @@ import {
   buildTimelineCharacterTracks,
   type TimelineCharacterTrack,
 } from "../lib/story-graph-display";
+import { buildArcInsights } from "../lib/story-arc-insights";
 import { Maximize2Icon } from "./Icon";
 import { GlassToggle } from "./GlassToggle";
 import { TimelineGraph } from "./TimelineGraph";
@@ -19,6 +20,8 @@ interface Props {
   worldData?: WorldData;
   currentChapterId: string | null;
   onSelectChapter: (id: string) => void;
+  /** Opens a chapter and selects an event's source clause in the editor. */
+  onJumpToEvent?: (chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => void;
   prefs: Preferences;
   onSetPrefs: (next: Preferences) => void;
 }
@@ -46,9 +49,12 @@ const electronAPI = (window as Window & {
 }).electronAPI;
 
 function StoryGraphPanelImpl({
-  storyGraph, chapters, syncChapters, worldData, currentChapterId, onSelectChapter, prefs, onSetPrefs,
+  storyGraph, chapters, syncChapters, worldData, currentChapterId, onSelectChapter, onJumpToEvent, prefs, onSetPrefs,
 }: Props) {
   const [overlayOpen, setOverlayOpen] = useState(false);
+  // Chapter the full view should open its inspector on. Set when an insight
+  // line in the panel is clicked, cleared when the overlay closes.
+  const [overlayFocusId, setOverlayFocusId] = useState<string | null>(null);
   const [lmStatus, setLmStatus] = useState<LMStatus>("idle");
   const [syncedTracks, setSyncedTracks] = useState<TimelineCharacterTrack[] | null>(null);
   const [tracksSyncing, setTracksSyncing] = useState(false);
@@ -78,6 +84,14 @@ function StoryGraphPanelImpl({
     [storyGraph, worldData],
   );
   const topChars = syncedTracks ?? snapshotTracks;
+
+  // Cross-chapter insights — pure aggregation over the persisted graph, cheap
+  // enough to re-derive on every graph update. syncChapters carries content
+  // only while the graph tab is open, which is the only time this renders.
+  const insights = useMemo(
+    () => buildArcInsights(storyGraph, syncChapters, topChars),
+    [storyGraph, syncChapters, topChars],
+  );
 
   useEffect(() => {
     setSyncedTracks(null);
@@ -152,6 +166,28 @@ function StoryGraphPanelImpl({
                 <span className="sg-stat-key">chapters</span>
               </div>
             </div>
+            {/* Cross-chapter insights — the two most important, as full
+                sentences. Clicking one opens the arc view with its inspector
+                already on the chapter the claim is about. */}
+            {insights.length > 0 && (
+              <div className="sg-insights">
+                {insights.slice(0, 2).map((ins) => (
+                  <button
+                    key={ins.kind + ins.chapterIds.join()}
+                    type="button"
+                    className="sg-insight-line"
+                    data-severity={ins.severity}
+                    onClick={() => {
+                      setOverlayFocusId(ins.chapterIds[0] ?? null);
+                      setOverlayOpen(true);
+                    }}
+                  >
+                    <span className="sg-insight-dot" aria-hidden />
+                    <span className="sg-insight-text">{ins.text}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Character presence list */}
             {topChars.length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 6px", padding: "4px 0 8px" }}>
@@ -195,6 +231,7 @@ function StoryGraphPanelImpl({
               characterTracks={topChars}
               currentChapterId={currentChapterId}
               onSelectChapter={onSelectChapter}
+              onJumpToEvent={onJumpToEvent}
             />
           </div>
         ) : (
@@ -280,9 +317,14 @@ function StoryGraphPanelImpl({
           storyGraph={storyGraph}
           chapters={chapters}
           characterTracks={topChars}
+          insights={insights}
+          focusChapterId={overlayFocusId}
           currentChapterId={currentChapterId}
-          onSelectChapter={(id) => { onSelectChapter(id); setOverlayOpen(false); }}
-          onClose={() => setOverlayOpen(false)}
+          onSelectChapter={(id) => { onSelectChapter(id); setOverlayOpen(false); setOverlayFocusId(null); }}
+          onJumpToEvent={onJumpToEvent
+            ? (cid, evt) => { setOverlayOpen(false); setOverlayFocusId(null); onJumpToEvent(cid, evt); }
+            : undefined}
+          onClose={() => { setOverlayOpen(false); setOverlayFocusId(null); }}
         />,
         document.body,
       )}

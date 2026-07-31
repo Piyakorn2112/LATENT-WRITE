@@ -89,6 +89,9 @@ interface Props {
   onToolHighlights?: (highlights: import("../lib/tool-runner").ToolHighlight[]) => void;
   /** Scrolls the editor to a paragraph — wired to the chapter observation. */
   onJumpToParagraph?: (paragraphIndex: number) => void;
+  /** Opens a chapter and selects a stored event's source clause — wired to the
+   *  story timeline, which is the only surface that spans chapters. */
+  onJumpToEvent?: (chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => void;
   tier: Tier;
   onTierChange: (t: Tier) => void;
 }
@@ -593,7 +596,7 @@ export function AnalysisPanel({
   onAutoSceneBreak, sceneBreaking, onOpenChange,
   storyGraph, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
-  onImportTools, onToolHighlights, onJumpToParagraph,
+  onImportTools, onToolHighlights, onJumpToParagraph, onJumpToEvent,
   tier, onTierChange,
 }: Props) {
   // High-mode gating mirrors the reader: cross-arc data is only meaningful
@@ -1095,6 +1098,7 @@ export function AnalysisPanel({
               worldData={worldData}
               currentChapterId={chapterId ?? null}
               onSelectChapter={handleGraphSelectChapter}
+              onJumpToEvent={onJumpToEvent ? (cid, evt) => { onJumpToEvent(cid, evt); setView(null); } : undefined}
               prefs={prefs}
               onSetPrefs={onSetPrefs}
             />

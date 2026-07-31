@@ -11,10 +11,11 @@
  *  - Atmosphere: dot-grid, subtle gradient fills, cinematic not diagrammatic
  */
 
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Activity } from "lucide-react";
 import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
+import type { ArcInsight } from "../lib/story-arc-insights";
 import { measureTextWidth } from "../lib/measure-text";
 import { TIMELINE_CHIP_BUDGET } from "../lib/narrative-events";
 import { CloseIcon } from "./Icon";
@@ -25,8 +26,14 @@ interface Props {
   storyGraph: StoryGraph;
   chapters: TimelineChapterDisplay[];
   characterTracks: TimelineCharacterTrack[];
+  /** Cross-chapter insights from story-arc-insights, already ranked. */
+  insights: ArcInsight[];
+  /** Chapter whose inspector should open when the overlay mounts. */
+  focusChapterId?: string | null;
   currentChapterId: string | null;
   onSelectChapter: (id: string) => void;
+  /** Opens a chapter in the editor with the event's clause selected. */
+  onJumpToEvent?: (chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => void;
   onClose: () => void;
 }
 
@@ -99,11 +106,12 @@ interface BoxState {
   detail: string | null;
   detailW: number;
   label: string;
-  /** Hover text: type, salience, location, confidence, and the SOURCE CLAUSE.
-   *  Threaded all the way through the layout because the label is capped at
-   *  20-30 characters and cannot justify itself; before `sentence` was
-   *  persisted there was nothing to show here. */
-  tip: string;
+  /** The chapter the event belongs to — a chip click jumps INTO that chapter. */
+  chapterId: string;
+  /** The stored event, whole. The label is capped at 20-30 characters and
+   *  cannot justify itself; the hover card shows the event's type, agent,
+   *  location, confidence and its verbatim SOURCE CLAUSE from here. */
+  evt: MajorEvent;
   w: number;       // dynamic box width
   cx: number;      // center X (mutable during layout)
   cy: number;      // center Y (mutable during layout)
@@ -129,7 +137,9 @@ interface ChapterRenderData {
   color: string;
   nr: number;
   isAct: boolean;
-  events: Array<{ type: MajorEvent["type"]; label: string; detailLabel?: string }>;
+  /** Inspector rail open on this chapter. */
+  isInspect: boolean;
+  events: MajorEvent[];
 }
 
 interface TrackRenderData {
@@ -152,11 +162,7 @@ function layoutBoxes(
   chData: Array<{
     ch: { id: string };
     x: number; y: number; nr: number;
-    events: Array<{
-      type: string; label: string; detailLabel?: string;
-      sentence?: string; paragraphIndex?: number; narrativeType?: string;
-      salience?: string; confidence?: number; tensionPosition?: number;
-    }>;
+    events: MajorEvent[];
     color: string;
   }>,
 ): PlacedBox[] {
@@ -194,15 +200,8 @@ function layoutBoxes(
         detail,
         detailW,
         label, w,
-        tip: [
-          `${evt.narrativeType ?? evt.type}${evt.salience ? ` · ${evt.salience}` : ""}`,
-          evt.paragraphIndex !== undefined
-            ? `¶${evt.paragraphIndex + 1}${evt.confidence !== undefined ? ` · ${Math.round(evt.confidence * 100)}% confidence` : ""}`
-            : evt.tensionPosition !== undefined
-              ? `${Math.round(evt.tensionPosition * 100)}% through the chapter`
-              : "",
-          evt.sentence ? `\n${evt.sentence}` : "",
-        ].filter(Boolean).join("\n"),
+        chapterId: ch.id,
+        evt,
         cx: chX,
         cy: Math.max(MIN_BOX_Y + BOX_H / 2, initCY),
       });
@@ -343,6 +342,9 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
   chapters: ChapterRenderData[];
   trackLayouts: TrackRenderData[];
   detailsReady: boolean;
+  /** Click = INSPECT (open the rail), not navigate. Leaving the view is the
+   *  inspector's "Open chapter" button — one deliberate step further — so the
+   *  map can actually be explored without being thrown out of it. */
   onSelectChapter: (id: string) => void;
 }) {
   return (
@@ -421,7 +423,7 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
       ))}
 
       {/* Per-chapter elements */}
-      {chapters.map(({ ch, entry, x, y, color, nr, isAct }) => (
+      {chapters.map(({ ch, entry, x, y, color, nr, isAct, isInspect }) => (
         <g
           key={ch.id}
           style={{ cursor: "pointer" }}
@@ -456,6 +458,14 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
             />
           )}
 
+          {/* Inspector ring — dashed, distinct from the active-chapter ring */}
+          {isInspect && (
+            <circle cx={x} cy={y} r={nr + 7}
+              fill="none" stroke="var(--text-secondary)"
+              strokeWidth={1.2} strokeDasharray="3,3" opacity={0.7}
+            />
+          )}
+
           <text
             x={x} y={LABEL_Y_NUM}
             textAnchor="middle" dominantBaseline="hanging"
@@ -485,17 +495,29 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
   );
 });
 
-const EventBoxesLayer = memo(function EventBoxesLayer({ boxes }: { boxes: PlacedBox[] }) {
+const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }: {
+  boxes: PlacedBox[];
+  /** Feeds the styled hover card — the native <title> tooltip is gone because
+   *  it could show only unstyled text after a fixed delay, which is most of
+   *  why the chips earned nothing. */
+  onHover: (box: PlacedBox | null) => void;
+  onPick: (box: PlacedBox) => void;
+}) {
   return (
     <>
       {boxes.map((box) => (
-        <g key={box.key}>
+        <g
+          key={box.key}
+          style={{ cursor: "pointer" }}
+          onMouseEnter={() => onHover(box)}
+          onMouseLeave={() => onHover(null)}
+          onClick={(e) => { e.stopPropagation(); onPick(box); }}
+        >
           <path
             d={box.branchPath}
             fill="none" stroke={box.color}
             strokeWidth={1.1} strokeOpacity={0.3}
           />
-          <title>{box.tip}</title>
           <rect
             x={box.x} y={box.y}
             width={box.w} height={BOX_H}
@@ -540,12 +562,21 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes }: { boxes: Placed
 });
 
 function TimelineGraphFullImpl({
-  storyGraph, chapters, characterTracks, currentChapterId, onSelectChapter, onClose,
+  storyGraph, chapters, characterTracks, insights, focusChapterId,
+  currentChapterId, onSelectChapter, onJumpToEvent, onClose,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const layoutCacheRef = useRef<Map<string, PlacedBox[]>>(new Map());
   const [detailRange, setDetailRange] = useState<VisibleRange>(() => computeVisibleRange(0, 0, chapters.length));
   const [detailsReady, setDetailsReady] = useState(false);
+  // Chapter whose inspector rail is open. Click a node to set, Esc / × to clear.
+  const [inspectId, setInspectId] = useState<string | null>(focusChapterId ?? null);
+  const inspectIdRef = useRef(inspectId);
+  inspectIdRef.current = inspectId;
+  // Event chip under the pointer — drives the styled hover card.
+  const [hoverBox, setHoverBox] = useState<PlacedBox | null>(null);
+  // Which insight's full sentence shows under the chip strip.
+  const [activeInsight, setActiveInsight] = useState(0);
   const analyzed  = Object.keys(storyGraph.entries).length;
   const svgW      = PAD_X + Math.max(0, chapters.length - 1) * CHAPTER_W + PAD_X;
   const svgH      = CHAR_ZONE_TOP + Math.max(characterTracks.length, 1) * CHAR_TRACK_H + 20;
@@ -554,6 +585,80 @@ function TimelineGraphFullImpl({
     onSelectChapter(id);
     onClose();
   }, [onClose, onSelectChapter]);
+
+  // Chapters whose analysis no longer matches their text. The insight layer
+  // already worked this out (it has the content; this component does not).
+  const staleIds = useMemo(
+    () => new Set(insights.find((i) => i.kind === "stale")?.chapterIds ?? []),
+    [insights],
+  );
+
+  const trackColor = useMemo(
+    () => new Map(characterTracks.map((t) => [t.name.toLowerCase(), t.color])),
+    [characterTracks],
+  );
+
+  // Centre a chapter in the viewport and open its inspector — for jumps that
+  // arrive from OUTSIDE the canvas (insight chips, the panel's insight lines).
+  const focusChapter = useCallback((id: string) => {
+    setInspectId(id);
+    const idx = chapters.findIndex((c) => c.id === id);
+    const el = scrollRef.current;
+    if (idx >= 0 && el) {
+      el.scrollTo({ left: Math.max(0, chapterX(idx) - el.clientWidth / 2), behavior: "smooth" });
+    }
+  }, [chapters]);
+
+  // Open the inspector on a clicked node WITHOUT re-centring the view — the
+  // user is already looking at it. Only exception: if the rail would cover
+  // the clicked node, nudge the canvas left just far enough to keep it seen.
+  const inspectChapter = useCallback((id: string) => {
+    setInspectId(id);
+    const idx = chapters.findIndex((c) => c.id === id);
+    const el = scrollRef.current;
+    if (idx < 0 || !el) return;
+    const railW = 340; // rail width + gutter
+    const viewportX = chapterX(idx) - el.scrollLeft;
+    if (viewportX > el.clientWidth - railW) {
+      el.scrollTo({ left: chapterX(idx) - (el.clientWidth - railW - 20), behavior: "smooth" });
+    }
+  }, [chapters]);
+
+  // Opened from an insight line in the panel: land on the chapter it cites.
+  useEffect(() => {
+    if (focusChapterId) focusChapter(focusChapterId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Esc peels one layer at a time: inspector first, then the overlay.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      if (inspectIdRef.current) { setInspectId(null); return; }
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const handleBoxPick = useCallback((box: PlacedBox) => {
+    if (onJumpToEvent) onJumpToEvent(box.chapterId, box.evt);
+    else setInspectId(box.chapterId);
+  }, [onJumpToEvent]);
+
+  // Everything the inspector rail shows, derived once per selection.
+  const inspect = useMemo(() => {
+    if (!inspectId) return null;
+    const ch = chapters.find((c) => c.id === inspectId);
+    if (!ch) return null;
+    const entry = storyGraph.entries[inspectId];
+    // The canvas shows the engine's top three; the rail shows EVERYTHING the
+    // engine kept, in reading order — that difference is the point of a rail.
+    const events = [...(entry?.majorEvents ?? [])]
+      .sort((a, b) => (a.paragraphIndex ?? 0) - (b.paragraphIndex ?? 0));
+    return { ch, entry, events, stale: staleIds.has(inspectId) };
+  }, [inspectId, chapters, storyGraph, staleIds]);
 
   useEffect(() => {
     const body = document.body;
@@ -642,12 +747,16 @@ function TimelineGraphFullImpl({
     const color  = entry ? roleColor(entry.role) : "#475569";
     const nr     = entry ? nodeRadius(entry.role, entry.tensionPeak) : 6;
     const events = (entry?.majorEvents ?? []).slice(0, MAX_EVENTS);
-    return { ch, entry, x, y, color, nr, isAct: false, events };
+    return { ch, entry, x, y, color, nr, isAct: false, isInspect: false, events };
   }), [chapters, storyGraph]);
 
   const chData = useMemo(
-    () => baseChData.map((item) => ({ ...item, isAct: item.ch.id === currentChapterId })),
-    [baseChData, currentChapterId],
+    () => baseChData.map((item) => ({
+      ...item,
+      isAct: item.ch.id === currentChapterId,
+      isInspect: item.ch.id === inspectId,
+    })),
+    [baseChData, currentChapterId, inspectId],
   );
 
   const trackLayouts = useMemo<TrackRenderData[]>(() => {
@@ -738,6 +847,12 @@ function TimelineGraphFullImpl({
     [eventBoxes, detailLeft, detailRight],
   );
 
+  // If the hovered chip scrolls out of the virtualised window its mouseleave
+  // never fires — drop the card rather than let it orphan.
+  useEffect(() => {
+    setHoverBox((prev) => (prev && !visibleEventBoxes.includes(prev) ? null : prev));
+  }, [visibleEventBoxes]);
+
   return (
     <div
       className="timeline-full-overlay"
@@ -773,45 +888,230 @@ function TimelineGraphFullImpl({
           </button>
         </div>
 
-        {/* ── Scrollable SVG canvas ── */}
-        <div
-          ref={scrollRef}
-          className="timeline-full-scroll"
-        >
-          <svg
-            width={svgW}
-            height={svgH}
-            viewBox={`0 0 ${svgW} ${svgH}`}
-            style={{ display: "block", minWidth: "100%", overflow: "visible" }}
-          >
-            <defs>
-              <pattern id="tg-dots" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
-                <circle cx="14" cy="14" r="0.8" fill="var(--divider-line)" />
-              </pattern>
-              <linearGradient id="tg-terrain" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="var(--text)" stopOpacity="0.04" />
-                <stop offset="100%" stopColor="var(--text)" stopOpacity="0" />
-              </linearGradient>
-              <filter id="tg-glow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="6" result="b" />
-                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
-              </filter>
-            </defs>
+        {/* ── Insight strip — what the graph knows across chapters ── */}
+        {insights.length > 0 && (
+          <div className="timeline-insight-strip">
+            <div className="timeline-insight-chips">
+              {insights.map((ins, i) => (
+                <button
+                  key={ins.kind + ins.chapterIds.join()}
+                  type="button"
+                  className={`timeline-insight-chip${i === activeInsight ? " timeline-insight-chip--active" : ""}`}
+                  data-severity={ins.severity}
+                  onClick={() => {
+                    setActiveInsight(i);
+                    if (ins.chapterIds[0]) focusChapter(ins.chapterIds[0]);
+                  }}
+                >
+                  <span className="timeline-insight-dot" aria-hidden />
+                  {ins.chip}
+                </button>
+              ))}
+            </div>
+            <p className="timeline-insight-detail">
+              {insights[Math.min(activeInsight, insights.length - 1)].text}
+            </p>
+          </div>
+        )}
 
-            <StaticTimelineLayer
-              svgW={svgW}
-              svgH={svgH}
-              areaPath={areaPath}
-              spinePath={spinePath}
-              chapters={chData}
-              trackLayouts={trackLayouts}
-              detailsReady={detailsReady}
-              onSelectChapter={handleChapterSelect}
-            />
-            {detailsReady && (
-              <EventBoxesLayer boxes={visibleEventBoxes} />
-            )}
-          </svg>
+        {/* ── Canvas + inspector share one positioning context ── */}
+        <div className="timeline-full-body">
+          <div
+            ref={scrollRef}
+            className="timeline-full-scroll"
+          >
+            {/* Relative wrapper the hover card positions inside — it scrolls
+                WITH the canvas, so the card stays glued to its chip. margin
+                auto keeps a short book centred, which is what the old svg
+                min-width 100% + preserveAspectRatio letterboxing produced. */}
+            <div style={{ position: "relative", width: svgW, height: svgH, margin: "0 auto" }}>
+              <svg
+                width={svgW}
+                height={svgH}
+                viewBox={`0 0 ${svgW} ${svgH}`}
+                style={{ display: "block", overflow: "visible" }}
+              >
+                <defs>
+                  <pattern id="tg-dots" x="0" y="0" width="28" height="28" patternUnits="userSpaceOnUse">
+                    <circle cx="14" cy="14" r="0.8" fill="var(--divider-line)" />
+                  </pattern>
+                  <linearGradient id="tg-terrain" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--text)" stopOpacity="0.04" />
+                    <stop offset="100%" stopColor="var(--text)" stopOpacity="0" />
+                  </linearGradient>
+                  <filter id="tg-glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="6" result="b" />
+                    <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+                  </filter>
+                </defs>
+
+                <StaticTimelineLayer
+                  svgW={svgW}
+                  svgH={svgH}
+                  areaPath={areaPath}
+                  spinePath={spinePath}
+                  chapters={chData}
+                  trackLayouts={trackLayouts}
+                  detailsReady={detailsReady}
+                  onSelectChapter={inspectChapter}
+                />
+                {detailsReady && (
+                  <EventBoxesLayer boxes={visibleEventBoxes} onHover={setHoverBox} onPick={handleBoxPick} />
+                )}
+              </svg>
+
+              {/* ── Hover card — the event, allowed to justify itself ── */}
+              {hoverBox && (() => {
+                const below = hoverBox.y < 170;
+                const evt = hoverBox.evt;
+                return (
+                  <div
+                    className="timeline-hover-card"
+                    data-below={below || undefined}
+                    style={{
+                      left: Math.min(Math.max(hoverBox.cx, 150), svgW - 150),
+                      top: below ? hoverBox.y + BOX_H + 10 : hoverBox.y - 10,
+                    }}
+                  >
+                    <div className="timeline-hover-card-head">
+                      <span className="timeline-hover-card-type" style={{ color: hoverBox.color }}>
+                        {evt.narrativeType ?? evt.type}
+                      </span>
+                      {evt.salience === "major" && <span className="timeline-hover-card-salience">major</span>}
+                      <span className="timeline-hover-card-loc">
+                        {evt.paragraphIndex !== undefined ? `¶${evt.paragraphIndex + 1}` : `${Math.round(evt.tensionPosition * 100)}%`}
+                        {` · ${Math.round(evt.confidence * 100)}%`}
+                      </span>
+                    </div>
+                    {evt.agent && <div className="timeline-hover-card-agent">{evt.agent}</div>}
+                    {evt.sentence && <p className="timeline-hover-card-clause">{evt.sentence}</p>}
+                    {onJumpToEvent && <div className="timeline-hover-card-hint">Click to open in the editor</div>}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* ── Chapter inspector rail ── */}
+          {inspect && (
+            <aside className="timeline-inspector" aria-label={`Chapter ${inspect.ch.number} details`}>
+              <div className="timeline-inspector-head">
+                <span className="timeline-inspector-eyebrow">Chapter {inspect.ch.number}</span>
+                <button className="icon-btn" type="button" onClick={() => setInspectId(null)} aria-label="Close inspector">
+                  <CloseIcon />
+                </button>
+              </div>
+              <h3 className="timeline-inspector-title">{inspect.ch.title || `Chapter ${inspect.ch.number}`}</h3>
+
+              {inspect.entry ? (
+                <div className="timeline-inspector-scroll">
+                  <div className="timeline-inspector-meta">
+                    <span className="timeline-inspector-role" style={{ color: roleColor(inspect.entry.role) }}>
+                      {inspect.entry.role}
+                    </span>
+                    <span>{inspect.entry.proseRegister}</span>
+                    <span>{inspect.entry.wordCount >= 1000 ? `${(inspect.entry.wordCount / 1000).toFixed(1)}k` : inspect.entry.wordCount} words</span>
+                  </div>
+
+                  {inspect.stale && (
+                    <p className="timeline-inspector-stale">
+                      This chapter changed since its last analysis. What follows describes the earlier text.
+                    </p>
+                  )}
+
+                  {inspect.entry.tensionCurve.length > 1 && (() => {
+                    const W = 268, H = 36;
+                    const pts = inspect.entry!.tensionCurve;
+                    const step = W / (pts.length - 1);
+                    const xy = pts.map((v, i) => [i * step, H - 4 - Math.min(1, Math.max(0, v)) * (H - 8)] as const);
+                    const line = xy.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+                    const peakI = pts.indexOf(Math.max(...pts));
+                    const rc = roleColor(inspect.entry!.role);
+                    return (
+                      <div className="timeline-inspector-section">
+                        <p className="timeline-inspector-label">Tension</p>
+                        <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="timeline-inspector-spark" aria-hidden>
+                          <path d={`${line} L${W},${H} L0,${H} Z`} fill={rc} opacity={0.09} />
+                          <path d={line} fill="none" stroke={rc} strokeWidth={1.5} opacity={0.65} />
+                          <circle cx={xy[peakI][0]} cy={xy[peakI][1]} r={2.5} fill={rc} />
+                        </svg>
+                      </div>
+                    );
+                  })()}
+
+                  <div className="timeline-inspector-section">
+                    <p className="timeline-inspector-label">What happens</p>
+                    {inspect.events.length > 0 ? (
+                      <ul className="timeline-inspector-events">
+                        {inspect.events.map((evt, i) => (
+                          <li key={`${evt.paragraphIndex ?? i}-${evt.label}`}>
+                            <button
+                              type="button"
+                              className="timeline-inspector-event"
+                              onClick={() => onJumpToEvent?.(inspect.ch.id, evt)}
+                              disabled={!onJumpToEvent}
+                            >
+                              <span
+                                className="timeline-inspector-event-dot"
+                                data-salience={evt.salience ?? "major"}
+                                style={{ "--evt-color": EVENT_COLOR[evt.type] ?? "#64748b" } as CSSProperties}
+                              />
+                              <span className="timeline-inspector-event-body">
+                                <span className="timeline-inspector-event-label">{evt.label}</span>
+                                <span className="timeline-inspector-event-meta">
+                                  {evt.narrativeType ?? evt.type}
+                                  {evt.agent ? ` · ${evt.agent}` : ""}
+                                  {evt.paragraphIndex !== undefined ? ` · ¶${evt.paragraphIndex + 1}` : ""}
+                                </span>
+                                {evt.sentence && (
+                                  <span className="timeline-inspector-event-clause">{evt.sentence}</span>
+                                )}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="timeline-inspector-quiet">
+                        No turn detected: nothing here reads as a decision, revelation or change of state.
+                      </p>
+                    )}
+                  </div>
+
+                  {inspect.entry.charactersPresent.length > 0 && (
+                    <div className="timeline-inspector-section">
+                      <p className="timeline-inspector-label">Cast</p>
+                      <div className="timeline-inspector-cast">
+                        {inspect.entry.charactersPresent.map((name) => (
+                          <span key={name} className="timeline-inspector-cast-chip">
+                            <span
+                              className="timeline-inspector-cast-dot"
+                              style={{ background: trackColor.get(name.toLowerCase()) ?? "var(--text-tertiary)" }}
+                            />
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="timeline-inspector-scroll">
+                  <p className="timeline-inspector-quiet">
+                    Not analyzed yet. Open the chapter and the analysis will fill this in.
+                  </p>
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="timeline-inspector-open"
+                onClick={() => handleChapterSelect(inspect.ch.id)}
+              >
+                Open chapter
+              </button>
+            </aside>
+          )}
         </div>
       </div>
     </div>

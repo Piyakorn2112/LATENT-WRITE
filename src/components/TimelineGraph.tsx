@@ -25,6 +25,9 @@ export interface TimelineGraphProps {
   characterTracks: TimelineCharacterTrack[];
   currentChapterId: string | null;
   onSelectChapter: (id: string) => void;
+  /** Opens the chapter with the event's source clause selected. When set, an
+   *  event chip stops being decoration: clicking it goes to the scene. */
+  onJumpToEvent?: (chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => void;
 }
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
@@ -106,7 +109,7 @@ function computeRows(chapters: TimelineChapterDisplay[], storyGraph: StoryGraph)
 // ─── Component ────────────────────────────────────────────────────────────────
 
 function TimelineGraphImpl({
-  storyGraph, chapters, characterTracks, currentChapterId, onSelectChapter,
+  storyGraph, chapters, characterTracks, currentChapterId, onSelectChapter, onJumpToEvent,
 }: TimelineGraphProps) {
   if (chapters.length === 0) {
     return (
@@ -311,7 +314,15 @@ function TimelineGraphImpl({
               const dotX = detailX + detailTextW + 3;
               const labelX = chipX + SIDE_PAD + detailW + (detail ? DETAIL_GAP : 0);
               return (
-                <g key={`evt-${ch.id}-${ei}`} opacity={0.9}>
+                <g
+                  key={`evt-${ch.id}-${ei}`}
+                  opacity={0.9}
+                  // A chip click goes to the SCENE, not just the chapter — the
+                  // row click above still selects the chapter as before.
+                  onClick={onJumpToEvent
+                    ? (e) => { e.stopPropagation(); onJumpToEvent(ch.id, evt); }
+                    : undefined}
+                >
                   {/* ★ The first hover surface this timeline has ever had.
                       An event label is capped at 28–36 characters, so the chip
                       alone can never justify itself; the writer had no way to see

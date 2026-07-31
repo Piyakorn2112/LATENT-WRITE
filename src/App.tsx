@@ -1243,6 +1243,35 @@ export default function App() {
     handleProjectJump(target.id, offset, Math.min(paraText.length, 160));
   }, [activeChapter, analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Jump from the timeline to a detected event's clause, in ANY chapter.
+  // The stored event carries its verbatim source sentence, which survives
+  // paragraph re-splits; locate it with indexOf against the chapter's current
+  // text. Falls back to paragraph position, then to plain chapter open, so an
+  // edited chapter degrades to "roughly there" instead of a stale selection.
+  const handleJumpToEvent = useCallback((chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => {
+    const ch = novel.chapters.find((c) => c.id === chapterId);
+    if (!ch) return;
+    if (event.sentence) {
+      const offset = ch.content.indexOf(event.sentence);
+      if (offset >= 0) {
+        handleProjectJump(chapterId, offset, Math.min(event.sentence.length, 200));
+        return;
+      }
+    }
+    if (event.paragraphIndex !== undefined) {
+      // Same split the analysis runner uses, so the index means the same thing.
+      const paras = ch.content.split(/\n{2,}|\n/).map((p) => p.trim()).filter(Boolean);
+      const para = paras[event.paragraphIndex];
+      const offset = para ? ch.content.indexOf(para) : -1;
+      if (offset >= 0) {
+        handleProjectJump(chapterId, offset, Math.min(para!.length, 160));
+        return;
+      }
+    }
+    setCurrentId(chapterId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [novel.chapters]);
+
   // Jump to a search hit: open the chapter, then scroll to the offset and
   // select the hit. Uses the chapter's *fresh* content (looked up from
   // `novel`) rather than the stale closure-captured `current`, since at
@@ -1798,6 +1827,7 @@ export default function App() {
         intelMode={intelMode}
         onSetIntelMode={(m) => setIntelMode(m === "off" ? "off" : "auto")}
         onJumpToParagraph={handleJumpToParagraph}
+        onJumpToEvent={handleJumpToEvent}
         tier={tier}
         onTierChange={handleTierChange}
         prefs={prefs}
