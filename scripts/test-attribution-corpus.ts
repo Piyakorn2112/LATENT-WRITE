@@ -220,12 +220,28 @@ async function runBook(key: string, level: IntelligenceLevel, collectSamples: bo
 
         if (isHonorific) {
           const seg = findSegment(result, closeIdx);
+          // ★ SCORE THE HONORIFIC AGAINST THE TAG, NOT AGAINST THE CAST.
+          //
+          // `resolveAgainstCast` returns undefined when the surname was never
+          // independently extracted — common, because a character introduced only
+          // as "Mr. Wilson" has no bare "Wilson" in the cast. This used to count
+          // as WRONG, so `said Mr. Wilson -> Wilson` — the right answer — was
+          // scored as a failure, and the honorific number was measuring cast
+          // coverage as much as attribution.
+          //
+          // Dumping the failures made it obvious: most of the 46 were the engine
+          // being correct. The tag itself is unambiguous ground truth, so fall
+          // back to comparing against the tagged surname when the cast is silent.
+          const tagSurname = core.trim().split(/\s+/).pop() ?? core;
+          const truth = expected ?? tagSurname;
           honorific.total++;
           if (!seg) honorific.noSegment++;
           else if (!seg.speaker) honorific.unattributed++;
-          else if (expected && seg.speaker.toLowerCase() === expected.toLowerCase()) honorific.correct++;
-          else honorific.wrong++; // includes "expected unknown" (surname never independently extracted) — still an objective non-match on this test's terms
-          if (collectSamples && samples.honorific.length < 20) {
+          else if (seg.speaker.toLowerCase() === truth.toLowerCase()
+                   || seg.speaker.toLowerCase() === core.trim().toLowerCase()) honorific.correct++;
+          else honorific.wrong++;
+          if (collectSamples && samples.honorific.length < 20
+              && (!seg?.speaker || (seg.speaker.toLowerCase() !== (expected ?? core.trim().split(/\s+/).pop() ?? '').toLowerCase() && seg.speaker.toLowerCase() !== core.trim().toLowerCase()))) {
             samples.honorific.push(`[${key}] ...${p.slice(Math.max(0, closeIdx - 50), closeIdx + m[0].length)}  → seg.speaker=${seg?.speaker ?? "(none)"}  expected=${expected ?? "?"}`);
           }
         } else {
