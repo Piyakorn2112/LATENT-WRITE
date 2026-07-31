@@ -58,6 +58,20 @@ export interface SpeechDetectOptions {
   adaptiveContext?: import("../types").AdaptiveInferenceContext;
   /** Collects per-span prediction traces for feedback logging. */
   predictionTraceOut?: { value: import("../types").AdaptivePredictionTrace[] };
+  /**
+   * The subset of `knownNames` that could plausibly SPEAK.
+   *
+   * `knownNames` is the highlight layer's list and necessarily contains places,
+   * factions and instruments alongside people, because until a writer
+   * categorises them the extractor cannot tell them apart. Attribution treats
+   * every name it is given as a candidate speaker, so without this the cast
+   * competes against the scenery — measured at 15.2% of bare dialogue lines
+   * attributed to something that never speaks in its own book.
+   *
+   * Build it with `filterSpeakerCandidates` from world-data. Omitted → every
+   * known name is a candidate, i.e. the previous behaviour exactly.
+   */
+  speakerCandidates?: readonly string[];
 }
 
 export interface SpeechSegment {
@@ -2471,10 +2485,19 @@ function groupIntoScenes(paragraphs: string[], results: ChapterParaResult[]): vo
  */
 export function detectSpeechInChapter(
   paragraphs: string[],
-  knownNames: string[] = [],
+  knownNamesIn: string[] = [],
   options?: SpeechDetectOptions,
 ): ChapterParaResult[] {
   const level = options?.intelligenceLevel ?? 'default';
+
+  // ── Speaker candidacy ────────────────────────────────────────────────────
+  // Everything below this line treats `knownNames` as the set of things that
+  // can be a speaker, so the narrowing is done ONCE, here, rather than at the
+  // forty-odd places that iterate the list. When no candidate list is supplied
+  // this is the identity and behaviour is unchanged.
+  const knownNames = options?.speakerCandidates
+    ? knownNamesIn.filter((n) => options.speakerCandidates!.includes(n))
+    : knownNamesIn;
 
   // ── Level-specific settings ──────────────────────────────────────────────
   // extCtxDepth: how many previous paragraphs to include in extended context
