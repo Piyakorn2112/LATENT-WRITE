@@ -101,7 +101,7 @@ app.whenReady().then(async () => {
   const d = await win.webContents.executeJavaScript(RECORDER);
 
   console.log(`\ntoggle knob motion  (resting scale ${d.rest.s.toFixed(3)}, left ${d.rest.l.toFixed(1)}px)`);
-  const press = analyse("PRESS", d.press, "s", "scale should ramp 1 -> 1.35 smoothly");
+  const press = analyse("PRESS", d.press, "s", "scale should ramp 1 -> 2 and SETTLE, not overshoot");
   const release = analyse("RELEASE", d.release, "s", "scale should settle back to 1");
   const slide = analyse("SLIDE (on)", d.slide, "l", "left should travel to the far end");
 
@@ -120,10 +120,14 @@ app.whenReady().then(async () => {
   // its declared target, the spring's overshoot stays within sane bounds, and
   // the motion is spread over real frames rather than jumping in one.
   const fails = [];
-  if (Math.abs(press.last - 1.35) > 0.02) fails.push(`press never reaches 1.35 (ended ${press.last.toFixed(3)})`);
+  if (Math.abs(press.last - 2) > 0.02) fails.push(`press never reaches 2 (ended ${press.last.toFixed(3)})`);
   if (Math.abs(release.last - 1) > 0.02) fails.push(`release never settles at 1 (ended ${release.last.toFixed(3)})`);
-  if (press.peak > 1.55) fails.push(`press overshoots too far (${press.peak.toFixed(3)})`);
-  if (release.trough < 0.90) fails.push(`release undershoots too far (${release.trough.toFixed(3)})`);
+  // ★ The press easing, cubic-bezier(0.22, 0.61, 0.36, 1), is a DECELERATE:
+  // it must arrive at 2 and stop. Any overshoot means the knob is being driven
+  // by the base spring (0.34, 1.56, 0.64, 1) again, which is the bug that made
+  // the swell bounce past its size and snap back. Same for the release.
+  if (press.peak > 2.03) fails.push(`press OVERSHOOTS (${press.peak.toFixed(3)}) — wrong easing, should settle on 2`);
+  if (release.trough < 0.97) fails.push(`release UNDERSHOOTS (${release.trough.toFixed(3)}) — wrong easing, should settle on 1`);
   if (press.moving < 8) fails.push(`press animated over only ${press.moving} frames`);
   if (release.moving < 8) fails.push(`release animated over only ${release.moving} frames`);
   if (slide.moving < 8) fails.push(`slide animated over only ${slide.moving} frames`);
