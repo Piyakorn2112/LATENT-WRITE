@@ -1321,12 +1321,22 @@ export function filterSpeakerCandidates(names: readonly string[], text: string):
     const re = new RegExp(`(.{0,4})\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
     let occ = 0;
     let determined = 0;
+    let bracketed = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text)) !== null) {
       occ++;
       if (DETERMINER_BEFORE_RE.test(m[1])) determined++;
+      // ★ A NAME THAT LIVES INSIDE SQUARE BRACKETS IS A DOCUMENT ARTIFACT.
+      // Gutenberg texts carry `[Illustration: ...]`, `[Copyright ...]`,
+      // `[Transcriber's note ...]` — and "Illustration" passed the determiner
+      // test (nobody writes "the Illustration") straight into Pride and
+      // Prejudice's cast, where it WON dialogue lines. Same family of test as
+      // the determiner: no word list, positional evidence the text itself
+      // supplies. Prose never brackets a person's name; markup always does.
+      if (/\[\s*$/.test(m[1])) bracketed++;
     }
     if (occ === 0) return true;
+    if (bracketed / occ >= 0.5) return false;
     return determined / occ < MAX_DETERMINER_RATIO;
   });
 }

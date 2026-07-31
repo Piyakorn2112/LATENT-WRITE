@@ -128,6 +128,13 @@ function maskParagraph(p: string): { masked: string; gold: string } | undefined 
   if (!rawName) return undefined;
   const gold = bareSurname(rawName);
   if (gold.length < 3) return undefined;
+  // ★ A BARE HONORIFIC IS A PARSE ARTIFACT, NOT A GOLD LABEL. On
+  // `said Mrs. Bennet, more than once,` the honorific branch needs a
+  // sentence-final terminator after "Bennet" and finds a comma, so the regex
+  // BACKTRACKS to name="Mrs" with the abbreviating period passing as
+  // sentence-final — subverting the comma-tag exclusion and producing a
+  // corrupt masked line whose gold is "Mrs", which no engine can answer.
+  if (new RegExp(`^(?:${HONORIFIC_ALT})$`, "i").test(gold)) return undefined;
 
   const closeChar = p[m.index];
   const before = p.slice(0, m.index);          // up to, excluding, the closing quote
