@@ -42,6 +42,13 @@
   --bg-glass: rgba(255, 255, 255, 0.44);
   --bg-glass-hover: rgba(255, 255, 255, 0.82);
   --bg-glass-strong: rgba(255, 255, 255, 0.76);
+
+  /* Flat-blur surface, for overlays that sit ON a glass card and so must not
+     be glass themselves (timeline inspector + event hover card). Tint carries
+     enough opacity for body text over a busy canvas; the outline is a plain
+     hairline rather than the liquid rim gradient. */
+  --tl-flat-fill: rgba(252, 252, 251, 0.82);
+  --tl-flat-line: rgba(0, 0, 0, 0.1);
   --bg-glass-unfocused: rgb(248, 248, 246);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
   --bg-edge-right: #eef0f3;
@@ -179,6 +186,8 @@
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
     --bg-glass-unfocused: rgb(24, 24, 22);
+    --tl-flat-fill: rgba(32, 32, 31, 0.82);
+    --tl-flat-line: rgba(255, 255, 255, 0.13);
     /* Dark glass already gives a colour wash plenty to read against. */
     --lqg-glow-boost: 1;
     --overlay-scrim-bg-unfocused: rgba(8, 10, 14, 0.58);
@@ -13636,15 +13645,23 @@ body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input
 
 /* ── Event hover card — the event, allowed to justify itself ─────────────── */
 
+/* ★ FLAT BLUR, not liquid glass. Both surfaces below sit INSIDE
+   .timeline-full-panel, which is itself a liquid-glass card (tinted fill,
+   gradient rim, --shadow-glass). Stacking a second glass treatment on top of
+   the first double-tints the backdrop and reads muddy, and the rim gradient
+   fights the panel's own. So these are the flat treatment used by the app's
+   other in-context overlays: one light tint, one real backdrop blur, a plain
+   1px outline, no gradient rim and no glass shadow. */
 .timeline-hover-card {
   position: absolute;
   width: 280px;
   transform: translate(-50%, -100%);
   padding: 10px 12px 9px;
   border-radius: 14px;
-  background: var(--bg-glass-strong);
-  border: 1px solid var(--divider-line);
-  box-shadow: var(--shadow-glass);
+  background: var(--tl-flat-fill);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  border: 1px solid var(--tl-flat-line);
   pointer-events: none;
   z-index: 5;
   animation: fade-in 0.12s ease;
@@ -13729,9 +13746,10 @@ body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input
   flex-direction: column;
   padding: 14px 16px 14px;
   border-radius: 22px;
-  background: var(--bg-glass-strong);
-  border: 1px solid var(--divider-line);
-  box-shadow: var(--shadow-glass);
+  background: var(--tl-flat-fill);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--tl-flat-line);
   z-index: 6;
   animation: timeline-inspector-in 0.18s ease;
 }
