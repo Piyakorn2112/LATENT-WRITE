@@ -207,7 +207,62 @@ const SPEECH_VERBS = [
   'mumbled','mumble','rasped','rasp','croaked','croak','blurted','blurt',
 ];
 
-const SPEECH_VERB_PAT = `(?:${SPEECH_VERBS.join('|')})`;
+/**
+ * Compile a word list into a PREFIX-TRIE alternation instead of a flat one.
+ *
+ * `said|says|say|asked|ask|…` is 130 alternatives, and a regex engine tries each
+ * one at every position in the subject string. Almost all of them die on their
+ * first character, but only after being entered. Sharing prefixes moves that
+ * decision into a single character test: the list above becomes
+ * `sa(?:id|ys|y)|ask(?:ed)?|…`, so one look at `s` retires every branch that
+ * does not start with it.
+ *
+ * This matters because SPEECH_VERB_PAT is not used once — it is embedded in the
+ * name-forward, name-inverted, generic-forward, generic-inverted and explicit-tag
+ * patterns, so every one of them inherits the shape. Profiling put 28% of fast
+ * mode's runtime inside this single alternation after the findDirectName gate
+ * landed, making it the hottest thing in the engine.
+ *
+ * ★ The accepted LANGUAGE is unchanged — this is the same set of words in a
+ * different tree — and that is verified rather than asserted: bench-verb-trie.ts
+ * runs both forms over the entire corpus and compares the match sequences
+ * position by position.
+ *
+ * Terminal nodes that also have children render as an optional suffix, so `ask`
+ * and `asked` collapse to `ask(?:ed)?`. Every use site wraps the pattern in
+ * `\b…\b`, so the greedy suffix cannot end up matching a prefix of a longer word.
+ */
+function buildTriePattern(words: readonly string[]): string {
+  interface Node { children: Map<string, Node>; terminal: boolean }
+  const root: Node = { children: new Map(), terminal: false };
+  for (const w of words) {
+    let node = root;
+    for (const ch of w) {
+      let next = node.children.get(ch);
+      if (!next) { next = { children: new Map(), terminal: false }; node.children.set(ch, next); }
+      node = next;
+    }
+    node.terminal = true;
+  }
+  const escChar = (c: string) => c.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+  function render(node: Node): string {
+    if (node.children.size === 0) return '';
+    const branches: string[] = [];
+    const leafChars: string[] = [];
+    for (const [ch, child] of node.children) {
+      if (child.children.size === 0 && child.terminal) leafChars.push(ch);
+      else branches.push(escChar(ch) + render(child));
+    }
+    // Single-character endings collapse into one character class.
+    if (leafChars.length === 1) branches.push(escChar(leafChars[0]));
+    else if (leafChars.length > 1) branches.push(`[${leafChars.map(escChar).join('')}]`);
+    const body = branches.length === 1 ? branches[0] : `(?:${branches.join('|')})`;
+    return node.terminal ? `(?:${body})?` : body;
+  }
+  return `(?:${render(root)})`;
+}
+
+const SPEECH_VERB_PAT = buildTriePattern(SPEECH_VERBS);
 
 /**
  * Does this trailing text carry an EXPLICIT attribution tag — a speech verb
