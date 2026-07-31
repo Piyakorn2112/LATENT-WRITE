@@ -155,7 +155,7 @@ function IntelBtn({
     >
       <span className="intel-btn-inner">
         {USE_ORB_ENGINE ? (
-          <span className="intel-orb-live intel-orb-live--engine">
+          <span className={`intel-orb-live intel-orb-live--engine${funMode ? " intel-orb-live--fun" : ""}`}>
             {/* vibrance carries the converged-idle "vivid" lift (the JS
                 loop eases it, so the lift breathes in rather than snaps);
                 aberration sets the lens's dispersion depth. */}
@@ -170,7 +170,7 @@ function IntelBtn({
             {funMode && <IntelEyes />}
           </span>
         ) : (
-        <span className="intel-orb-live">
+        <span className={`intel-orb-live${funMode ? " intel-orb-live--fun" : ""}`}>
             {/* Three mesh layers: blue body, warmer under-glow, then a brighter
               accent rim that can carry complementary colour. Keeping them
               separate lets the third layer behave like a tiny chromatic

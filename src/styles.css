@@ -10302,6 +10302,32 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   to   { opacity: 1; transform: scale(1); }
 }
 
+/* ─── Fun mode: the orb settles back as the eyes land ──────────────────────
+   A short dip in the orb's own brightness at each moment the eyes ARRIVE back
+   at centre, so the return reads as a settle rather than the eyes simply
+   stopping. Two beats, both borrowed from `intel-eye-move`'s 8s timeline and
+   deliberately sharing its duration so they can never drift apart: 28% (back
+   from the glance right) and 66% (back from the glance up).
+
+   `:not(.intel-eyes)` is what makes this the ORB fading and not the face — the
+   eyes are a sibling of the orb canvas inside the same box, so dimming the
+   parent would take them with it. */
+.intel-orb-live--fun > :not(.intel-eyes) {
+  animation: intel-orb-fun-settle 8s ease-in-out infinite;
+}
+
+@keyframes intel-orb-fun-settle {
+  0%, 24%   { opacity: 1; }
+  28%       { opacity: 0.72; }
+  34%, 62%  { opacity: 1; }
+  66%       { opacity: 0.72; }
+  72%, 100% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intel-orb-live--fun > :not(.intel-eyes) { animation: none; }
+}
+
 .intel-eye {
   /* ★ Ink, not black. These were hardcoded #000 in two places (fill here,
      stroke on .intel-eye-arc) and stayed black on a dark toolbar. One token,

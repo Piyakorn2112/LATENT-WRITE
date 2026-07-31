@@ -148,19 +148,21 @@ export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
         release(true);
       }}
     >
-      {/* ★ The glass class is PERMANENT, not toggled on press.
-          `liquid-glass-control-knob` is not decoration: liquid-glass-filter.ts
-          watches class attributes across the document and, the moment it
-          appears, registers the element, builds a displacement map, attaches an
-          SVG filter and starts a ResizeObserver. Flipping it on pointerdown ran
-          all of that on the first frame of the press — the other half of why
-          this felt broken. Leaving it on costs one registration at mount (the
-          map cache is keyed by size, so every knob in the app shares one) and is
-          identical at rest, because the engine sets `backdrop-filter` and the
-          resting fill is opaque white: there is nothing to see through. The
-          glass appears only when the press makes the fill translucent, which is
-          exactly the intent. */}
-      <span className="glass-toggle-knob liquid-glass-control-knob" />
+      {/* ★ GLASS ON PRESS ONLY — and REVERTING this is what fixed the feel.
+          I briefly made the class permanent, reasoning that
+          `liquid-glass-control-knob` makes liquid-glass-filter.ts register the
+          element, build a displacement map and attach an SVG filter, and that
+          doing so on pointerdown had to be the jank. That was a hypothesis I
+          never measured, and it was wrong in the expensive direction: the class
+          applies `backdrop-filter: url(#…)`, so leaving it on meant the knob
+          carried a live displacement filter through every ON/OFF SLIDE as well,
+          and a filtered element that MOVES must re-sample and re-filter its
+          backdrop every frame. Registration is a one-off; per-frame refraction
+          on a travelling element is not.
+          The knob is opaque white at rest, so the glass is only ever visible
+          while pressed — and a press does not move the knob. Attaching it for
+          exactly that moment is both the cheapest and the original design. */}
+      <span className={pressed ? "glass-toggle-knob liquid-glass-control-knob" : "glass-toggle-knob"} />
     </button>
   );
 }

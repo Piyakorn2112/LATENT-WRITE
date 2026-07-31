@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 
 interface Props {
   min: number;
@@ -6,8 +6,6 @@ interface Props {
   step: number;
   value: number;
   onChange: (v: number) => void;
-  /** Kept for API compatibility. The knob's glass is now always registered
-   *  (see knobClassName below), so this no longer gates anything. */
   enableGlass?: boolean;
   className?: string;
   trackStyle?: CSSProperties;
@@ -34,7 +32,7 @@ export function GlassRange({
   step,
   value,
   onChange,
-  enableGlass: _enableGlass = false,
+  enableGlass = false,
   className = "",
   trackStyle,
   trackUnderlayStyle,
@@ -42,19 +40,27 @@ export function GlassRange({
   showFill = true,
   ariaLabel,
 }: Props) {
-  void _enableGlass;
+  const [glassActive, setGlassActive] = useState(false);
+
+  useEffect(() => {
+    if (!glassActive) return;
+    const reset = () => setGlassActive(false);
+    window.addEventListener("pointerup", reset);
+    window.addEventListener("pointercancel", reset);
+    return () => {
+      window.removeEventListener("pointerup", reset);
+      window.removeEventListener("pointercancel", reset);
+    };
+  }, [glassActive]);
 
   const fraction = max === min ? 0 : Math.min(1, Math.max(0, (value - min) / (max - min)));
   const wrapClassName = className ? `glass-range-wrap ${className}` : "glass-range-wrap";
-  // ★ The glass class is PERMANENT. `liquid-glass-control-knob` registers the
-  // element with liquid-glass-filter.ts, which watches class attributes on the
-  // whole document: adding it on pointerdown built a displacement map, attached
-  // an SVG filter and started a ResizeObserver on the first frame of the drag,
-  // which is exactly when the knob is supposed to be moving smoothly. Registered
-  // once at mount instead. Resting appearance is unchanged because the engine
-  // sets `backdrop-filter` and the knob's resting fill is opaque white; the
-  // glass only shows once the press turns the fill translucent.
-  const knobClassName = "glass-range-knob liquid-glass-control-knob";
+  // ★ Glass while dragging only. See the note in GlassToggle: making this class
+  // permanent looked like it would avoid registration work on pointerdown, but
+  // the class applies `backdrop-filter: url(#…)`, so an always-on knob carries a
+  // live displacement filter every frame it moves. Registration is a one-off;
+  // per-frame refraction on a moving element is not.
+  const knobClassName = glassActive ? "glass-range-knob liquid-glass-control-knob" : "glass-range-knob";
 
   return (
     <div className={wrapClassName}>
@@ -75,6 +81,12 @@ export function GlassRange({
         onChange={(e) => onChange(Number(e.target.value))}
         className="glass-range-input"
         aria-label={ariaLabel}
+        onPointerDown={(e) => {
+          if (enableGlass || e.currentTarget.closest(".settings-panel")) setGlassActive(true);
+        }}
+        onPointerUp={() => setGlassActive(false)}
+        onPointerCancel={() => setGlassActive(false)}
+        onBlur={() => setGlassActive(false)}
       />
     </div>
   );
