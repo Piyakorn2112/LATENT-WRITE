@@ -47,8 +47,16 @@
      be glass themselves (timeline inspector + event hover card). Tint carries
      enough opacity for body text over a busy canvas; the outline is a plain
      hairline rather than the liquid rim gradient. */
-  --tl-flat-fill: rgba(252, 252, 251, 0.82);
+  /* ★ 0.62, not 0.82. At 0.82 the blur genuinely fired and was invisible: the
+     surface sits on a panel that is itself a 0.76-white glass card, so two
+     near-opaque whites stacked left nothing of the backdrop to see and the
+     result read as a plain solid card. Enough of the frost has to survive for
+     the surface to look like a surface. */
+  --tl-flat-fill: rgba(252, 252, 251, 0.62);
   --tl-flat-line: rgba(0, 0, 0, 0.1);
+
+  /* Fun-mode orb eyes. Inverts in the dark block below. */
+  --intel-eye-ink: #000000;
   --bg-glass-unfocused: rgb(248, 248, 246);
   --text-entity-tag: rgba(255, 255, 255, 0.696);
   --bg-edge-right: #eef0f3;
@@ -186,8 +194,9 @@
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
     --bg-glass-unfocused: rgb(24, 24, 22);
-    --tl-flat-fill: rgba(32, 32, 31, 0.82);
+    --tl-flat-fill: rgba(28, 28, 27, 0.66);
     --tl-flat-line: rgba(255, 255, 255, 0.13);
+    --intel-eye-ink: #ffffff;
     /* Dark glass already gives a colour wash plenty to read against. */
     --lqg-glow-boost: 1;
     --overlay-scrim-bg-unfocused: rgba(8, 10, 14, 0.58);
@@ -10185,100 +10194,40 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   transform: translateY(-50%) scale(1.08);
 }
 
-.glass-toggle--press-a .glass-toggle-knob {
-  animation: glass-toggle-knob-press-a 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-.glass-toggle--press-b .glass-toggle-knob {
-  animation: glass-toggle-knob-press-b 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-.glass-toggle--release-a .glass-toggle-knob {
-  animation: glass-toggle-knob-release-a 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-.glass-toggle--release-b .glass-toggle-knob {
-  animation: glass-toggle-knob-release-b 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
-}
-
-@keyframes glass-toggle-knob-press-a {
-  0% {
-    transform: translateY(-50%) scale(1);
-    background: rgb(255, 255, 255);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.109),
-      0 4px 10px rgba(0, 0, 0, 0.10);
-  }
-  100% {
-    transform: translateY(-50%) scale(2);
-    background: rgba(255, 255, 255, 0.18);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.22),
-      0 12px 28px rgba(0, 0, 0, 0.22);
-  }
-}
-
-@keyframes glass-toggle-knob-press-b {
-  0% {
-    transform: translateY(-50%) scale(1);
-    background: rgb(255, 255, 255);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.109),
-      0 4px 10px rgba(0, 0, 0, 0.10);
-  }
-  100% {
-    transform: translateY(-50%) scale(2);
-    background: rgba(255, 255, 255, 0.18);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.22),
-      0 12px 28px rgba(0, 0, 0, 0.22);
-  }
-}
-
-@keyframes glass-toggle-knob-release-a {
-  0% {
-    transform: translateY(-50%) scale(2);
-    background: rgba(255, 255, 255, 0.18);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.22),
-      0 12px 28px rgba(0, 0, 0, 0.22);
-  }
-  100% {
-    transform: translateY(-50%) scale(1);
-    background: rgb(255, 255, 255);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.109),
-      0 4px 10px rgba(0, 0, 0, 0.10);
-  }
-}
-
-@keyframes glass-toggle-knob-release-b {
-  0% {
-    transform: translateY(-50%) scale(2);
-    background: rgba(255, 255, 255, 0.18);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.22),
-      0 12px 28px rgba(0, 0, 0, 0.22);
-  }
-  100% {
-    transform: translateY(-50%) scale(1);
-    background: rgb(255, 255, 255);
-    box-shadow:
-      0 1px 2px rgba(0, 0, 0, 0.109),
-      0 4px 10px rgba(0, 0, 0, 0.10);
-  }
-}
-
 /* Active — bigger scale + semi-transparent fill, same press-feel as
    .glass-range-knob's active state. The transparent fill lets the
    underlying track colour bleed through (track-coloured tint when ON,
    subtle dark tint when OFF), which is what makes the knob feel like
-   it's lifting OFF the track on press. Slightly less aggressive scale
-   than the slider (1.42 vs 1.62) because the toggle knob is already
-   bigger at rest (32×24 vs the slider's 20×14). */
+   it's lifting OFF the track on press.
+
+   ★ THIS USED TO BE FOUR @keyframes PLUS AN A/B RESTART HACK, and that is
+   what made the toggle feel broken.
+
+   The press and release were `animation: … forwards` on `transform`, with
+   `--press-a`/`--press-b` alternating only to force a restart, four pieces of
+   React state, and a timer computing `max(MIN_GLASS_ACTIVE_MS - elapsed,
+   PRESS_ANIMATION_MS - elapsed)` to decide when to start the release. That
+   timer fires on the same frame the press animation ends, so press-end and
+   release-start RACE: whenever release won, the knob snapped from wherever the
+   press had reached back to the release keyframe's 0% (scale 2) before
+   animating down. A running animation also outranks the `:hover` declaration,
+   so the hover scale was swallowed mid-gesture.
+
+   A transition cannot have that bug: interrupt it at any point and it
+   retargets smoothly FROM THE CURRENT COMPUTED VALUE. The slider
+   (.glass-range-knob) has always worked this way, driven by :has(:active) —
+   the toggle's own comments already claimed to mirror it. Now it does, and the
+   ORIGINAL toggle (3aabd70) was exactly this: a handful of CSS rules, no JS.
+
+   ★ SCALE IS BACK TO 1.35, its value before b3788cf. That commit raised it to 2
+   while introducing the keyframes, and left the opening paragraph above
+   describing the intent it had just broken. The toggle knob is 32x24 at rest
+   against the slider's 20x14, so it wants a SMALLER multiplier than the
+   slider's 1.62, not a larger one. Doubling the bigger of the two knobs is what
+   made the press read as a balloon instead of a lift. */
 .glass-toggle:active .glass-toggle-knob,
-.glass-toggle--glass-active .glass-toggle-knob {
-  transform: translateY(-50%) scale(2);
+.glass-toggle--pressed .glass-toggle-knob {
+  transform: translateY(-50%) scale(1.35);
   background: rgba(255, 255, 255, 0.18);
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.22),
@@ -10354,7 +10303,11 @@ body.scroll-edge-idle .toolbar-ambient-orb {
 }
 
 .intel-eye {
-  fill: #000000;
+  /* ★ Ink, not black. These were hardcoded #000 in two places (fill here,
+     stroke on .intel-eye-arc) and stayed black on a dark toolbar. One token,
+     flipped once in the dark block below, so the pills and the arcs can never
+     disagree with each other again. */
+  fill: var(--intel-eye-ink);
   /* transform-box: fill-box + transform-origin: center — scale & translate
      operate around each shape's own bounding-box centre. */
   transform-box: fill-box;
@@ -10391,7 +10344,7 @@ body.scroll-edge-idle .toolbar-ambient-orb {
 .intel-eye-arc {
   opacity: 0;
   fill: none;
-  stroke: #000000;
+  stroke: var(--intel-eye-ink);
   stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -13659,8 +13612,8 @@ body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input
   padding: 10px 12px 9px;
   border-radius: 14px;
   background: var(--tl-flat-fill);
-  -webkit-backdrop-filter: blur(14px) saturate(150%);
-  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  backdrop-filter: blur(20px) saturate(140%);
   border: 1px solid var(--tl-flat-line);
   pointer-events: none;
   z-index: 5;
@@ -13747,8 +13700,8 @@ body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input
   padding: 14px 16px 14px;
   border-radius: 22px;
   background: var(--tl-flat-fill);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
-  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(26px) saturate(140%);
+  backdrop-filter: blur(26px) saturate(140%);
   border: 1px solid var(--tl-flat-line);
   z-index: 6;
   animation: timeline-inspector-in 0.18s ease;

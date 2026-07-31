@@ -96,7 +96,12 @@ function computeRows(chapters: TimelineChapterDisplay[], storyGraph: StoryGraph)
   let cursor = PAD_TOP;
   for (const ch of chapters) {
     const entry    = storyGraph.entries[ch.id];
-    const evCount  = (entry?.majorEvents ?? []).length;
+    // ★ Reserve space for the chips that are actually DRAWN, not for every event
+    // the engine stored. This read the uncapped array while the render draws at
+    // most TIMELINE_CHIP_BUDGET, so a chapter holding 20 events reserved 20 rows
+    // of height and showed 3 — the big uneven vertical gaps between chapters.
+    // Same selector as the render below, so the two cannot disagree again.
+    const evCount  = selectTimelineChips(entry?.majorEvents ?? []).length;
     const chY      = cursor + ROW_H_BASE / 2;
     const evStartY = cursor + ROW_H_BASE + EVENT_H / 2;
     const totalH   = ROW_H_BASE + evCount * EVENT_H;
