@@ -68,7 +68,10 @@ const bump = (m: Map<string, [number, number]>, k: string, hit: boolean) => {
   m.set(k, v);
 };
 
+const DEV = new Set(["webnovel","treasure","frankenstein","hollow-iris","sherlock","worlds","anne","root-crown"]);
+const only = process.env.DEVONLY === "1" ? DEV : process.env.HOLDOUT === "1" ? null : null;
 for (const gc of gold.chapters) {
+  if (only && !only.has(gc.book)) continue;
   const novel = await book(gc.book);
   const chapter = novel.chapters.find((c) => c.number === gc.chapter);
   if (!chapter) continue;

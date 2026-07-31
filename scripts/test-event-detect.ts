@@ -460,6 +460,7 @@ function detectNarrativeEventsFor(p: Prepared): NarrativeEvent[] {
     confidenceFloor: process.env.FLOOR ? Number(process.env.FLOOR) : undefined,
     maxEvents: process.env.CAP ? Number(process.env.CAP) : undefined,
     positionPriorWeight: process.env.POSW ? Number(process.env.POSW) : undefined,
+    typePriorWeight: process.env.TYPEW ? Number(process.env.TYPEW) : undefined,
   });
 }
 

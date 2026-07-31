@@ -150,6 +150,8 @@ export interface DetectOptions {
   /** Weight of the narrative-position prior. Exposed for the DEV sweep; see
    *  POSITION_PRIOR_WEIGHT and the block that applies it. */
   positionPriorWeight?: number;
+  /** Weight of the per-type reliability prior. Exposed for the DEV sweep. */
+  typePriorWeight?: number;
 }
 
 /**
@@ -180,6 +182,28 @@ export interface DetectOptions {
  * an estimate of it. Do not re-derive this expecting the 3x.
  */
 export const POSITION_PRIOR_WEIGHT = 0.6;
+
+/**
+ * Per-type reliability, centred on the DEV mean hit rate (~0.36) so the term
+ * only ever REORDERS and never inflates a chapter's scores as a group. The
+ * shape is fixed from the measurement recorded at the point of use; only the
+ * single scale below is swept, which keeps this one fitted number rather than
+ * seven and makes it far harder to overfit seven small per-type samples.
+ */
+const TYPE_RELIABILITY: Record<string, number> = {
+  decision:      0.10,
+  action:        0.08,
+  "state-change": 0.045,
+  departure:     0.03,
+  arrival:      -0.03,
+  revelation:   -0.07,
+  confrontation: -0.10,
+  unclassified:  0,
+};
+
+/** Scale on TYPE_RELIABILITY. Swept on DEV, confirmed held out; see the sweep
+ *  recorded beside the sweep for POSITION_PRIOR_WEIGHT. */
+export const TYPE_PRIOR_WEIGHT = 0;
 
 /** The timeline gives an event label 20–36 characters depending on whether a
  *  detail tag sits beside it (measured off TimelineGraph/TimelineGraphFull).
@@ -1531,7 +1555,7 @@ export function detectNarrativeEvents(
   // ★ Every option that changes the OUTPUT must appear here. A swept parameter
   // missing from the key makes the sweep read the first run's answer back for
   // every setting and report a dead flat curve that looks like "no effect".
-  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${options.positionPriorWeight ?? ""}|${(options.knownNames ?? []).length}`;
+  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${options.positionPriorWeight ?? ""}|${options.typePriorWeight ?? ""}|${(options.knownNames ?? []).length}`;
   if (key === _memoKey) return _memoValue;
   const result = detectNarrativeEventsUncached(paragraphs, speechResults, options);
   _memoKey = key;
@@ -1548,6 +1572,7 @@ function detectNarrativeEventsUncached(
   if (paraCount < 2) return [];
 
   const positionPriorWeight = options.positionPriorWeight ?? POSITION_PRIOR_WEIGHT;
+  const typePriorWeight = options.typePriorWeight ?? TYPE_PRIOR_WEIGHT;
   const names = (options.knownNames ?? []).filter((n) => n && n.length >= 2);
   const pattern = buildEntityPattern(names);
   const nameRe = pattern ? new RegExp(pattern, "g") : null;
@@ -1724,6 +1749,46 @@ function detectNarrativeEventsUncached(
       // model that fits jointly — rather than from marginals — could use it. The
       // measurement bug is fixed either way, so the next person sees true numbers.
       if (cand.type !== "unclassified") why.push(`verb:${cand.type}`);
+
+      // ─── HOW RELIABLE IS THIS ENGINE ON THIS KIND OF EVENT ────────────────
+      //
+      // The verb class already scores. What it does not carry is how often the
+      // engine turns out to be RIGHT when it fires that class, and those rates
+      // are far apart. Measured on DEV books, share of detections landing on a
+      // real gold event (mean ~36%):
+      //
+      //     decision      45.7%  (n=70)     departure     39.3%  (n=28)
+      //     action        43.8%  (n=64)     arrival       33.3%  (n=27)
+      //     state-change  40.5%  (n=79)     revelation    29.1%  (n=117)
+      //                                     confrontation 26.3%  (n=57)
+      //
+      // Revelation and confrontation together are the largest slice of output
+      // and the least trustworthy part of it, which is a self-knowledge the
+      // ranker had no way to express.
+      //
+      // ★★ AND IT IS OFF, BECAUSE IT DID NOT SURVIVE THE HELD-OUT BOOKS. This is
+      // the most useful measurement in this file; read it before reinventing the
+      // idea, because on DEV it looks unarguable.
+      //
+      //     DEV       0 -> 51.7   2 -> 52.5   4 -> 53.3   7 -> 54.6   11 -> 53.8
+      //     HELD OUT  0 -> 44.6                           7 -> 42.4
+      //
+      // On DEV that is a clean monotonic climb to a real peak, +2.9 points,
+      // exactly what a genuine signal looks like. Held out it LOSES 2.2, and
+      // major-events-shown loses 2.1 with it.
+      //
+      // The reason is a double-dip that is easy to miss. The seven-value SHAPE
+      // was read off the DEV hit rates, and then the scale was swept on DEV as
+      // well. Only the scale LOOKED like a fitted parameter; in truth eight
+      // numbers were fitted on the books the sweep then scored. A single swept
+      // scalar is not automatically safe when the vector it multiplies came out
+      // of the same data.
+      //
+      // Kept at 0 rather than deleted, in the same spirit as the LM salience
+      // blend below: the mechanism plus its measurement is worth more than
+      // either alone. Retrying this honestly needs type rates from a source the
+      // sweep never sees.
+      if (typePriorWeight !== 0) score += typePriorWeight * (TYPE_RELIABILITY[cand.type] ?? 0);
 
       // ─── Agent kind ────────────────────────────────────────────────────────
       //
