@@ -3478,6 +3478,104 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
       // withhold experiment) and cost far more than it bought.
     }
   }
+
+  // ── SCENE-LOCAL TWO-HANDERS: eject the outsider, fill the silence ────────
+  //
+  // The two-cast rules in the forward ladder fire only when the BOOK's cast has
+  // two members, which is almost never true. But most dialogue in a big-cast
+  // novel is still a two-hander — a scene where exactly two people are talking
+  // — and high mode's worst wrong answers are names like Kaelen and Veren that
+  // are not in the scene at all, elected off a stale roster.
+  //
+  // Deciding "is this line inside a strict two-hander" needs a view of the
+  // surrounding attested turns that the forward pass, marching left to right on
+  // a budget, cannot afford. The retro pass can: for each revisable line, look
+  // at every ATTESTED turn within ±10 paragraphs; if exactly two speakers hold
+  // them and each holds at least two, the scene is theirs.
+  //
+  // Then two conservative moves, both anchored on an ADJACENT dialogue line:
+  //   EJECT — the guess is a name outside the pair: replace it with the
+  //           alternation partner of the adjacent neighbour. An outsider's
+  //           claim on a line inside somebody else's two-hander is exactly the
+  //           stale-roster failure, and adjacency + membership decide the
+  //           replacement, not recency in the roster.
+  //   FILL  — the line has no speaker and the adjacent neighbour is one of the
+  //           pair: the new-paragraph convention (the k=2 rule that survived
+  //           every measurement) supplies the other member.
+  //
+  // Lines whose guess is already one of the pair are NOT second-guessed: the
+  // forward pass plus the sandwich handle those, and prev-only flipping was
+  // measured (continue-1 outnumbers alternate-2 in real prose) as unsafe.
+  {
+    const attested: Array<{ idx: number; k: string; name: string }> = [];
+    for (let j = 0; j < result.length; j++) {
+      for (const sg of speechSegs(j)) {
+        if (sg.speaker && isEvidence(sg)) {
+          attested.push({ idx: j, k: normKey(sg.speaker), name: sg.speaker });
+        }
+      }
+    }
+
+    // `attested` is ordered by paragraph, so the ±10 window slides with i —
+    // two pointers instead of a full rescan per line keeps the sweep O(n).
+    let lo = 0;
+    let hi = 0;
+    for (let i = 0; i < result.length; i++) {
+      while (lo < attested.length && attested[lo].idx < i - 10) lo++;
+      while (hi < attested.length && attested[hi].idx <= i + 10) hi++;
+
+      const segs = speechSegs(i);
+      if (segs.length !== 1) continue;
+      const seg = segs[0];
+      if (seg.speaker && seg.confidence > STRUCTURAL_MAX_CONF) continue;
+      if (!quotesClosed(paragraphs[i] ?? '')) continue;
+      if (i > 0 && !quotesClosed(paragraphs[i - 1] ?? '')) continue;
+
+      // The strict local pair: exactly two attested speakers within ±10, each
+      // with at least two turns. A third voice anywhere nearby disqualifies.
+      const counts = new Map<string, { name: string; n: number }>();
+      for (let ai = lo; ai < hi; ai++) {
+        const a = attested[ai];
+        if (a.idx === i) continue;
+        const c = counts.get(a.k) ?? { name: a.name, n: 0 };
+        c.n++;
+        counts.set(a.k, c);
+      }
+      if (counts.size !== 2) continue;
+      const pair = [...counts.entries()];
+      if (pair[0][1].n < 2 || pair[1][1].n < 2) continue;
+      const inPair = (k: string) => k === pair[0][0] || k === pair[1][0];
+      const other = (k: string) =>
+        k === pair[0][0] ? pair[1][1].name : pair[0][1].name;
+
+      // Anchor: the nearest ADJACENT dialogue neighbour (≤2 paragraphs away)
+      // whose speaker is evidence-backed and one of the pair.
+      let anchor: string | undefined;
+      for (const dir of [-1, 1] as const) {
+        for (let step = 1; step <= 2 && !anchor; step++) {
+          const j = i + dir * step;
+          if (j < 0 || j >= result.length) break;
+          const nsegs = speechSegs(j);
+          if (!nsegs.length) continue;
+          const ns = dir === -1 ? nsegs[nsegs.length - 1] : nsegs[0];
+          if (ns.speaker && isEvidence(ns) && inPair(normKey(ns.speaker))) {
+            anchor = ns.speaker;
+          }
+          break; // only the nearest dialogue paragraph in each direction
+        }
+        if (anchor) break;
+      }
+      if (!anchor) continue;
+
+      if (seg.speaker && !inPair(normKey(seg.speaker))) {
+        seg.speaker = other(normKey(anchor));
+        seg.confidence = 0.70;
+      } else if (!seg.speaker) {
+        seg.speaker = other(normKey(anchor));
+        seg.confidence = 0.68;
+      }
+    }
+  }
 }
 
 /**
