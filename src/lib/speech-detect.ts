@@ -1052,14 +1052,18 @@ function findAttribution(
   // a place or an object — cannot reach it.
   {
     const tagged = `${localAfter}`.match(
-      new RegExp(`^\\s*[,]?\\s*\\b${SPEECH_VERB_PAT}\\b\\s+(${HONORIFIC_PAT})\\.?\\s+([A-Z][a-z']{1,})`, 'i'),
+      new RegExp(`^\\s*[,]?\\s*\\b${SPEECH_VERB_PAT}\\b\\s+(${HONORIFIC_PAT})\\.?\\s+([A-Z][a-z']{1,}(?:\\s+[A-Z][a-z']{1,})?)`, 'i'),
     ) ?? `${localBefore}`.match(
-      new RegExp(`\\b${SPEECH_VERB_PAT}\\b\\s+(${HONORIFIC_PAT})\\.?\\s+([A-Z][a-z']{1,})\\s*$`, 'i'),
+      new RegExp(`\\b${SPEECH_VERB_PAT}\\b\\s+(${HONORIFIC_PAT})\\.?\\s+([A-Z][a-z']{1,}(?:\\s+[A-Z][a-z']{1,})?)\\s*$`, 'i'),
     );
     if (tagged) {
       // The BARE NAME, not "Mr. Wilson" — every other path in this file returns a
       // name without its honorific, and downstream label building assumes that.
-      return { speaker: tagged[2], type: 'speech', confidence: 0.9 };
+      // A two-word name resolves to its LAST token — "Mr. James Windibank" is
+      // Windibank, and the cast list holds surnames. Falls back to the single
+      // token when there is only one.
+      const parts = tagged[2].trim().split(/\s+/);
+      return { speaker: parts[parts.length - 1], type: 'speech', confidence: 0.9 };
     }
   }
 
