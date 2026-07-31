@@ -272,6 +272,23 @@ const HONORIFIC_PAT = "(?:Mr|Mrs|Ms|Miss|Dr|Prof|Rev|St|Capt|Col|Sgt|Lt|Gen|Sir|
 // (?<!to ) excludes bare infinitives like "to ask", "to say" which are NOT speech attribution
 const SPEECH_VERB_RE  = new RegExp(`(?<!to )\\b${SPEECH_VERB_PAT}\\b`, 'i');
 
+/**
+ * A pure SUPERSET gate: does this text contain a speech verb at all?
+ *
+ * Used to skip whole families of composed patterns that cannot possibly match
+ * without one. See findDirectName, which runs roughly 180 such patterns per
+ * call — every name forward, every name inverted, and every generic noun both
+ * ways, each re-embedding this same ~130-verb alternation.
+ *
+ * ★ DELIBERATELY WITHOUT THE `(?<!to )` LOOKBEHIND that SPEECH_VERB_RE carries.
+ * That lookbehind makes SPEECH_VERB_RE narrower than the patterns being gated,
+ * which for a filter is the dangerous direction: on `she had nothing to say to
+ * Iris` it reports no verb while the forward pattern would still match `say`,
+ * and the gate would silently suppress a real attribution. A gate may only ever
+ * be wider than what it guards.
+ */
+const ANY_SPEECH_VERB_RE = new RegExp(`\\b${SPEECH_VERB_PAT}\\b`, 'i');
+
 // Pronoun + (optional words) + speech verb  e.g. "she said", "he quietly asked"
 const PRONOUN_RE = new RegExp(
   `\\b(she|he|they|it)\\b(?:\\s+\\w+){0,4}\\s+\\b${SPEECH_VERB_PAT}\\b`,
@@ -642,6 +659,17 @@ function findDirectName(
   knownNames: string[],
   cache?: NameRegexCache,
 ): string | undefined {
+  // ★ ONE SCAN INSTEAD OF ~180. Every pattern below is a conjunction that
+  // requires a speech verb: name-then-verb, verb-then-name, and the same two
+  // shapes for each of ~60 generic nouns. With no speech verb anywhere in the
+  // text all of them are guaranteed to fail, so testing once for any verb and
+  // returning early is exactly equivalent and skips the rest.
+  //
+  // This is the hot path. Profiling the corpus put 36% of fast mode's entire
+  // runtime inside two of these alternations, with a long tail of per-generic
+  // patterns (beggar, princess, porter, landlady, housekeeper ...) each costing
+  // another ~42ms and each re-embedding the whole ~130-verb alternation.
+  if (!ANY_SPEECH_VERB_RE.test(text)) return undefined;
   // ★ THIS LOOP IS OVER NAMES, NOT POSITIONS, and `knownNames` is sorted by
   // FREQUENCY. So across a long context window this returns the book's
   // most-mentioned character rather than whoever is nearest the quote — a
