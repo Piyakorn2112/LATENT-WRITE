@@ -362,6 +362,31 @@ const SPEECH_VERB_RE  = new RegExp(`(?<!to )\\b${SPEECH_VERB_PAT}\\b`, 'i');
 const SPEECH_VERB_SET: ReadonlySet<string> = new Set(SPEECH_VERBS);
 const WORD_RUN_RE = /[a-z]+/g;
 
+/**
+ * Does the (already lower-cased) text contain any word from `vocab`?
+ *
+ * The general form of the gate above, so the same trick can retire the OTHER
+ * pattern families in findDirectName rather than only the verb-free case:
+ *
+ *   - no generic noun present  → all ~120 generic patterns must fail
+ *   - no known-name word present → all ~60 name patterns must fail
+ *
+ * ★ For MULTI-WORD entries the vocabulary holds each word SEPARATELY — `old
+ * woman` contributes `old` and `woman`. That makes the gate wider than the
+ * phrase it guards, which is the only safe direction: a pattern requiring the
+ * whole phrase certainly requires each of its words, so absence of every word
+ * proves absence of the phrase, while presence of one merely fails to rule it
+ * out and the real pattern then decides.
+ */
+function containsAnyWord(lower: string, vocab: ReadonlySet<string>): boolean {
+  WORD_RUN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = WORD_RUN_RE.exec(lower)) !== null) {
+    if (vocab.has(m[0])) return true;
+  }
+  return false;
+}
+
 function hasAnySpeechVerb(text: string): boolean {
   const lower = text.toLowerCase();
   WORD_RUN_RE.lastIndex = 0;
@@ -412,6 +437,11 @@ const GENERIC_SPEAKERS: readonly string[] = [
   'old man','old woman','young man','young lady','little girl','little boy',
   'narrator','operator','ai','assistant','instructor','mentor',
 ];
+
+/** Every individual word appearing in any GENERIC_SPEAKERS entry. */
+const GENERIC_WORD_SET: ReadonlySet<string> = new Set(
+  GENERIC_SPEAKERS.flatMap((g) => g.toLowerCase().split(/\s+/)),
+);
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -527,6 +557,26 @@ class NameRegexCache {
     }
     return re;
   }
+}
+
+/**
+ * Every individual word appearing in any known name, lower-cased — the
+ * vocabulary for the name gate in findDirectName. Multi-word names contribute
+ * each word separately, which is the safe (wider) direction; see
+ * `containsAnyWord`. Cached per cast, because the cast is fixed for a chapter
+ * and this is on the hot path.
+ */
+const EMPTY_NAMES: readonly string[] = [];
+let _cachedNameWordSet: ReadonlySet<string> | undefined;
+let _cachedNameWordSetFor: string[] | undefined;
+
+function nameWordSet(knownNames: string[]): ReadonlySet<string> {
+  if (_cachedNameWordSetFor === knownNames && _cachedNameWordSet) return _cachedNameWordSet;
+  const s = new Set<string>();
+  for (const n of knownNames) for (const w of n.toLowerCase().split(/[^a-z]+/)) if (w) s.add(w);
+  _cachedNameWordSet = s;
+  _cachedNameWordSetFor = knownNames;
+  return s;
 }
 
 let _cachedNames: string[] | undefined;
@@ -753,6 +803,15 @@ function findDirectName(
   // patterns (beggar, princess, porter, landlady, housekeeper ...) each costing
   // another ~42ms and each re-embedding the whole ~130-verb alternation.
   if (!hasAnySpeechVerb(text)) return undefined;
+
+  // The same reasoning retires the two REMAINING families for texts that do
+  // carry a verb. A name pattern needs one of the cast's words to be present; a
+  // generic pattern needs one of the generic nouns' words. Absence proves the
+  // whole family must fail, so it is skipped rather than run 60 or 120 times.
+  // Both vocabularies hold multi-word entries word by word, which makes the
+  // gates wider than the phrases they guard — the only safe direction.
+  const lowerText = text.toLowerCase();
+  const anyNameWord = containsAnyWord(lowerText, nameWordSet(knownNames));
   // ★ THIS LOOP IS OVER NAMES, NOT POSITIONS, and `knownNames` is sorted by
   // FREQUENCY. So across a long context window this returns the book's
   // most-mentioned character rather than whoever is nearest the quote — a
@@ -775,7 +834,7 @@ function findDirectName(
   // up — subjectWeights, the dialogue thread, extCtx density, or
   // pronounMinScore 12 vs fast's higher floor. Instrument WHICH source sets the
   // speaker on those 17 before attempting a fourth fix.
-  for (const name of knownNames) {
+  for (const name of anyNameWord ? knownNames : EMPTY_NAMES) {
     const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:to|toward|at|with|for)\\s+${esc(name)}\\b`, 'i');
     if (objTest.test(text)) continue;
     // Fix B: expanded window 0–50 → 0–120 to handle long embedded clauses
@@ -784,7 +843,7 @@ function findDirectName(
     if (fwdRe.test(text)) return name;
   }
   // Known names: inverted pattern — verb ... Name
-  for (const name of knownNames) {
+  for (const name of anyNameWord ? knownNames : EMPTY_NAMES) {
     const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:to|toward|at|with|for)\\s+${esc(name)}\\b`, 'i');
     if (objTest.test(text)) continue;
     // Fix B: also expand inverted window 0–40 → 0–70 (more conservative on inverted)
@@ -810,7 +869,8 @@ function findDirectName(
   // extra CORRECT answers on accuracy-suite's hard cases come from the same
   // machinery, so the fix has to separate them rather than turn it down.
   // Generic speakers — use pre-computed arrays (no RegExp allocation per call)
-  for (let gi = 0; gi < GENERIC_SPEAKERS.length; gi++) {
+  const genericCount = containsAnyWord(lowerText, GENERIC_WORD_SET) ? GENERIC_SPEAKERS.length : 0;
+  for (let gi = 0; gi < genericCount; gi++) {
     if (GENERIC_FWD_RES[gi].test(text)) return cap(GENERIC_SPEAKERS[gi]);
     if (GENERIC_INV_RES[gi].test(text)) return cap(GENERIC_SPEAKERS[gi]);
   }
