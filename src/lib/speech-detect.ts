@@ -333,16 +333,44 @@ const SPEECH_VERB_RE  = new RegExp(`(?<!to )\\b${SPEECH_VERB_PAT}\\b`, 'i');
  * Used to skip whole families of composed patterns that cannot possibly match
  * without one. See findDirectName, which runs roughly 180 such patterns per
  * call — every name forward, every name inverted, and every generic noun both
- * ways, each re-embedding this same ~130-verb alternation.
+ * ways, each re-embedding the same ~130-verb alternation. With no verb present
+ * every one of them is guaranteed to fail, so one test replaces all of them.
  *
- * ★ DELIBERATELY WITHOUT THE `(?<!to )` LOOKBEHIND that SPEECH_VERB_RE carries.
- * That lookbehind makes SPEECH_VERB_RE narrower than the patterns being gated,
- * which for a filter is the dangerous direction: on `she had nothing to say to
- * Iris` it reports no verb while the forward pattern would still match `say`,
- * and the gate would silently suppress a real attribution. A gate may only ever
- * be wider than what it guards.
+ * Answered by TOKENISING rather than scanning, because a speech verb is a WORD
+ * and words can be looked up.
+ *
+ * A wide alternation is retried at every character position: for a 75-character
+ * fragment that is ~75 positions x ~26 surviving first-character branches, some
+ * two thousand operations. Profiling put this single test at 27.5% of fast
+ * mode's runtime even after it had already been reduced to one call per
+ * findDirectName. Splitting the fragment into its ~13 words and probing a Set
+ * replaces those two thousand operations with 13 hash lookups.
+ *
+ * ★ A GATE MAY ONLY EVER BE WIDER THAN WHAT IT GUARDS, and this one is wider in
+ * two ways, both deliberate.
+ *
+ * It does NOT carry SPEECH_VERB_RE's `(?<!to )` lookbehind, which exists to
+ * exclude bare infinitives. That lookbehind would make the gate NARROWER than
+ * the patterns behind it: on `she had nothing to say to Iris` it reports no verb
+ * while the forward pattern would still match `say`, and a real attribution
+ * would be silently suppressed.
+ *
+ * And `[a-z]+` treats a digit as a separator where `\b` does not, so `said2`
+ * yields the token `said` and passes here where `\bsaid\b` fails. Also harmless:
+ * being wider only means the real patterns get run and decide for themselves.
  */
-const ANY_SPEECH_VERB_RE = new RegExp(`\\b${SPEECH_VERB_PAT}\\b`, 'i');
+const SPEECH_VERB_SET: ReadonlySet<string> = new Set(SPEECH_VERBS);
+const WORD_RUN_RE = /[a-z]+/g;
+
+function hasAnySpeechVerb(text: string): boolean {
+  const lower = text.toLowerCase();
+  WORD_RUN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = WORD_RUN_RE.exec(lower)) !== null) {
+    if (SPEECH_VERB_SET.has(m[0])) return true;
+  }
+  return false;
+}
 
 // Pronoun + (optional words) + speech verb  e.g. "she said", "he quietly asked"
 const PRONOUN_RE = new RegExp(
@@ -724,7 +752,7 @@ function findDirectName(
   // runtime inside two of these alternations, with a long tail of per-generic
   // patterns (beggar, princess, porter, landlady, housekeeper ...) each costing
   // another ~42ms and each re-embedding the whole ~130-verb alternation.
-  if (!ANY_SPEECH_VERB_RE.test(text)) return undefined;
+  if (!hasAnySpeechVerb(text)) return undefined;
   // ★ THIS LOOP IS OVER NAMES, NOT POSITIONS, and `knownNames` is sorted by
   // FREQUENCY. So across a long context window this returns the book's
   // most-mentioned character rather than whoever is nearest the quote — a
