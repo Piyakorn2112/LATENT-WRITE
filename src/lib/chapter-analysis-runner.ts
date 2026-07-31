@@ -17,6 +17,7 @@ import {
 } from "./chapter-analysis";
 import { findActionSentences, predictActionActor, type ActionPrediction } from "./action-detect";
 import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
+import { buildSpeakerAliasMap } from "./world-data";
 import type { WorldData } from "../types";
 
 export interface ChapterAnalysisResult {
@@ -129,12 +130,30 @@ export function runChapterAnalysis({
   worldData,
 }: RunChapterAnalysisInput): ChapterAnalysisResult {
   const paragraphs = toParagraphs(chapter.content);
+
+  // Alias identity for the engine: authored aliases from worldData are the
+  // ground truth when a writer has recorded them; the morphological linker
+  // covers the cold start. Chapter text is a narrower window than a whole book,
+  // which only makes the linker MORE conservative — its coordination veto and
+  // frequency vote just see less.
+  const aliasCanon = new Map<string, string>();
+  for (const [alias, canonical] of buildSpeakerAliasMap(knownNames, chapter.content)) {
+    aliasCanon.set(alias, canonical);
+  }
+  for (const c of worldData?.characters ?? []) {
+    if (!c.name) continue;
+    for (const a of c.aliases ?? []) {
+      if (a) aliasCanon.set(a.toLowerCase().trim(), c.name);
+    }
+  }
+
   const contextOut: { value: ChapterEndContext | null } = { value: null };
   const predictionTraceOut: { value: AdaptivePredictionTrace[] } | undefined = collectPredictionDetails
     ? { value: [] }
     : undefined;
   const speechResults = detectSpeechInChapter(paragraphs, knownNames, {
     intelligenceLevel: level,
+    aliasCanon,
     prevChapterContext: prevContext ?? undefined,
     contextOut,
     learnedBias,

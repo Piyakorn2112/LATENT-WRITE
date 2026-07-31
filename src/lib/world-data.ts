@@ -1341,6 +1341,78 @@ export function filterSpeakerCandidates(names: readonly string[], text: string):
   });
 }
 
+/**
+ * Link NICKNAMES to their full names, conservatively — `Lizzy` → `Elizabeth`.
+ *
+ * ★ WHY. Pride and Prejudice's auto-extracted cast holds Elizabeth, Lizzy and
+ * Eliza as three unrelated strings, so the engine's weights, rosters and scene
+ * pairs fragment one person across three identities — and an attribution of
+ * "Lizzy" scores as wrong against a tag that says "Elizabeth" although both
+ * are the same woman. Aliasing is identity, and identity belongs in ONE key.
+ *
+ * The linker is deliberately narrow, because a wrong merge is far worse than a
+ * missed one (two characters collapse into a single speaker everywhere):
+ *
+ *   MORPHOLOGY — the classic English hypocorism: lower-case the short form,
+ *   strip a trailing y/ie/ey, collapse a doubled final consonant, and require
+ *   the ≥3-letter stem to appear inside the long form. Lizzy → lizz → liz ⊂
+ *   elizabeth. Kitty → kit ⊄ catherine, correctly missed: that nickname is
+ *   cultural knowledge, not derivable, and guessing it would need a word list.
+ *
+ *   UNIQUENESS — a stem matching two different long forms links to neither.
+ *
+ *   COORDINATION — "X and Y" / "X or Y" anywhere in the text is proof of two
+ *   people, and vetoes the pair. An author never coordinates a character with
+ *   her own nickname.
+ *
+ * Single-token names only on both sides: multi-word forms ("Miss Bennet",
+ * "Lady Catherine") encode honorific conventions where the surname names a
+ * whole family, and merging those needs context no morphology supplies.
+ *
+ * The CANONICAL form is whichever name the text uses more (tie → the longer),
+ * so downstream labels show the name the author actually favours. Returned map
+ * is keyed by lower-cased trimmed name and maps EVERY member of a linked group
+ * to the canonical display form.
+ */
+export function buildSpeakerAliasMap(
+  names: readonly string[],
+  text: string,
+): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!text) return out;
+  // ≥4 letters on the short side: three-letter names generate mid-word
+  // substring hits ("Don" ⊂ "London") that no length-3 stem can disambiguate.
+  const single = names.filter((n) => !/\s/.test(n) && n.length >= 4);
+  const lowerText = text.toLowerCase();
+
+  const stemOf = (n: string): string | undefined => {
+    let st = n.toLowerCase().replace(/(?:ey|ie|y)$/, "");
+    st = st.replace(/([a-z])\1$/, "$1");
+    return st.length >= 3 ? st : undefined;
+  };
+  const countOf = (n: string): number =>
+    (text.match(new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g")) ?? []).length;
+
+  for (const a of single) {
+    const stem = stemOf(a);
+    if (!stem) continue;
+    const fulls = single.filter(
+      (f) => f !== a && f.length > a.length && f.toLowerCase().includes(stem),
+    );
+    if (fulls.length !== 1) continue;
+    const f = fulls[0];
+    // A plural is a FAMILY ("the Cratchits"), not a nickname of one member.
+    if (f.toLowerCase() === `${a.toLowerCase()}s` || f.toLowerCase() === `${a.toLowerCase()}es`) continue;
+    const coord = new RegExp(
+      `\\b(?:${a}\\s+(?:and|or)\\s+${f}|${f}\\s+(?:and|or)\\s+${a})\\b`, "i");
+    if (coord.test(lowerText)) continue;
+    const canonical = countOf(f) >= countOf(a) ? f : a;
+    out.set(a.toLowerCase().trim(), canonical);
+    out.set(f.toLowerCase().trim(), canonical);
+  }
+  return out;
+}
+
 /** `filterSpeakerCandidates` over a whole novel's text. */
 export function resolveSpeakerCandidates(novel: Novel): string[] {
   const text = novel.chapters.map((c) => c.content).join("\n");

@@ -54,7 +54,7 @@
  */
 
 import { BOOKS, CORPUS_BOOKS, loadBook, splitParagraphs } from "./print-chapter";
-import { resolveKnownNames, filterSpeakerCandidates } from "../src/lib/world-data";
+import { resolveKnownNames, filterSpeakerCandidates, buildSpeakerAliasMap } from "../src/lib/world-data";
 import { detectSpeechInChapter, type IntelligenceLevel } from "../src/lib/speech-detect";
 
 const ALL_BOOK_KEYS = [...Object.keys(BOOKS), ...Object.keys(CORPUS_BOOKS)];
@@ -185,10 +185,18 @@ async function main() {
     let novel;
     try { novel = await loadBook(key); } catch { continue; }
     const knownNames = resolveKnownNames(novel);
+    const bookText = novel.chapters.map((c) => c.content).join("\n");
     // NOSPEAKERFILTER=1 reproduces the pre-filter behaviour, for A/B.
     const speakerCandidates = process.env.NOSPEAKERFILTER === "1"
       ? undefined
-      : filterSpeakerCandidates(knownNames, novel.chapters.map((c) => c.content).join("\n"));
+      : filterSpeakerCandidates(knownNames, bookText);
+    // ★ Aliases are IDENTITY, for scoring as much as for the engine: an answer
+    // of "Lizzy" against a tag of "Elizabeth" is the same woman, and counting
+    // it wrong made pride's number meaningless. Both sides of the comparison
+    // go through the same text-derived map — it is built from morphology and
+    // coordination, never from engine output, so nothing is circular.
+    const aliasCanon = buildSpeakerAliasMap(speakerCandidates ?? knownNames, bookText);
+    const canonOf = (x: string): string => aliasCanon.get(x.toLowerCase().trim()) ?? x;
     const bookScore = new Map<IntelligenceLevel, ModeScore>();
     for (const m of modes) bookScore.set(m, { correct: 0, wrong: 0, unattributed: 0 });
 
@@ -215,16 +223,17 @@ async function main() {
 
         for (const mode of modes) {
           const t0 = performance.now();
-          const res = detectSpeechInChapter(text, knownNames, { intelligenceLevel: mode, speakerCandidates });
+          const res = detectSpeechInChapter(text, knownNames, { intelligenceLevel: mode, speakerCandidates, aliasCanon });
           timing.set(mode, (timing.get(mode) ?? 0) + (performance.now() - t0));
           for (const c of batch) {
             const seg = res[c.paraIdx]?.segments?.find((s) => s.type === "speech");
             const score = bookScore.get(mode)!;
             const tot = totals.get(mode)!;
             if (!seg?.speaker) { score.unattributed++; tot.unattributed++; continue; }
-            const got = seg.speaker.trim();
-            const ok = got.toLowerCase() === c.gold.toLowerCase()
-              || bareSurname(got).toLowerCase() === c.gold.toLowerCase();
+            const got = canonOf(seg.speaker.trim());
+            const goldC = canonOf(c.gold);
+            const ok = got.toLowerCase() === goldC.toLowerCase()
+              || bareSurname(got).toLowerCase() === goldC.toLowerCase();
             if (ok) { score.correct++; tot.correct++; }
             else {
               score.wrong++; tot.wrong++;

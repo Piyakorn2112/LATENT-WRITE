@@ -126,6 +126,17 @@ export interface SpeechDetectOptions {
   /** Collects per-span prediction traces for feedback logging. */
   predictionTraceOut?: { value: import("../types").AdaptivePredictionTrace[] };
   /**
+   * Alias → canonical display name, keyed by lower-cased trimmed name — built
+   * by world-data's buildSpeakerAliasMap (or from authored worldData aliases).
+   *
+   * Used for IDENTITY, not for surface: weights, rosters, scene pairs and the
+   * retro passes key on the canonical form so one person accumulates one
+   * history, while an EXPLICIT tag's answer keeps the name the text used.
+   * Inferred answers (rosters, sandwiches, pairs) surface the canonical form,
+   * which is whichever name the author uses more.
+   */
+  aliasCanon?: ReadonlyMap<string, string>;
+  /**
    * The subset of `knownNames` that could plausibly SPEAK.
    *
    * `knownNames` is the highlight layer's list and necessarily contains places,
@@ -2194,7 +2205,10 @@ function processParagraph(
   stageDirectionSubject?: string,
   /** Evidence-backed subset of recentSpeakers — see NEW-PARA-NEW-SPEAKER. */
   attestedSpeakers?: string[],
+  /** Alias → canonical, for roster identity. See SpeechDetectOptions. */
+  aliasCanon?: ReadonlyMap<string, string>,
 ): ParaResult {
+  const rosterCanon = (n: string): string => aliasCanon?.get(normKey(n)) ?? n;
   const segments: SpeechSegment[] = [];
 
   if (isContinuation) {
@@ -2393,14 +2407,14 @@ function processParagraph(
       // same-paragraph continuation. The roster is therefore built only from
       // observation, and inference can consume it without feeding it.
       if (attr.confidence >= ROSTER_EVIDENCE_FLOOR) {
-        recentSpeakers.push(attr.speaker);
+        recentSpeakers.push(rosterCanon(attr.speaker));
         if (recentSpeakers.length > (maxRecentSpeakers ?? 7)) recentSpeakers.shift();
       }
       // Parallel roster of turns the TEXT attested, kept alongside rather than
       // instead of the full one — see ROSTER_EVIDENCE_FLOOR for why the full
       // roster cannot simply be narrowed.
       if (attestedSpeakers && attr.confidence >= ATTESTED_FLOOR) {
-        attestedSpeakers.push(attr.speaker);
+        attestedSpeakers.push(rosterCanon(attr.speaker));
         if (attestedSpeakers.length > (maxRecentSpeakers ?? 7)) attestedSpeakers.shift();
       }
     }
@@ -3047,6 +3061,9 @@ export function detectSpeechInChapter(
     }
   }
 
+  const aliasCanon = options?.aliasCanon;
+  const canon = (n: string): string => aliasCanon?.get(normKey(n)) ?? n;
+
   let openContinuation = false;
   let activeSubject: string | undefined = prev?.activeSubject;
   let prevParaFocus: { name: string; ratio: number } | undefined;
@@ -3233,6 +3250,7 @@ export function detectSpeechInChapter(
       nameCache,
       carriedParagraphSubject,
       attestedSpeakers,
+      aliasCanon,
     );
 
     // ── High mode: confidence upgrade / demotion pass ──────────────────
@@ -3264,9 +3282,12 @@ export function detectSpeechInChapter(
 
     for (const seg of segments) {
       if (seg.speaker && seg.type === 'speech') {
-        speakWeights.set(normKey(seg.speaker), 1.0);
-        activeSubject = seg.speaker;
-        if (subjectWeights) subjectWeights.set(normKey(seg.speaker), 1.0);
+        // Identity is CANONICAL: "Lizzy" and "Elizabeth" must feed one weight
+        // and one active-subject slot, or one person fragments into rivals.
+        const c = canon(seg.speaker);
+        speakWeights.set(normKey(c), 1.0);
+        activeSubject = c;
+        if (subjectWeights) subjectWeights.set(normKey(c), 1.0);
       }
     }
 
@@ -3288,7 +3309,7 @@ export function detectSpeechInChapter(
   // never have this — it runs on the typing path, where the future does not
   // exist yet. High runs in the background over a complete chapter, so looking
   // both ways is exactly the kind of intelligence its cost is supposed to buy.
-  if (level === 'high') retroSandwichPass(paragraphs, result, knownNames);
+  if (level === 'high') retroSandwichPass(paragraphs, result, knownNames, aliasCanon);
 
   if (useGroupScenes) groupIntoScenes(paragraphs, result);
 
@@ -3386,7 +3407,16 @@ function vocativeIn(inner: string, knownNames: string[]): string | undefined {
   return undefined;
 }
 
-function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], knownNames: string[]): void {
+function retroSandwichPass(
+  paragraphs: string[],
+  result: ChapterParaResult[],
+  knownNames: string[],
+  aliasCanon?: ReadonlyMap<string, string>,
+): void {
+  // Canonical KEY for identity comparisons; the stored/displayed partner is
+  // also canonical, since an inferred answer has no surface form to honour.
+  const ck = (n: string): string => normKey(aliasCanon?.get(normKey(n)) ?? n);
+  const cn = (n: string): string => aliasCanon?.get(normKey(n)) ?? n;
   const speechSegs = (j: number) =>
     result[j]?.segments?.filter((s) => s.type === 'speech') ?? [];
 
@@ -3432,10 +3462,10 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
       const prev = nb?.seg, next = na?.seg;
       if (!prev?.speaker || !next?.speaker) continue;
       if (!isEvidence(prev) || !isEvidence(next)) continue;
-      const a = normKey(prev.speaker);
-      if (normKey(next.speaker) !== a) continue;   // not a sandwich — ambiguous
+      const a = ck(prev.speaker);
+      if (ck(next.speaker) !== a) continue;   // not a sandwich — ambiguous
 
-      if (seg.speaker && normKey(seg.speaker) !== a) {
+      if (seg.speaker && ck(seg.speaker) !== a) {
         // Forward guess agrees with the sandwich: confirm it. Confidence stays
         // below ATTESTED_FLOOR so nothing downstream mistakes it for a tag.
         confirmed.add(seg);
@@ -3451,19 +3481,19 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
       let partner: string | undefined;
       for (const side of [nb!, na!]) {
         const voc = vocativeIn(innerOf(side.idx, side.seg), knownNames);
-        if (voc && normKey(voc) !== a) { partner = voc; break; }
+        if (voc && ck(voc) !== a) { partner = cn(voc); break; }
       }
       // The bare line's own vocative names ITS addressee — a name the speaker
       // cannot be. Exclude it from the fallback search.
       const selfVoc = vocativeIn(innerOf(i, seg), knownNames);
-      const excl = selfVoc ? normKey(selfVoc) : undefined;
+      const excl = selfVoc ? ck(selfVoc) : undefined;
       for (let d = 1; d <= 12 && !partner; d++) {
         for (const j of [i - d, i + d]) {
           if (j < 0 || j >= result.length) continue;
           for (const s of speechSegs(j)) {
-            if (s.speaker && isEvidence(s) && normKey(s.speaker) !== a
-                && normKey(s.speaker) !== excl) {
-              partner = s.speaker;
+            if (s.speaker && isEvidence(s) && ck(s.speaker) !== a
+                && ck(s.speaker) !== excl) {
+              partner = cn(s.speaker);
               break;
             }
           }
@@ -3511,7 +3541,7 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
     for (let j = 0; j < result.length; j++) {
       for (const sg of speechSegs(j)) {
         if (sg.speaker && isEvidence(sg)) {
-          attested.push({ idx: j, k: normKey(sg.speaker), name: sg.speaker });
+          attested.push({ idx: j, k: ck(sg.speaker), name: cn(sg.speaker) });
         }
       }
     }
@@ -3545,6 +3575,8 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
       const pair = [...counts.entries()];
       if (pair[0][1].n < 2 || pair[1][1].n < 2) continue;
       const inPair = (k: string) => k === pair[0][0] || k === pair[1][0];
+      // pair keys are canonical (built with ck above), so membership tests
+      // must canonicalise their side too.
       const other = (k: string) =>
         k === pair[0][0] ? pair[1][1].name : pair[0][1].name;
 
@@ -3558,7 +3590,7 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
           const nsegs = speechSegs(j);
           if (!nsegs.length) continue;
           const ns = dir === -1 ? nsegs[nsegs.length - 1] : nsegs[0];
-          if (ns.speaker && isEvidence(ns) && inPair(normKey(ns.speaker))) {
+          if (ns.speaker && isEvidence(ns) && inPair(ck(ns.speaker))) {
             anchor = ns.speaker;
           }
           break; // only the nearest dialogue paragraph in each direction
@@ -3567,11 +3599,11 @@ function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], kn
       }
       if (!anchor) continue;
 
-      if (seg.speaker && !inPair(normKey(seg.speaker))) {
-        seg.speaker = other(normKey(anchor));
+      if (seg.speaker && !inPair(ck(seg.speaker))) {
+        seg.speaker = other(ck(anchor));
         seg.confidence = 0.70;
       } else if (!seg.speaker) {
-        seg.speaker = other(normKey(anchor));
+        seg.speaker = other(ck(anchor));
         seg.confidence = 0.68;
       }
     }
