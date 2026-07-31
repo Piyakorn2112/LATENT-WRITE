@@ -183,6 +183,39 @@ const SPEECH_VERB_PAT = `(?:${SPEECH_VERBS.join('|')})`;
  * nothing; it is never the right answer when the text says "said the child" two
  * characters later.
  */
+/**
+ * Pull the speaker out of an explicit DEFINITE-DESCRIPTION tag — "said the
+ * blacksmith" -> "Blacksmith".
+ *
+ * `GENERIC_SPEAKERS` is a whitelist, and a whitelist of the nouns fiction uses
+ * for people can never be finished: extending it from a measured failure list
+ * took definite-description precision 78% -> 89%, and the corpus still leaves 39
+ * quotes UNATTRIBUTED because their noun is not on it (blacksmith, sexton,
+ * turnkey, ostler...). Every one of those is a quote whose speaker the text
+ * states outright.
+ *
+ * The grammar is doing the work here, not a word list: a determiner plus a
+ * common noun in the attribution slot of a speech verb IS a speaker reference,
+ * whatever the noun. Bounded to that slot, so ordinary prose cannot reach it.
+ */
+const NOT_A_SPEAKER_NOUN = new Set([
+  "truth", "word", "words", "same", "rest", "matter", "reason", "thing",
+  "things", "way", "time", "other", "others", "one", "two", "first", "last",
+  "moment", "night", "morning", "day", "end", "door", "room", "house",
+]);
+function speakerFromDescriptiveTag(after: string): string | undefined {
+  const m = new RegExp(
+    `^${TAG_LEAD}\\b(?:${SPEECH_VERBS.join("|")})\\b\\s+(?:the|a|an)\\s+((?:old|young|little|tall|short|fat|thin|grey|gray|white|black)\\s+)?([a-z][a-z-]{2,})\\b`,
+    "i",
+  ).exec(after);
+  if (!m) return undefined;
+  const noun = m[2].toLowerCase();
+  if (NOT_A_SPEAKER_NOUN.has(noun)) return undefined;
+  const adj = m[1] ? m[1].trim().toLowerCase() : "";
+  const phrase = adj ? `${adj} ${noun}` : noun;
+  return phrase.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
 const TAG_LEAD = "[\\s,.:;\\u2014\\u2013\\u201c\\u201d\\u2018\\u2019\"']*";
 function hasExplicitTrailingTag(after: string): boolean {
   // Speech verb followed by a determiner or honorific \u2014 "said the child",
@@ -1619,6 +1652,12 @@ function findAttribution(
   // 6 -> 3 moved them (26 wrong -> 22). Cutting the depth is not an option — it is
   // the mode's design and its reach. Yielding to explicit evidence gets the same
   // errors back while keeping every paragraph.
+  // Resolve the tag the guard just deferred to, rather than leaving it silent.
+  {
+    const descr = speakerFromDescriptiveTag(after);
+    if (descr) return { speaker: descr, type: 'speech', confidence: 0.75 };
+  }
+
   if (extCtx && !hasExplicitTrailingTag(after)) {
     const extName = findDirectName(extCtx, knownNames, cache);
     if (extName) {
