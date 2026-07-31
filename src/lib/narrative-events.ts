@@ -1744,6 +1744,25 @@ function detectNarrativeEventsUncached(
       // Note that a pronoun subject has gone from the best any-hit agent signal to
       // a mild negative. It did not get worse; it stopped being the only thing in
       // the room.
+      // ─── REFUTED: cancelling the entity bonus on PASSIVE clauses ──────────
+      //
+      // The reasoning was sound and the measurement still said no, so it is
+      // recorded here rather than retried. "Green Gables builds" ships at 77%
+      // confidence and salience MAJOR from "Green Gables was built at the
+      // furthest edge of his cleared land" — a sentence describing a house —
+      // and entity-subject (+0.82) is the strongest signal in the engine. Since
+      // that bonus exists to reward an entity ACTING, and a passive subject is
+      // what was acted upon, cancelling it there looked like a free correction.
+      //
+      // Measured on DEV: precision@3 51.7 -> 50.8, major shown unchanged. AND IT
+      // DID NOT FIX ITS OWN TARGET CASE: the chip was still there, identical,
+      // because "Green Gables" is classified `named`, not `entity`, so the bonus
+      // being cancelled was never the one paying for that chip.
+      //
+      // The lesson is about method, not about passives: confirm which signal is
+      // actually funding a bad output (`why` carries it) before writing a rule
+      // aimed at a different one. The real defect in that example is upstream —
+      // a place name resolving as a character-shaped agent.
       if (cand.agentKind === "entity") { score += 0.82; why.push("entity-subject"); }
       else if (cand.agentKind === "pronoun") { score += 0.25; why.push("pronoun-agent"); }
       else if (cand.agentKind === "named") { score -= 0.62; why.push("named-agent"); }
