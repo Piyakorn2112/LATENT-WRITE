@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Standalone local report. No external requests: system fonts only, CSS-drawn bars.
+     Open directly in a browser (file://) - nothing to build, nothing to serve. -->
+<style>*,*::before,*::after{box-sizing:border-box}body,h1,h2,h3,p,table{margin:0}</style>
+<title>FAST vs HIGH — attribution engine</title>
+<style>
+  :root{
+    --bg:#f2f2f2; --surface:#fafaf9; --surface-2:#ffffff;
+    --text:#1a1a1a; --text-2:#555555; --text-3:#8a8a86;
+    --rule:rgba(0,0,0,.10); --rule-soft:rgba(0,0,0,.055);
+    --accent:#ff9c00;
+    --gain:#1f8a5f; --loss:#d6335a; --flat:#8d9096;
+    --bar-fast:#ff9c00; --bar-high:#7a7a74;
+    --font-ui:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --font-body:Georgia,"Times New Roman",serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e0e0d; --surface:#151514; --surface-2:#1c1c1a;
+      --text:#ededec; --text-2:#a8a8a4; --text-3:#6b6b67;
+      --rule:rgba(255,255,255,.11); --rule-soft:rgba(255,255,255,.06);
+      --gain:#46c88d; --loss:#ff6b8a; --flat:#7b7e84;
+      --bar-high:#6d6d67;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e0e0d; --surface:#151514; --surface-2:#1c1c1a;
+    --text:#ededec; --text-2:#a8a8a4; --text-3:#6b6b67;
+    --rule:rgba(255,255,255,.11); --rule-soft:rgba(255,255,255,.06);
+    --gain:#46c88d; --loss:#ff6b8a; --flat:#7b7e84;
+    --bar-high:#6d6d67;
+  }
+  :root[data-theme="light"]{
+    --bg:#f2f2f2; --surface:#fafaf9; --surface-2:#ffffff;
+    --text:#1a1a1a; --text-2:#555555; --text-3:#8a8a86;
+    --rule:rgba(0,0,0,.10); --rule-soft:rgba(0,0,0,.055);
+    --gain:#1f8a5f; --loss:#d6335a; --flat:#8d9096;
+    --bar-high:#7a7a74;
+  }
+
+  body{background:var(--bg);color:var(--text);font-family:var(--font-ui);
+    line-height:1.55;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:920px;margin:0 auto;padding:clamp(2rem,5vw,4.5rem) clamp(1.1rem,4vw,2.5rem) 5rem;
+    display:flex;flex-direction:column;gap:clamp(2.2rem,4vw,3.2rem);}
+
+  .eyebrow{font-size:10px;font-weight:500;letter-spacing:.3em;text-transform:uppercase;
+    color:var(--accent);margin-bottom:.75rem;}
+  h1{font-size:clamp(1.7rem,4.4vw,2.5rem);font-weight:200;letter-spacing:-.022em;
+    line-height:1.15;text-wrap:balance;}
+  h2{font-size:clamp(1.05rem,2.2vw,1.25rem);font-weight:400;letter-spacing:-.012em;}
+  .sub{font-family:var(--font-body);color:var(--text-2);max-width:64ch;margin-top:.9rem;
+    font-size:.95rem;line-height:1.7;}
+  .note{font-family:var(--font-body);color:var(--text-2);font-size:.875rem;line-height:1.7;max-width:66ch;}
+
+  section{display:flex;flex-direction:column;gap:1.1rem;}
+  .sechead{display:flex;flex-direction:column;gap:.35rem;
+    border-top:1px solid var(--rule);padding-top:1.1rem;}
+  .sechead .k{font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--text-3);}
+
+  /* verdict */
+  .verdict{background:var(--surface);border-radius:20px;padding:clamp(1.2rem,3vw,1.7rem);
+    display:flex;flex-direction:column;gap:1rem;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+  .vgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:1px;
+    background:var(--rule-soft);border-radius:12px;overflow:hidden;}
+  .vcell{background:var(--surface);padding:.95rem 1rem;display:flex;flex-direction:column;gap:.3rem;}
+  .vcell .lab{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--text-3);}
+  .vcell .val{font-size:1.42rem;font-weight:300;letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
+  .vcell .cap{font-size:.78rem;color:var(--text-2);}
+
+  .tag{display:inline-flex;align-items:center;gap:.4rem;font-size:.72rem;font-weight:500;
+    letter-spacing:.04em;padding:.16rem .55rem;border-radius:9999px;width:fit-content;
+    font-variant-numeric:tabular-nums;}
+  .tag::before{content:"";width:5px;height:5px;border-radius:50%;background:currentColor;}
+  .t-gain{color:var(--gain);background:color-mix(in srgb,var(--gain) 12%,transparent);}
+  .t-loss{color:var(--loss);background:color-mix(in srgb,var(--loss) 13%,transparent);}
+  .t-flat{color:var(--flat);background:color-mix(in srgb,var(--flat) 14%,transparent);}
+
+  /* tables */
+  .scroll{overflow-x:auto;}
+  table{width:100%;border-collapse:collapse;font-size:.87rem;font-variant-numeric:tabular-nums;}
+  caption{text-align:left;font-size:.78rem;color:var(--text-3);padding-bottom:.6rem;}
+  th,td{text-align:right;padding:.6rem .7rem;border-bottom:1px solid var(--rule-soft);white-space:nowrap;}
+  th:first-child,td:first-child{text-align:left;white-space:normal;min-width:170px;}
+  thead th{font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--text-3);
+    font-weight:500;border-bottom:1px solid var(--rule);}
+  tbody tr:last-child td{border-bottom:none;}
+  td.metric{color:var(--text-2);}
+  .num{font-weight:400;}
+
+  /* bars */
+  .bars{display:flex;flex-direction:column;gap:1.15rem;background:var(--surface);
+    border-radius:20px;padding:clamp(1.2rem,3vw,1.7rem);}
+  .barrow{display:grid;grid-template-columns:1fr;gap:.45rem;}
+  .barrow .rlab{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;}
+  .barrow .rname{font-size:.83rem;color:var(--text-2);}
+  .barrow .rratio{font-size:.78rem;color:var(--text-3);font-variant-numeric:tabular-nums;}
+  .pair{display:flex;flex-direction:column;gap:.3rem;}
+  .b{display:grid;grid-template-columns:44px 1fr auto;align-items:center;gap:.6rem;}
+  .b .who{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-3);}
+  .track{height:15px;background:var(--rule-soft);border-radius:3px;overflow:hidden;}
+  .fill{height:100%;border-radius:3px;}
+  .fill.fast{background:var(--bar-fast);}
+  .fill.high{background:var(--bar-high);}
+  .b .v{font-size:.8rem;font-variant-numeric:tabular-nums;color:var(--text-2);min-width:74px;text-align:right;}
+
+  .legend{display:flex;gap:1.1rem;flex-wrap:wrap;font-size:.76rem;color:var(--text-3);}
+  .legend span{display:inline-flex;align-items:center;gap:.4rem;}
+  .sw{width:10px;height:10px;border-radius:2px;display:inline-block;}
+
+  .callout{border-left:2px solid var(--accent);padding:.15rem 0 .15rem 1rem;
+    display:flex;flex-direction:column;gap:.5rem;}
+  .callout h3{font-size:.93rem;font-weight:500;letter-spacing:-.005em;}
+
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;
+    background:var(--rule-soft);padding:.08em .34em;border-radius:4px;}
+  .foot{font-size:.76rem;color:var(--text-3);border-top:1px solid var(--rule);padding-top:1rem;
+    font-variant-numeric:tabular-nums;}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+
+  <header>
+    <div class="eyebrow">Speech attribution · measured 31 Jul 2026</div>
+    <h1>Did HIGH mode survive the FAST-mode pass?</h1>
+    <p class="sub">Measured by checking out the pre-session commit <code>f0faa39</code> into a
+      worktree and running the identical harnesses against both trees, minutes apart on the same
+      machine. Not inferred from the suite scores — actually re-run.</p>
+  </header>
+
+  <!-- ── VERDICT ───────────────────────────────────────────────── -->
+  <section>
+    <div class="verdict">
+      <div class="vgrid">
+        <div class="vcell">
+          <span class="lab">Hard cases</span>
+          <span class="val">210 / 217</span>
+          <span class="tag t-flat">identical</span>
+          <span class="cap">Every one of the 217 hand-written cases resolves the same way.</span>
+        </div>
+        <div class="vcell">
+          <span class="lab">Real prose</span>
+          <span class="val">49.5%</span>
+          <span class="tag t-gain">+4.0 pp</span>
+          <span class="cap">Masked benchmark, 798 lines. Was 45.5%.</span>
+        </div>
+        <div class="vcell">
+          <span class="lab">Speed</span>
+          <span class="val">3.98×</span>
+          <span class="tag t-gain">faster</span>
+          <span class="cap">52.53 → 13.19 ms per 1000 words.</span>
+        </div>
+        <div class="vcell">
+          <span class="lab">Regressions</span>
+          <span class="val">1 case</span>
+          <span class="tag t-loss">−1 descriptive</span>
+          <span class="cap">One line moved from “no answer” to a wrong answer.</span>
+        </div>
+      </div>
+      <p class="note"><strong>Short answer: yes, with one exception I want to name rather than
+        round away.</strong> HIGH is unchanged on hard cases, better on real prose, better on the bulk
+        corpus, and four times faster. One definite-description case out of 219 went from
+        unattributed to wrong, taking that register's precision from 97.6% to 97.1%. Recall did not
+        move. It is a single line, but it is the one number in this table that got worse.</p>
+    </div>
+  </section>
+
+  <!-- ── HIGH BEFORE/AFTER ─────────────────────────────────────── -->
+  <section>
+    <div class="sechead">
+      <span class="k">Question one</span>
+      <h2>HIGH mode, before and after</h2>
+    </div>
+    <div class="scroll">
+      <table>
+        <caption>Baseline = <code>f0faa39</code>. Current = <code>0aa6eb5</code>. Same harness, same machine.</caption>
+        <thead>
+          <tr><th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="metric">Hard cases (accuracy-suite)</td><td class="num">210 / 217</td><td class="num">210 / 217</td><td><span class="tag t-flat">unchanged</span></td></tr>
+          <tr><td class="metric">Masked real prose</td><td class="num">45.5%</td><td class="num">49.5%</td><td><span class="tag t-gain">+4.0 pp</span></td></tr>
+          <tr><td class="metric">— lines correct</td><td class="num">363</td><td class="num">395</td><td><span class="tag t-gain">+32</span></td></tr>
+          <tr><td class="metric">— no answer given</td><td class="num">32</td><td class="num">24</td><td><span class="tag t-gain">−8</span></td></tr>
+          <tr><td class="metric">Corpus bulk gold correct</td><td class="num">1846</td><td class="num">1847</td><td><span class="tag t-gain">+1</span></td></tr>
+          <tr><td class="metric">Honorific tags</td><td class="num">234 ✓ / 8 ✗</td><td class="num">234 ✓ / 8 ✗</td><td><span class="tag t-flat">unchanged</span></td></tr>
+          <tr><td class="metric">Definite descriptions</td><td class="num">202 ✓ / 5 ✗</td><td class="num">202 ✓ / 6 ✗</td><td><span class="tag t-loss">−1</span></td></tr>
+          <tr><td class="metric">Speed, ms / 1000 words</td><td class="num">52.53</td><td class="num">13.19</td><td><span class="tag t-gain">3.98× faster</span></td></tr>
+          <tr><td class="metric">p95 per chapter</td><td class="num">538.3 ms</td><td class="num">117.2 ms</td><td><span class="tag t-gain">4.6× better</span></td></tr>
+          <tr><td class="metric">Worst chapter</td><td class="num">1458.0 ms</td><td class="num">272.3 ms</td><td><span class="tag t-gain">5.4× better</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">HIGH was never touched directly. It gained because every fix landed below the
+      mode split: the cast no longer offers places and institutions as candidate speakers, the
+      stage-direction rule sits under the shared attribution ladder, and the regex gating is
+      mode-independent.</p>
+  </section>
+
+  <!-- ── HEAD TO HEAD ──────────────────────────────────────────── -->
+  <section>
+    <div class="sechead">
+      <span class="k">Question two</span>
+      <h2>FAST against HIGH, as they stand today</h2>
+    </div>
+
+    <div class="bars">
+      <div class="legend">
+        <span><i class="sw" style="background:var(--bar-fast)"></i> FAST</span>
+        <span><i class="sw" style="background:var(--bar-high)"></i> HIGH</span>
+        <span>Bars are linear; longer is slower.</span>
+      </div>
+
+      <div class="barrow">
+        <div class="rlab"><span class="rname">Scan cost per 1000 words</span><span class="rratio">HIGH 9.9× slower</span></div>
+        <div class="pair">
+          <div class="b"><span class="who">Fast</span><div class="track"><div class="fill fast" style="width:10.1%"></div></div><span class="v">1.33 ms</span></div>
+          <div class="b"><span class="who">High</span><div class="track"><div class="fill high" style="width:100%"></div></div><span class="v">13.19 ms</span></div>
+        </div>
+      </div>
+
+      <div class="barrow">
+        <div class="rlab"><span class="rname">p95 chapter latency</span><span class="rratio">HIGH 9.4× slower</span></div>
+        <div class="pair">
+          <div class="b"><span class="who">Fast</span><div class="track"><div class="fill fast" style="width:10.6%"></div></div><span class="v">12.4 ms</span></div>
+          <div class="b"><span class="who">High</span><div class="track"><div class="fill high" style="width:100%"></div></div><span class="v">117.2 ms</span></div>
+        </div>
+      </div>
+
+      <div class="barrow">
+        <div class="rlab"><span class="rname">Worst chapter in the corpus</span><span class="rratio">HIGH 7.8× slower</span></div>
+        <div class="pair">
+          <div class="b"><span class="who">Fast</span><div class="track"><div class="fill fast" style="width:12.8%"></div></div><span class="v">34.9 ms</span></div>
+          <div class="b"><span class="who">High</span><div class="track"><div class="fill high" style="width:100%"></div></div><span class="v">272.3 ms</span></div>
+        </div>
+      </div>
+
+      <div class="barrow">
+        <div class="rlab"><span class="rname">Accuracy on real prose (masked, 798 lines)</span><span class="rratio">FAST ahead by 0.2 pp</span></div>
+        <div class="pair">
+          <div class="b"><span class="who">Fast</span><div class="track"><div class="fill fast" style="width:49.7%"></div></div><span class="v">49.7%</span></div>
+          <div class="b"><span class="who">High</span><div class="track"><div class="fill high" style="width:49.5%"></div></div><span class="v">49.5%</span></div>
+        </div>
+      </div>
+
+      <div class="barrow">
+        <div class="rlab"><span class="rname">Accuracy on hand-written hard cases (217)</span><span class="rratio">HIGH ahead by 19.4 pp</span></div>
+        <div class="pair">
+          <div class="b"><span class="who">Fast</span><div class="track"><div class="fill fast" style="width:77.4%"></div></div><span class="v">77.4%</span></div>
+          <div class="b"><span class="who">High</span><div class="track"><div class="fill high" style="width:96.8%"></div></div><span class="v">96.8%</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout">
+      <h3>The two accuracy bars disagree, and that is the finding</h3>
+      <p class="note">On 217 cases written by hand to exercise deep-context machinery, HIGH wins by
+        19.4 points. On 798 lines of real prose it wins by nothing — it is 0.2 points behind. Those
+        cases were authored alongside the mechanisms they test, so they measure whether the
+        mechanisms fire, not how often the situation arises in a novel.</p>
+      <p class="note">What HIGH genuinely buys is <strong>fewer silences</strong>: it leaves 24 lines
+        unattributed where FAST leaves 36. It converts them into wrong answers rather than right ones
+        — 379 wrong against FAST's 365. For a highlight layer that is arguably the worse trade, since
+        a confident wrong speaker is more damaging than a blank.</p>
+    </div>
+  </section>
+
+  <!-- ── PER REGISTER ──────────────────────────────────────────── -->
+  <section>
+    <div class="sechead">
+      <span class="k">Where each one wins</span>
+      <h2>By book</h2>
+    </div>
+    <div class="scroll">
+      <table>
+        <caption>Masked benchmark accuracy. “·” marks a held-out book, never tuned against. N = masked lines.</caption>
+        <thead><tr><th>Book</th><th>N</th><th>FAST</th><th>HIGH</th><th>Winner</th></tr></thead>
+        <tbody>
+          <tr><td class="metric">hollow-iris</td><td class="num">449</td><td class="num">53.7%</td><td class="num">53.2%</td><td><span class="tag t-flat">even</span></td></tr>
+          <tr><td class="metric">root-crown ·</td><td class="num">101</td><td class="num">52.5%</td><td class="num">51.5%</td><td><span class="tag t-flat">even</span></td></tr>
+          <tr><td class="metric">expectations</td><td class="num">75</td><td class="num">48.0%</td><td class="num">46.7%</td><td><span class="tag t-flat">even</span></td></tr>
+          <tr><td class="metric">carol</td><td class="num">43</td><td class="num">60.5%</td><td class="num">65.1%</td><td><span class="tag t-gain">HIGH</span></td></tr>
+          <tr><td class="metric">anne ·</td><td class="num">28</td><td class="num">46.4%</td><td class="num">46.4%</td><td><span class="tag t-flat">tie</span></td></tr>
+          <tr><td class="metric">sherlock</td><td class="num">24</td><td class="num">45.8%</td><td class="num">41.7%</td><td><span class="tag t-gain">FAST</span></td></tr>
+          <tr><td class="metric">pride</td><td class="num">20</td><td class="num">20.0%</td><td class="num">10.0%</td><td><span class="tag t-gain">FAST</span></td></tr>
+          <tr><td class="metric">treasure ·</td><td class="num">18</td><td class="num">27.8%</td><td class="num">33.3%</td><td><span class="tag t-gain">HIGH</span></td></tr>
+          <tr><td class="metric">gatsby ·</td><td class="num">14</td><td class="num">21.4%</td><td class="num">14.3%</td><td><span class="tag t-gain">FAST</span></td></tr>
+          <tr><td class="metric">awakening ·</td><td class="num">13</td><td class="num">30.8%</td><td class="num">46.2%</td><td><span class="tag t-gain">HIGH</span></td></tr>
+          <tr><td class="metric">webnovel</td><td class="num">7</td><td class="num">14.3%</td><td class="num">28.6%</td><td><span class="tag t-gain">HIGH</span></td></tr>
+          <tr><td class="metric">dracula · worlds</td><td class="num">6</td><td class="num">0.0%</td><td class="num">0.0%</td><td><span class="tag t-flat">too few</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">HIGH's wins cluster in the small-N books, where a handful of lines swings the
+      percentage by double digits — <code>webnovel</code> is seven lines. The two largest samples,
+      which carry 69% of the benchmark, are flat. I would not read a register preference into this
+      table without more masked lines per book.</p>
+  </section>
+
+  <!-- ── FAST for reference ────────────────────────────────────── -->
+  <section>
+    <div class="sechead">
+      <span class="k">For reference</span>
+      <h2>FAST mode, before and after</h2>
+    </div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Metric</th><th>Baseline</th><th>Current</th><th>Change</th></tr></thead>
+        <tbody>
+          <tr><td class="metric">Hard cases</td><td class="num">168 / 217</td><td class="num">168 / 217</td><td><span class="tag t-flat">unchanged</span></td></tr>
+          <tr><td class="metric">Masked real prose</td><td class="num">45.1%</td><td class="num">49.7%</td><td><span class="tag t-gain">+4.6 pp</span></td></tr>
+          <tr><td class="metric">Speed, ms / 1000 words</td><td class="num">4.08</td><td class="num">1.33</td><td><span class="tag t-gain">3.07× faster</span></td></tr>
+          <tr><td class="metric">p95 per chapter</td><td class="num">39.5 ms</td><td class="num">12.4 ms</td><td><span class="tag t-gain">3.2× better</span></td></tr>
+          <tr><td class="metric">Worst chapter</td><td class="num">84.3 ms</td><td class="num">34.9 ms</td><td><span class="tag t-gain">2.4× better</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p class="foot">798 masked lines · 15 books · 596 chapters · 1,758,495 words. Speed is best-of-3
+    per chapter. Run-to-run variance is a few percent, so ratios are the reliable figure, not the
+    third decimal. Baseline <code>f0faa39</code> → current <code>0aa6eb5</code>.</p>
+
+</div>
+
+</body>
+</html>
