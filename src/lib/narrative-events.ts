@@ -170,7 +170,12 @@ export const TIMELINE_CHIP_BUDGET = 3;
  * apart. Fix the extraction, not the threshold. The flag stays only so the claim
  * can be re-tested when the extraction improves.
  */
-const STRICT_DIALOGUE_CONTENT = process.env.STRICT_DIALOGUE === "on";
+// `process` does not exist in the Electron renderer. Reading it unguarded threw
+// `ReferenceError: process is not defined` at MODULE SCOPE, which kills the
+// whole module rather than just this flag — so the timeline engine never loaded
+// at all in the app. Harness-only escape hatch; in the app it is simply off.
+const STRICT_DIALOGUE_CONTENT =
+  typeof process !== "undefined" && process.env?.STRICT_DIALOGUE === "on";
 
 // ─── Verb classes ─────────────────────────────────────────────────────────────
 // Verbs are a closed class and generalise across manuscripts; multi-word idioms
