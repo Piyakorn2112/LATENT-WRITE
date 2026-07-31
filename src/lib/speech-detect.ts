@@ -373,6 +373,9 @@ const HONORIFIC_PAT = "(?:Mr|Mrs|Ms|Miss|Dr|Prof|Rev|St|Capt|Col|Sgt|Lt|Gen|Sir|
 // (?<!to ) excludes bare infinitives like "to ask", "to say" which are NOT speech attribution
 const SPEECH_VERB_RE  = new RegExp(`(?<!to )\\b${SPEECH_VERB_PAT}\\b`, 'i');
 
+/** `said:` / `whispered:` hard against the end of the pre-quote text. */
+const COLON_INTRO_RE = new RegExp(`\\b${SPEECH_VERB_PAT}\\s*:\\s*$`, 'i');
+
 /**
  * A pure SUPERSET gate: does this text contain a speech verb at all?
  *
@@ -1329,6 +1332,40 @@ function findAttribution(
       // token when there is only one.
       const parts = tagged[2].trim().split(/\s+/);
       return { speaker: parts[parts.length - 1], type: 'speech', confidence: 0.9 };
+    }
+  }
+
+  // ── COLON-INTRODUCED QUOTE: `... and said: "Q"` ──────────────────────────
+  // A standard convention in literary and British prose that the engine had NO
+  // rule for: the introducing clause ends in a speech verb and a colon, and its
+  // grammatical subject is the speaker. Explicit attribution, so it sits with
+  // the tag handling, above every inference.
+  //
+  // ★ THE SUBJECT IS READ FROM THE CLAUSE'S FRONT, NOT FOUND NEAR THE VERB. The
+  // first draft asked findActionSubject, which scans for any name near a verb —
+  // and on "She sat down across from Nora ... and said:" it produced Nora at
+  // 0.92, the exact failure this rule exists to fix, and cost four fast suite
+  // cases besides. English puts the subject of this construction clause-
+  // initially, so that is the only position consulted: a cast name in the first
+  // words, or a lone pronoun there, resolved to the PARAGRAPH's own subject
+  // (never the chapter-level carry, which across a scene break is exactly the
+  // wrong person) under a gender check.
+  if (COLON_INTRO_RE.test(before)) {
+    const colonClause = leadingClause(before).trimStart();
+    const lead = /^([A-Z][a-z'’-]+)\b/.exec(colonClause);
+    if (lead) {
+      const k = normKey(lead[1]);
+      const hit = knownNames.find(
+        (n) => normKey(n) === k || normKey(n.split(/\s+/).pop() ?? n) === k,
+      );
+      if (hit) return { speaker: hit, type: 'speech', confidence: 0.92 };
+    }
+    if (activeSubject && activeSubjectIsLocal && /^(?:he|she|they)\b/i.test(colonClause)) {
+      const cMasc = /^he\b/i.test(colonClause);
+      const cFem  = /^she\b/i.test(colonClause);
+      const cg    = genderMap?.get(normKey(activeSubject));
+      const cOk = (!cMasc && !cFem) || (cFem && cg !== 'M') || (cMasc && cg !== 'F');
+      if (cOk) return { speaker: activeSubject, type: 'speech', confidence: 0.85 };
     }
   }
 
