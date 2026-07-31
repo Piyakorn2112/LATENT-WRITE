@@ -1,5 +1,5 @@
 import type { ChapterAnalysisResult } from "./chapter-analysis-runner";
-import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
+import { detectNarrativeEvents, selectTimelineChips, type NarrativeEvent } from "./narrative-events";
 
 /**
  * chapter-observation.ts — the brief above the widgets.
@@ -106,7 +106,12 @@ export function buildChapterBrief(
     });
 
   const major = events.filter((e) => e.salience === "major");
-  const lead = (major.length ? major : events).slice(0, 3);
+  // ★ Select by RANK, narrate in reading order. `events` arrives in paragraph
+  // order, so slicing it picked the chapter's OPENING three and called them the
+  // headline (measured on the gold set: 36.1% real, against 47.0% by rank).
+  // The headline still reads "A at ¶2, and then B at ¶9" because that is a
+  // sequence, but which three it names is now a judgement, not a position.
+  const lead = selectTimelineChips(major.length ? major : events, 3);
 
   // ── The lead line.
   let headline: string;

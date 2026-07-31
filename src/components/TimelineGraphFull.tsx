@@ -17,7 +17,7 @@ import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
 import type { ArcInsight } from "../lib/story-arc-insights";
 import { measureTextWidth } from "../lib/measure-text";
-import { TIMELINE_CHIP_BUDGET } from "../lib/narrative-events";
+import { selectTimelineChips } from "../lib/narrative-events";
 import { CloseIcon } from "./Icon";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
@@ -68,9 +68,6 @@ const PAD_X       = 120;   // horizontal padding
 const SPINE_BASE  = 280;   // baseline Y (no tension) — was 230
 const TERRAIN_AMP = 60;    // max upward displacement (full tension = y=220)
 // Event box collision layout constants
-// ★ The chip budget lives in narrative-events.ts, because the accuracy suite
-// gates on precision@BUDGET and has to measure the view that actually ships.
-const MAX_EVENTS  = TIMELINE_CHIP_BUDGET;
 const EVENT_LAYOUT_OVERSCAN = 3;
 const BOX_H       = 22;    // fixed box height
 const BOX_GAP     = 8;     // minimum gap between boxes
@@ -746,7 +743,9 @@ function TimelineGraphFullImpl({
     const y      = entry ? spineY(entry.tensionPeak) : SPINE_BASE;
     const color  = entry ? roleColor(entry.role) : "#475569";
     const nr     = entry ? nodeRadius(entry.role, entry.tensionPeak) : 6;
-    const events = (entry?.majorEvents ?? []).slice(0, MAX_EVENTS);
+    // Best by RANK, drawn in reading order — never a slice of the stored array,
+    // which is ordered by paragraph and would select the chapter's opening.
+    const events = selectTimelineChips(entry?.majorEvents ?? []);
     return { ch, entry, x, y, color, nr, isAct: false, isInspect: false, events };
   }), [chapters, storyGraph]);
 

@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildChapterBrief } from "../lib/chapter-observation";
+import { selectTimelineChips } from "../lib/narrative-events";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
@@ -965,7 +966,7 @@ export function AnalysisPanel({
                       event was called an event. */}
                   {brief.events.length > 0 && (
                     <div className="chapter-brief-events">
-                      {brief.events.slice(0, 4).map((e, i) => (
+                      {selectTimelineChips(brief.events, 4).map((e, i) => (
                         <button
                           key={`${e.paragraphIndex}-${i}`}
                           type="button"

@@ -118,6 +118,10 @@ export function buildChapterEntry(
         offsetInParagraph: e.offsetInParagraph,
         narrativeType: e.type,
         salience: e.salience,
+        // Selection order. Without it the stored array's reading order becomes
+        // the selection order at render time, which is the bug measured at
+        // 36.1% vs 47.0% on the gold set.
+        rank: e.rank,
         agent: e.agent,
         channel: e.channel,
       }));

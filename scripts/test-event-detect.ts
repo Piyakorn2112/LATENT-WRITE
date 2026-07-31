@@ -37,7 +37,7 @@ import { analyzeChapter } from "../src/lib/chapter-analysis";
 import { detectMajorEvents } from "../src/lib/event-detect";
 import {
   detectNarrativeEvents, refineEventSalience,
-  LABEL_BUDGET, TIMELINE_CHIP_BUDGET,
+  LABEL_BUDGET, TIMELINE_CHIP_BUDGET, selectTimelineChips,
   type NarrativeEvent,
 } from "../src/lib/narrative-events";
 import { detectSpeechInChapter } from "../src/lib/speech-detect";
@@ -192,6 +192,13 @@ interface Predicted {
   legacyType: string;
   confidence: number;
   salience?: "major" | "minor";
+  /** ★ Both fields exist so this projection can be fed to the ENGINE'S OWN
+   *  chip selector. Without them selectTimelineChips falls back to array order,
+   *  which is paragraph order, which silently reproduces the exact bug the
+   *  selector was written to prevent — and the suite would score a view nobody
+   *  has for the third time. */
+  rank: number;
+  tensionPosition: number;
 }
 
 // ─── Fixture integrity ────────────────────────────────────────────────────────
@@ -351,7 +358,10 @@ function runOld(p: Prepared): Predicted[] {
     p.novel.worldData,
   );
   const n = p.paragraphs.length;
-  return events.map((e) => ({
+  // The old engine has no rank of its own; it emits in confidence order, so
+  // array position IS its selection order. Stamping it keeps the comparison
+  // fair rather than handing the baseline the new engine's selector for free.
+  return events.map((e, rank) => ({
     // The old engine only reports a fractional position, so recovering the
     // paragraph means inverting the same rounding it used. This is exactly the
     // information loss that made events un-clickable in the UI.
@@ -360,6 +370,8 @@ function runOld(p: Prepared): Predicted[] {
     type: e.type,
     legacyType: e.type,
     confidence: e.confidence,
+    rank,
+    tensionPosition: e.tensionPosition,
   }));
 }
 
@@ -415,25 +427,15 @@ function toPredicted(e: NarrativeEvent): Predicted {
     legacyType: e.legacyType,
     confidence: e.confidence,
     salience: e.salience,
+    rank: e.rank,
+    tensionPosition: e.tensionPosition,
   };
 }
 
 function runNew(p: Prepared): Predicted[] {
-  const events: NarrativeEvent[] = detectNarrativeEvents(p.paragraphs, p.speech, {
-    knownNames: p.knownNames,
-    worldData: p.novel.worldData,
-    tensionByParagraph: tensionByParagraph(p.speech),
-    confidenceFloor: process.env.FLOOR ? Number(process.env.FLOOR) : undefined,
-    maxEvents: process.env.CAP ? Number(process.env.CAP) : undefined,
-  });
-  return events.map((e) => ({
-    paragraph: e.paragraphIndex + 1, // gold is 1-based
-    label: e.label,
-    type: e.type,
-    legacyType: e.legacyType,
-    confidence: e.confidence,
-    salience: e.salience,
-  }));
+  // One projection, one detector call — the duplicate that used to live here
+  // was how `rank` came to be missing from half the runs.
+  return detectNarrativeEventsFor(p).map(toPredicted);
 }
 
 // ─── Report ───────────────────────────────────────────────────────────────────
@@ -576,16 +578,20 @@ async function main() {
       const { matches, unmatched } = align(gc.events, predicted);
       const t = engine.totals;
 
-      // ── What the writer actually sees. The timeline renders the top
-      // TIMELINE_CHIP_BUDGET chips by confidence, so the precision of the whole
-      // ranked list is not the precision of the product. Both are reported.
+      // ── What the writer actually sees.
       //
-      // ★ This was hardcoded to 4 while the shipping timeline rendered 3, so the
-      // gate described a view nobody sees. The budget is now imported from the
-      // engine, which both renderers also import. Do not re-inline it.
-      const top = [...predicted]
-        .sort((a, b) => b.confidence - a.confidence)
-        .slice(0, TIMELINE_CHIP_BUDGET);
+      // ★ This has now been WRONG TWICE, in the same way both times: it scored a
+      // view nobody had. First it was hardcoded to 4 while the timeline rendered
+      // 3. Then it sorted by confidence — but the renderers sliced the array the
+      // engine returns, which is in READING order, so the product was showing
+      // the chapter's first three events while this gate scored its best three:
+      //
+      //     first 3 by position (what shipped)   36.1%
+      //     top 3 by rank       (what this said) 47.0%
+      //
+      // Both are now the same call the renderers make. If the selection rule
+      // ever changes again, it changes HERE, once, for all three.
+      const top = selectTimelineChips(predicted, TIMELINE_CHIP_BUDGET);
       const topAligned = align(gc.events, top);
       t.topEmitted += top.length;
       for (const m of topAligned.matches) {

@@ -110,6 +110,23 @@ export interface NarrativeEvent {
   salience: "major" | "minor";
   /** The triggering clause, verbatim. The UI can finally show its source. */
   sentence: string;
+  /**
+   * ★ SELECTION ORDER, 0 = the chapter's strongest event.
+   *
+   * This array is returned in READING order, because that is how a timeline
+   * has to draw it. For a long time that meant every consumer wrote
+   * `events.slice(0, TIMELINE_CHIP_BUDGET)` and got "the first three events in
+   * the chapter" while believing it had "the three best" — the harness even
+   * documented the wrong one. Measured over the gold set, that mistake cost:
+   *
+   *     first 3 by position (what shipped)   36.1%  <- worse than random
+   *     random 3                             42.5%
+   *     top 3 by rank                        47.0%
+   *
+   * So: rank to CHOOSE, paragraph order to DRAW. Never re-derive the choice by
+   * slicing this array.
+   */
+  rank: number;
   /** Resolved actor, when one was found. */
   agent?: string;
   channel: "dialogue" | "narration";
@@ -151,6 +168,27 @@ export const LABEL_BUDGET = 28;
  * must agree on it or the gate is measuring a view nobody sees.
  */
 export const TIMELINE_CHIP_BUDGET = 3;
+
+/**
+ * The chips a chapter shows: the best `budget` by RANK, drawn in reading order.
+ *
+ * Every surface that renders chips must go through this. Slicing the event
+ * array directly is the bug this function exists to make impossible — the
+ * array is in reading order, so a slice silently selects "earliest" and reads
+ * as "best". Works on stored MajorEvent records too (pre-rank entries fall
+ * back to array order, which is what they were rendered as anyway).
+ */
+export function selectTimelineChips<T extends { rank?: number; tensionPosition: number }>(
+  events: readonly T[],
+  budget: number = TIMELINE_CHIP_BUDGET,
+): T[] {
+  return [...events]
+    .map((e, i) => ({ e, rank: e.rank ?? i }))
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, budget)
+    .sort((a, b) => a.e.tensionPosition - b.e.tensionPosition)
+    .map((x) => x.e);
+}
 
 /**
  * Reject a dialogue act whose content could not be recovered, rather than only
@@ -2078,8 +2116,10 @@ function selectEvents(
   // cut, because event density genuinely varies between chapters.
   const majorCut = kept.length ? Math.max(0.62, kept[0].conf - 0.12) : 1;
 
+  // `kept` is already in selection order, so the index IS the rank. Capture it
+  // BEFORE the display sort below, which destroys that order.
   return kept
-    .map(({ c, conf, label }) => {
+    .map(({ c, conf, label }, rank) => {
       return {
         label,
         type: c.type,
@@ -2091,6 +2131,7 @@ function selectEvents(
         confidence: Number(conf.toFixed(3)),
         salience: (conf >= majorCut ? "major" : "minor") as "major" | "minor",
         sentence: c.sentence,
+        rank,
         agent: c.agent,
         channel: c.channel,
         why: c.why,
@@ -2162,9 +2203,15 @@ export async function refineEventSalience(
     };
   });
 
+  // ★ RE-ASSIGN RANK. This pass rewrites `confidence`, so the rank the detector
+  // stamped is stale the moment it runs — and rank is what every renderer now
+  // selects on. Leaving it meant the LM could re-score all it liked while the
+  // timeline still drew the detector's original pick. `rank` means "selection
+  // order as of the most recent scoring pass", and any future pass that touches
+  // confidence owes the same three lines.
   return rescored
     .filter((e) => e._salience >= minSalience)
     .sort((a, b) => b.confidence - a.confidence)
-    .map(({ _salience, ...e }) => { void _salience; return e; })
+    .map(({ _salience, ...e }, rank) => { void _salience; return { ...e, rank }; })
     .sort((a, b) => a.tensionPosition - b.tensionPosition);
 }

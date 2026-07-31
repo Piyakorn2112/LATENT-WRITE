@@ -325,6 +325,11 @@ export interface MajorEvent {
   narrativeType?: string;
   /** `major` = a chapter summary would mention it. */
   salience?: "major" | "minor";
+  /** Selection order, 0 = the chapter's strongest event. The array is stored in
+   *  READING order, so a renderer that slices it selects "earliest" and reads
+   *  as "best" — measured at 36.1% vs 47.0% precision on the gold set. Always
+   *  select with selectTimelineChips(). Absent on pre-rank stored entries. */
+  rank?: number;
   /** Resolved actor. */
   agent?: string;
   /** Which channel found it: an attributed utterance, or narration. */
