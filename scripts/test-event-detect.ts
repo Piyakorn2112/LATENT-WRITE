@@ -37,7 +37,7 @@ import { analyzeChapter } from "../src/lib/chapter-analysis";
 import { detectMajorEvents } from "../src/lib/event-detect";
 import {
   detectNarrativeEvents, refineEventSalience,
-  LABEL_BUDGET, TIMELINE_CHIP_BUDGET, selectTimelineChips,
+  LABEL_BUDGET, TIMELINE_CHIP_BUDGET, selectTimelineChips, labelDefect,
   type NarrativeEvent,
 } from "../src/lib/narrative-events";
 import { detectSpeechInChapter } from "../src/lib/speech-detect";
@@ -108,6 +108,40 @@ const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 // hold as many major events. NOTHING REGRESSED — it is the same engine measured
 // against what actually ships. 30.5% had been reported to the owner and was
 // wrong; 16.9% is honest, and the gap to the goal is wider than stated.
+/**
+ * ─── DEV / TEST SPLIT, BY BOOK ───────────────────────────────────────────────
+ *
+ * Added when the engine gained its first FITTED parameter (the narrative-position
+ * prior). Every number in this file up to that point came from a rule written
+ * from a principle and then measured, so the whole gold set could be the test
+ * set. A fitted weight cannot be chosen that way: sweeping it against the set you
+ * then quote is how you report a number that does not survive contact with a new
+ * book, and this project has already learned that lesson twice in the attribution
+ * engine.
+ *
+ * Split by BOOK, never by chapter: chapters of one novel share an author's voice,
+ * a cast and a structural habit, so a chapter-level split leaks.
+ *
+ * DEV is the half you may sweep against. TEST is quoted and never tuned on.
+ * The split is frozen: reshuffling it after seeing results is the same mistake
+ * wearing a different hat.
+ *
+ *   HOLDOUT=1  score only TEST books
+ *   DEVONLY=1  score only DEV books
+ */
+export const DEV_BOOKS = new Set([
+  "webnovel", "treasure", "frankenstein", "hollow-iris", "sherlock",
+  "worlds", "anne", "root-crown",
+]);
+export const TEST_BOOKS = new Set([
+  "dracula", "expectations", "gatsby", "pride", "carol", "awakening", "antonia",
+]);
+
+const BOOK_FILTER: Set<string> | null =
+  process.env.HOLDOUT === "1" ? TEST_BOOKS
+  : process.env.DEVONLY === "1" ? DEV_BOOKS
+  : null;
+
 const TARGETS = {
   /**
    * ★ THE NUMBER THAT DESCRIBES THE PRODUCT: of the chips a writer actually
@@ -115,10 +149,10 @@ const TARGETS = {
    * numbers were gated, which meant the suite could stay green through a change
    * that made the visible output worse.
    */
-  precisionAtBudget: 0.46,
+  precisionAtBudget: 0.48,
   /** Of the events a chapter summary would mention, how many are actually SHOWN.
    *  The weakest number here by a distance, and the one the goal is about. */
-  majorInBudget: 0.21,
+  majorInBudget: 0.22,
   /** Of the events a chapter summary would mention, how many are found at all. */
   majorRecall: 0.40,
   /** Of everything emitted, how much corresponds to a real event. Still the
@@ -127,6 +161,15 @@ const TARGETS = {
   precision: 0.30,
   /** Labels must fit the timeline's real budget without being cut mid-word. */
   labelFitRate: 0.95,
+  /** ★ NEW GATE, and the one that answers "would the writer understand this?".
+   *  labelFitRate only ever measured LENGTH, so a label could be 100% fitting
+   *  and still read "Marilla accuses ll" (from "You'll have to stay here") or
+   *  "Marilla insists Marilla". Of the chips actually SHOWN, the share whose
+   *  label is well formed: no contraction fragment, no restated agent, and
+   *  something said about the agent. Measured 98.6% before the repair and
+   *  100% after, so this is held at 100 — a fragment reaching the timeline is
+   *  a defect, not a tuning question. */
+  shownWellFormed: 1.0,
 };
 
 /**
@@ -416,6 +459,7 @@ function detectNarrativeEventsFor(p: Prepared): NarrativeEvent[] {
     tensionByParagraph: tensionByParagraph(p.speech),
     confidenceFloor: process.env.FLOOR ? Number(process.env.FLOOR) : undefined,
     maxEvents: process.env.CAP ? Number(process.env.CAP) : undefined,
+    positionPriorWeight: process.env.POSW ? Number(process.env.POSW) : undefined,
   });
 }
 
@@ -450,6 +494,12 @@ interface Totals {
   legacyCorrect: number;
   overlapSum: number;
   labelsFit: number;
+  /** Labels that are WELL FORMED, i.e. carry no contraction fragment and do not
+   *  restate the agent. `labelsFit` only ever measured LENGTH, so a label could
+   *  be 100% "fitting" and still read "Marilla accuses ll". */
+  labelsWellFormed: number;
+  /** Chips SHOWN whose label is well formed — the number the writer lives with. */
+  topWellFormed: number;
   exactAnchor: number;
   /** Emitted and matched counting ONLY the top 4 by confidence per chapter,
    *  which is what the timeline actually renders. */
@@ -461,7 +511,8 @@ interface Totals {
 function emptyTotals(): Totals {
   return {
     gold: 0, goldMajor: 0, predicted: 0, matched: 0, matchedMajor: 0,
-    typeCorrect: 0, legacyCorrect: 0, overlapSum: 0, labelsFit: 0, exactAnchor: 0,
+    typeCorrect: 0, legacyCorrect: 0, overlapSum: 0, labelsFit: 0,
+    labelsWellFormed: 0, topWellFormed: 0, exactAnchor: 0,
     topEmitted: 0, topMatched: 0, topMajorMatched: 0,
   };
 }
@@ -489,14 +540,17 @@ function report(name: string, t: Totals): { f1: number; majorRecall: number; pre
   console.log(`  legacy type (of matched)  ${pct(t.legacyCorrect, t.matched)}`);
   console.log(`  label↔gold token overlap  ${t.matched ? `${((t.overlapSum / t.matched) * 100).toFixed(1).padStart(5)}%` : "  n/a"}`);
   console.log(`  labels fit ≤${LABEL_BUDGET} chars, uncut ${pct(t.labelsFit, t.predicted)}`);
+  console.log(`  labels well formed        ${pct(t.labelsWellFormed, t.predicted)}`);
   console.log(`  ── what the timeline SHOWS (top ${TIMELINE_CHIP_BUDGET} per chapter) ──`);
   console.log(`  chips rendered              ${String(t.topEmitted).padStart(4)}`);
   console.log(`  precision@${TIMELINE_CHIP_BUDGET}               ${pct(t.topMatched, t.topEmitted)}`);
   console.log(`  major events SHOWN        ${pct(t.topMajorMatched, t.goldMajor)}`);
+  console.log(`  shown labels well formed  ${pct(t.topWellFormed, t.topEmitted)}`);
   return {
     f1, majorRecall, precision, fit,
     precisionAtBudget: t.topEmitted ? t.topMatched / t.topEmitted : 0,
     majorInBudget: t.goldMajor ? t.topMajorMatched / t.goldMajor : 0,
+    shownWellFormed: t.topEmitted ? t.topWellFormed / t.topEmitted : 0,
   };
 }
 
@@ -568,7 +622,14 @@ async function main() {
   // The corpus deliberately mixes Victorian literary, American modernist, YA,
   // adventure and web-novel prose; a single pooled number hides which of those
   // the engine is actually failing.
-  for (const gc of gold.chapters.filter((c) => !only || c.book === only)) {
+  const scored = gold.chapters.filter(
+    (c) => (!only || c.book === only) && (!BOOK_FILTER || BOOK_FILTER.has(c.book)),
+  );
+  if (BOOK_FILTER) {
+    console.log(`\n★ ${process.env.HOLDOUT === "1" ? "HELD-OUT TEST" : "DEV"} books only — ` +
+      `${scored.length} chapters, ${scored.reduce((a, c) => a + c.events.length, 0)} gold events`);
+  }
+  for (const gc of scored) {
     const p = (await prepare(gc, cache))!;
     if (detail) {
       console.log(`\n═══ ${gc.book} ch${gc.chapter} (${gc.eventfulness}, ${p.paragraphs.length} paragraphs, ${gc.events.length} gold) ═══`);
@@ -602,7 +663,11 @@ async function main() {
       t.gold += gc.events.length;
       t.goldMajor += gc.events.filter((e) => e.salience === "major").length;
       t.predicted += predicted.length;
-      for (const p2 of predicted) if (labelFits(p2.label)) t.labelsFit++;
+      for (const p2 of predicted) {
+        if (labelFits(p2.label)) t.labelsFit++;
+        if (!labelDefect(p2.label)) t.labelsWellFormed++;
+      }
+      for (const c of top) if (!labelDefect(c.label)) t.topWellFormed++;
       for (const m of matches) {
         if (!m.pred) continue;
         t.matched++;
@@ -641,6 +706,7 @@ async function main() {
   const checks: Array<[string, number, number]> = [
     // ★ First, because it is the only one a writer experiences directly.
     [`precision@${TIMELINE_CHIP_BUDGET} (what is SHOWN)`, newEngine.precisionAtBudget, TARGETS.precisionAtBudget],
+    ["shown labels well formed", newEngine.shownWellFormed, TARGETS.shownWellFormed],
     [`major events in the top ${TIMELINE_CHIP_BUDGET}`, newEngine.majorInBudget, TARGETS.majorInBudget],
     ["recall on major events", newEngine.majorRecall, TARGETS.majorRecall],
     ["precision", newEngine.precision, TARGETS.precision],

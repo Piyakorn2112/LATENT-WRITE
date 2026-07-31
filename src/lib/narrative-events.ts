@@ -147,7 +147,39 @@ export interface DetectOptions {
   /** Override the calibrated-confidence floor. Exposed so the operating point
    *  can be SWEPT by the suite instead of guessed; see CONFIDENCE_FLOOR. */
   confidenceFloor?: number;
+  /** Weight of the narrative-position prior. Exposed for the DEV sweep; see
+   *  POSITION_PRIOR_WEIGHT and the block that applies it. */
+  positionPriorWeight?: number;
 }
+
+/**
+ * How hard "late in the chapter" counts as evidence.
+ *
+ * FITTED ON DEV BOOKS ONLY (see DEV_BOOKS in scripts/test-event-detect.ts), then
+ * confirmed on the held-out TEST books. DEV sweep, precision@3:
+ *
+ *     0 -> 49.6   0.3 -> 50.8   0.6 -> 51.7   0.9 -> 49.2
+ *     1.2 -> 49.6   1.6 -> 52.1
+ *
+ * A noisy plateau, not a peak: the spread is about 3 points and it is not
+ * monotonic, so anything inside it is a coin-flip on this sample. 0.6 was taken
+ * over the marginally higher 1.6 because a smaller intervention is the safer
+ * one when the curve cannot tell them apart.
+ *
+ * HELD OUT, which is the number that counts:
+ *     0    precision@3 43.5   major shown 16.7
+ *     0.6  precision@3 44.6   major shown 17.7
+ *
+ * ★ WORTH ABOUT A POINT, and the gap to expectation is the interesting part.
+ * The decile table below shows P(real) nearly TRIPLING from the first decile to
+ * the last, which looks like it should be worth far more. It is not, because
+ * that table is pooled ACROSS chapters while selection happens WITHIN one: a
+ * prior that is monotone in position can only reorder a single chapter's own
+ * candidates, and the between-chapter variance it also describes is unavailable
+ * to it. A pooled distribution is an upper bound on a within-group ranker, never
+ * an estimate of it. Do not re-derive this expecting the 3x.
+ */
+export const POSITION_PRIOR_WEIGHT = 0.6;
 
 /** The timeline gives an event label 20–36 characters depending on whether a
  *  detail tag sits beside it (measured off TimelineGraph/TimelineGraphFull).
@@ -1275,14 +1307,86 @@ const PRESENT_IRREGULAR: Record<string, string> = {
   be: "is", have: "has", go: "goes", do: "does",
 };
 
+/**
+ * Agents that take the BARE present rather than the -s form. "I loses" and "We
+ * agrees" both shipped; a label that cannot conjugate reads as broken software
+ * rather than as a reminder, which costs more trust than a missed event does.
+ */
+const PLURAL_AGENTS = new Set(["i", "we", "they", "you", "both", "everyone else"]);
+
 /** Third-person present of a base form: "refuse" → "refuses". Labels read as a
  *  present-tense report ("Tessa admits she has known"), which is how a reader
  *  narrates a plot beat and how the gold set is written. */
-function toPresent(base: string): string {
+function toPresent(base: string, agent?: string): string {
+  const a = agent?.toLowerCase().trim();
+  if (a && (PLURAL_AGENTS.has(a) || / and /.test(a))) {
+    // "I refuse", "We agree", "Tessa and Mira arrive".
+    return base === "be" ? "are" : base;
+  }
   if (PRESENT_IRREGULAR[base]) return PRESENT_IRREGULAR[base];
   if (/(?:s|sh|ch|x|z|o)$/.test(base)) return `${base}es`;
   if (/[^aeiou]y$/.test(base)) return `${base.slice(0, -1)}ies`;
   return `${base}s`;
+}
+
+/**
+ * ─── LABEL WELL-FORMEDNESS ───────────────────────────────────────────────────
+ *
+ * The object slot was accepting text that is not a word, and the timeline was
+ * showing it. Real examples, all from the gold corpus:
+ *
+ *     "Marilla accuses ll"        <- "You'll have to stay here"
+ *     "Marilla accuses t know"    <- "You don't know how delighted I was"
+ *     "Matthew accuses d likely"  <- "You'd likely set the place on fire"
+ *     "Marilla insists Marilla"   <- "insisted Marilla" (inverted attribution)
+ *
+ * The first three are CONTRACTION REMNANTS: an apostrophe-split left `ll`, `t`,
+ * `d`, `s`, `re`, `ve`, `m` stranded as a bare token, and none of them is an
+ * English word. The fourth is the agent repeated back at itself, which carries
+ * no information at all.
+ *
+ * These are rejected rather than repaired. A missing object degrades to "Marilla
+ * accuses", which is thin but true; a fragment object is noise wearing the shape
+ * of information, and the writer cannot tell which they are looking at.
+ */
+const CONTRACTION_REMNANTS = new Set(["ll", "t", "d", "s", "re", "ve", "m", "n", "nt"]);
+
+const bare = (w: string) => w.toLowerCase().replace(/[^a-z]/gi, "");
+
+/** True when this object text would make the label worse than having none. */
+function isJunkObject(object: string, agent?: string): boolean {
+  const words = object.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  // Any contraction remnant anywhere in the phrase poisons it: the phrase was
+  // cut mid-word, so the words after it are the wrong side of the split.
+  if (words.some((w) => CONTRACTION_REMNANTS.has(bare(w)))) return true;
+  // The agent restated. "Marilla insists Marilla" says one thing twice.
+  if (agent && words.some((w) => bare(w) === agent.toLowerCase().trim())) return true;
+  return false;
+}
+
+/**
+ * The defect in a finished label, or null when it is well formed.
+ *
+ * Exported so the accuracy suite scores the SAME definition the engine repairs
+ * against. A label-quality target checked by a second, hand-rolled copy of
+ * these rules would drift, and then the gate would pass while the timeline
+ * showed "Marilla accuses ll".
+ */
+export function labelDefect(label: string): "fragment" | "repeats-agent" | "no-verb" | null {
+  const words = label.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "no-verb";
+  if (words.some((w) => CONTRACTION_REMNANTS.has(bare(w)))) return "fragment";
+  const seen = new Set<string>();
+  for (const w of words) {
+    const k = bare(w);
+    if (!k) continue;
+    if (seen.has(k)) return "repeats-agent";
+    seen.add(k);
+  }
+  // Agent alone, with nothing said about it.
+  if (words.length < 2) return "no-verb";
+  return null;
 }
 
 function capitalize(s: string): string {
@@ -1291,8 +1395,17 @@ function capitalize(s: string): string {
 
 /** Assemble a label inside the budget by dropping the least important part
  *  first (the object), rather than truncating mid-phrase. */
+/** A/B switch for the label repair, in the same style as FLOOR / CAP / SALIENCE,
+ *  so the suite can print the before-and-after instead of me asserting it.
+ *  Guarded: a bare `process` reference at module scope kills the whole module in
+ *  the renderer, which has already happened once in this codebase. */
+const LABEL_REPAIR =
+  typeof process !== "undefined" ? process.env?.LABEL_REPAIR !== "off" : true;
+
 function buildLabel(agent: string | undefined, verb: string, object: string | null): string {
   const a = agent ? capitalize(agent) : "";
+  // A fragment object is worse than no object — see isJunkObject.
+  if (LABEL_REPAIR && object && isJunkObject(object, agent)) object = null;
   const withObject = [a, verb, object].filter(Boolean).join(" ");
   if (withObject.length <= LABEL_BUDGET) return capitalize(withObject);
   const noObject = [a, verb].filter(Boolean).join(" ");
@@ -1415,7 +1528,10 @@ export function detectNarrativeEvents(
   // uses for its contentHash, and enough to catch any real edit.
   const first = paragraphs[0] ?? "";
   const last = paragraphs[paragraphs.length - 1] ?? "";
-  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${(options.knownNames ?? []).length}`;
+  // ★ Every option that changes the OUTPUT must appear here. A swept parameter
+  // missing from the key makes the sweep read the first run's answer back for
+  // every setting and report a dead flat curve that looks like "no effect".
+  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${options.positionPriorWeight ?? ""}|${(options.knownNames ?? []).length}`;
   if (key === _memoKey) return _memoValue;
   const result = detectNarrativeEventsUncached(paragraphs, speechResults, options);
   _memoKey = key;
@@ -1431,6 +1547,7 @@ function detectNarrativeEventsUncached(
   const paraCount = paragraphs.length;
   if (paraCount < 2) return [];
 
+  const positionPriorWeight = options.positionPriorWeight ?? POSITION_PRIOR_WEIGHT;
   const names = (options.knownNames ?? []).filter((n) => n && n.length >= 2);
   const pattern = buildEntityPattern(names);
   const nameRe = pattern ? new RegExp(pattern, "g") : null;
@@ -1683,11 +1800,37 @@ function detectNarrativeEventsUncached(
         why.push("tension-rise");
       }
 
-      // Chapter edges. Retained as penalties: both measured strongly negative,
-      // but on only four candidates each, far too few to invert on.
+      // ─── WHERE IN THE CHAPTER, as a continuous prior ──────────────────────
+      //
+      // This used to be two cliffs at the extreme edges (pos < 0.04, pos > 0.98),
+      // each firing on about four candidates. The real signal is a gradient
+      // across the WHOLE chapter, and it is large. Measured over 74 gold
+      // chapters, P(a detected event is real | the decile it sits in):
+      //
+      //     0-10%  20.7%   40-50%  30.7%   80-90%  44.3%
+      //    10-20%  36.9%   50-60%  26.9%   90-100% 58.0%
+      //    20-30%  19.5%   60-70%  26.9%
+      //    30-40%  31.5%   70-80%  33.8%
+      //
+      // Gold events put 1.52x as much weight in the second half as the first,
+      // and the final decile alone holds 19.7% of all of them (2x uniform)
+      // against 20.8% of the majors. The engine's own candidates, by contrast,
+      // are FLAT across position (0.99x): it was blind to this entirely, so the
+      // prior adds evidence rather than double-counting something already scored.
+      //
+      // This is a structural fact about chapters, not a clause feature — a
+      // chapter ends on its turn — which is why no amount of better clause
+      // analysis was ever going to recover it.
+      //
+      // The weight is FITTED, the first fitted parameter in this engine, so the
+      // gold set gained a DEV/TEST split by book at the same time; see the header
+      // of scripts/test-event-detect.ts. Swept on DEV only.
       const pos = pi / Math.max(1, paraCount - 1);
+      score += positionPriorWeight * (pos - 0.5);
+      if (pos >= 0.8) why.push("late-chapter");
+      // The very first paragraphs stay a hard penalty on top of the ramp: an
+      // opening line is scene-setting far more reliably than the ramp alone says.
       if (pos < 0.04) { score -= 1.2; why.push("-chapter-open"); }
-      if (pos > 0.98) { score += 0.47; why.push("-chapter-close"); }
 
       candidates.push({ ...cand, score, why });
     }
@@ -2097,7 +2240,9 @@ function selectEvents(
       (k) => Math.abs(k.c.paragraphIndex - entry.c.paragraphIndex) <= MIN_SEPARATION_PARAGRAPHS,
     );
     if (clash) continue;
-    const verbSurface = entry.c.channel === "dialogue" ? entry.c.verbBase : toPresent(entry.c.verbBase);
+    const verbSurface = entry.c.channel === "dialogue"
+      ? entry.c.verbBase
+      : toPresent(entry.c.verbBase, entry.c.agent);
     const label = buildLabel(entry.c.agent, verbSurface, entry.c.object);
     const key = label.toLowerCase();
     if (seenLabels.has(key)) continue;

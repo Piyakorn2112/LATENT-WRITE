@@ -204,7 +204,7 @@ export async function enrichChapterEntryWithLM(
     let events = entry.majorEvents;
     if (events.some((e) => e.sentence)) {
       const refined = await refineEventSalience(
-        events.map((e) => ({
+        events.map((e, i) => ({
           ...e,
           sentence: e.sentence ?? "",
           type: (e.narrativeType ?? "unclassified") as never,
@@ -214,6 +214,10 @@ export async function enrichChapterEntryWithLM(
           offsetInParagraph: e.offsetInParagraph ?? 0,
           salience: e.salience ?? "minor",
           channel: e.channel ?? "narration",
+          // Entries stored before `rank` existed fall back to array order,
+          // which is what they were being rendered as anyway. The refine pass
+          // re-stamps this from the blended score regardless.
+          rank: e.rank ?? i,
           why: [],
         })),
         {
@@ -258,7 +262,11 @@ export async function enrichChapterEntryWithLM(
         .filter((e) => keep.has(`${e.paragraphIndex ?? 0}|${e.label}`))
         .map((e) => {
           const r = refined.find((x) => x.paragraphIndex === (e.paragraphIndex ?? 0) && x.label === e.label);
-          return r ? { ...e, confidence: r.confidence } : e;
+          // ★ `rank` travels with `confidence` or the re-rank is thrown away:
+          // the refine pass re-scores and re-orders, and the timeline selects on
+          // rank, so copying one without the other silently keeps the detector's
+          // original pick and makes the whole LM pass invisible to the writer.
+          return r ? { ...e, confidence: r.confidence, rank: r.rank } : e;
         });
       if (DEV && events.length !== entry.majorEvents.length) {
         console.log(`[StoryGraph] Ch.${entry.chapterNumber} LM salience: ${entry.majorEvents.length} -> ${events.length} events`);
