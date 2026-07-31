@@ -571,7 +571,7 @@ class NameRegexCache {
   getObjTestRe(name: string): RegExp {
     let re = this.objTestRe.get(name);
     if (!re) {
-      re = new RegExp(`\\b(?:to|toward|at|with|for)\\s+${esc(name)}\\b`, 'i');
+      re = new RegExp(`\\b(?:${OBJ_PREP})\\s+${esc(name)}\\b`, 'i');
       this.objTestRe.set(name, re);
     }
     return re;
@@ -881,7 +881,7 @@ function findDirectName(
   // pronounMinScore 12 vs fast's higher floor. Instrument WHICH source sets the
   // speaker on those 17 before attempting a fourth fix.
   for (const name of anyNameWord ? knownNames : EMPTY_NAMES) {
-    const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:to|toward|at|with|for)\\s+${esc(name)}\\b`, 'i');
+    const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:${OBJ_PREP})\\s+${esc(name)}\\b`, 'i');
     if (objTest.test(text)) continue;
     // Fix B: expanded window 0–50 → 0–120 to handle long embedded clauses
     // Exclude quote marks in char class to prevent bridging across quote boundaries
@@ -890,7 +890,7 @@ function findDirectName(
   }
   // Known names: inverted pattern — verb ... Name
   for (const name of anyNameWord ? knownNames : EMPTY_NAMES) {
-    const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:to|toward|at|with|for)\\s+${esc(name)}\\b`, 'i');
+    const objTest = cache ? cache.getObjTestRe(name) : new RegExp(`\\b(?:${OBJ_PREP})\\s+${esc(name)}\\b`, 'i');
     if (objTest.test(text)) continue;
     // Fix B: also expand inverted window 0–40 → 0–70 (more conservative on inverted)
     const invRe = cache ? cache.getDirectInvRe(name) : new RegExp(`\\b${SPEECH_VERB_PAT}\\b[^.!?\u201c\u201d\u201e\u2018\u2019"']{0,70}\\b${esc(name)}\\b(?!['’]s)`, 'i');
@@ -1466,11 +1466,11 @@ function findAttribution(
       //
       // This is the same precedence that governs the rest of the ladder, applied
       // to the roster instead of to the current line.
-      const search = (list: string[]): string | undefined => {
+      const search = (list: string[], exclude?: string): string | undefined => {
         const floor = Math.max(0, list.length - 1 - ALTERNATION_LOOKBACK);
         for (let j = list.length - 1; j >= floor; j--) {
           const k = normKey(list[j]);
-          if (k === prevSpeakerK) continue;
+          if (k === prevSpeakerK || k === exclude) continue;
           // Enhancement B: also check recentSpeakers for generic speakers
           // not in knownNames (e.g. "Officer" from "the officer said")
           const name = knownNames.find(n => normKey(n) === k)
@@ -1479,8 +1479,24 @@ function findAttribution(
         }
         return undefined;
       };
-      const partner = (attestedSpeakers && search(attestedSpeakers))
+      let partner = (attestedSpeakers && search(attestedSpeakers))
         ?? search(recentSpeakers.slice(0, -1));
+
+      // ★ A QUOTE NEVER ADDRESSES ITS OWN SPEAKER (high only). When the line
+      // being attributed contains a vocative — `"Tell me, Nora."` — the roster
+      // cannot be right to hand it to Nora, however recently she spoke. Re-run
+      // the search with the addressee excluded; if nobody else qualifies, fall
+      // through to the later branches rather than assert a name the line itself
+      // rules out. Gated on `thread` (high mode) and on quoteContent being
+      // available, and costs one small regex over one quote.
+      if (partner && thread && quoteContent) {
+        const voc = vocativeIn(quoteContent, knownNames);
+        if (voc && normKey(voc) === normKey(partner)) {
+          const vk = normKey(voc);
+          partner = (attestedSpeakers && search(attestedSpeakers, vk))
+            ?? search(recentSpeakers.slice(0, -1), vk);
+        }
+      }
 
       if (partner) return { speaker: partner, type: 'speech', confidence: 0.73 };
     }
@@ -2186,9 +2202,30 @@ function processParagraph(
   let lastAttributedConfidence = 0;
   let prevPairEnd = 0;
 
+  // ★ WORDS INSIDE QUOTATION MARKS ARE SPEECH, NOT ATTRIBUTION EVIDENCE.
+  //
+  // `before` and `after` used to be raw slices of the paragraph, so they carried
+  // the full text of every SIBLING quote. The attribution regexes guard against
+  // crossing a quote boundary, but a match can sit entirely INSIDE one: in
+  //   and said: "The system is not what you think it is."
+  // the generic-speaker pattern found `system … think` wholly within the quote
+  // — "think" is a speech verb — and attributed the NEXT quote to a speaker
+  // called System at 0.90. What a character says must never be read as the
+  // narrator saying who spoke, so sibling-quote interiors are blanked
+  // LENGTH-PRESERVINGLY (indices and window arithmetic unchanged) before any
+  // evidence is extracted. The current quote's own content still reaches
+  // classification untouched via `quoteContent`.
+  const blanked = (() => {
+    const chars = text.split('');
+    for (const p of pairs) {
+      for (let k = p.start + 1; k < p.end; k++) chars[k] = ' ';
+    }
+    return chars.join('');
+  })();
+
   for (const pair of pairs) {
-    const before = text.slice(0, pair.start);
-    const after  = text.slice(pair.end + 1);
+    const before = blanked.slice(0, pair.start);
+    const after  = blanked.slice(pair.end + 1);
     const quoteContent = text.slice(pair.start + 1, pair.end);
     let attr = findAttribution(before, after, extCtx, knownNames,
       speakWeights, mentionWeights, activeSubject, prevParaFocus, quoteContent, recentSpeakers, genderMap, pronounMinScore, thread, extCtxDensity, activeSubjectIsLocal, learnedBias, adaptiveContext, cache, stageDirectionSubject, attestedSpeakers);
@@ -3150,6 +3187,13 @@ export function detectSpeechInChapter(
     }
   }
 
+  // ── High mode: RETROSPECTIVE pass over the finished chapter ──────────────
+  // The single mechanism in the engine that reads FUTURE dialogue. Fast can
+  // never have this — it runs on the typing path, where the future does not
+  // exist yet. High runs in the background over a complete chapter, so looking
+  // both ways is exactly the kind of intelligence its cost is supposed to buy.
+  if (level === 'high') retroSandwichPass(paragraphs, result, knownNames);
+
   if (useGroupScenes) groupIntoScenes(paragraphs, result);
 
   // Export final state box for cross-chapter continuity seeding.
@@ -3169,6 +3213,175 @@ export function detectSpeechInChapter(
   }
 
   return result;
+}
+
+/**
+ * High mode's retrospective pass: the A / ? / A SANDWICH.
+ *
+ * In published dialogue, a new paragraph implies the turn passes. So when the
+ * attested line before a bare quote and the attested line after it belong to
+ * the SAME speaker A, the bare quote between them is A's interlocutor — for it
+ * to be A as well, A would have to hold three consecutive paragraphs of an
+ * exchange, which the convention exists to avoid.
+ *
+ * This is evidence the forward pass structurally cannot use: when it reaches
+ * the bare quote, the line after it has not been processed yet. Every prior
+ * attempt to fix high mode's alternation losses filtered its forward guesses
+ * and each one starved something load-bearing (see ROSTER_EVIDENCE_FLOOR).
+ * Reading the future instead ADDS evidence rather than subtracting it.
+ *
+ * Discipline, in order of what it refuses to touch:
+ *   - only paragraphs whose single speech segment is a STRUCTURAL guess
+ *     (conf ≤ 0.74: stage direction, alternation, action subject) or has no
+ *     speaker at all — an answer the text attested is never revisited
+ *   - both neighbours must be ATTESTED (≥ ATTESTED_FLOOR), so an inferred
+ *     answer can never overturn anything via this pass
+ *   - continuation guard: the paragraph and its predecessor must close their
+ *     quotes; a multi-paragraph quote legitimately holds the floor and is
+ *     exactly the case where the sandwich reasoning is wrong
+ *   - the replacement partner must itself be attested nearby (±6 paragraphs)
+ */
+const STRUCTURAL_MAX_CONF = 0.74;
+
+function quotesClosed(p: string): boolean {
+  const curly = (p.match(/[“”]/g) ?? []).length;
+  const straight = (p.match(/"/g) ?? []).length;
+  return curly % 2 === 0 && straight % 2 === 0;
+}
+
+/**
+ * A DIRECT ADDRESS inside a quotation names the ADDRESSEE, never the speaker.
+ *
+ *     "Tell me, Nora."      →  spoken TO Nora, so by somebody else
+ *     "Nora, listen."       →  same
+ *
+ * That inversion is the entire value: a cast name set off by commas inside the
+ * quote is one of the few pieces of text that tells you who is NOT talking, and
+ * in a two-hander it therefore tells you who is. Nothing in the engine read
+ * vocatives before this.
+ *
+ * Shape is deliberately strict — the name must be punctuation-bounded on both
+ * sides (`, Nora.` / `^Nora,`), so `Iris said` or a name in ordinary object
+ * position never matches.
+ */
+const VOCATIVE_RE = /(?:^|[,;—–]\s*)([A-Z][a-z'’-]{2,})\s*[,.!?…]/g;
+
+/**
+ * Prepositions that put a following name in OBJECT position — someone acted
+ * toward this person, so the name is not the actor. The original list was
+ * to|toward|at|with|for, and the gap was measured on a hard case that had
+ * defeated three fixes: in "She sat down across from Nora ... and said:" the
+ * subject-finder read Nora as the actor because "from" was not in the list, and
+ * attributed Iris's colon-introduced quote to the person she sat opposite.
+ */
+const OBJ_PREP = "to|toward|towards|at|with|for|from|of|by|near|beside|behind|opposite|against|across|beneath|below|above|around|upon|between|without";
+
+function vocativeIn(inner: string, knownNames: string[]): string | undefined {
+  if (!inner) return undefined;
+  VOCATIVE_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = VOCATIVE_RE.exec(inner)) !== null) {
+    const k = normKey(m[1]);
+    const hit = knownNames.find(
+      (n) => normKey(n) === k || normKey(n.split(/\s+/).pop() ?? n) === k,
+    );
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+function retroSandwichPass(paragraphs: string[], result: ChapterParaResult[], knownNames: string[]): void {
+  const speechSegs = (j: number) =>
+    result[j]?.segments?.filter((s) => s.type === 'speech') ?? [];
+
+  // Structural guesses whose speaker an attested sandwich has CONFIRMED. They
+  // become usable evidence for further sandwiches — belief propagating down the
+  // exchange, always anchored at tags the text attested. Flipped and filled
+  // answers never join: the sandwich proves the line is NOT A, but which
+  // partner it is remains an inference.
+  const confirmed = new Set<SpeechSegment>();
+  const isEvidence = (s: SpeechSegment) =>
+    s.confidence >= ATTESTED_FLOOR || confirmed.has(s);
+
+  // Nearest dialogue neighbour within three paragraphs, skipping narrative.
+  const neighbour = (i: number, dir: -1 | 1): { seg: SpeechSegment; idx: number } | undefined => {
+    for (let step = 1; step <= 3; step++) {
+      const j = i + dir * step;
+      if (j < 0 || j >= result.length) return undefined;
+      const segs = speechSegs(j);
+      if (!segs.length) continue;
+      return { seg: dir === -1 ? segs[segs.length - 1] : segs[0], idx: j };
+    }
+    return undefined;
+  };
+  const innerOf = (idx: number, sg: SpeechSegment) =>
+    (paragraphs[idx] ?? '').slice(sg.start + 1, Math.max(sg.start + 1, sg.end - 1));
+
+  // Two iterations: agreements found in the first unlock sandwiches in the
+  // second. Measured funnel before the propagation existed: 4519 candidates,
+  // only 473 with both neighbours attested — the anchor tags are sparse, and
+  // one pass reaches only the lines directly beside them.
+  for (let iter = 0; iter < 2; iter++) {
+    for (let i = 0; i < result.length; i++) {
+      const segs = speechSegs(i);
+      if (segs.length !== 1) continue;
+      const seg = segs[0];
+      if (confirmed.has(seg)) continue;
+      if (seg.speaker && seg.confidence > STRUCTURAL_MAX_CONF) continue;
+      if (!quotesClosed(paragraphs[i] ?? '')) continue;
+      if (i > 0 && !quotesClosed(paragraphs[i - 1] ?? '')) continue;
+
+      const nb = neighbour(i, -1);
+      const na = neighbour(i, 1);
+      const prev = nb?.seg, next = na?.seg;
+      if (!prev?.speaker || !next?.speaker) continue;
+      if (!isEvidence(prev) || !isEvidence(next)) continue;
+      const a = normKey(prev.speaker);
+      if (normKey(next.speaker) !== a) continue;   // not a sandwich — ambiguous
+
+      if (seg.speaker && normKey(seg.speaker) !== a) {
+        // Forward guess agrees with the sandwich: confirm it. Confidence stays
+        // below ATTESTED_FLOOR so nothing downstream mistakes it for a tag.
+        confirmed.add(seg);
+        seg.confidence = Math.min(0.77, seg.confidence + 0.03);
+        continue;
+      }
+
+      // Guess is A itself (or absent) while the sandwich says A's partner
+      // speaks. A VOCATIVE in either of A's own attested lines names exactly
+      // who A is talking to — the most precise partner evidence there is, and
+      // it beats "nearest speaker", which in a three-hander can pick whoever
+      // happened to be tagged closest.
+      let partner: string | undefined;
+      for (const side of [nb!, na!]) {
+        const voc = vocativeIn(innerOf(side.idx, side.seg), knownNames);
+        if (voc && normKey(voc) !== a) { partner = voc; break; }
+      }
+      // The bare line's own vocative names ITS addressee — a name the speaker
+      // cannot be. Exclude it from the fallback search.
+      const selfVoc = vocativeIn(innerOf(i, seg), knownNames);
+      const excl = selfVoc ? normKey(selfVoc) : undefined;
+      for (let d = 1; d <= 12 && !partner; d++) {
+        for (const j of [i - d, i + d]) {
+          if (j < 0 || j >= result.length) continue;
+          for (const s of speechSegs(j)) {
+            if (s.speaker && isEvidence(s) && normKey(s.speaker) !== a
+                && normKey(s.speaker) !== excl) {
+              partner = s.speaker;
+              break;
+            }
+          }
+          if (partner) break;
+        }
+      }
+      if (partner) {
+        seg.speaker = partner;
+        seg.confidence = 0.70;
+      }
+      // No supported partner: leave the line alone. Blanking was measured (the
+      // withhold experiment) and cost far more than it bought.
+    }
+  }
 }
 
 /**
