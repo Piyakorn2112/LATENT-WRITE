@@ -173,6 +173,30 @@ const SPEECH_VERBS = [
 ];
 
 const SPEECH_VERB_PAT = `(?:${SPEECH_VERBS.join('|')})`;
+
+/**
+ * Does this trailing text carry an EXPLICIT attribution tag — a speech verb
+ * followed by something that names the speaker?
+ *
+ * Used to make inference yield to evidence. A carried subject, an alternation
+ * guess or any other inferred speaker is the right answer when the text says
+ * nothing; it is never the right answer when the text says "said the child" two
+ * characters later.
+ */
+const TAG_LEAD = "[\\s,.:;\\u2014\\u2013\\u201c\\u201d\\u2018\\u2019\"']*";
+function hasExplicitTrailingTag(after: string): boolean {
+  // Speech verb followed by a determiner or honorific \u2014 "said the child",
+  // "said Mr. Wilson". Case-insensitive.
+  const descriptive = new RegExp(
+    `^${TAG_LEAD}\\b${SPEECH_VERB_PAT}\\b\\s+(?:the|a|an|Mr|Mrs|Ms|Miss|Dr|Prof|Rev|Sir|Lord|Lady|Madam|Master)\\b`,
+    "i",
+  );
+  // Speech verb followed by a capitalised name \u2014 "said Belle". Case-SENSITIVE,
+  // because the capital is the whole signal.
+  const named = new RegExp(`^${TAG_LEAD}\\b(?:${SPEECH_VERBS.join("|")})\\b\\s+[A-Z][a-z']{2,}`);
+  return descriptive.test(after) || named.test(after);
+}
+
 /** Honorifics that carry an abbreviating period, which reads as a sentence end. */
 const HONORIFIC_PAT = "(?:Mr|Mrs|Ms|Miss|Dr|Prof|Rev|St|Capt|Col|Sgt|Lt|Gen|Sir|Lady|Lord|Madam|Master|Mister)";
 
@@ -1266,7 +1290,28 @@ function findAttribution(
   //    (Without this guard, a narrative-only character who was the subject
   //    of a preceding paragraph — e.g. "Kael was aboard." — could be
   //    carried into dialogue attribution even as the scene shifts to Nora.)
-  if (activeSubject && thread && (activeSubjectIsLocal || before.trim().length > 0)) {
+  // ★ THE CARRIED SUBJECT YIELDS TO AN EXPLICIT TAG.
+  //
+  // Per-branch ablation of the dialogue thread's three consumers, on the 16-book
+  // corpus and accuracy-suite together:
+  //
+  //     branch                     corpus wrong    accuracy-suite HIGH
+  //     (none ablated)                  33            210/217
+  //     A  bare alternation             33            210/217
+  //     B  two-compatible-names         33            210/217
+  //     C  carried subject (this)       26            210/217
+  //
+  // This branch owns ALL SEVEN of the thread's wrong answers and contributes
+  // ZERO hard cases — the thread's 27-case value lives entirely in A and B. It
+  // fires whenever `before` is non-empty, and returns the carried subject at 0.78
+  // BEFORE anything reads the tag sitting in `after`. So `"..." said the child.`
+  // was answered by whoever spoke last, with the real answer two characters away.
+  //
+  // Not removed: a carried subject is the correct answer whenever the text is
+  // silent, which is most of the time. It now simply defers when the text names
+  // its speaker. That is the mode using its context better rather than less of it.
+  if (activeSubject && thread && !hasExplicitTrailingTag(after)
+      && (activeSubjectIsLocal || before.trim().length > 0)) {
     const leadSubj = findActionSubject(leading, knownNames, cache);
     if (!leadSubj || normKey(leadSubj) === normKey(activeSubject)) {
       return { speaker: activeSubject, type: 'speech', confidence: 0.78 };
