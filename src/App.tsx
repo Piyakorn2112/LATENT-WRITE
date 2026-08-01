@@ -956,14 +956,21 @@ export default function App() {
       ? "Inserting scene breaks…"
       : "";
 
+  // ★ NO PILL FOR ORDINARY CHAPTER ANALYSIS. The toolbar orb already animates
+  // for the whole of that pass (Toolbar `isAnalyzing`), so a pill reading
+  // "Analysing chapter…" was a second readout of a state the user can already
+  // see — and on a 1s debounce it reappeared after almost every edit.
+  //
+  // REFINING KEEPS ITS PILL deliberately: the orb animates identically for
+  // both phases, so it cannot distinguish "still working" from "revisiting who
+  // said what". The pill is the only thing that says which, and that phase is
+  // rare enough not to read as noise.
   const statusTask: StatusTask | null = lensActive
     ? null
     : renameTask
-      ?? (analysisRunning
-        ? { kind: "analyzing", label: "Analysing chapter…" }
-        : analysisRefining
-          ? { kind: "analyzing", label: "Refining attribution…" }
-          : null);
+      ?? (analysisRefining
+        ? { kind: "analyzing", label: "Refining attribution…" }
+        : null);
 
   // Initialize secondaryId when entering split mode
   useEffect(() => {
