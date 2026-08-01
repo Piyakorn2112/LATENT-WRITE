@@ -446,16 +446,21 @@ async function runNewAsync(p: Prepared): Promise<Predicted[]> {
   let events = detectNarrativeEventsFor(p);
   if (SALIENCE_MIN !== null) {
     const { eventSalienceBatch, chapterCentrality } = await import("../src/lib/narrative-lm");
-    // Default matches what story-graph.ts ships. A suite testing a configuration
+    // Defaults match what story-graph.ts ships. A suite testing a configuration
     // nobody runs is measuring fiction, which this file has already been caught
-    // doing once.
-    const cw = Number(process.env.CENTRALITY_W ?? 0.6);
+    // doing once. Centrality shipped at 0.6 until the differential probe showed
+    // it drove 86% of the LM's WRONG promotions; env knobs keep both dials
+    // sweepable.
+    const cw = Number(process.env.CENTRALITY_W ?? 0);
     events = await refineEventSalience(events, {
       scorer: eventSalienceBatch,
       minSalience: SALIENCE_MIN,
+      keepFloor: process.env.KEEP_FLOOR ? Number(process.env.KEEP_FLOOR) : 0.8,
       weight: Number(process.env.SALIENCE_W ?? 0),
-      centrality: (clauses) => chapterCentrality(clauses, p.paragraphs),
-      centralityWeight: cw,
+      ...(cw > 0 ? {
+        centrality: (clauses: string[]) => chapterCentrality(clauses, p.paragraphs),
+        centralityWeight: cw,
+      } : {}),
     });
   }
   return events.map(toPredicted);

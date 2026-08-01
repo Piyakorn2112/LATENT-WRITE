@@ -181,7 +181,7 @@ export async function enrichChapterEntryWithLM(
   if (paras.length === 0 || entry.majorEvents.length === 0) return entry;
 
   try {
-    const { classifyEventDetail, semanticSimilarity, hasEmbedder, eventSalienceBatch, chapterCentrality } =
+    const { classifyEventDetail, semanticSimilarity, hasEmbedder, eventSalienceBatch } =
       await import("./narrative-lm");
     const { refineEventSalience } = await import("./narrative-events");
 
@@ -226,6 +226,14 @@ export async function enrichChapterEntryWithLM(
           // cliff rather than a slope: -0.2 prunes 3 events, -0.05 prunes 65, 0.1
           // prunes 174 of 204 and destroys the output. Do not nudge it casually.
           minSalience: -0.05,
+          // ★ THE PRUNE'S OVERRIDE, measured on DEV after the label/selection
+          // work: the raw -0.05 cut deleted 18 real majors from the inspector
+          // rail (the differential probe found only 64% of its chip-level
+          // removals were right). An event the SYNC engine scored >= 0.8
+          // survives the veto — structural evidence that strong outranks the
+          // embedding. DEV: rail major recall 40.7 -> 43.0 AND precision@3
+          // 51.7 -> 52.5; 0.75 was tried and was worse on both chips numbers.
+          keepFloor: 0.8,
           // ★ THE SALIENCE BLEND IS OFF, AND THAT IS A MEASURED DECISION.
           //
           // `weight` multiplies the contrastive event-vs-description score into
@@ -244,17 +252,19 @@ export async function enrichChapterEntryWithLM(
           // churn, zero accuracy. MiniLM's event-vs-description judgement is good
           // enough to PRUNE with and not good enough to RANK with, on this corpus.
           weight: 0,
-          // Chapter centrality: how close each clause sits to what the chapter is
-          // about. Sign and weight both MEASURED, not assumed, because every
-          // intuition-set weight in this engine has been wrong. Re-swept after the
-          // salience term came out, reading precision@3 / major shown:
-          //     0.2 -> 49.1/16.9   0.35 -> 49.1/16.9   0.45 -> 50.9/18.6
-          //     0.6 -> 50.9/22.0   0.8 -> 49.1/20.3
-          // Still a plateau rather than a lucky point, and 0.6 is the best corner
-          // of it. An earlier sweep including negative weights fell away hard,
-          // which is what confirmed the direction.
-          centrality: (clauses) => chapterCentrality(clauses, paras),
-          centralityWeight: 0.6,
+          // ★ CHAPTER CENTRALITY IS OUT, and it went out the same way it came
+          // in: measured. It earned its 0.6 on an earlier engine state
+          // (0.6 -> 50.9/22.0 on that sweep). Re-measured after the label and
+          // selection work, the differential probe showed centrality was the
+          // engine of BAD promotions — 86% of wrong chips the LM pushed into
+          // the top 3 carried the "central" tag vs 71% of right ones — and the
+          // clean re-sweep read precision@3 / major shown:
+          //     0.6 -> 51.7/25.2    0.3 -> 51.7/25.9    0 -> 51.7/26.7
+          // Identical chips, MORE majors with it gone: on-topic is not the
+          // same thing as eventful. Removing it also removes one embed per
+          // paragraph — the most expensive part of this pass (~0.4s median
+          // chapter, ~1.1s at p90) — so the LM path got faster AND better.
+          // chapterCentrality itself stays in narrative-lm.ts for future use.
         },
       );
       const keep = new Set(refined.map((r) => `${r.paragraphIndex}|${r.label}`));

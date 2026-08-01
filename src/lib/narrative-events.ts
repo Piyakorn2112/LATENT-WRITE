@@ -1105,6 +1105,7 @@ function findAgent(
   nameRe: RegExp | null,
   carried: string | null,
   recurringCaps: Set<string>,
+  windowNames: readonly string[] = [],
 ): AgentHit | null {
   if (nameRe) {
     nameRe.lastIndex = 0;
@@ -1115,9 +1116,32 @@ function findAgent(
   }
   const p = clause.match(/^\s*(She|He|They|I|We|It)\b/);
   if (p) {
-    const resolved = carried && SUBJECT_PRONOUNS.has(p[1].toLowerCase()) && p[1].toLowerCase() !== "it"
+    const pron = p[1];
+    const lower = pron.toLowerCase();
+    let resolved = carried && SUBJECT_PRONOUNS.has(lower) && lower !== "it"
       ? carried
-      : p[1];
+      : pron;
+    // ★ She/He resolve through the RECENT-NAME WINDOW too (the owner's ask:
+    // the chip should say the cast name, not the pronoun, when the engine can
+    // be confident). Two rules, both deliberately conservative — a wrong name
+    // in a chip is worse than a pronoun:
+    //   · no carry, and exactly ONE known name on stage in the last three
+    //     sentences → that name is who "she/he" is;
+    //   · a carry the window CONTRADICTS (names on stage, the carried one not
+    //     among them) is stale — fall back to the pronoun rather than guess.
+    // "I"/"We" never resolve this way (first-person narrators are not cast),
+    // and "It" never resolves at all.
+    if (lower === "she" || lower === "he") {
+      if (resolved === pron && windowNames.length === 1) {
+        resolved = windowNames[0];
+      }
+      // MEASURED AND REJECTED (kept for the record): also vetoing a carry the
+      // window contradicts — carried name absent from the last three sentences
+      // while other names are on stage → fall back to the pronoun. On DEV it
+      // traded names for pronouns (shown named agent 81.6 -> 79.2) and cost
+      // 0.8pp of precision@3. The carry is right more often than the window
+      // when they disagree.
+    }
     return { name: resolved, end: (p.index ?? 0) + p[0].length, kind: "pronoun" };
   }
 
@@ -1723,6 +1747,51 @@ function detectNarrativeEventsUncached(
   const candidates: Candidate[] = [];
   let carriedSubject: string | null = null;
 
+  // ── Rolling window of explicitly-named characters, for pronoun resolution.
+  //    The carry alone dies at every stretch of narration that produces no
+  //    candidate ("She pushed up the sash" opening a chapter stayed "She"),
+  //    so every sentence also records which known names it MENTIONS; a
+  //    clause-initial she/he can then resolve when exactly one name has been
+  //    on stage in the last three sentences. Places are excluded — a window
+  //    of ["Green Gables"] must never make "she" a house.
+  const nameSweep = nameRe ? new RegExp(nameRe.source, "gi") : null;
+  const recentNames: Array<{ name: string; tick: number }> = [];
+  let sentenceTick = 0;
+  // ── Place-shape statistics, world-data or not. The place filter above only
+  //    exists after an entity scan, and the first live test of the window
+  //    resolved "She" to GREEN GABLES — a house — because nothing else had
+  //    been on stage for three sentences. A name that mostly occurs behind a
+  //    locative preposition ("at Green Gables", "in Avonlea") is a place
+  //    whatever the world data says, and never a pronoun referent.
+  const nameShape = new Map<string, { locative: number; agentive: number; total: number }>();
+  const LOCATIVE_BEFORE = /\b(?:at|in|into|near|towards?)\s+$/i;
+  // Auxiliaries make equative and passive frames ("This was Green Gables",
+  // "Green Gables was built") — being followed by one is not ACTING.
+  const AUX = new Set(["was", "were", "is", "are", "be", "been", "being", "had",
+    "has", "have", "would", "could", "will", "shall", "should", "may", "might",
+    "must", "did", "does", "do", "and", "or"]);
+  // Irregular pasts that looksVerbal cannot see (they are not change verbs, so
+  // IRREGULAR_PAST — which feeds detection — must not learn them; this set
+  // feeds ONLY the agentivity stat). "Anne awoke" is how a referent enters.
+  const AGENTIVE_EXTRA = new Set(["awoke", "woke", "ran", "ate", "drank",
+    "slept", "wept", "sprang", "leapt", "crept", "shook", "knelt", "clung",
+    "swung", "hung", "strode", "rode", "drove", "flew", "grew", "wore", "met",
+    "got", "bade", "smiled", "laughed", "nodded", "sighed"]);
+  const eligibleSpeakers = new Set<string>();
+  // ★ A pronoun referent must have EARNED personhood in this chapter: either
+  // it has acted (name followed by a real, non-auxiliary verb — "Anne awoke")
+  // or it has spoken (attributed speaker). The first live test resolved "She"
+  // to GREEN GABLES off a predicate nominal ("This was Green Gables"), which
+  // passes every frequency and locative test — but a house never acts and
+  // never speaks, and that is the difference that holds.
+  const personShaped = (name: string): boolean => {
+    const key = name.toLowerCase();
+    if (eligibleSpeakers.has(key)) return true;
+    const stat = nameShape.get(key);
+    if (!stat || stat.agentive === 0) return false;
+    return stat.total === 0 || stat.locative / stat.total <= 0.5;
+  };
+
   // ── Place names, for agent validation. "Green Gables builds" shipped at 77%
   //    because a place name resolves through the same path as a character —
   //    the defect the passive-clause experiment (below) failed to fix because
@@ -1767,6 +1836,12 @@ function detectNarrativeEventsUncached(
       return others.size === 1 ? [...others][0] : undefined;
     };
 
+    for (const sSeg of segments) {
+      if (sSeg.type === "speech" && sSeg.speaker && (sSeg.confidence ?? 0) >= 0.65) {
+        eligibleSpeakers.add(sSeg.speaker.toLowerCase());
+      }
+    }
+
     for (let si = 0; si < sentences.length; si++) {
       const sent = sentences[si];
       const text = sent.text;
@@ -1780,13 +1855,52 @@ function detectNarrativeEventsUncached(
       );
 
       const mood = moodOf(text);
+
+      // The window holds names from PRIOR sentences only. Recording the
+      // current sentence first would let "She wrote to Nora" resolve its own
+      // subject to Nora — the object of the very clause under question.
+      //
+      // ★ Resolution rule: the MOST RECENT eligible name, if it is close
+      // enough (within 8 sentences) and unrivalled — the nearest DIFFERENT
+      // eligible name must be at least 4 sentences older. A fixed short
+      // window missed the ordinary case where the referent enters once and a
+      // pronoun trail carries her ("Anne awoke... she... she... She pushed"),
+      // while a two-name scene stays ambiguous and keeps the pronoun.
+      sentenceTick++;
+      while (recentNames.length && recentNames[0].tick < sentenceTick - 12) recentNames.shift();
+      let windowNames: string[] = [];
+      for (let ri = recentNames.length - 1; ri >= 0; ri--) {
+        const last = recentNames[ri];
+        if (!personShaped(last.name)) continue;
+        if (sentenceTick - last.tick > 8) break;
+        const rival = [...recentNames].reverse()
+          .find((r) => r.name !== last.name && personShaped(r.name));
+        if (!rival || last.tick - rival.tick >= 4) windowNames = [last.name];
+        break;
+      }
+      if (nameSweep) {
+        nameSweep.lastIndex = 0;
+        for (const m of text.matchAll(nameSweep)) {
+          if (placeNames.has(m[0].toLowerCase())) continue;
+          const key = m[0].toLowerCase();
+          const stat = nameShape.get(key) ?? { locative: 0, agentive: 0, total: 0 };
+          stat.total++;
+          if (LOCATIVE_BEFORE.test(text.slice(Math.max(0, (m.index ?? 0) - 10), m.index ?? 0))) stat.locative++;
+          const after = text.slice((m.index ?? 0) + m[0].length).match(/^\s+([a-z']+)/);
+          if (after && !AUX.has(after[1]) && (looksVerbal(after[1]) || AGENTIVE_EXTRA.has(after[1]))) stat.agentive++;
+          nameShape.set(key, stat);
+          recentNames.push({ name: m[0], tick: sentenceTick });
+          if (recentNames.length > 24) recentNames.shift();
+        }
+      }
+
       // Annotated explicitly: both branches return `Candidate | null`, and
       // without the annotation TypeScript follows Candidate → dialogueCandidate
       // → Candidate and reports a circular inference (TS7022).
       const cand: Candidate | null = seg
         ? dialogueCandidate(text, sent, pi, si, seg, mood,
             seg.speaker ? addresseeOf(seg.speaker) : undefined)
-        : narrationCandidate(text, sent, pi, si, nameRe, carriedSubject, mood, recurringCaps);
+        : narrationCandidate(text, sent, pi, si, nameRe, carriedSubject, mood, recurringCaps, windowNames);
 
       if (!cand) continue;
 
@@ -2119,10 +2233,11 @@ function narrationCandidate(
   carried: string | null,
   mood: MoodFlags,
   recurringCaps: Set<string>,
+  windowNames: readonly string[] = [],
 ): Candidate | null {
   // A named character or pronoun first; failing that, a definite noun phrase.
   _funnel.sentences++;
-  const primary = findAgent(text, nameRe, carried, recurringCaps);
+  const primary = findAgent(text, nameRe, carried, recurringCaps, windowNames);
   if (primary) _funnel.agentNamedOrPronoun++; else _funnel.entityTried++;
   let agent = primary ?? findEntitySubject(text);
   // Fallback ONLY — cannot change any clause that already finds a subject.
@@ -2131,7 +2246,7 @@ function narrationCandidate(
     bodyOffset = frontedAdverbialLength(text);
     if (bodyOffset > 0) {
       const body = text.slice(bodyOffset);
-      agent = findAgent(body, nameRe, carried, recurringCaps) ?? findEntitySubject(body);
+      agent = findAgent(body, nameRe, carried, recurringCaps, windowNames) ?? findEntitySubject(body);
       if (!agent) bodyOffset = 0;
     }
   }
@@ -2571,6 +2686,11 @@ export interface SalienceRefineOptions {
   centralityWeight?: number;
   /** Drop events below this. Tuned by the suite; see the sweep in its comments. */
   minSalience?: number;
+  /** ★ The prune's override: an event whose SYNC confidence (pre-blend) is at
+   *  least this survives even below minSalience. The -0.05 cut deletes real
+   *  majors from the rail (18 on DEV when measured); structural evidence
+   *  strong enough should outvote the embedding. Unset = pure cut. */
+  keepFloor?: number;
   /** How hard the LM score moves the ranking, relative to the sync confidence. */
   weight?: number;
 }
@@ -2587,8 +2707,10 @@ export async function refineEventSalience(
   const minSalience = options.minSalience ?? -Infinity;
   const weight = options.weight ?? 0.5;
 
+  const keepFloor = options.keepFloor ?? Infinity;
   const rescored = events.map((e, i) => {
     const s = scores[i] ?? 0;
+    const syncConfidence = e.confidence;
     // Blend rather than replace. The sync score carries structural evidence the
     // LM cannot see (realis mood, agent kind, object class); the LM carries
     // semantic evidence the structure cannot. Neither should win outright.
@@ -2603,6 +2725,7 @@ export async function refineEventSalience(
         ...(central ? [c >= 0.35 ? "central" : "peripheral"] : []),
       ],
       _salience: s,
+      _sync: syncConfidence,
     };
   });
 
@@ -2613,8 +2736,8 @@ export async function refineEventSalience(
   // order as of the most recent scoring pass", and any future pass that touches
   // confidence owes the same three lines.
   return rescored
-    .filter((e) => e._salience >= minSalience)
+    .filter((e) => e._salience >= minSalience || e._sync >= keepFloor)
     .sort((a, b) => b.confidence - a.confidence)
-    .map(({ _salience, ...e }, rank) => { void _salience; return { ...e, rank }; })
+    .map(({ _salience, _sync, ...e }, rank) => { void _salience; void _sync; return { ...e, rank }; })
     .sort((a, b) => a.tensionPosition - b.tensionPosition);
 }
