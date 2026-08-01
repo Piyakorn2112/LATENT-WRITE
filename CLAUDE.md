@@ -254,7 +254,34 @@ knob-glass solves the normal analytically instead (the method the STM /about
 hero uses for its glass stripes: analytic shape ⇒ exact SDF and exact normal,
 no probes) and reads the displacement profile from a 1-D LUT.
 
-It also authors the map at the density the knob is DISPLAYED at. The knob only
+★ **Map density is capped by the 8-BIT DISPLACEMENT CHANNEL — do not raise it
+to match the display size.** One byte moves the sample by `DISP_PX/255` =
+0.157 element px; one texel advances `1/density`. Once a texel is worth about
+one byte, every texel either steps a whole byte (the sampling STALLS) or none
+(it advances fully), so the refraction band alternates — and that alternation
+is a comb of stripes over any hard backdrop edge, magnified 2x by the press.
+Measured at density 6: 56% of band texels stalled, advances reading
+`1 1 1 .06 1 .06 1 .06`. At density 3 the dominant step is a gentle 0.53x.
+The ceiling is `255 / (2·DISP_PX)` = 3.19, and the knobs sit at 3.
+`maxUsefulDensity()` enforces it; a caller may ask for press density and will
+be capped. If a sharper pressed knob is ever wanted the lever is a FINER
+ENCODING (a second channel for the low byte) or a smaller DISP_PX — never more
+texels. `npm run diagnose:knob` prints the advance distribution that shows it.
+
+★ **The knobs' refraction profile is NOT the squircle→Snell curve.** That
+curve crams its whole pull into the first ~10% of the bezel, which a knob's
+thin bezel cannot carry: measured on the shipped map, 1228 of 6580 interior
+texels sampled BACKWARDS (19% of the knob), which is the mirrored comb the
+general engine's own "known artifact" note describes. The knobs use a
+bounded-derivative falloff instead — `g(t) = (1−t)²(1+2t)`, max|g′| = 1.5 —
+with the RIM MAGNITUDE unchanged, so the glass bends exactly as hard at its
+edge and merely decays more gently inward. Fold-free needs
+`peak ≤ bezel/1.5`; the 32x24 toggle knob asks 4.78px of 6.40px and passes
+untouched, the 20x14 range knob asks 6.97px of 3.73px and is scaled to fit
+(x0.535) rather than shipped torn.
+
+It also authors the map at the density the knob is DISPLAYED at, up to that
+ceiling. The knob only
 wears glass while pressed, and the press scales it to 2×, so a map authored
 from the layout box was magnified across the swollen knob — 1.5 texels per
 displayed pixel where 3 was intended. `KNOB_DISPLAY_SCALE` in the filter is

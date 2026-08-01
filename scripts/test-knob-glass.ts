@@ -25,7 +25,9 @@
  *   node node_modules/tsx/dist/cli.mjs scripts/test-knob-glass.ts
  */
 
-import { buildKnobMapPixels, dispExact, type KnobPreset } from "../src/lib/knob-glass";
+import {
+  buildKnobMapPixels, dispExact, foldFreeBudget, maxUsefulDensity, type KnobPreset,
+} from "../src/lib/knob-glass";
 
 let failed = 0;
 const ok = (label: string, cond: boolean, detail?: string) => {
@@ -42,10 +44,13 @@ const REQ = (k: (typeof KNOBS)[number], extra: Record<string, unknown> = {}) => 
   preset: k.preset, bezel: null, displayScale: 2, mapPad: 6, ...extra,
 });
 
-// ─── 1 · The physics is the general engine's, bit for bit ────────────────────
-// Re-derived here from the published constants rather than imported, so a
-// silent edit to either copy shows up as a disagreement.
-console.log("physics — squircle profile and Snell solve:");
+// ─── 1 · The two invariants the refraction rests on ─────────────────────────
+// The profile is NOT the general engine's any more — a knob's bezel is far too
+// thin for the squircle→Snell curve, which crams its whole pull into the first
+// ~10% and tears the backdrop (measured: 1228 of 6580 interior texels sampling
+// BACKWARDS). What must hold is (a) the rim bends exactly as hard as the
+// physics says, and (b) the decay inward is gentle enough never to fold.
+console.log("refraction profile — rim strength and the fold-free bound:");
 {
   const h = (t: number) => (1 - (1 - t) ** 4) ** 0.25;
   const dh = (t: number) => (h(Math.min(t + 5e-4, 1)) - h(Math.max(t - 5e-4, 0))) / 1e-3;
@@ -57,12 +62,22 @@ console.log("physics — squircle profile and Snell solve:");
     if (sinSq >= 1) return 0;
     return (Math.sqrt(1 - sinSq) - eta * nZ) * (slope / nLen);
   };
-  let worst = 0;
-  for (let i = 0; i <= 2000; i++) {
-    const t = i / 2000;
-    worst = Math.max(worst, Math.abs(dispExact(t) - snell(Math.min(dh(t), 5.0), 1 / 1.5)));
+  const rimPhysics = snell(Math.min(dh(0), 5.0), 1 / 1.5);
+  ok("rim magnitude is the squircle→Snell value, unchanged",
+    Math.abs(dispExact(0) - rimPhysics) < 1e-12, `${dispExact(0)} vs ${rimPhysics}`);
+  ok("the profile reaches zero at the bezel depth", dispExact(1) === 0, `${dispExact(1)}`);
+  // max|g'| by dense sampling — the bound the budget is derived from.
+  let maxSlope = 0;
+  for (let i = 1; i <= 20000; i++) {
+    const a = dispExact((i - 1) / 20000) / rimPhysics;
+    const b = dispExact(i / 20000) / rimPhysics;
+    maxSlope = Math.max(maxSlope, Math.abs(b - a) * 20000);
   }
-  ok("displacement profile identical to the general engine", worst === 0, `max |Δ| ${worst}`);
+  ok("normalised slope never exceeds 1.5", maxSlope <= 1.5 + 1e-6, `max |g'| ${maxSlope.toFixed(4)}`);
+  ok("the profile decays monotonically", (() => {
+    for (let i = 1; i <= 2000; i++) if (dispExact(i / 2000) > dispExact((i - 1) / 2000)) return false;
+    return true;
+  })());
 }
 
 // ─── 2 · The LUT's error is BOUNDED (it is not, and cannot be, zero) ─────────
@@ -147,22 +162,46 @@ for (const k of KNOBS) {
     worstOutsideBand > 1, `worst outside the band ${worstOutsideBand.toFixed(1)}° (expected: the tie)`);
 }
 
-// ─── 4 · Density follows the press ───────────────────────────────────────────
-console.log("\ndensity — authored per DISPLAYED pixel, not per layout pixel:");
+// ─── 4 · Density is capped by the 8-BIT CHANNEL, not by the press ───────────
+// This is the banding fix. A displacement byte moves the sample by dispPx/255
+// element px; a texel advances 1/density. Once one texel is worth about one
+// byte, every texel either steps a whole byte (the sampling STALLS) or none
+// (it advances fully) — the band alternates, and that alternation is a comb.
+// Measured at density 6: 56% of band texels stalled, advances reading
+// "1 1 1 .06 1 .06 1 .06" — the reported banding stripes. At density 3 the
+// dominant step is a gentle 0.53x.
+console.log("\ndensity — capped by the displacement quantisation:");
+{
+  const DISP = 40;
+  const ceiling = maxUsefulDensity(DISP);
+  ok(`ceiling at DISP_PX ${DISP} is ${ceiling.toFixed(2)} texels/element px`,
+    Math.abs(ceiling - 255 / 80) < 1e-9);
+  for (const k of KNOBS) {
+    // Ask for press density (2x) and check the engine refuses to exceed the cap.
+    const asked = buildKnobMapPixels(REQ(k, { displayScale: 2, dispPx: DISP }));
+    ok(`${k.label}: asked for 2x press density, authored at ${asked.density}`,
+      asked.density <= Math.floor(ceiling), `${asked.density} > ${Math.floor(ceiling)}`);
+    // And that a caller asking for less still gets less.
+    const small = buildKnobMapPixels(REQ(k, { displayScale: 1, dispPx: DISP }));
+    ok(`${k.label}: a smaller request is honoured (${small.density})`, small.density <= asked.density);
+  }
+}
+
+// ─── 4b · The fold-free budget holds for what actually ships ────────────────
+console.log("\nfold-free budget — peak pull against the bezel it must fit in:");
 for (const k of KNOBS) {
-  const at1 = buildKnobMapPixels(REQ(k, { displayScale: 1 }));
-  const at2 = buildKnobMapPixels(REQ(k, { displayScale: 2 }));
-  const texelsPerElemPx = (m: { outW: number; padX: number }) =>
-    (m.outW - 2 * Math.round((m.padX * (m.outW)) / (k.elemW + 2 * m.padX))) / k.elemW;
-  ok(`${k.label}: displayScale 2 doubles output texels per axis`,
-    at2.outW > at1.outW * 1.9 && at2.outW < at1.outW * 2.1,
-    `${at1.outW} -> ${at2.outW}`);
-  void texelsPerElemPx;
-  // 3 texels per element px at scale 1 is the approved density; at press the
-  // knob is displayed 2x, so 6 per layout px IS 3 per displayed px.
-  const elemTexels = at2.outW - 2 * Math.round((6 * at2.outW) / (k.elemW + 12));
-  ok(`${k.label}: ~6 texels per layout px (= 3 per pressed px)`,
-    Math.abs(elemTexels / k.elemW - 6) < 0.35, `${(elemTexels / k.elemW).toFixed(2)}`);
+  const halfShorter = Math.min(k.elemW, k.elemH) / 2;
+  const bezel = Math.min(120, halfShorter * 0.8);
+  const gain = k.preset === "toggle-control-knob" ? 0.24 : 0.35;
+  const peakPx = (40 * 127 * gain) / 255;
+  const budget = foldFreeBudget(bezel);
+  const m = buildKnobMapPixels(REQ(k, { dispPx: 40 }));
+  // What SHIPS must fit the budget — the engine clamps when the request does
+  // not. The toggle knob passes untouched; the range knob is scaled to ~half
+  // because its bezel is too thin to carry the pull its gain asks for.
+  ok(`${k.label}: shipped peak ${(peakPx * m.foldFreeClamp).toFixed(2)}px ≤ budget ${budget.toFixed(2)}px`
+    + `${m.foldFreeClamp < 1 ? ` (clamped x${m.foldFreeClamp.toFixed(3)})` : ""}`,
+    peakPx * m.foldFreeClamp <= budget + 1e-9);
 }
 
 // ─── 5 · The map is well formed ──────────────────────────────────────────────
@@ -208,8 +247,8 @@ for (const k of KNOBS) {
 console.log("\nbyte tripwire — the map has not drifted:");
 {
   const EXPECTED: Record<string, string> = {
-    "range knob  20x14": "cf452b45-192x156-p6",
-    "toggle knob 32x24": "eeb0ff15-264x216-p6",
+    "range knob  20x14": "ebcf5fd1-96x78-p6",
+    "toggle knob 32x24": "19de2845-132x108-p6",
   };
   for (const k of KNOBS) {
     const m = buildKnobMapPixels(REQ(k));
@@ -288,9 +327,16 @@ console.log("\ncanary — the checks can fail:");
   let diff = 0;
   for (let i = 0; i < good.data.length; i++) if (good.data[i] !== perturbed.data[i]) diff++;
   ok("a 1-parameter perturbation moves the map", diff > 1000, `${diff} bytes`);
-  const sameScale = buildKnobMapPixels(REQ(k, { displayScale: 1 }));
-  ok("displayScale actually changes the output size", sameScale.outW !== good.outW,
-    `${sameScale.outW} vs ${good.outW}`);
+  // ★ This canary used to assert that displayScale changes the output size.
+  // It does NOT any more, and that IS the fix: the engine caps density at the
+  // 8-bit ceiling however much the caller asks for. What still must respond is
+  // the ceiling itself — halve dispPx and one byte becomes worth half as much,
+  // so denser maps become useful again.
+  const finer = buildKnobMapPixels(REQ(k, { displayScale: 2, dispPx: 20 }));
+  ok("a finer dispPx raises the ceiling and the density follows",
+    finer.density > good.density, `${good.density} -> ${finer.density}`);
+  ok("the shipped request is capped regardless of displayScale",
+    buildKnobMapPixels(REQ(k, { displayScale: 8 })).density === good.density);
 }
 
 console.log(failed ? `\nFAILED ${failed}` : "\nPASS — the knob engine is faithful, dense at press, and well formed");

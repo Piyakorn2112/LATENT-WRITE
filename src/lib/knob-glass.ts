@@ -118,6 +118,51 @@ function snellDisp(slope: number, eta: number): number {
 }
 
 /**
+ * ★ THE FOLD-FREE FALLOFF — the shape of the pull across the bezel, and the
+ * fix for the reported banding stripes.
+ *
+ * `feDisplacementMap` GATHERS: `out(P) = backdrop(P + disp(P))`. The backdrop
+ * is BENT only while the sampling position keeps increasing —
+ * `d/dy [ y + disp(y) ] > 0`. Writing the pull as `disp(d) = A · g(d/bezel)`:
+ *
+ *      A · max|g′| ≤ bezel
+ *
+ * The squircle→Snell profile fails that badly on a knob. Its slope is clamped
+ * at 5 right at the rim and collapses within ~10% of the bezel, so max|g′| is
+ * an order of magnitude past 1. Measured on the SHIPPED knob map with that
+ * profile: 1228 of 6580 interior texels sample BACKWARDS — 19% of the knob —
+ * evenly split top/bottom/left/right, with the sampling running to −0.88×
+ * normal at the rim. Backwards sampling re-reads backdrop it has already
+ * read, mirrored and compressed; over the toggle track's hard edge that is a
+ * comb of stripes, and magnified 2× by the press it is impossible to miss.
+ *
+ * ★ THE FIX IS THE SHAPE, NOT THE STRENGTH — a FLATTER falloff lets the SAME
+ * pull stay fold-free. This is the smoothstep complement g(t) = (1−t)²(1+2t):
+ * g(0)=1, g(1)=0, zero slope at both ends, max|g′| = 1.5 exactly (at t = ½).
+ * The budget is then bezel/1.5 = 6.4px for the 32×24 knob against the 4.78px
+ * it asks for — the same rim strength it has today, with no fold at all.
+ *
+ * ★ AND "0 FOLDS" MEASURED AFTER A FIX IS NOT EVIDENCE THE FIX WAS
+ * UNNECESSARY. This profile was reverted once mid-investigation on exactly
+ * that reasoning: the fold count read 0, so the change looked unjustified —
+ * but the 0 was there BECAUSE of it. Restoring the old profile put 1228 folds
+ * straight back. Re-measure the ORIGINAL, not the patched, before concluding
+ * a change did nothing.
+ */
+const MAX_G_SLOPE = 1.5;
+
+/** Bounded-derivative falloff: 1 at the rim → 0 at the bezel depth. */
+function falloff(t: number): number {
+  const u = 1 - t;
+  return u * u * (1 + 2 * t);
+}
+
+/** The rim magnitude, straight from the physics — the squircle's steepest
+ *  slope refracted through Snell. Unchanged; only the decay inward is
+ *  reshaped, so the glass bends exactly as hard at its edge as before. */
+const RIM_DISP = snellDisp(Math.min(dh(0), 5.0), N1 / N2);
+
+/**
  * ★ THE 1-D PROFILE LUT. `disp` is a pure function of t = distToEdge / bezel,
  * so it is the same curve for every knob at every size — built once, here, and
  * read with linear interpolation instead of two `pow()` calls per pixel.
@@ -137,11 +182,7 @@ function snellDisp(slope: number, eta: number): number {
 const LUT_N = 4096;
 const DISP_LUT = (() => {
   const lut = new Float64Array(LUT_N + 1);
-  const eta = N1 / N2;
-  for (let i = 0; i <= LUT_N; i++) {
-    const t = i / LUT_N;
-    lut[i] = snellDisp(Math.min(dh(t), 5.0), eta);
-  }
+  for (let i = 0; i <= LUT_N; i++) lut[i] = RIM_DISP * falloff(i / LUT_N);
   return lut;
 })();
 
@@ -156,7 +197,46 @@ function dispAt(t: number): number {
 
 /** Exact math, for the harness to compare the LUT against. */
 export function dispExact(t: number): number {
-  return snellDisp(Math.min(dh(Math.min(Math.max(t, 0), 1)), 5.0), N1 / N2);
+  return RIM_DISP * falloff(Math.min(Math.max(t, 0), 1));
+}
+
+/** The fold-free budget for a given bezel: the largest peak pull that cannot
+ *  tear the backdrop with this profile. Exported so the harness derives it
+ *  rather than trusting a number here. */
+export function foldFreeBudget(bezelPx: number): number {
+  return bezelPx / MAX_G_SLOPE;
+}
+
+/**
+ * ★ THE MAP'S USEFUL DENSITY IS CAPPED BY THE 8-BIT CHANNEL, not by how big
+ * the element is drawn. This is the whole finding of the banding
+ * investigation, so it lives next to the arithmetic that causes it.
+ *
+ * A displacement byte moves the sample by `dispPx/255` element px — 0.157px
+ * at DISP_PX 40. A texel advances `1/density` element px. The map can only
+ * change in WHOLE bytes, so what a texel does is quantised:
+ *
+ *   density 3  → advance 0.333px ≈ 2 LSB → the usual step is 1 of 2 → the
+ *                sampling advances ~0.53x, smoothly, everywhere.
+ *   density 6  → advance 0.167px ≈ 1 LSB → each texel either steps a whole
+ *                LSB (advance 0.06x, a STALL) or none (advance 1.0x). The
+ *                band alternates stall/advance — measured 56% stalled — and
+ *                that alternation is a COMB. Over a hard backdrop edge,
+ *                magnified 2x by the press, it reads as banding stripes.
+ *
+ * So the ceiling is where one texel is worth about two bytes:
+ *
+ *      density ≤ 255 / (2 · dispPx)      = 3.19 at DISP_PX 40
+ *
+ * Authoring "at display density" — which is what the press-scale change did —
+ * is the right instinct for a colour texture and the WRONG one for a
+ * quantised vector field: past this ceiling there is no more information to
+ * carry, and the extra texels can only stair-step. If a sharper pressed knob
+ * is ever wanted, the lever is a finer encoding (a second channel for the low
+ * byte) or a smaller DISP_PX — never more texels.
+ */
+export function maxUsefulDensity(dispPx: number): number {
+  return 255 / (2 * dispPx);
 }
 
 function clamp01(v: number): number {
@@ -178,9 +258,21 @@ export interface KnobMapRequest {
   displayScale?: number;
   /** Element px of neutral margin to bake in (the rest is an feFlood). */
   mapPad?: number | null;
+  /**
+   * The filter's `feDisplacementMap` scale (DISP_PX in liquid-glass-filter).
+   * The engine needs it to know how many ELEMENT PIXELS its packed bytes will
+   * become, which is what the fold-free budget is measured in.
+   */
+  dispPx?: number;
 }
 
 export interface KnobMapPixels {
+  /** 1 when the requested pull fit the fold-free budget; below 1 when it had
+   *  to be scaled to keep the backdrop from tearing. */
+  foldFreeClamp: number;
+  /** Texels per element pixel this map was authored at — the caller and the
+   *  harness both need it to check the quantisation ceiling. */
+  density: number;
   data: Uint8ClampedArray<ArrayBuffer>;
   mw: number;
   mh: number;
@@ -240,8 +332,28 @@ export function buildKnobMapPixels(req: KnobMapRequest, useLut = true): KnobMapP
   // ★ Density is authored per DISPLAYED pixel. The internal render density is
   // untouched, so this buys resolution where the knob is actually seen without
   // spending another SSAA pass.
-  const mapOversample = MAP_OVERSAMPLE * displayScale;
-  const renderOversample = Math.max(mapOversample, MAP_RENDER_OVERSAMPLE);
+  // ★ Density is requested by the caller but CAPPED here — see
+  // maxUsefulDensity. A caller asking for press density gets it only as far
+  // as the 8-bit channel can carry it.
+  const ceiling = maxUsefulDensity(req.dispPx ?? 40);
+  const mapOversample = Math.min(MAP_OVERSAMPLE * displayScale, Math.max(1, Math.floor(ceiling)));
+  // ★ THE SSAA RATIO MUST BE A WHOLE NUMBER.
+  //
+  // Render 16 → output 6 is a ratio of 2.667, so each output texel averages a
+  // different number of render texels (2,3,3,2,3,3…) and that pattern does not
+  // mirror about the element's centre. Measured on the shipped map: the top
+  // rim's transition began ONE TEXEL EARLIER than the bottom's (G = 158 at the
+  // top edge where the bottom still read 128), while the rest of the field was
+  // perfectly odd-symmetric. At the rim the profile moves 30 bytes in a single
+  // texel, so that one-texel phase slip is a third of a displayed pixel of
+  // refraction — the top and bottom edges blending unequally, which is exactly
+  // what was reported.
+  //
+  // An integer ratio makes the downscale a symmetric box average, so whatever
+  // the top rim gets, the bottom rim gets. Pick the whole multiple closest to
+  // the SSAA target rather than the target itself.
+  const ssaaSteps = Math.max(1, Math.round(MAP_RENDER_OVERSAMPLE / mapOversample));
+  const renderOversample = mapOversample * ssaaSteps;
 
   const pad = resolveMapPad(elemW, elemH, overflow, MAP_DIVISOR, mapOversample, req.mapPad);
   const renderSize = computeMapSize(elemW, elemH, pad, MAP_DIVISOR, renderOversample);
@@ -264,11 +376,26 @@ export function buildKnobMapPixels(req: KnobMapRequest, useLut = true): KnobMapP
   const flatY = halfH - r;
 
   const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
+
+  // ── THE AMPLITUDE CLAMP, and it is not decoration.
+  //
+  // The packed byte becomes `dispPx · (byte/255 − 0.5)` element px, so this
+  // map's peak pull is `dispPx · 127 · gain / 255`. Fold-free needs it inside
+  // foldFreeBudget(bezel). Measured: the 32x24 toggle knob asks 4.78px of a
+  // 6.40px budget and passes untouched; the 20x14 RANGE knob asks 6.97px of
+  // 3.73px — it wants to bend the backdrop further than its own lens is
+  // thick, which cannot be done without the backdrop tearing. Its pull is
+  // scaled to fit (about half) rather than shipped as a comb of stripes.
+  const dispPx2 = req.dispPx ?? 40;
+  const peakPx = (dispPx2 * 127 * channelGain) / 255;
+  const budgetPx = foldFreeBudget(bezel);
+  const foldFreeClamp = peakPx > budgetPx ? budgetPx / peakPx : 1;
+
+
   const blurRimEnd = Math.max(1, Math.min(halfShorter * BLUR_TRANSITION_PCT, halfShorter));
 
   const sxInv = elemW / mwElem;
   const syInv = elemH / mhElem;
-  const eta = N1 / N2;
   const edgeAaWidth = EDGE_AA_SPAN[preset] * Math.max(sxInv, syInv);
 
   const data = new Uint8ClampedArray(new ArrayBuffer(mw * mh * 4));
@@ -333,7 +460,7 @@ export function buildKnobMapPixels(req: KnobMapRequest, useLut = true): KnobMapP
       if (dispCoverage <= 0) continue;
 
       const t = Math.min(Math.max(distToEdge, 0), bezel) / bezel;
-      const disp = useLut ? dispAt(t) : snellDisp(Math.min(dh(t), 5.0), eta);
+      const disp = useLut ? dispAt(t) : dispExact(t);
       if (disp < 1e-6) continue;
 
       // ── ★ EXACT OUTWARD NORMAL, no probes.
@@ -379,14 +506,24 @@ export function buildKnobMapPixels(req: KnobMapRequest, useLut = true): KnobMapP
       // Untouched pixels already carry the prefill exactly.
       if (rx === 0 && ry === 0 && mask === baselineMask) continue;
       const b = ((py + ovY) * mw + (px + ovX)) * 4;
-      data[b] = (128 + (rx / norm) * 127 * channelGain + 0.5) | 0;
-      data[b + 1] = (128 + (ry / norm) * 127 * channelGain + 0.5) | 0;
+      // ★ SYMMETRIC ROUNDING. `(128 + v + 0.5) | 0` floors, which rounds +v
+      // up and −v down — so a displacement of +0.5 and one of −0.5 land on
+      // bytes 129 and 128, not 129 and 127. That is a 1-LSB (dispPx/255 =
+      // 0.157px) bias between the top half of the knob and the bottom, and it
+      // showed up as the top and bottom rims blending unequally. Rounding
+      // away from zero keeps the field exactly odd about the centre.
+      const vx = (rx / norm) * 127 * channelGain * foldFreeClamp;
+      const vy = (ry / norm) * 127 * channelGain * foldFreeClamp;
+      data[b] = 128 + (vx < 0 ? -Math.round(-vx) : Math.round(vx));
+      data[b + 1] = 128 + (vy < 0 ? -Math.round(-vy) : Math.round(vy));
       data[b + 2] = mask;
       data[b + 3] = 255;
     }
   }
 
   return {
+    foldFreeClamp,
+    density: mapOversample,
     data,
     mw,
     mh,

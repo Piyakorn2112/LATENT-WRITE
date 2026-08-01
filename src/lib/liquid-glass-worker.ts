@@ -305,6 +305,9 @@ interface MapRequest {
    * map at that density — see knob-glass.ts.
    */
   displayScale?: number;
+  /** The filter's feDisplacementMap scale — knob presets need it to size
+   *  their fold-free budget. */
+  dispPx?: number;
 }
 
 interface MapResponse {
@@ -450,6 +453,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
       bezel: req.bezel,
       displayScale: req.displayScale,
       mapPad: req.mapPad,
+      dispPx: req.dispPx,
     });
   }
 

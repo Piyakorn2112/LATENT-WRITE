@@ -172,6 +172,9 @@ function buildMapInWorker(
       id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad,
       // Knobs author their map at press density; every other preset ignores it.
       displayScale: isKnobPreset(preset) ? KNOB_DISPLAY_SCALE : undefined,
+      // …and need the filter's displacement scale to size their fold-free
+      // budget, since that is what turns their packed bytes into element px.
+      dispPx: isKnobPreset(preset) ? DISP_PX : undefined,
     });
   });
 }

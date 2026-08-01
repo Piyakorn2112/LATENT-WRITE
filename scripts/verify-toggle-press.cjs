@@ -162,10 +162,19 @@ app.whenReady().then(async () => {
   console.log(`  => ${perDisplayedCssPx.toFixed(2)} texels per displayed CSS px`
     + ` (${perDevicePx.toFixed(2)} per device px)`);
 
-  // 3 texels per DISPLAYED px is the approved knob density (the 12 -> 3 cut).
-  // Authored from the layout box it landed at 1.5 under the swell.
-  const ok = perDisplayedCssPx >= 2.9;
-  console.log(`  => material is ${ok ? "IN STEP with the swell" : "STRETCHED over the swell"}`);
+  // ★ THIS GATE USED TO DEMAND 3 TEXELS PER DISPLAYED PIXEL, and that was the
+  // wrong invariant — it is not reachable and chasing it caused the banding.
+  // The displacement channel is 8-bit: one byte moves the sample by
+  // dispPx/255 element px, so once a texel advances less than about two bytes
+  // the sampling alternates between stalling and jumping, which is a comb of
+  // stripes. The ceiling is 255/(2·dispPx) = 3.19 texels per ELEMENT px, and
+  // the knobs sit at 3. Density is therefore checked against the ceiling, not
+  // against the display size; sharpness past it has to come from a finer
+  // encoding, not more texels. See src/lib/knob-glass.ts (maxUsefulDensity).
+  const CEILING = 255 / (2 * 40);
+  const ok = texelsPerElemPx <= CEILING + 1e-9 && texelsPerElemPx >= CEILING - 1.2;
+  console.log(`  quantisation ceiling ..... ${CEILING.toFixed(2)} texels/element px`);
+  console.log(`  => density is ${ok ? "WITHIN the 8-bit ceiling" : "PAST the ceiling — expect stripes"}`);
   await win.webContents.executeJavaScript("window.__press(false)");
   console.log(`\nshots: ${OUT}/toggle-press-*.png`);
   app.exit(ok ? 0 : 1);

@@ -30,6 +30,7 @@
     "audit:ood": "tsx scripts/ood-language-audit.ts",
     "test:glass-exact": "tsx scripts/test-liquid-glass-exact.ts",
     "test:knob-glass": "tsx scripts/test-knob-glass.ts",
+    "diagnose:knob": "electron scripts/diagnose-knob-live.cjs",
     "test:glass-fuzz": "tsx scripts/test-liquid-glass-fuzz.ts 1200",
     "test:glass-pixels": "electron scripts/glass-pixel-diff.cjs --diff ref",
     "test:glass-pixels:save": "electron scripts/glass-pixel-diff.cjs --save ref",
