@@ -59,6 +59,14 @@ const ETA = 1 / 1.5;
  * the owner wanted the effect obvious, and at 0.34 the bend maxed out at
  * about 11 device px on a pressed toggle knob.
  *
+ * ★ IT ALSO SETS HOW MUCH OF THE KNOB IS GLASS-EDGE AND HOW MUCH IS FLAT.
+ * The interior beyond the bezel is refraction-FREE by construction, so this
+ * fraction is literally "how far in the bevel reaches": at 0.72 the inner
+ * ~28% of the pill passes the backdrop through untouched. Raising it buys
+ * strength (the pull is capped at bezel/max|g'|) and spends the flat centre;
+ * lowering it does the reverse. That trade is unavoidable — a lens cannot
+ * bend further than its own edge is thick.
+ *
  * ★ NOTE THAT THE REFRACTIVE INDEX IS NOT THE DIAL. `snellDisp` sets the RIM
  * magnitude, but the field is then normalised to the fold-free budget
  * (`amp = peak / RIM_DISP`), so η cancels out entirely — raising it changes
@@ -66,25 +74,60 @@ const ETA = 1 / 1.5;
  * width and how close the pull runs to `bezel / max|g′|`. Those two are the
  * dials; the index only decides the SHAPE the physics gives the rim.
  */
-const BEZEL_FRAC = 0.88;
-/** Bounded-derivative falloff: max|g′| is exactly 1.5, at t = ½. */
-const MAX_G_SLOPE = 1.5;
+const BEZEL_FRAC = 0.72;
 /**
- * ★ HOW CLOSE TO THE FOLD BOUND WE ACTUALLY GO.
+ * ★ THE FALLOFF SHAPE — zero in the middle, strongest at the very edge.
  *
- * `A·max|g′| ≤ bezel` is the bound for the sampling never to REVERSE — but at
- * exactly that bound the advance reaches ZERO at the profile's steepest point,
- * so the backdrop is infinitely compressed there and smears. Sitting on the
- * bound is what made the first "stronger" attempt tear at the cap. This keeps
- * a margin, so the worst local compression is 1 / (1 − SAFETY) rather than
- * infinite: at 0.82 the sampling never advances slower than 0.18× normal —
- * compressed hard, which is what strong glass looks like, but never stalled.
+ * The bevel model the liquid-glass write-ups describe: the glass is FLAT
+ * across its interior (surface normal straight up ⇒ a view ray passes
+ * through undeviated ⇒ no refraction at all) and rolls over through a bevel
+ * at the rim, where the normal swings toward horizontal and the deviation
+ * peaks. So the displacement must be 0 through the middle and climb smoothly
+ * to its maximum AT the edge — which is what this profile is, expressed as
+ * `g(t)`, t = distance-from-edge / bezel, g(0) = 1 at the rim, g(1) = 0.
+ *
+ * ★ WHY IT IS (NEARLY) A LINEAR RAMP, and this is the non-obvious part.
+ * The resample must stay monotone or the backdrop mirrors:
+ *
+ *      A · max|g′| ≤ bezel        ⇒        A ≤ bezel / max|g′|
+ *
+ * and for ANY curve running 1 → 0 across the band, max|g′| ≥ 1, with equality
+ * only for a straight ramp. So every bit of "concentration near the edge"
+ * costs strength: a profile that dumps its fall into the outer tenth has
+ * max|g′| ≈ 10 and must therefore be TEN TIMES weaker to avoid tearing. That
+ * is exactly why the original squircle→Snell curve tore — it is the right
+ * shape for a THICK bevel and far too steep for a knob's thin one.
+ *
+ * The optimum is therefore a ramp with just enough easing at both ends to
+ * avoid a visible ring where it starts and stops. Its derivative is a
+ * trapezoid: 0 at both ends, flat at k in between, with area 1, so
+ * k = 1/(1 − EASE) — only 22% worse than the theoretical floor instead of
+ * 10x, and the interior stays genuinely untouched.
  */
-const FOLD_SAFETY = 0.82;
+const EASE = 0.18;
+const MAX_G_SLOPE = 1 / (1 - EASE);   // 1.22
+
+/**
+ * ★ HOW CLOSE TO THE FOLD BOUND THE PULL ACTUALLY RUNS.
+ *
+ * At exactly `A·max|g′| = bezel` the sampling advance reaches ZERO where the
+ * profile is steepest — infinite compression, which smears rather than bends
+ * (the first "stronger" attempt tore at the cap for precisely this reason).
+ * At 0.85 the sampling never advances slower than 0.15x normal: compressed
+ * hard, which is what a strong glass edge looks like, but never stalled.
+ */
+const FOLD_SAFETY = 0.85;
 
 function falloff(t: number): number {
-  const u = 1 - t;
-  return u * u * (1 + 2 * t);
+  if (t <= 0) return 1;
+  if (t >= 1) return 0;
+  const k = MAX_G_SLOPE;
+  if (t < EASE) return 1 - (k * t * t) / (2 * EASE);
+  if (t > 1 - EASE) {
+    const u = 1 - t;
+    return (k * u * u) / (2 * EASE);
+  }
+  return 1 - (k * EASE) / 2 - k * (t - EASE);
 }
 
 /** Squircle height profile, and its slope — the same optics as everywhere else. */
