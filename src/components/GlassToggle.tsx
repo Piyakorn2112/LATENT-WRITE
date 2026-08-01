@@ -1,8 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 
-/** How long the pressed look is held even for an instant click, so a fast
- *  toggle still shows the knob lift instead of flickering. */
-const MIN_PRESS_MS = 160;
+/**
+ * How long the pressed look is held, even for an instant click.
+ *
+ * ★ THIS MUST BE >= THE CSS PRESS DURATION (0.3s on
+ * `.glass-toggle--pressed .glass-toggle-knob`), and that is the whole point of
+ * it — not a "feels nice" constant.
+ *
+ * A click is pointerdown followed by pointerup ~50ms later, but the swell takes
+ * 300ms to reach scale(2). Release any earlier and the knob REVERSES partway up
+ * and never reaches full size: measured peak 1.906 of 2.000 at a 160ms hold, a
+ * stunted swell that reads as a broken expansion however correct the easing is.
+ *
+ * The version this replaced expressed the same requirement as
+ * `max(MIN_GLASS_ACTIVE_MS - elapsed, PRESS_ANIMATION_MS - elapsed)`, where
+ * PRESS_ANIMATION_MS was 300 — the animation's own length. I collapsed those
+ * two terms into one 160ms constant and dropped the load-bearing one.
+ * verify:toggle-motion now fails if this drops below the CSS duration again.
+ */
+const MIN_PRESS_MS = 300;
 
 interface Props {
   checked: boolean;

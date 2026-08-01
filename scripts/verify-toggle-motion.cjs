@@ -17,6 +17,18 @@ const path = require("node:path");
 
 const CSS = fs.readFileSync(path.join(__dirname, "..", "src", "styles.css"), "utf8");
 
+// ★ Read the component's own hold constant so the harness tests what SHIPS and
+// cannot drift from it. This is the number the bug lived in: the hold must be
+// at least as long as the CSS press duration, or a click reverses the swell
+// before it ever arrives.
+const TSX = fs.readFileSync(path.join(__dirname, "..", "src", "components", "GlassToggle.tsx"), "utf8");
+const HOLD_MS = Number((TSX.match(/const\s+MIN_PRESS_MS\s*=\s*(\d+)/) || [])[1] || 0);
+// The press duration is the 2nd entry of the pressed rule's transition-duration.
+const PRESSED_RULE = CSS.slice(CSS.indexOf(".glass-toggle--pressed .glass-toggle-knob"));
+const PRESS_MS = Math.round(
+  parseFloat((PRESSED_RULE.match(/transition-duration:\s*[\d.]+s,\s*([\d.]+)s/) || [])[1] || "0") * 1000,
+);
+
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -27,7 +39,8 @@ html,body{margin:0;padding:40px;background:#f5f6f8;}
 </body></html>`;
 
 // Record scaleX from the computed transform matrix, plus `left`, each frame.
-const RECORDER = `(async () => {
+const RECORDER = (HOLD) => `(async () => {
+  const HOLD = ${HOLD};
   const tg = document.getElementById('tg');
   const kn = document.getElementById('kn');
   const readScale = () => {
@@ -61,8 +74,28 @@ const RECORDER = `(async () => {
   // The on/off slide, which is a different transition (left, not transform).
   tg.classList.add('glass-toggle--on');
   const slide = await sample(600);
+  tg.classList.remove('glass-toggle--on');
+  await new Promise((r) => setTimeout(r, 500));
 
-  return { rest, press, release, slide };
+  // ★ A REAL CLICK: press, then release after the component's hold, exactly as
+  // GlassToggle does. This is the case the user actually performs, and the one
+  // the earlier harness never exercised — it drove the classes with 500ms gaps,
+  // which quietly guaranteed the swell always had time to finish.
+  const clickOut = [];
+  const t0 = performance.now();
+  tg.classList.add('glass-toggle--pressed');
+  let releasedAt = null;
+  await new Promise((res) => {
+    const tick = () => {
+      const t = performance.now() - t0;
+      clickOut.push({ t, s: readScale(), l: readLeft() });
+      if (releasedAt === null && t >= HOLD) { tg.classList.remove('glass-toggle--pressed'); releasedAt = t; }
+      if (t < 900) requestAnimationFrame(tick); else res();
+    };
+    requestAnimationFrame(tick);
+  });
+
+  return { rest, press, release, slide, click: clickOut, releasedAt };
 })()`;
 
 function analyse(name, samples, key, label) {
@@ -98,12 +131,14 @@ app.whenReady().then(async () => {
   const win = new BrowserWindow({ width: 700, height: 400, show: false });
   await win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(PAGE));
   await new Promise((r) => setTimeout(r, 500));
-  const d = await win.webContents.executeJavaScript(RECORDER);
+  const d = await win.webContents.executeJavaScript(RECORDER(HOLD_MS));
 
   console.log(`\ntoggle knob motion  (resting scale ${d.rest.s.toFixed(3)}, left ${d.rest.l.toFixed(1)}px)`);
   const press = analyse("PRESS", d.press, "s", "scale should ramp 1 -> 2 and SETTLE, not overshoot");
   const release = analyse("RELEASE", d.release, "s", "scale should settle back to 1");
   const slide = analyse("SLIDE (on)", d.slide, "l", "left should travel to the far end");
+  const click = analyse("REAL CLICK", d.click, "s", `press then release after the component's ${HOLD_MS}ms hold`);
+  console.log(`    press duration in CSS ${PRESS_MS}ms, component hold ${HOLD_MS}ms, released at ${Math.round(d.releasedAt)}ms`);
 
   // ★ WHAT THIS CAN AND CANNOT ASSERT.
   //
@@ -129,6 +164,13 @@ app.whenReady().then(async () => {
   if (press.peak > 2.03) fails.push(`press OVERSHOOTS (${press.peak.toFixed(3)}) — wrong easing, should settle on 2`);
   if (release.trough < 0.97) fails.push(`release UNDERSHOOTS (${release.trough.toFixed(3)}) — wrong easing, should settle on 1`);
   if (press.moving < 8) fails.push(`press animated over only ${press.moving} frames`);
+  // ★ THE ONE THAT MATTERS. On a real click the swell must actually ARRIVE.
+  if (HOLD_MS < PRESS_MS) {
+    fails.push(`hold ${HOLD_MS}ms is SHORTER than the ${PRESS_MS}ms press — the swell reverses before it lands`);
+  }
+  if (click.peak < 1.98) {
+    fails.push(`REAL CLICK never reaches full size (peak ${click.peak.toFixed(3)} of 2.000) — stunted swell`);
+  }
   if (release.moving < 8) fails.push(`release animated over only ${release.moving} frames`);
   if (slide.moving < 8) fails.push(`slide animated over only ${slide.moving} frames`);
 
