@@ -170,6 +170,15 @@ const TARGETS = {
    *  100% after, so this is held at 100 — a fragment reaching the timeline is
    *  a defect, not a tuning question. */
   shownWellFormed: 1.0,
+  /** ★ THE OWNER'S ASK, AS NUMBERS: "the quick short sentence that reminds the
+   *  writer what happened... it should surface more specific name or action".
+   *  Two floors over what is SHOWN, set just under the measured DEV values
+   *  (83.3% / 75.8%) at the commit that introduced them — regression tripwires,
+   *  not aspirations. NAMED agent: the label opens with a name, not a pronoun.
+   *  With object: the label says something beyond agent+verb — an object, an
+   *  addressee, a direction. */
+  shownNamedAgent: 0.80,
+  shownWithObject: 0.70,
 };
 
 /**
@@ -501,6 +510,14 @@ interface Totals {
   labelsWellFormed: number;
   /** Chips SHOWN whose label is well formed — the number the writer lives with. */
   topWellFormed: number;
+  /** Chips SHOWN whose label opens with a NAME rather than a pronoun. "Anne
+   *  refuses supper" places the writer instantly; "She refuses supper" makes
+   *  them reconstruct who held the camera. */
+  topNamedAgent: number;
+  /** Chips SHOWN whose label says something beyond agent+verb — an object, an
+   *  addressee, a direction. "Matthew tells Jerry Buote" reminds; "Matthew
+   *  tells" does not. */
+  topWithObject: number;
   exactAnchor: number;
   /** Emitted and matched counting ONLY the top 4 by confidence per chapter,
    *  which is what the timeline actually renders. */
@@ -513,7 +530,7 @@ function emptyTotals(): Totals {
   return {
     gold: 0, goldMajor: 0, predicted: 0, matched: 0, matchedMajor: 0,
     typeCorrect: 0, legacyCorrect: 0, overlapSum: 0, labelsFit: 0,
-    labelsWellFormed: 0, topWellFormed: 0, exactAnchor: 0,
+    labelsWellFormed: 0, topWellFormed: 0, topNamedAgent: 0, topWithObject: 0, exactAnchor: 0,
     topEmitted: 0, topMatched: 0, topMajorMatched: 0,
   };
 }
@@ -547,11 +564,15 @@ function report(name: string, t: Totals): { f1: number; majorRecall: number; pre
   console.log(`  precision@${TIMELINE_CHIP_BUDGET}               ${pct(t.topMatched, t.topEmitted)}`);
   console.log(`  major events SHOWN        ${pct(t.topMajorMatched, t.goldMajor)}`);
   console.log(`  shown labels well formed  ${pct(t.topWellFormed, t.topEmitted)}`);
+  console.log(`  shown labels NAMED agent  ${pct(t.topNamedAgent, t.topEmitted)}`);
+  console.log(`  shown labels with object  ${pct(t.topWithObject, t.topEmitted)}`);
   return {
     f1, majorRecall, precision, fit,
     precisionAtBudget: t.topEmitted ? t.topMatched / t.topEmitted : 0,
     majorInBudget: t.goldMajor ? t.topMajorMatched / t.goldMajor : 0,
     shownWellFormed: t.topEmitted ? t.topWellFormed / t.topEmitted : 0,
+    shownNamedAgent: t.topEmitted ? t.topNamedAgent / t.topEmitted : 0,
+    shownWithObject: t.topEmitted ? t.topWithObject / t.topEmitted : 0,
   };
 }
 
@@ -668,7 +689,12 @@ async function main() {
         if (labelFits(p2.label)) t.labelsFit++;
         if (!labelDefect(p2.label)) t.labelsWellFormed++;
       }
-      for (const c of top) if (!labelDefect(c.label)) t.topWellFormed++;
+      for (const c of top) {
+        if (!labelDefect(c.label)) t.topWellFormed++;
+        const words = c.label.split(/\s+/).filter(Boolean);
+        if (!/^(?:she|he|they|i|we|it|you)$/i.test(words[0] ?? "")) t.topNamedAgent++;
+        if (words.length >= 3) t.topWithObject++;
+      }
       for (const m of matches) {
         if (!m.pred) continue;
         t.matched++;
@@ -708,6 +734,8 @@ async function main() {
     // ★ First, because it is the only one a writer experiences directly.
     [`precision@${TIMELINE_CHIP_BUDGET} (what is SHOWN)`, newEngine.precisionAtBudget, TARGETS.precisionAtBudget],
     ["shown labels well formed", newEngine.shownWellFormed, TARGETS.shownWellFormed],
+    ["shown labels NAMED agent", newEngine.shownNamedAgent, TARGETS.shownNamedAgent],
+    ["shown labels with object", newEngine.shownWithObject, TARGETS.shownWithObject],
     [`major events in the top ${TIMELINE_CHIP_BUDGET}`, newEngine.majorInBudget, TARGETS.majorInBudget],
     ["recall on major events", newEngine.majorRecall, TARGETS.majorRecall],
     ["precision", newEngine.precision, TARGETS.precision],

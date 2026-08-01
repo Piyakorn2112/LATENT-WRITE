@@ -60,7 +60,8 @@
     "verify:toggle-press": "electron scripts/verify-toggle-press.cjs",
     "diff:toggle-sequence": "electron scripts/diff-toggle-sequence.cjs",
     "verify:toggle-tap": "electron scripts/verify-toggle-tap.cjs",
-    "verify:app-toggle": "electron scripts/probe-app-toggle.cjs"
+    "verify:app-toggle": "electron scripts/probe-app-toggle.cjs",
+    "test:label-quality": "tsx scripts/test-label-quality.ts"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",

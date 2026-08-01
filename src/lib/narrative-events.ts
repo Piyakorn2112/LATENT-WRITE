@@ -1298,6 +1298,10 @@ function findObject(rest: string): string | null {
     const clean = stripTrailingPunct(w);
     if (!clean) continue;
     if (OBJECT_TERMINATOR.has(clean) || REFLEXIVE.has(clean)) break;
+    // A degree/time adverb never belongs in an object: it either strands the
+    // object walk on a modifier ("tells Once") or trails a real noun with
+    // noise ("hands glass anyway"). Stop before it, keeping what came first.
+    if (ADVERB_HEADS.has(clean)) break;
     if (OBJECT_STOP.has(clean)) {
       if (out.length) break;
       continue;
@@ -1312,13 +1316,19 @@ function findObject(rest: string): string | null {
     // Strip surrounding punctuation INCLUDING quote marks. Leaving them in
     // produced labels like `Iris commits "I` and `Tessa commits "I want` — the
     // opening quote of the utterance survived into the object.
-    const word = w.replace(/^[^A-Za-z']+/, "").replace(/[^A-Za-z's]+$/, "");
+    // A dash splice is TWO tokens the typesetting glued together — "sash--it"
+    // is "sash" followed by a new clause. Keep the first side only; carrying
+    // both shipped "She pushes sash--it".
+    const word = w.split(/--|—|–/)[0]
+      .replace(/^[^A-Za-z']+/, "").replace(/[^A-Za-z's]+$/, "");
     if (!word) continue;
     // NOTE: rejecting pronoun heads here was tried and measured as a net LOSS
     // (major recall 56% -> 44%): it removed valid objects along with the useless
     // ones. The uselessness of "tells them" is handled by scoring, not by
     // refusing to extract.
     out.push(word);
+    // The dash opened a NEW clause; nothing after it belongs to this object.
+    if (/--|—|–/.test(w)) break;
     if (out.length === 2) break;
   }
   const phrase = out.filter(Boolean).join(" ").trim();
@@ -1375,6 +1385,38 @@ function toPresent(base: string, agent?: string): string {
  */
 const CONTRACTION_REMNANTS = new Set(["ll", "t", "d", "s", "re", "ve", "m", "n", "nt"]);
 
+/** Interrogative heads. An object that opens with one is the shell of a
+ *  question, not its content: "Rachel demands What", "Marilla asks How" tell
+ *  the writer nothing. These shipped because the junk filter only knew about
+ *  contraction remnants. */
+const QUESTION_HEADS = new Set([
+  "what", "who", "whom", "whose", "which", "why", "how", "where", "when",
+]);
+
+/** A whole subject-contraction as a word — "I'm", "you're", "don't". As an
+ *  object it means the strips upstream never reached the quote's content
+ *  ("Marilla commits I'm"), and in any position it reads as a cut-off quote. */
+const CONTRACTION_WORD = /^(?:i|you|he|she|it|we|they|that|there|who|what|don|won|can|ain)['’](?:m|re|ll|ve|d|s|t)$/i;
+
+/** A bare possessive as an object head is a quote cut mid-reference:
+ *  "Bohemian confesses mine", "Fuchs tells ours". Nothing a possessive alone
+ *  points at survives into the label. */
+const POSSESSIVE_HEADS = new Set(["mine", "ours", "yours", "theirs", "hers"]);
+
+/** Degree/time adverbs that mean the object walk stopped on a modifier and
+ *  never reached a noun: "Jake tells Once", "Old man becomes somewhat",
+ *  "Fuchs remembers exactly how". */
+const ADVERB_HEADS = new Set([
+  "once", "somewhat", "exactly", "quite", "rather", "almost", "really",
+  "perhaps", "indeed", "anyway", "anyhow", "however", "twice",
+]);
+
+/** Personal pronouns as object heads. GRAMMATICAL, unlike the above — "Robert
+ *  kisses them" is a fine reminder — so these are not junk. They are merely
+ *  ANONYMOUS, and buildLabel upgrades them to the addressee's name when the
+ *  scene knows one. */
+const PERSONAL_OBJECT_HEADS = new Set(["him", "her", "them", "us", "me", "you", "it"]);
+
 const bare = (w: string) => w.toLowerCase().replace(/[^a-z]/gi, "");
 
 /** True when this object text would make the label worse than having none. */
@@ -1384,6 +1426,20 @@ function isJunkObject(object: string, agent?: string): boolean {
   // Any contraction remnant anywhere in the phrase poisons it: the phrase was
   // cut mid-word, so the words after it are the wrong side of the split.
   if (words.some((w) => CONTRACTION_REMNANTS.has(bare(w)))) return true;
+  if (words.some((w) => CONTRACTION_WORD.test(w))) return true;
+  // A question shell ("What", "How desperate") points at nothing.
+  if (QUESTION_HEADS.has(bare(words[0]))) return true;
+  // A possessive or a stranded modifier as the head reached no noun.
+  if (POSSESSIVE_HEADS.has(bare(words[0]))) return true;
+  if (ADVERB_HEADS.has(bare(words[0]))) return true;
+  // Two personal pronouns in a row is a splice across a clause boundary:
+  // "Jake tells us we" — the "we" belongs to the next clause.
+  for (let i = 1; i < words.length; i++) {
+    if (PERSONAL_OBJECT_HEADS.has(bare(words[i - 1])) &&
+        (PERSONAL_OBJECT_HEADS.has(bare(words[i])) || /^(?:i|we|he|she|they)$/i.test(bare(words[i])))) {
+      return true;
+    }
+  }
   // The agent restated. "Marilla insists Marilla" says one thing twice.
   if (agent && words.some((w) => bare(w) === agent.toLowerCase().trim())) return true;
   return false;
@@ -1401,6 +1457,19 @@ export function labelDefect(label: string): "fragment" | "repeats-agent" | "no-v
   const words = label.split(/\s+/).filter(Boolean);
   if (words.length === 0) return "no-verb";
   if (words.some((w) => CONTRACTION_REMNANTS.has(bare(w)))) return "fragment";
+  // A cut-off quote shipped whole: "Marilla commits I'm", "Rachel tells don't".
+  if (words.some((w) => CONTRACTION_WORD.test(w))) return "fragment";
+  // A question shell after the subject: "Rachel demands What", "Marilla asks
+  // How". The first word is exempt — it is the agent, and a character can be
+  // named Who — but anywhere later a bare interrogative is a quote's skeleton.
+  if (words.slice(1).some((w) => QUESTION_HEADS.has(bare(w)))) return "fragment";
+  // A bare possessive or stranded modifier after the subject reached no noun:
+  // "Bohemian confesses mine", "Jake tells Once", "Old man becomes somewhat".
+  // (Personal pronouns — "kisses them" — are grammatical and NOT flagged.)
+  if (words.slice(1).some((w) => POSSESSIVE_HEADS.has(bare(w)))) return "fragment";
+  if (words.slice(1).some((w) => ADVERB_HEADS.has(bare(w)))) return "fragment";
+  // A dash splice survived object extraction: "She pushes sash--it".
+  if (/--|—|–/.test(label)) return "fragment";
   const seen = new Set<string>();
   for (const w of words) {
     const k = bare(w);
@@ -1426,10 +1495,53 @@ function capitalize(s: string): string {
 const LABEL_REPAIR =
   typeof process !== "undefined" ? process.env?.LABEL_REPAIR !== "off" : true;
 
-function buildLabel(agent: string | undefined, verb: string, object: string | null): string {
+/** How each speech verb takes a PERSON as its object. "Rachel demands Marilla"
+ *  is broken English; "Rachel presses Marilla" is the scene. A verb with no
+ *  entry cannot take the addressee, and the fallback quietly declines. */
+const ADDRESSEE_VERB: Record<string, string> = {
+  asks: "asks", questions: "questions", demands: "presses",
+  tells: "tells", reveals: "tells", announces: "tells",
+  explains: "explains to", admits: "admits to", confesses: "confesses to",
+  concedes: "concedes to", acknowledges: "answers", confirms: "confirms to",
+  warns: "warns", accuses: "accuses", refuses: "refuses", declines: "refuses",
+  agrees: "agrees with", promises: "promises", answers: "answers",
+  objects: "objects to", protests: "protests to", counters: "counters",
+  offers: "offers", argues: "argues with", insists: "insists to",
+  snaps: "snaps at", shouts: "shouts at", swears: "swears to",
+  repeats: "repeats to", says: "speaks to",
+};
+
+/** Exported for scripts/test-label-quality.ts, same reasoning as labelDefect:
+ *  the repair rules deserve direct cases, not just corpus-level rates. */
+export function buildLabel(
+  agent: string | undefined,
+  verb: string,
+  object: string | null,
+  addressee?: string,
+): string {
   const a = agent ? capitalize(agent) : "";
   // A fragment object is worse than no object — see isJunkObject.
   if (LABEL_REPAIR && object && isJunkObject(object, agent)) object = null;
+  // ★ And no object at all is worse than the ADDRESSEE. When a dialogue event's
+  // content came back empty or junk but the scene is a clean two-hander, name
+  // the other party: "Rachel presses Marilla" reminds the writer of the scene;
+  // "Rachel demands" reminds them of nothing. Label-time only — the fallback
+  // never touches scoring or selection — and only through ADDRESSEE_VERB, so
+  // the verb always agrees with a person object.
+  // An ANONYMOUS object upgrades to the addressee too: "Bohemian tells him"
+  // is grammatical but reminds the writer of no one; "Bohemian tells the
+  // Bohemian's actual listener" does. Only the single-pronoun case — a longer
+  // object that merely starts with a pronoun is saying something else.
+  const anonymous = object !== null &&
+    object.split(/\s+/).length === 1 && PERSONAL_OBJECT_HEADS.has(bare(object));
+  if (LABEL_REPAIR && (!object || anonymous) && addressee &&
+      bare(addressee) !== (agent ?? "").toLowerCase().trim()) {
+    const av = ADDRESSEE_VERB[verb.toLowerCase()];
+    if (av) {
+      verb = av;
+      object = capitalize(addressee);
+    }
+  }
   const withObject = [a, verb, object].filter(Boolean).join(" ");
   if (withObject.length <= LABEL_BUDGET) return capitalize(withObject);
   const noObject = [a, verb].filter(Boolean).join(" ");
@@ -1499,6 +1611,10 @@ interface Candidate {
   type: NarrativeEventType;
   object: string | null;
   mood: MoodFlags;
+  /** The scene's OTHER speaker, when the passage is a clean two-hander.
+   *  Used only as a label-time fallback object — "Rachel presses Marilla"
+   *  instead of "Rachel demands" — never for scoring or selection. */
+  addressee?: string;
   /** Entity subject that named or counted nothing — see the entity path. */
   unspecifiedEntity?: boolean;
   score: number;
@@ -1555,7 +1671,11 @@ export function detectNarrativeEvents(
   // ★ Every option that changes the OUTPUT must appear here. A swept parameter
   // missing from the key makes the sweep read the first run's answer back for
   // every setting and report a dead flat curve that looks like "no effect".
-  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${options.positionPriorWeight ?? ""}|${options.typePriorWeight ?? ""}|${(options.knownNames ?? []).length}`;
+  // ★ Every option that can change the OUTPUT must be in this key. worldData
+  // joined that set when place-agent rejection landed — without it here, the
+  // first caller's result was served to a caller with different places, which
+  // is exactly how the rejection silently failed its own test.
+  const key = `${paragraphs.length}|${first.length}|${last.length}|${first.slice(0, 40)}|${last.slice(-40)}|${options.confidenceFloor ?? ""}|${options.maxEvents ?? ""}|${options.positionPriorWeight ?? ""}|${options.typePriorWeight ?? ""}|${(options.knownNames ?? []).length}|${(options.worldData?.places ?? []).map((p) => p.name).join(",")}`;
   if (key === _memoKey) return _memoValue;
   const result = detectNarrativeEventsUncached(paragraphs, speechResults, options);
   _memoKey = key;
@@ -1603,10 +1723,49 @@ function detectNarrativeEventsUncached(
   const candidates: Candidate[] = [];
   let carriedSubject: string | null = null;
 
+  // ── Place names, for agent validation. "Green Gables builds" shipped at 77%
+  //    because a place name resolves through the same path as a character —
+  //    the defect the passive-clause experiment (below) failed to fix because
+  //    it aimed at a different signal. World data knows the difference; when
+  //    an agent is a KNOWN PLACE and not also a character name, the candidate
+  //    is not an actor doing something, it is scenery being described.
+  // The guard against "a character named after a place" reads the EXPLICIT
+  // character list, not knownNames — knownNames is a mixed pool (cast scan +
+  // speakers + recurring proper nouns) that contains the places themselves,
+  // and filtering against it quietly emptied the place set on first test.
+  const explicitCharacters = new Set(
+    (options.worldData?.characters ?? [])
+      .flatMap((c) => [c.name, ...(c.aliases ?? [])])
+      .map((n) => n.toLowerCase()),
+  );
+  const placeNames = new Set(
+    (options.worldData?.places ?? [])
+      .flatMap((p) => [p.name, ...(p.aliases ?? [])])
+      .map((n) => n.toLowerCase())
+      .filter((n) => n && !explicitCharacters.has(n)),
+  );
+
   for (let pi = 0; pi < paraCount; pi++) {
     const paraText = paragraphs[pi];
     const sentences: Sentence[] = splitSentences(paraText);
     const segments = speechResults[pi]?.segments ?? [];
+
+    // ── The scene's other party, for the label's fallback object. Scan a
+    //    ±2-paragraph window for attributed speech; if exactly ONE other
+    //    confident speaker holds the floor, this is a two-hander and that
+    //    speaker is who the current line is said TO. In a crowd the answer is
+    //    nobody: a guessed name in a label is worse than no object.
+    const addresseeOf = (speaker: string): string | undefined => {
+      const others = new Set<string>();
+      for (let qi = Math.max(0, pi - 2); qi <= Math.min(paraCount - 1, pi + 2); qi++) {
+        for (const s of speechResults[qi]?.segments ?? []) {
+          if (s.type !== "speech" || !s.speaker || (s.confidence ?? 0) < 0.65) continue;
+          if (s.speaker !== speaker) others.add(s.speaker);
+          if (others.size > 1) return undefined;
+        }
+      }
+      return others.size === 1 ? [...others][0] : undefined;
+    };
 
     for (let si = 0; si < sentences.length; si++) {
       const sent = sentences[si];
@@ -1625,10 +1784,16 @@ function detectNarrativeEventsUncached(
       // without the annotation TypeScript follows Candidate → dialogueCandidate
       // → Candidate and reports a circular inference (TS7022).
       const cand: Candidate | null = seg
-        ? dialogueCandidate(text, sent, pi, si, seg, mood)
+        ? dialogueCandidate(text, sent, pi, si, seg, mood,
+            seg.speaker ? addresseeOf(seg.speaker) : undefined)
         : narrationCandidate(text, sent, pi, si, nameRe, carriedSubject, mood, recurringCaps);
 
       if (!cand) continue;
+
+      // A known place acting as an agent is scenery, not an event. (See the
+      // placeNames note above; this is the upstream fix the passive-clause
+      // experiment was aiming past.)
+      if (cand.agent && placeNames.has(cand.agent.toLowerCase())) continue;
 
       if (cand.agent && cand.agentKind === "named") carriedSubject = cand.agent;
 
@@ -2106,6 +2271,7 @@ function dialogueCandidate(
   si: number,
   seg: { speaker?: string; confidence: number },
   mood: MoodFlags,
+  addressee?: string,
 ): Candidate | null {
   // An utterance with no attributed speaker cannot become "<who> admits <what>",
   // and a guessed speaker in a label is worse than no event. 0.5 is below
@@ -2157,6 +2323,13 @@ function dialogueCandidate(
   // and "Nora admits something you're" — the frame was gone but its subject
   // pronoun became the object.
   const content = inner
+    // ★ Discourse markers FIRST. Every strip below is ANCHORED to the start of
+    // the utterance, and spoken lines overwhelmingly open with a connective —
+    // "And you know how hard...", "But I'm not going to keep her", "Well, what
+    // of it?". One leading "And" defeated every anchor at once, which is how
+    // "Marilla tells you know" and "Marilla commits I'm" shipped: the frame
+    // strips never fired, so the frame became the object.
+    .replace(/^(?:(?:And|But|So|Well|Oh|Now|Then|Still|Yet|Besides|Anyway|Indeed|Why|Surely|Perhaps|Of course|Nonsense)[,!]?\s+){1,2}/i, "")
     // An imperative opens with its verb ("Come see where I live"), and findObject
     // stops at the first verb-shaped word — so the object came back empty and the
     // event was penalised out of existence. Drop the imperative verb first.
@@ -2210,6 +2383,7 @@ function dialogueCandidate(
     type: act,
     object,
     mood,
+    addressee: addressee && addressee !== seg.speaker ? addressee : undefined,
     score: 0,
     why: [],
   };
@@ -2327,7 +2501,7 @@ function selectEvents(
     const verbSurface = entry.c.channel === "dialogue"
       ? entry.c.verbBase
       : toPresent(entry.c.verbBase, entry.c.agent);
-    const label = buildLabel(entry.c.agent, verbSurface, entry.c.object);
+    const label = buildLabel(entry.c.agent, verbSurface, entry.c.object, entry.c.addressee);
     const key = label.toLowerCase();
     if (seenLabels.has(key)) continue;
     // A CONTENT-LESS label is subsumed by one that shares its agent and verb and
