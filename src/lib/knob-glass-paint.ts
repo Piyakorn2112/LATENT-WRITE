@@ -49,10 +49,38 @@
 /** Air → glass. */
 const ETA = 1 / 1.5;
 
-/** Bezel depth as a fraction of the pill's half-short-side. Rim-hugging. */
-const BEZEL_FRAC = 0.34;
+/**
+ * Bezel depth as a fraction of the pill's half-short-side.
+ *
+ * This is the single dial that sets HOW MUCH the glass can bend: the pull is
+ * bounded by `bezel / max|g′|`, so a wider bezel buys a proportionally
+ * stronger refraction. Kept well under 1 so the lens still reads as an EDGE
+ * rather than the whole button smearing, but pushed up from the first pass —
+ * the owner wanted the effect obvious, and at 0.34 the bend maxed out at
+ * about 11 device px on a pressed toggle knob.
+ *
+ * ★ NOTE THAT THE REFRACTIVE INDEX IS NOT THE DIAL. `snellDisp` sets the RIM
+ * magnitude, but the field is then normalised to the fold-free budget
+ * (`amp = peak / RIM_DISP`), so η cancels out entirely — raising it changes
+ * nothing on screen. How hard this glass bends is set by GEOMETRY: the bezel
+ * width and how close the pull runs to `bezel / max|g′|`. Those two are the
+ * dials; the index only decides the SHAPE the physics gives the rim.
+ */
+const BEZEL_FRAC = 0.88;
 /** Bounded-derivative falloff: max|g′| is exactly 1.5, at t = ½. */
 const MAX_G_SLOPE = 1.5;
+/**
+ * ★ HOW CLOSE TO THE FOLD BOUND WE ACTUALLY GO.
+ *
+ * `A·max|g′| ≤ bezel` is the bound for the sampling never to REVERSE — but at
+ * exactly that bound the advance reaches ZERO at the profile's steepest point,
+ * so the backdrop is infinitely compressed there and smears. Sitting on the
+ * bound is what made the first "stronger" attempt tear at the cap. This keeps
+ * a margin, so the worst local compression is 1 / (1 − SAFETY) rather than
+ * infinite: at 0.82 the sampling never advances slower than 0.18× normal —
+ * compressed hard, which is what strong glass looks like, but never stalled.
+ */
+const FOLD_SAFETY = 0.82;
 
 function falloff(t: number): number {
   const u = 1 - t;
@@ -119,6 +147,10 @@ export interface KnobGlassScene {
    *  much wider; the shading is a border, not a band. Painting the shading
    *  across the whole bezel turned the knob into a black lozenge. */
   rimPx?: number;
+  /** Multiplies the refraction. 1 = the fold-free maximum for this geometry;
+   *  above that the sampling reverses and the backdrop mirrors, so it is
+   *  clamped and reported rather than obeyed blindly. */
+  strength?: number;
   /** Channel separation at the rim, as a fraction of the displacement. Kept
    *  low: it is a glass tell, and past ~0.1 it reads as a colour bug at a
    *  hard backdrop edge rather than dispersion. */
@@ -190,9 +222,13 @@ export function paintKnobGlass(canvas: HTMLCanvasElement, scene: KnobGlassScene)
   const flatX = halfW - r;
   const flatY = halfH - r;
   const bezel = Math.max(1, Math.min(halfW, halfH) * BEZEL_FRAC);
-  // Bounded so the resample cannot fold: A·max|g′| ≤ bezel.
-  const amp = Math.min(RIM_DISP * bezel * 2.2, bezel / MAX_G_SLOPE) / Math.max(RIM_DISP, 1e-6);
-  const chroma = scene.chroma ?? 0.07;
+  // ★ THE FOLD-FREE MAXIMUM, in device px: A·max|g′| ≤ bezel. Asking for more
+  // than this does not make the glass stronger, it makes the backdrop mirror
+  // — so `strength` scales toward it and is clamped at it.
+  const wanted = Math.max(0, scene.strength ?? 1);
+  const peak = (bezel / MAX_G_SLOPE) * FOLD_SAFETY * Math.min(wanted, 1);
+  const amp = peak / Math.max(RIM_DISP, 1e-6);
+  const chroma = scene.chroma ?? 0.04;
   const sat = scene.saturate ?? 1.45;
   const [fr, fg, fb, fa] = parseRgba(scene.fill);
   const edgeHi = scene.edgeHi ?? 0.5;

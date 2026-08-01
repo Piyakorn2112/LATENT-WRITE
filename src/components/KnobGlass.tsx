@@ -37,17 +37,41 @@ export function KnobGlass({ active }: { active: boolean }) {
       const layers: KnobBackdropLayer[] = [];
       let base = "rgb(240,240,242)";
       if (control) {
-        const cRect = control.getBoundingClientRect();
-        const cs = getComputedStyle(control);
-        layers.push({
-          x: cRect.left - knobRect.left,
-          y: cRect.top - knobRect.top,
-          w: cRect.width,
-          h: cRect.height,
-          r: parseFloat(cs.borderRadius) || cRect.height / 2,
-          color: cs.backgroundColor,
-        });
-        // Whatever is behind the control: walk up for the first opaque paint.
+        // ★ EVERY PAINTED THING IN THE CONTROL, in DOM order — not just the
+        // control's own background. The toggle IS its track, but a slider's
+        // track and its PROGRESS FILL are separate children (a 4px rail and a
+        // fill div), so painting only the wrapper drew nothing at all and the
+        // knob showed no progress through its glass.
+        const paintables: Element[] = [control, ...control.querySelectorAll("*")];
+        for (const el of paintables) {
+          if (el === knob || knob.contains(el)) continue;   // never the knob itself
+          const cs = getComputedStyle(el);
+          // ★ OPACITY IS NOT OPTIONAL HERE. The slider's <input> is laid over
+          // the whole control to catch pointer events and is hidden with
+          // `opacity: 0` — but its COMPUTED backgroundColor is opaque white.
+          // Painting it covered the track and the progress fill completely,
+          // which is exactly why the slider knob showed nothing through its
+          // glass. Fold the element's opacity into the layer's alpha instead
+          // of reading the colour alone.
+          const elemOpacity = Number(cs.opacity);
+          if (!(elemOpacity > 0.02)) continue;
+          const bg = cs.backgroundColor;
+          const m = bg.match(/[\d.]+/g);
+          if (!m || m.length < 3) continue;
+          const alpha = (m.length > 3 ? Number(m[3]) : 1) * elemOpacity;
+          if (alpha <= 0.01) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width < 0.5 || r.height < 0.5) continue;
+          layers.push({
+            x: r.left - knobRect.left,
+            y: r.top - knobRect.top,
+            w: r.width,
+            h: r.height,
+            r: parseFloat(cs.borderRadius) || 0,
+            color: `rgba(${m[0]}, ${m[1]}, ${m[2]}, ${alpha})`,
+          });
+        }
+        // Whatever is behind the control: the first opaque ancestor paint.
         let p: HTMLElement | null = control.parentElement;
         while (p) {
           const bg = getComputedStyle(p).backgroundColor;
