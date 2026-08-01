@@ -7258,6 +7258,33 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   -webkit-backdrop-filter: blur(0px) saturate(1.45);
 }
 
+/* ★ THE PAINTED KNOB. While pressed the knob's material is drawn by
+   KnobGlass into a canvas that fills it — the refraction is evaluated per
+   pixel in float instead of gathered through an 8-bit displacement map, which
+   is where the folds, combs and banding all came from. The knob's own
+   background goes transparent so the canvas IS the surface; the specular
+   ::before ring and the drop shadow stay in CSS, over and under it. */
+.glass-toggle-knob--painted,
+.glass-range-knob--painted {
+  /* The canvas paints the surface, so the element's own fill must not double
+     it — but the TINT still belongs to CSS, so it stays a variable the
+     painter reads. Same value the pressed rule used to set as `background`. */
+  --knob-fill: rgba(255, 255, 255, 0.18);
+  background: transparent !important;
+}
+
+.knob-glass-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  pointer-events: none;
+  /* Under the specular ring (::before sits at z-index auto above content). */
+  z-index: 0;
+}
+
 /* Hover + press states: driven by :has() watching the transparent native input */
 .glass-range-wrap:has(.glass-range-input:hover) .glass-range-knob {
   transform: translateY(-50%) scale(1.08);

@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import { KnobGlass } from "./KnobGlass";
 
 interface Props {
   min: number;
@@ -60,7 +61,7 @@ export function GlassRange({
   // the class applies `backdrop-filter: url(#…)`, so an always-on knob carries a
   // live displacement filter every frame it moves. Registration is a one-off;
   // per-frame refraction on a moving element is not.
-  const knobClassName = glassActive ? "glass-range-knob liquid-glass-control-knob" : "glass-range-knob";
+  const knobClassName = glassActive ? "glass-range-knob glass-range-knob--painted" : "glass-range-knob";
 
   return (
     <div className={wrapClassName}>
@@ -70,7 +71,10 @@ export function GlassRange({
         <div
           className={knobClassName}
           style={{ "--glass-range-frac": String(fraction) } as CSSProperties}
-        />
+        >
+          {/* Same painted material as the toggle knob — see KnobGlass. */}
+          <KnobGlass active={glassActive} />
+        </div>
       </div>
       <input
         type="range"

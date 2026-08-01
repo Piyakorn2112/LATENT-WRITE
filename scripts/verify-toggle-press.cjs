@@ -85,97 +85,83 @@ app.whenReady().then(async () => {
   await shot("3-press-settled");
   const held = await probe();
 
-  await win.webContents.executeJavaScript("window.__press(false)");
-  await wait(120);
-  await shot("4-release-120ms");
-  await wait(300);
-  await shot("5-released");
-  const after = await probe();
-
   const show = (label, p) => {
     console.log(`\n  ${label}`);
     console.log(`    transform      ${p.transform}`);
     console.log(`    background     ${p.background}`);
-    console.log(`    backdrop-filter ${p.backdropFilter || "(none)"}`);
     console.log(`    layout box     ${p.layoutW}x${p.layoutH}   painted box ${p.paintedW}x${p.paintedH}`);
   };
-
   console.log("toggle press, real glass engine:");
   show("REST", rest);
   show("PRESS 60ms", mid);
   show("PRESS settled", held);
-  show("RELEASED", after);
 
-  // ★ THE QUESTION THIS LOOP EXISTS TO ANSWER — and it used to answer it with
-  // the wrong number. Comparing the PAINTED box to the LAYOUT box only
-  // restates the CSS transform (it is 2x by design, always), so it reported
-  // "STRETCHED" forever and could never report anything else. What actually
-  // matters is the map's TEXEL DENSITY over the knob as displayed: the engine
-  // authored the map from the layout box, so under the swell a 32x24-authored
-  // map was magnified across a 64x48 knob. knob-glass now authors at press
-  // density, and this measures that directly by reading the real <feImage>.
-  // The knob only wears its glass WHILE PRESSED, so press again to measure —
-  // the first version of this block ran after the release and could only ever
-  // report "no backdrop-filter on the knob".
-  await win.webContents.executeJavaScript("window.__press(true)");
-  await wait(360);
-  const density = await win.webContents.executeJavaScript(`(async () => {
+  // ── THE KNOB IS PAINTED NOW, NOT FILTERED ────────────────────────────────
+  //
+  // The material is a canvas drawn per pixel in float (knob-glass-paint.ts),
+  // so there is no <feImage> to inspect and no texel density to police. The
+  // two things that CAN regress are the two that were actually reported:
+  //   · SHARPNESS — the canvas backing store must carry the press scale, or
+  //     the knob is a magnified bitmap again;
+  //   · BANDING — a comb shows as repeated large jumps between ADJACENT
+  //     pixels along a scanline inside the knob. Smooth refraction crosses
+  //     the track edge once or twice per line; a comb crosses it over and over.
+  const painted = await win.webContents.executeJavaScript(`(() => {
     const knob = document.querySelector('.glass-toggle-knob');
-    const cs = getComputedStyle(knob);
-    const m = /url\\("?#([^")]+)"?\\)/.exec(cs.backdropFilter || "");
-    if (!m) return { error: "no backdrop-filter url on the knob" };
-    const filter = document.getElementById(m[1]);
-    if (!filter) return { error: "filter " + m[1] + " not in the DOM" };
-    const fe = filter.querySelector('feImage');
-    const href = fe && (fe.getAttribute('href') || fe.getAttribute('xlink:href'));
-    if (!href) return { error: "no feImage href" };
-    const img = new Image();
-    img.src = href;
-    await img.decode();
-    const rect = knob.getBoundingClientRect();
-    // The map spans the element plus the baked margin, in ELEMENT units.
-    const feW = parseFloat(fe.getAttribute('width'));
+    const canvas = knob && knob.querySelector('canvas.knob-glass-canvas');
+    if (!canvas) return { error: "the knob has no painted canvas" };
+    const r = knob.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const W = canvas.width, H = canvas.height;
+    const px = ctx.getImageData(0, 0, W, H).data;
+    let jumps = 0, worst = 0, samples = 0;
+    for (const frac of [0.3, 0.5, 0.7]) {
+      const y = Math.round(H * frac);
+      let prev = null;
+      for (let x = 4; x < W - 4; x++) {
+        const i = (y * W + x) * 4;
+        if (px[i + 3] < 250) { prev = null; continue; }
+        const v = 0.213 * px[i] + 0.715 * px[i + 1] + 0.072 * px[i + 2];
+        if (prev !== null) {
+          const dv = Math.abs(v - prev);
+          if (dv > 40) jumps++;
+          if (dv > worst) worst = dv;
+          samples++;
+        }
+        prev = v;
+      }
+    }
     return {
-      id: m[1],
-      mapW: img.naturalWidth,
-      mapH: img.naturalHeight,
-      feW,
-      layoutW: knob.offsetWidth,
-      paintedW: Math.round(rect.width),
-      dpr: window.devicePixelRatio,
+      cssW: Math.round(r.width), dpr, backingW: W, backingH: H,
+      expectedW: Math.round(r.width * dpr),
+      jumps, worst: Math.round(worst), samples,
+      filter: getComputedStyle(knob).backdropFilter,
     };
   })()`);
 
   console.log("");
-  if (density.error) {
-    console.log(`  density: could not measure — ${density.error}`);
-    app.exit(2);
-    return;
-  }
-  // Texels per element pixel, then per pixel as actually displayed.
-  const texelsPerElemPx = density.mapW / density.feW;
-  const perDisplayedCssPx = (texelsPerElemPx * density.layoutW) / density.paintedW;
-  const perDevicePx = perDisplayedCssPx / density.dpr;
-  console.log(`  map ${density.mapW}x${density.mapH} over ${density.feW} element px`
-    + ` = ${texelsPerElemPx.toFixed(2)} texels/element px`);
-  console.log(`  knob displayed at ${density.paintedW}px (layout ${density.layoutW}px, dpr ${density.dpr})`);
-  console.log(`  => ${perDisplayedCssPx.toFixed(2)} texels per displayed CSS px`
-    + ` (${perDevicePx.toFixed(2)} per device px)`);
+  if (painted.error) { console.log(`  painted knob: ${painted.error}`); app.exit(2); return; }
+  console.log(`  knob displayed ${painted.cssW}px css @dpr ${painted.dpr}`);
+  console.log(`  canvas backing ${painted.backingW}x${painted.backingH} (expected ${painted.expectedW} wide)`);
+  console.log(`  backdrop-filter on the knob: ${painted.filter}`);
+  console.log(`  adjacent-pixel jumps > 40 ... ${painted.jumps} of ${painted.samples} steps (worst ${painted.worst})`);
 
-  // ★ THIS GATE USED TO DEMAND 3 TEXELS PER DISPLAYED PIXEL, and that was the
-  // wrong invariant — it is not reachable and chasing it caused the banding.
-  // The displacement channel is 8-bit: one byte moves the sample by
-  // dispPx/255 element px, so once a texel advances less than about two bytes
-  // the sampling alternates between stalling and jumping, which is a comb of
-  // stripes. The ceiling is 255/(2·dispPx) = 3.19 texels per ELEMENT px, and
-  // the knobs sit at 3. Density is therefore checked against the ceiling, not
-  // against the display size; sharpness past it has to come from a finer
-  // encoding, not more texels. See src/lib/knob-glass.ts (maxUsefulDensity).
-  const CEILING = 255 / (2 * 40);
-  const ok = texelsPerElemPx <= CEILING + 1e-9 && texelsPerElemPx >= CEILING - 1.2;
-  console.log(`  quantisation ceiling ..... ${CEILING.toFixed(2)} texels/element px`);
-  console.log(`  => density is ${ok ? "WITHIN the 8-bit ceiling" : "PAST the ceiling — expect stripes"}`);
+  const fails = [];
+  if (Math.abs(painted.backingW - painted.expectedW) > 2) {
+    fails.push(`canvas is not at display resolution (${painted.backingW} vs ${painted.expectedW})`);
+  }
+  if (painted.filter && painted.filter !== "none") {
+    fails.push(`the knob still carries a backdrop-filter (${painted.filter})`);
+  }
+  if (painted.jumps > 8) {
+    fails.push(`${painted.jumps} large adjacent-pixel jumps — that is a comb, the banding is back`);
+  }
+
   await win.webContents.executeJavaScript("window.__press(false)");
+  console.log("");
+  if (!fails.length) console.log("PASS — painted at display resolution, no banding comb, no filter.");
+  else for (const f of fails) console.log(`FAIL — ${f}`);
   console.log(`\nshots: ${OUT}/toggle-press-*.png`);
-  app.exit(ok ? 0 : 1);
+  app.exit(fails.length ? 1 : 0);
 });

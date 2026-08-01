@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { KnobGlass } from "./KnobGlass";
 
 const MIN_GLASS_ACTIVE_MS = 140;
 const PRESS_ANIMATION_MS = 300;
@@ -172,7 +173,7 @@ export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
       }}
     >
       <span
-        className={visualGlassActive ? "glass-toggle-knob liquid-glass-control-knob" : "glass-toggle-knob"}
+        className={visualGlassActive ? "glass-toggle-knob glass-toggle-knob--painted" : "glass-toggle-knob"}
         onAnimationEnd={(e) => {
           if (e.animationName !== "glass-toggle-knob-press-a" && e.animationName !== "glass-toggle-knob-press-b") {
             if (e.animationName === "glass-toggle-knob-release-a" || e.animationName === "glass-toggle-knob-release-b") {
@@ -182,7 +183,14 @@ export function GlassToggle({ checked, onChange, ariaLabel }: Props) {
           }
           setPressAnimating(false);
         }}
-      />
+      >
+        {/* ★ The material is PAINTED, not filtered. The SVG displacement-map
+            path is 8-bit and gathers, which is where every fold / comb /
+            banding artifact this knob ever had came from; this evaluates the
+            same optics per pixel in float, at the DISPLAYED size. See
+            src/lib/knob-glass-paint.ts. */}
+        <KnobGlass active={visualGlassActive} />
+      </span>
     </button>
   );
 }

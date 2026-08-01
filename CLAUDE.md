@@ -254,6 +254,27 @@ knob-glass solves the normal analytically instead (the method the STM /about
 hero uses for its glass stripes: analytic shape ⇒ exact SDF and exact normal,
 no probes) and reads the displacement profile from a 1-D LUT.
 
+★ **The app's knobs are PAINTED, not filtered.** `GlassToggle`/`GlassRange`
+render `KnobGlass` (`src/lib/knob-glass-paint.ts`), which draws the backdrop
+the knob covers and refracts it PER PIXEL IN FLOAT with bilinear sampling —
+the method stm-page uses (`GlassBars` in a shader, `EventOrbit/glassRefract`
+as a canvas resample). Every artifact these knobs ever had came from the
+ENCODING, not the optics: an 8-bit displacement map gathered by the
+compositor quantises (comb), tears where the sampling stops increasing
+(fold), and is authored in the layout box then magnified by the press (soft).
+Float sampling has none of those failure modes, and the canvas is sized to
+the DISPLAYED box so the press scale costs no sharpness. Its limitation is
+the honest one: a canvas cannot sample arbitrary page content, so it
+RECONSTRUCTS the backdrop from the live DOM (the track's rect/radius/colour,
+the first opaque ancestor behind it). That is exact for a knob, which only
+ever sits on its own track over a panel — do not reach for this where the
+backdrop is arbitrary content. Gate: `verify:toggle-press` checks the canvas
+is at display resolution, carries no backdrop-filter, and has no comb
+(adjacent-pixel jumps along scanlines through the refraction band).
+
+The notes below describe the SVG map engine, which the knob presets still use
+on the dev bench pages:
+
 ★ **Map density is capped by the 8-BIT DISPLACEMENT CHANNEL — do not raise it
 to match the display size.** One byte moves the sample by `DISP_PX/255` =
 0.157 element px; one texel advances `1/density`. Once a texel is worth about

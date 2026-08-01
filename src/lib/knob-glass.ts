@@ -1,5 +1,14 @@
 /**
- * knob-glass.ts — the control knobs' OWN glass engine.
+ * knob-glass.ts — the SVG displacement-map engine for knob-shaped presets.
+ *
+ * ★ THE APP NO LONGER PAINTS ITS KNOBS THROUGH THIS. GlassToggle and
+ * GlassRange render `KnobGlass`, which evaluates the same optics PER PIXEL IN
+ * FLOAT on a canvas (src/lib/knob-glass-paint.ts) — because every artifact
+ * these knobs ever showed (folds, combs, banding, 1-LSB asymmetries) came
+ * from the 8-bit map and the compositor's gather, not from the optics. This
+ * module remains as the reference implementation and is still exercised by
+ * the dev bench/diagnostic pages (glass-gpu-bench, glass-direction), which
+ * render knob-sized specs against the SVG chain.
  *
  * ─── WHY THE KNOBS GET THEIR OWN ENGINE ──────────────────────────────────────
  *
