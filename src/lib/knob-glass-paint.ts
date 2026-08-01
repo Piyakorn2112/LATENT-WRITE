@@ -32,18 +32,9 @@
  *      (white where the rim faces up/down, dark where it faces the sides —
  *      the glass-editor `--shadow-glass` tell).
  *
- * The pull is bounded so the resample stays monotone (`A·max|g′| ≤ bezel`),
- * which is cheap to guarantee here because nothing is quantised.
- *
- * ─── WHY THE BEZEL IS SMALL ──────────────────────────────────────────────────
- *
- * A knob is a flat pill of glass with a rounded edge, not a dome: the lens
- * belongs AT THE RIM. The displacement-map version used a bezel of
- * 0.8 × half-height — on a 24px knob that is the whole thing — and got away
- * with it only because the squircle profile crammed its pull into the first
- * pixel. With an honest bounded profile that same bezel spreads the
- * refraction across the entire knob, which reads as the whole button
- * smearing rather than a glass edge. BEZEL_FRAC keeps it to the rim.
+ * The pull is deliberately LARGER than the bevel is wide, so the rim band
+ * folds and mirrors — see the bevel note below for why that is the look
+ * rather than a defect, and why it is only safe in float.
  */
 
 /** Air → glass. */
@@ -75,8 +66,14 @@ const ETA = 1 / 1.5;
  * comb. That is the whole reason the rebuild was worth doing.
  */
 
-/** Bevel width as a fraction of the pill's half-short-side. THIN. */
-const BEZEL_FRAC = 0.26;
+/**
+ * Bevel width as a fraction of the pill's half-short-side — how THICK the
+ * glass edge reads. Everything past it is flat, so this is literally "how much
+ * of the knob is edge". The pull scales with it (PULL_X_BEZEL below is a
+ * multiple of this), so widening the bevel thickens the band AND strengthens
+ * the bend together, which is how a thicker piece of glass behaves.
+ */
+const BEZEL_FRAC = 0.34;
 /**
  * Peak pull, in units of the bevel width. Greater than 1 means the rim samples
  * from beyond the bevel — the compression that makes the edge read as thick.
@@ -157,9 +154,9 @@ export interface KnobGlassScene {
    *  much wider; the shading is a border, not a band. Painting the shading
    *  across the whole bezel turned the knob into a black lozenge. */
   rimPx?: number;
-  /** Multiplies the refraction. 1 = the fold-free maximum for this geometry;
-   *  above that the sampling reverses and the backdrop mirrors, so it is
-   *  clamped and reported rather than obeyed blindly. */
+  /** Multiplies the refraction. 1 = the tuned default (PULL_X_BEZEL times the
+   *  bevel width). There is no clamp: the pull is MEANT to exceed the bevel,
+   *  which is what compresses the interior into the rim band. */
   strength?: number;
   /** Channel separation at the rim, as a fraction of the displacement. Kept
    *  low: it is a glass tell, and past ~0.1 it reads as a colour bug at a
