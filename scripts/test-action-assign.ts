@@ -22,7 +22,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { findActionSentences, segmentActions, attributeActor, predictActionActor } from "../src/lib/action-detect";
+import { findActionSentences, segmentActions, attributeActor, predictActionActor, inferGender } from "../src/lib/action-detect";
 import { runChapterAnalysis } from "../src/lib/chapter-analysis-runner";
 
 let failed = 0;
@@ -200,6 +200,10 @@ const STORY_GOLD: Array<[string, string | null]> = [
   ["they stood for a moment", null],           // collective — a decision, not a gap
   ["tucked the barley sugar wrapper", "Elena"],// subordinate clause's object must not steal
   ["It was Elena who moved first", "Elena"],   // cleft
+  // ★ WAS THE KNOWN MISS, now fixed by the gender-evidence model: the carry
+  // says Mira acted last, but "He" cannot be her, so the resolver walks back
+  // to the nearest actor whose gender agrees.
+  ["He took the chair across from Thomas", "Frank"],
 ];
 let storyHits = 0;
 for (const [substr, gold] of STORY_GOLD) {
@@ -208,14 +212,26 @@ for (const [substr, gold] of STORY_GOLD) {
   if (pass) storyHits++;
   ok(`"${substr}" → ${gold ?? "nobody"}`, pass, found ? `got ${found.actor ?? "—"}` : "span not found");
 }
-// KNOWN MISS, documented rather than hidden: "He took the chair across from
-// Thomas" is Frank, but the pronoun follows a Mira-subject sentence and the
-// engine has no gender model, so the carry answers Mira. If this line ever
-// PASSES, gender inference has landed — promote it into STORY_GOLD.
-const knownMiss = actorOf("He took the chair across from Thomas");
-console.log(`  · known miss (gender-blind carry): "He took the chair across from Thomas" → ${knownMiss?.actor ?? "—"} (gold Frank)`);
 const storyRate = storyHits / STORY_GOLD.length;
 ok(`story accuracy ${storyHits}/${STORY_GOLD.length} clears 90%`, storyRate >= 0.9, `${(storyRate * 100).toFixed(0)}%`);
+
+// ─── The gender-evidence model itself ───────────────────────────────────────
+//
+// It exists to break the "Mira gave him the whiskey. He took the chair." tie,
+// and it must be RIGHT or it moves actors rather than leaving them. Every
+// character in the story is checked, including Mira, whose entry needed two
+// separate object-vs-subject fixes to survive the confidence gate.
+console.log("\ngender evidence — inferred from the story's own prose:");
+const genderMap = inferGender(story, ["Mira", "Thomas", "Elena", "Adrian", "Frank", "Lio"]);
+const GENDER_GOLD: Array<[string, string]> = [
+  ["mira", "female"], ["elena", "female"],
+  ["thomas", "male"], ["adrian", "male"], ["frank", "male"], ["lio", "male"],
+];
+for (const [name, want] of GENDER_GOLD) {
+  ok(`${name} → ${want}`, genderMap.get(name) === want, `got ${genderMap.get(name) ?? "unknown"}`);
+}
+// A name with no evidence must stay ABSENT rather than default to a guess.
+ok("an unmentioned name has no gender entry", !inferGender(story, ["Nobody"]).has("nobody"));
 
 console.log(failed ? `\nFAILED ${failed}` : "\nPASS — all action-assignment cases hold");
 process.exit(failed ? 1 : 0);

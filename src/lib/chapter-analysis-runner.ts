@@ -17,7 +17,7 @@ import {
   type ChapterAnalysis,
   type ChapterStats,
 } from "./chapter-analysis";
-import { findActionSentences, predictActionActor, segmentActions, sentenceBounds, type ActionPrediction } from "./action-detect";
+import { findActionSentences, predictActionActor, segmentActions, sentenceBounds, inferGender, actorCandidates, isCommonWordName, type ActionPrediction } from "./action-detect";
 import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
 import { buildSpeakerAliasMap } from "./world-data";
 import type { WorldData } from "../types";
@@ -78,19 +78,69 @@ function buildActionPredictions(
   // sentence is an action; a pronoun resolves to the carry, or — when the
   // carry is empty — to the paragraph's single distinct name seen so far
   // (the same singleton rule the timeline's pronoun resolution earned).
-  const nameSweeps = knownNames.map((name) => ({
+  // ★ Gender evidence, gathered ONCE from the whole chapter — a pronoun in ¶5
+  // is resolved with what ¶1 established. Confident entries only; absence
+  // means "unknown" and leaves the carry untouched.
+  const chapterText = paragraphs.join("\n\n");
+  const gender = inferGender(chapterText, knownNames);
+  // ★ Who is even ELIGIBLE to be an actor. knownNames is a mixed pool and its
+  // junk entries were being handed real actions ("Rank", "Yield", "Some",
+  // "Mars" on the corpus benchmark). A name qualifies by acting or speaking;
+  // if the filter would empty the list it is ignored, because a thin list is
+  // worse than a noisy one.
+  const eligible = actorCandidates(chapterText, knownNames);
+  for (const r of speechResults) {
+    for (const seg of r.segments) {
+      // Speakers earn candidacy too, but the SAME common-word test applies:
+      // speech-detect can mis-read "Some day," he said as a speaker named
+      // "Some", and that name then acted for the rest of the chapter.
+      if (seg.type === "speech" && seg.speaker && (seg.confidence ?? 0) >= 0.65 &&
+          !isCommonWordName(seg.speaker, chapterText)) {
+        eligible.add(seg.speaker);
+      }
+    }
+  }
+  const actorNames = eligible.size > 0 ? knownNames.filter((n) => eligible.has(n)) : knownNames;
+  const nameSweeps = actorNames.map((name) => ({
     name,
     // Case-exact: "the frank curiosity of someone" is not the peddler Frank.
     re: new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"),
   }));
 
+
+  // ★ THE CARRY CROSSES PARAGRAPH BOUNDARIES. It used to reset on every one,
+  // and fiction breaks paragraphs mid-scene constantly — "Mira lit the lamp.
+  // ¶ He walked to the platform anyway." left the second paragraph with no
+  // antecedent at all. Measured on the corpus masking benchmark: 8.1% of
+  // masked subjects recovered with a per-paragraph carry, because the engine
+  // was answering "nobody" rather than answering wrong. A SCENE BREAK still
+  // resets it — across a break the previous actor is not the referent.
+  let carryingSpeaker: string | null = null;
+  let actorCarry: string | null = null;
+  const seenNames: string[] = [];
+  // Most recent first, deduped — the gender-disagreeing pronoun walks this.
+  const recentActors: string[] = [];
+  const noteActor = (name: string | null | undefined) => {
+    if (!name) return;
+    const at = recentActors.indexOf(name);
+    if (at >= 0) recentActors.splice(at, 1);
+    recentActors.unshift(name);
+    if (recentActors.length > 8) recentActors.pop();
+  };
+  const SCENE_BREAK = /^\s*(?:[*#•·—–-]\s*){1,9}$/;
+
   return paragraphs.map((para, paragraphIndex) => {
+    if (SCENE_BREAK.test(para)) {
+      carryingSpeaker = null;
+      actorCarry = null;
+      seenNames.length = 0;
+      recentActors.length = 0;
+      return [];
+    }
     const paraActions = findActionSentences(para);
     const segs = [...(speechResults[paragraphIndex]?.segments ?? [])].sort((a, b) => a.start - b.start);
     const predictions: ActionPrediction[] = [];
-    let carryingSpeaker: string | null = null;
-    let actorCarry: string | null = null;
-    const seenNames: string[] = [];
+
 
     for (const [sStart, sEnd] of sentenceBounds(para)) {
       const speech = segs.find((g) => g.type === "speech" && g.start < sEnd && g.end > sStart);
@@ -98,6 +148,7 @@ function buildActionPredictions(
         if ((speech.confidence ?? 0) >= 0.65 && speech.speaker) {
           carryingSpeaker = speech.speaker;
           actorCarry = speech.speaker;
+          noteActor(speech.speaker);
         }
       }
       const sentText = para.slice(sStart, sEnd);
@@ -109,7 +160,11 @@ function buildActionPredictions(
         const carryForSentence = actorCarry
           ?? (new Set(seenNames).size === 1 ? seenNames[0] : null)
           ?? carryingSpeaker;
-        const segments = segmentActions(spanText, knownNames, carryForSentence);
+        void paragraphIndex;
+        const segments = segmentActions(spanText, actorNames, carryForSentence, {
+          gender,
+          recentActors,
+        });
         for (const segment of segments) {
           const segStart = start + segment.start;
           const segEnd = start + segment.end;
@@ -125,7 +180,7 @@ function buildActionPredictions(
           }
           const prediction = predictActionActor(
             para.slice(segStart, segEnd),
-            knownNames,
+            actorNames,
             carryForSentence,
             learnedBias,
             adaptiveContext,
@@ -134,7 +189,7 @@ function buildActionPredictions(
             segment.actor ?? undefined,
           );
           predictions.push({ start: segStart, end: segEnd, ...prediction });
-          if (prediction.actor) actorCarry = prediction.actor;
+          if (prediction.actor) { actorCarry = prediction.actor; noteActor(prediction.actor); }
         }
       }
       // Advance the paragraph's name memory AFTER the sentence is judged, so
@@ -145,7 +200,7 @@ function buildActionPredictions(
       }
       const initial = sentText.replace(/^[\s"'\u201c\u2018(]+/, "");
       for (const { name } of nameSweeps) {
-        if (initial.startsWith(name)) { actorCarry = name; break; }
+        if (initial.startsWith(name)) { actorCarry = name; noteActor(name); break; }
       }
     }
 

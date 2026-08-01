@@ -262,6 +262,230 @@ function escapeRegex(s: string) {
 // connective, a DIFFERENT known name in subject position on its right, and an
 // action verb on both sides, or the sentence stays whole.
 
+// ─── Gender evidence, for pronoun carry ───────────────────────────────────────
+//
+// "Mira gave him the whiskey. He took the chair across from Thomas." — the
+// carry says Mira acted last, so a gender-blind resolver hands "He" to Mira.
+// This is the single largest remaining class of wrong actor, and it does NOT
+// need a name gazetteer (invented names are half this corpus). It needs
+// evidence from the prose itself, gathered by high-precision rules only:
+//
+//   · an honorific immediately before the name          (weight 3)
+//   · a gendered common noun in apposition to the name  (weight 2)
+//   · a NOMINATIVE he/she later in the same sentence,
+//     with no other known name in between               (weight 2)
+//   · a sentence whose first known-name-free clause opens with He/She,
+//     attributed to the last name in play               (weight 2)
+//
+// Accusative/possessive pronouns are deliberately ignored: "Mira gave HIM the
+// whiskey" is the exact sentence that would poison her entry.
+
+export type Gender = "male" | "female";
+
+const MALE_HONORIFIC = /\b(?:mr|mister|sir|lord|master|captain|capt|king|prince|father|fr|brother|uncle)\.?\s+$/i;
+const FEMALE_HONORIFIC = /\b(?:mrs|miss|ms|madam|madame|mme|lady|queen|princess|mother|sister|aunt|widow|dame)\.?\s+$/i;
+const MALE_NOUN = /\b(?:man|men|boy|boys|gentleman|gentlemen|lad|fellow|husband|son|widower|nephew|king|prince)\b/i;
+const FEMALE_NOUN = /\b(?:woman|women|girl|girls|lady|ladies|wife|daughter|mother|sister|aunt|widow|niece|queen|princess|maid)\b/i;
+const NOMINATIVE_MALE = /\bhe\b/i;
+const NOMINATIVE_FEMALE = /\bshe\b/i;
+const OPENS_MALE = /^[\s"'\u201c\u2018(]*he\b/i;
+const OPENS_FEMALE = /^[\s"'\u201c\u2018(]*she\b/i;
+
+/**
+ * Per-character gender, inferred from the chapter's own prose.
+ *
+ * Returns only CONFIDENT entries: an absolute margin of 2 and a 65% majority.
+ * A name with mixed or thin evidence is simply absent, and every consumer must
+ * treat absence as "unknown" rather than as a licence to guess — a wrong
+ * gender is worse than none, because it would move an actor rather than leave
+ * a neutral span.
+ */
+export function inferGender(
+  text: string,
+  knownNames: string[],
+  /** Diagnostics sink — every bump with its reason, for probes. Cheap to skip. */
+  trace?: Array<{ name: string; gender: Gender; weight: number; why: string; sentence: string }>,
+): Map<string, Gender> {
+  const score = new Map<string, { male: number; female: number }>();
+  let bumpSentence = "";
+  const bump = (name: string, g: Gender, w: number, why = "") => {
+    const cur = score.get(name) ?? { male: 0, female: 0 };
+    cur[g] += w;
+    score.set(name, cur);
+    trace?.push({ name, gender: g, weight: w, why, sentence: bumpSentence.slice(0, 70) });
+  };
+  const nameRes = knownNames.map((name) => ({
+    name,
+    re: new RegExp(`\\b${escapeRegex(name)}\\b`, "g"),
+  }));
+
+  // The name currently "in play" — what a bare He/She at the head of a
+  // name-free sentence refers to. Reset by any sentence that names someone.
+  let lastName: string | null = null;
+
+  for (const [start, end] of sentenceBounds(text)) {
+    const sentence = text.slice(start, end);
+    bumpSentence = sentence;
+
+    // Where does each known name sit in this sentence?
+    const hits: Array<{ name: string; index: number }> = [];
+    for (const { name, re } of nameRes) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(sentence)) !== null) hits.push({ name, index: m.index });
+    }
+    hits.sort((a, b) => a.index - b.index);
+
+    // A sentence that opens with He/She before naming anyone continues the
+    // name in play.
+    let opened = false;
+    if (lastName && (hits.length === 0 || hits[0].index > 0)) {
+      if (OPENS_MALE.test(sentence)) { bump(lastName, "male", 2, "opens-he"); opened = true; }
+      else if (OPENS_FEMALE.test(sentence)) { bump(lastName, "female", 2, "opens-she"); opened = true; }
+    }
+    // A sentence that names NOBODY and uses exactly one gender's nominative
+    // pronoun is also about the name in play — "This one, she thought,
+    // watching the black water churn". Weaker, and never double-counted with
+    // the opener above.
+    if (lastName && !opened && hits.length === 0) {
+      const m = NOMINATIVE_MALE.test(sentence);
+      const f = NOMINATIVE_FEMALE.test(sentence);
+      if (m && !f) bump(lastName, "male", 1, "nameless-he");
+      else if (f && !m) bump(lastName, "female", 1, "nameless-she");
+    }
+
+    for (let i = 0; i < hits.length; i++) {
+      const { name, index } = hits[i];
+      const before = sentence.slice(Math.max(0, index - 12), index);
+      if (MALE_HONORIFIC.test(before)) bump(name, "male", 3, "honorific");
+      else if (FEMALE_HONORIFIC.test(before)) bump(name, "female", 3, "honorific");
+
+      // Apposition: a gendered common noun close by, on either side.
+      const nearAfter = sentence.slice(index + name.length, index + name.length + 45);
+      const nearBefore = sentence.slice(Math.max(0, index - 30), index);
+      const near = `${nearBefore} ${nearAfter}`;
+      if (MALE_NOUN.test(near) && !FEMALE_NOUN.test(near)) bump(name, "male", 2, "noun");
+      else if (FEMALE_NOUN.test(near) && !MALE_NOUN.test(near)) bump(name, "female", 2, "noun");
+
+      // A nominative pronoun after this name, before the NEXT name.
+      const stop = i + 1 < hits.length ? hits[i + 1].index : sentence.length;
+      const between = sentence.slice(index + name.length, stop);
+      if (NOMINATIVE_MALE.test(between) && !NOMINATIVE_FEMALE.test(between)) bump(name, "male", 2, "in-sentence-he");
+      else if (NOMINATIVE_FEMALE.test(between) && !NOMINATIVE_MALE.test(between)) bump(name, "female", 2, "in-sentence-she");
+    }
+
+    // ★ THE NAME IN PLAY IS THE SUBJECT, NOT THE LAST NAME MENTIONED. Taking
+    // the last one made "Thomas was the one who went out ... calling for Mira
+    // to bring a blanket." hand the next sentence ("He came back in carrying a
+    // boy") to Mira, and those two stray male points were exactly enough to
+    // deadlock her real gender into "unknown". A clause-initial name is the
+    // subject; failing that, a sentence naming exactly one person is about
+    // that person; anything more ambiguous leaves the previous name in play
+    // rather than guessing.
+    if (hits.length > 0) {
+      const distinct = [...new Set(hits.map((h) => h.name))];
+      const head = sentence.replace(/^[\s"'\u201c\u2018(]+/, "");
+      const initial = distinct.find((n) => head.startsWith(n));
+      // ★ A PRONOUN-INITIAL SENTENCE DOES NOT CHANGE WHO IS IN PLAY. Its
+      // subject is the pronoun — every name in it is an object. "He nodded
+      // once at Mira" names exactly one person and is not about her, and
+      // letting it hand the floor to Mira gave the following line ("he said")
+      // to her too. Two stray points, and they were the difference between
+      // knowing her gender and not.
+      const pronounSubject = /^(?:he|she|they|it|we|i)\b/i.test(head);
+      if (initial) lastName = initial;
+      else if (!pronounSubject && distinct.length === 1) lastName = distinct[0];
+    }
+  }
+
+  const out = new Map<string, Gender>();
+  for (const [name, s2] of score) {
+    const total = s2.male + s2.female;
+    if (total === 0) continue;
+    const [g, top, other] = s2.male >= s2.female
+      ? ["male" as Gender, s2.male, s2.female]
+      : ["female" as Gender, s2.female, s2.male];
+    if (top - other >= 2 && top / total >= 0.65) out.set(name.toLowerCase(), g);
+  }
+  return out;
+}
+
+/** Words that mark the previous token as a SUBJECT doing something. Kept
+ *  wide on purpose: this gate decides who may be an actor at all, and a gate
+ *  must always be wider than what it guards. */
+const VERBISH_AFTER_NAME = new Set([
+  "was", "were", "is", "are", "had", "has", "have", "did", "does", "would",
+  "could", "will", "shall", "should", "may", "might", "must", "began", "kept",
+  "seemed", "felt", "knew", "thought", "wanted", "tried", "made", "let",
+  "said", "asked", "replied", "answered", "told", "cried", "called", "spoke",
+  "looked", "saw", "watched", "heard", "smiled", "laughed", "nodded", "sat",
+  "stood", "went", "came", "left", "turned", "moved", "put", "took", "gave",
+]);
+
+/**
+ * Which known names may be offered as an ACTOR.
+ *
+ * `knownNames` is a mixed pool — world-data cast, detected speakers, and
+ * recurring capitalised words — so it carries entries like "Rank", "Yield",
+ * "Some" and "Mars". Offering those as actors produced exactly those answers
+ * on the corpus benchmark. A name earns actor candidacy the same way a
+ * character does in prose: by ACTING (clause-initial, followed by something
+ * verb-shaped) or by SPEAKING (handled by the caller, which knows the
+ * attributed speakers).
+ *
+ * Deliberately generous — one qualifying sentence in the whole chapter is
+ * enough, because the cost of excluding a real character is far higher than
+ * the cost of admitting a borderline one.
+ */
+/**
+ * Is this "name" just a common word that happened to start a sentence?
+ *
+ * "Rank", "Yield", "Some" and "Mars" were all being offered as actors, three
+ * of them because a capitalised sentence opener got recruited into the name
+ * pool. The test is evidence, not a stop-list: compare how often the word
+ * appears LOWER-case against how often it appears capitalised in this very
+ * text. "some" swamps "Some"; a character called Rose swamps the flower.
+ * Multi-word names are exempt — "Lin Xiao" is nobody's common noun.
+ */
+export function isCommonWordName(name: string, text: string): boolean {
+  if (/\s/.test(name) || name.length < 2) return false;
+  const lower = name.toLowerCase();
+  if (lower === name) return true; // never capitalised anywhere: not a name
+  const count = (re: RegExp) => (text.match(re) ?? []).length;
+  const lowerHits = count(new RegExp(`(?<![\\w'])${escapeRegex(lower)}(?![\\w'])`, "g"));
+  const capHits = count(new RegExp(`(?<![\\w'])${escapeRegex(name)}(?![\\w'])`, "g"));
+  return lowerHits >= capHits;
+}
+
+export function actorCandidates(text: string, knownNames: string[]): Set<string> {
+  const out = new Set<string>();
+  const sorted = [...knownNames].sort((a, b) => b.length - a.length);
+  for (const [start, end] of sentenceBounds(text)) {
+    const sentence = text.slice(start, end).replace(/^[\s"'\u201c\u2018(]+/, "");
+    for (const name of sorted) {
+      if (out.has(name) || !sentence.startsWith(name)) continue;
+      if (isCommonWordName(name, text)) continue;
+      const rest = sentence.slice(name.length);
+      if (!/^[\s,]/.test(rest)) continue;
+      const next = rest.replace(/^[\s,]+/, "").split(/[\s,.;:]+/)[0]?.toLowerCase() ?? "";
+      if (!next) continue;
+      if (ACTION_VERBS.has(next) || VERBISH_AFTER_NAME.has(next) ||
+          /(?:ed|ing)$/.test(next)) {
+        out.add(name);
+      }
+    }
+  }
+  return out;
+}
+
+/** The gender a subject pronoun demands, or null when it demands nothing. */
+export function pronounGender(pronoun: string): Gender | null {
+  const p = pronoun.toLowerCase();
+  if (p === "he") return "male";
+  if (p === "she") return "female";
+  return null;
+}
+
 export interface ActionSegment {
   /** Offsets within the SENTENCE this segment was cut from. */
   start: number;
@@ -278,6 +502,12 @@ const CLAUSE_CONNECTIVE = /\b(?:and|but|while|as|then|before|after|until)\s+/gi;
 // Singular only. "They stood for a moment" is six people; resolving it to
 // whoever acted last credits one person with a crowd's action.
 const SUBJECT_PRONOUN_RE = /^(?:she|he)\b/i;
+// Any pronoun subject. A clause whose SUBJECT is a pronoun must never take
+// its actor from a name sitting in object position — "She thanked him from
+// her heart, and then walked towards a table where Bingley..." is not
+// Bingley acting. Only the carry may answer a pronoun; if the carry cannot,
+// the honest answer is nobody.
+const ANY_PRONOUN_SUBJECT = /^(?:she|he|they|i|we|it)\b/i;
 
 /** All action-verb hits in `text`, as offsets. */
 function actionVerbOffsets(text: string): number[] {
@@ -314,10 +544,27 @@ function lastNameBefore(
  * `carryingSpeaker` is the same carry the whole-sentence path uses; it decides
  * pronoun subjects and unattributed segments.
  */
+export interface SegmentContext {
+  /** Confident per-character gender, from inferGender over the whole chapter. */
+  gender?: Map<string, Gender>;
+  /** Actors seen recently, MOST RECENT FIRST. A subject pronoun whose gender
+   *  the carry contradicts walks this list for the nearest actor that agrees. */
+  recentActors?: readonly string[];
+  /** ── REFUTED, kept as a note: a second-tier pool of names mentioned in ANY
+   *  position, searched after recentActors when gender disagrees. The theory
+   *  was that prose keeping its cast in object position ("Elizabeth thanked
+   *  him... She walked towards a table") would supply the antecedent there.
+   *  Measured: DEV masked recovery 37.7% before and after, held-out 23.1%
+   *  before and after — the branch fires too rarely to matter, because a
+   *  gender-disagreeing carry almost always has an agreeing ACTOR nearby.
+   *  Reverted rather than left as dead weight. */
+}
+
 export function segmentActions(
   sentence: string,
   knownNames: string[],
   carryingSpeaker: string | null,
+  context: SegmentContext = {},
 ): ActionSegment[] {
   // ★ CASE-EXACT. Character names are capitalised in prose, and a
   // case-blind match turned "the frank curiosity of someone" into the
@@ -416,9 +663,36 @@ export function segmentActions(
     if (subject) {
       actor = subject.name;
       via = "subject";
+    } else if (ANY_PRONOUN_SUBJECT.test(text.trimStart()) && !prevActor) {
+      // A pronoun subject with nothing to continue: say nobody, rather than
+      // reach into the clause for a name that is not its subject.
+      actor = null;
+      via = "none";
     } else if (SUBJECT_PRONOUN_RE.test(text.trimStart()) && prevActor) {
       // "She lit the lamp" — the pronoun subject continues whoever last acted
       // or spoke. Only clause-INITIAL pronouns; "watched her" is an object.
+      //
+      // ★ GENDER AGREEMENT. "Mira gave him the whiskey. He took the chair
+      // across from Thomas." — the carry says Mira, and a gender-blind
+      // resolver hands Frank's action to her. When the chapter's own prose
+      // gives a confident gender that CONTRADICTS the pronoun, the carry is
+      // not the referent: walk back for the nearest actor that agrees, and
+      // if none does, say nobody rather than name the wrong person.
+      const want = pronounGender(text.trimStart().match(SUBJECT_PRONOUN_RE)?.[0] ?? "");
+      const gender = context.gender;
+      const carryGender = gender?.get(prevActor.toLowerCase()) ?? null;
+      if (want && carryGender && carryGender !== want) {
+        const agreeing = (context.recentActors ?? [])
+          .find((a) => gender?.get(a.toLowerCase()) === want);
+        actor = agreeing ?? null;
+        via = agreeing ? "pronoun" : "none";
+      } else {
+        actor = prevActor;
+        via = "pronoun";
+      }
+    } else if (ANY_PRONOUN_SUBJECT.test(text.trimStart())) {
+      // "I"/"we"/"it" with a carry: continue it, but never scan the clause
+      // for a name — same reason as above.
       actor = prevActor;
       via = "pronoun";
     } else {
@@ -603,18 +877,46 @@ export function predictActionActor(
 // Sentence boundary: . ! ? optionally followed by closing quote/paren, then whitespace or EOL.
 const SENT_BOUNDARY = /[.!?]['")\]]?(?=\s|$)/g;
 
+/** Abbreviations whose period ends a WORD, not a sentence. Without this,
+ *  "I called upon my friend, Mr. Sherlock Holmes, one day in the autumn" is
+ *  two sentences, the second one starting mid-clause — so the action span and
+ *  its subject came from different sentences. speech-detect learned this same
+ *  lesson years ago; action-detect never did. */
+const ABBREVIATION = /\b(?:mr|mrs|ms|messrs|dr|prof|st|capt|capt|lt|sgt|col|gen|adm|rev|hon|jr|sr|esq|mme|mlle|vs|etc|no|inc|ltd|co|mt|ft|ave|dept|univ)$/i;
+
+function isAbbreviatingPeriod(text: string, dotIndex: number): boolean {
+  if (text[dotIndex] !== ".") return false;
+  let i = dotIndex - 1;
+  while (i >= 0 && /[A-Za-z]/.test(text[i])) i--;
+  const word = text.slice(i + 1, dotIndex);
+  if (!word) return false;
+  // A lone capital is an initial: "J. R. Hartley".
+  if (word.length === 1 && word === word.toUpperCase()) return true;
+  return ABBREVIATION.test(word);
+}
+
+/** Sentence END offsets, shared by findActionSentences and sentenceBounds so
+ *  the two can never disagree about where a sentence stops. */
+function sentenceEnds(text: string): number[] {
+  const ends: number[] = [];
+  SENT_BOUNDARY.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = SENT_BOUNDARY.exec(text)) !== null) {
+    if (isAbbreviatingPeriod(text, m.index)) continue;
+    ends.push(m.index + m[0].length);
+  }
+  for (let i = 0; i < text.length; i++) if (text[i] === "\n") ends.push(i);
+  ends.push(text.length);
+  ends.sort((a, b) => a - b);
+  return ends;
+}
+
 /** Every sentence's [start, end) in `text` — the same boundaries
  *  findActionSentences uses, exported so the prediction builder can walk the
  *  WHOLE paragraph in order (the actor carry must advance through sentences
  *  that are not actions: "Mira lit the lantern. She had run this place..."). */
 export function sentenceBounds(text: string): Array<[number, number]> {
-  const ends: number[] = [];
-  SENT_BOUNDARY.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = SENT_BOUNDARY.exec(text)) !== null) ends.push(m.index + m[0].length);
-  for (let i = 0; i < text.length; i++) if (text[i] === "\n") ends.push(i);
-  ends.push(text.length);
-  ends.sort((a, b) => a - b);
+  const ends = sentenceEnds(text);
   const out: Array<[number, number]> = [];
   let cursor = 0;
   for (const end of ends) {
@@ -631,19 +933,8 @@ export function sentenceBounds(text: string): Array<[number, number]> {
 export function findActionSentences(text: string): ActionSpan[] {
   if (!text) return [];
 
-  // First, collect sentence boundaries (end indices, exclusive of trailing space).
-  const ends: number[] = [];
-  SENT_BOUNDARY.lastIndex = 0;
-  let m: RegExpExecArray | null;
-  while ((m = SENT_BOUNDARY.exec(text)) !== null) {
-    ends.push(m.index + m[0].length);
-  }
-  // Newlines also end sentences (fiction often elides terminals at line breaks).
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\n") ends.push(i);
-  }
-  ends.push(text.length);
-  ends.sort((a, b) => a - b);
+  // Sentence boundaries, from the shared helper (abbreviation-aware).
+  const ends = sentenceEnds(text);
 
   const out: ActionSpan[] = [];
   let cursor = 0;
