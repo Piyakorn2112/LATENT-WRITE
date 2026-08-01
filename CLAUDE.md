@@ -244,6 +244,31 @@ Two diagnostics, both dev-only pages driven by scripts:
   scale every coordinate, or the analyser reads the wrong region and reports
   a confident zero.
 
+**The two control knobs are no longer part of this engine.** They run
+`src/lib/knob-glass.ts`, and the frozen oracle below no longer covers them.
+A knob is a PILL, so its surface normal is available in closed form — the
+general engine probes a numerical gradient (3 extra SDF evaluations per pixel)
+and blends a smooth-max over ±40 element px to hide a diagonal seam that only
+large rectangles have. On a 32×24 knob that blend band is wider than the knob.
+knob-glass solves the normal analytically instead (the method the STM /about
+hero uses for its glass stripes: analytic shape ⇒ exact SDF and exact normal,
+no probes) and reads the displacement profile from a 1-D LUT.
+
+It also authors the map at the density the knob is DISPLAYED at. The knob only
+wears glass while pressed, and the press scales it to 2×, so a map authored
+from the layout box was magnified across the swollen knob — 1.5 texels per
+displayed pixel where 3 was intended. `KNOB_DISPLAY_SCALE` in the filter is
+read off that CSS scale; change it if the CSS changes.
+
+Measured at the switch-over, against the frozen baseline: every non-knob
+preset stayed byte-identical; the knobs moved 17916 bytes (range, max delta 2)
+and 21982 (toggle, max delta 1), R and G only. Their gate is
+`npm run test:knob-glass` — physics, LUT error bound, normal fidelity, press
+density, map invariants, a 240-geometry fuzz and a byte checksum. The real-app
+density check is `verify:toggle-press`, which now measures texels per displayed
+pixel rather than comparing the painted box to the layout box (that only
+restated the CSS transform, so it reported "STRETCHED" unconditionally).
+
 Earlier deliberate exception, approved the same day: the knob presets'
 `MAP_OVERSAMPLE` went 12 → 3. **Do not raise it back.** At 12 the two control
 knobs cost 13.3 ms/frame on an M1 Pro — about 40× the entire 1100×44 toolbar —

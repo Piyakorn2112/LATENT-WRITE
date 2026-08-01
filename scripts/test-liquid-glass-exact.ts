@@ -28,8 +28,17 @@ const ovf = (disp: number, blur: number) => disp + blur * 2 + 4;
 
 interface Case extends MapRequest { label: string }
 const CASES: Case[] = [
-  { label: "range knob        20x14   ", id: "c", elemW: 20, elemH: 14, radius: 999, overflow: ovf(40, 0), preset: "control-knob", bezel: null, superSample: 1 },
-  { label: "toggle knob       32x24   ", id: "c", elemW: 32, elemH: 24, radius: 999, overflow: ovf(40, 0), preset: "toggle-control-knob", bezel: null, superSample: 1 },
+  // ★ THE TWO KNOBS ARE NOT HERE ANY MORE, and that is deliberate — read this
+  // before adding them back. They now run their OWN engine (src/lib/knob-glass.ts):
+  // a pill's normal is closed-form, so it is solved instead of probed, and the
+  // 40px smooth-max seam blend that a 32x24 knob was entirely inside no longer
+  // applies to them. That is a re-authoring, not a regression, so this frozen
+  // oracle cannot judge it — and updating the oracle to match would destroy the
+  // one thing it is for. Measured at the switch-over, against this baseline:
+  // 17916 bytes differ on the range knob (max delta 2) and 21982 on the toggle
+  // knob (max delta 1), R and G only — the blur mask and alpha are untouched.
+  // Their replacement gate is `npm run test:knob-glass`, which pins the physics,
+  // the LUT, the normal, the press density and a byte checksum.
   { label: "loading lens     100x100  ", id: "c", elemW: 100, elemH: 100, radius: 50, overflow: ovf(20, 0.2), preset: "default", bezel: 20, superSample: 4 },
   { label: "toolbar         1100x44   ", id: "c", elemW: 1100, elemH: 44, radius: 22, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },
   { label: "analysis tab     160x36   ", id: "c", elemW: 160, elemH: 36, radius: 18, overflow: ovf(40, 1.2), preset: "default", bezel: null, superSample: 1 },

@@ -58,8 +58,15 @@ let shrunk = 0;
 
 for (let i = 0; i < N; i++) {
   const rand = rng(i * 2654435761);
-  const preset = PRESETS[Math.floor(rand() * 3)];
-  const knob = preset !== "default";
+  // ★ DEFAULT PRESET ONLY. The knob presets left this engine — they run
+  // src/lib/knob-glass.ts now (a pill's normal is closed-form, so it is solved
+  // rather than probed), and a frozen oracle of the OLD math cannot judge a
+  // deliberate re-authoring. Their randomised coverage did not disappear:
+  // `npm run test:knob-glass` fuzzes pill geometries against the invariants
+  // that must hold for every one of them — LUT byte-equality, a neutral
+  // margin, odd symmetry, and inward pull.
+  const preset = PRESETS[0];
+  const knob = false;
 
   // Knob presets oversample 16x, so keep those elements small or the map
   // explodes; default preset roams the full size range the app can produce.

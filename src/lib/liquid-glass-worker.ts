@@ -49,6 +49,8 @@
  * Verify a harness can FAIL (perturb BEZEL_PX by 1) before trusting a pass.
  */
 
+import { buildKnobMapPixels } from "./knob-glass";
+
 // Air → glass.
 const N1 = 1;
 const N2 = 1.5;
@@ -297,6 +299,12 @@ interface MapRequest {
    * provably free of visual change; see `padX`/`padY` on the response.
    */
   mapPad?: number | null;
+  /**
+   * Knob presets only: how much bigger than its layout box the knob is
+   * DISPLAYED at while the glass is attached (the press swell). Authors the
+   * map at that density — see knob-glass.ts.
+   */
+  displayScale?: number;
 }
 
 interface MapResponse {
@@ -424,12 +432,33 @@ function resolveMapPad(
  * (scripts/liquid-glass-baseline.ts) in Node.
  */
 export function buildMapPixels(req: MapRequest): MapPixels {
+  // ★ THE KNOBS HAVE THEIR OWN ENGINE. A knob is a pill: its normal is
+  // available in closed form, and the smooth-max blend below exists only to
+  // hide a diagonal seam that large rectangles have and pills do not (on a
+  // 32x24 knob the 40px blend band is wider than the knob itself). knob-glass
+  // solves it analytically — the STM /about hero's method — and authors the
+  // map at the density the knob is DISPLAYED at, which for a knob means at
+  // full press. Everything below stays exactly as it was for every other
+  // preset, which is what keeps this file pixel-frozen.
+  if (req.preset === "control-knob" || req.preset === "toggle-control-knob") {
+    return buildKnobMapPixels({
+      elemW: req.elemW,
+      elemH: req.elemH,
+      radius: req.radius,
+      overflow: req.overflow,
+      preset: req.preset,
+      bezel: req.bezel,
+      displayScale: req.displayScale,
+      mapPad: req.mapPad,
+    });
+  }
+
   const { elemW, elemH, radius, overflow } = req;
-  const preset = req.preset === "toggle-control-knob"
-    ? "toggle-control-knob"
-    : req.preset === "control-knob"
-      ? "control-knob"
-      : "default";
+  // Knob presets returned above, so only "default" can reach here — the
+  // compiler agrees (the old three-way normalisation is now provably dead
+  // code). Every constant below is therefore read at its "default" entry,
+  // exactly as before for every non-knob element.
+  const preset: MapPreset = "default";
   const channelGain = CHANNEL_GAIN[preset];
   // Supersample boosts the map's pixel resolution so a CSS scale-up of the
   // element (the lens) stays smooth instead of revealing stair-step ridges.

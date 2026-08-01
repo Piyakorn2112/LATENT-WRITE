@@ -168,7 +168,11 @@ function buildMapInWorker(
     const id = `req-${++reqCounter}`;
     pendingBlob.set(id, ({ blob, padX, padY }) =>
       resolve({ url: URL.createObjectURL(blob), padX, padY }));
-    w.postMessage({ id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad });
+    w.postMessage({
+      id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad,
+      // Knobs author their map at press density; every other preset ignores it.
+      displayScale: isKnobPreset(preset) ? KNOB_DISPLAY_SCALE : undefined,
+    });
   });
 }
 
@@ -286,6 +290,25 @@ function readMapPreset(el: Element): MapPreset {
     return "toggle-control-knob";
   }
   return el.classList.contains("liquid-glass-control-knob") ? "control-knob" : "default";
+}
+
+/**
+ * How much bigger than its layout box a knob is DISPLAYED at while its glass
+ * is attached.
+ *
+ * ★ THIS IS NOT A TUNABLE — it is read off the CSS. `.glass-toggle--pressed
+ * .glass-toggle-knob` and the slider's `:has(:active)` rule both scale the
+ * knob to `scale(2)`, and GlassToggle/GlassRange attach
+ * `liquid-glass-control-knob` for exactly that press and its settle. So the
+ * knob is never displayed at 1x with glass on: authoring its map from the
+ * LAYOUT box meant a 32x24 map magnified across a 64x48 knob at the one
+ * moment it is biggest (verify-toggle-press.cjs called it "STRETCHED over the
+ * swell"). If the CSS scale changes, change this with it.
+ */
+const KNOB_DISPLAY_SCALE = 2;
+
+function isKnobPreset(preset: MapPreset): boolean {
+  return preset === "control-knob" || preset === "toggle-control-knob";
 }
 
 function readDispMapAntialias(preset: MapPreset): number {
@@ -528,7 +551,10 @@ async function ensureFilter(
   const w = snap(elemW);
   const h = snap(elemH);
   const r = snap(radius);
-  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}-d${disp}-z${bezel ?? "def"}${superSample > 1 ? `-s${superSample}` : ""}-q${saturate}`;
+  // ★ Every option that changes the OUTPUT belongs in this id — it is the
+  // cache key. displayScale changes the map's density, so a knob authored at
+  // press density must not be served from an entry built without it.
+  const id = `lg-${preset}-${w}-${h}-${r}-b${blur}-d${disp}-z${bezel ?? "def"}${superSample > 1 ? `-s${superSample}` : ""}${isKnobPreset(preset) ? `-x${KNOB_DISPLAY_SCALE}` : ""}-q${saturate}`;
 
   const cached = filterCache.get(id);
   if (cached) {

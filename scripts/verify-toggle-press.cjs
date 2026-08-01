@@ -106,14 +106,67 @@ app.whenReady().then(async () => {
   show("PRESS settled", held);
   show("RELEASED", after);
 
-  // ★ The question this loop exists to answer: the engine sizes its
-  // displacement map from the LAYOUT box, which transform: scale() does not
-  // change. If the painted box grows while the layout box does not, the glass
-  // is a small map stretched over a big knob.
-  const stretched = held.paintedW > held.layoutW * 1.2;
-  console.log(`\n  layout box under press: ${held.layoutW}x${held.layoutH}`);
-  console.log(`  painted box under press: ${held.paintedW}x${held.paintedH}`);
-  console.log(`  => material is ${stretched ? "STRETCHED over the swell" : "in step with the swell"}`);
+  // ★ THE QUESTION THIS LOOP EXISTS TO ANSWER — and it used to answer it with
+  // the wrong number. Comparing the PAINTED box to the LAYOUT box only
+  // restates the CSS transform (it is 2x by design, always), so it reported
+  // "STRETCHED" forever and could never report anything else. What actually
+  // matters is the map's TEXEL DENSITY over the knob as displayed: the engine
+  // authored the map from the layout box, so under the swell a 32x24-authored
+  // map was magnified across a 64x48 knob. knob-glass now authors at press
+  // density, and this measures that directly by reading the real <feImage>.
+  // The knob only wears its glass WHILE PRESSED, so press again to measure —
+  // the first version of this block ran after the release and could only ever
+  // report "no backdrop-filter on the knob".
+  await win.webContents.executeJavaScript("window.__press(true)");
+  await wait(360);
+  const density = await win.webContents.executeJavaScript(`(async () => {
+    const knob = document.querySelector('.glass-toggle-knob');
+    const cs = getComputedStyle(knob);
+    const m = /url\\("?#([^")]+)"?\\)/.exec(cs.backdropFilter || "");
+    if (!m) return { error: "no backdrop-filter url on the knob" };
+    const filter = document.getElementById(m[1]);
+    if (!filter) return { error: "filter " + m[1] + " not in the DOM" };
+    const fe = filter.querySelector('feImage');
+    const href = fe && (fe.getAttribute('href') || fe.getAttribute('xlink:href'));
+    if (!href) return { error: "no feImage href" };
+    const img = new Image();
+    img.src = href;
+    await img.decode();
+    const rect = knob.getBoundingClientRect();
+    // The map spans the element plus the baked margin, in ELEMENT units.
+    const feW = parseFloat(fe.getAttribute('width'));
+    return {
+      id: m[1],
+      mapW: img.naturalWidth,
+      mapH: img.naturalHeight,
+      feW,
+      layoutW: knob.offsetWidth,
+      paintedW: Math.round(rect.width),
+      dpr: window.devicePixelRatio,
+    };
+  })()`);
+
+  console.log("");
+  if (density.error) {
+    console.log(`  density: could not measure — ${density.error}`);
+    app.exit(2);
+    return;
+  }
+  // Texels per element pixel, then per pixel as actually displayed.
+  const texelsPerElemPx = density.mapW / density.feW;
+  const perDisplayedCssPx = (texelsPerElemPx * density.layoutW) / density.paintedW;
+  const perDevicePx = perDisplayedCssPx / density.dpr;
+  console.log(`  map ${density.mapW}x${density.mapH} over ${density.feW} element px`
+    + ` = ${texelsPerElemPx.toFixed(2)} texels/element px`);
+  console.log(`  knob displayed at ${density.paintedW}px (layout ${density.layoutW}px, dpr ${density.dpr})`);
+  console.log(`  => ${perDisplayedCssPx.toFixed(2)} texels per displayed CSS px`
+    + ` (${perDevicePx.toFixed(2)} per device px)`);
+
+  // 3 texels per DISPLAYED px is the approved knob density (the 12 -> 3 cut).
+  // Authored from the layout box it landed at 1.5 under the swell.
+  const ok = perDisplayedCssPx >= 2.9;
+  console.log(`  => material is ${ok ? "IN STEP with the swell" : "STRETCHED over the swell"}`);
+  await win.webContents.executeJavaScript("window.__press(false)");
   console.log(`\nshots: ${OUT}/toggle-press-*.png`);
-  app.exit(0);
+  app.exit(ok ? 0 : 1);
 });
