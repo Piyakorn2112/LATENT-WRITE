@@ -25,13 +25,18 @@ const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
 const BASE_COLOR      = "var(--text-body)";
 
-// Scene label tension colours — drawn from the same iOS-system palette
-// used for entity highlights so they read with consistent saturation in
-// both light and dark mode (the previous slate/amber/rose values washed
-// out on light surfaces). The mapping is intentional, not arbitrary:
+// Scene tension colours — drawn from the same iOS-system palette used for
+// entity highlights so they read with consistent saturation in both light and
+// dark mode. The mapping is intentional, not arbitrary:
 //   calm   → indigo (low-key, recedes)
 //   rising → orange (warning warmth)
 //   high   → red    (alarm)
+//
+// ★ THESE TINT THE RULE, NOT THE WORD — see sceneTagStyle. The label used to
+//   be printed in the tension colour, which quietly re-coupled the two things
+//   the label engine exists to separate: the word says what the scene DOES
+//   (scene-function.ts), the colour says how hot it is. Painting a function
+//   word in a heat colour makes it read as another way of saying "red".
 const SCENE_T: Record<"calm" | "rising" | "high", string> = {
   calm:   IOS_COLORS.indigo.text,  // #4F45D8 — readable on white, vivid on dark
   rising: IOS_COLORS.orange.text,  // #DC7B19
@@ -52,22 +57,49 @@ const SCENE_ANCHOR: CSSProperties = {
   userSelect: "none",
 };
 
-function sceneTagStyle(tension: "calm" | "rising" | "high"): CSSProperties {
+/**
+ * The scene label as a margin note, not a chip.
+ *
+ * It reads set in the body's muted ink at a manuscript-note size, preceded by
+ * a hairline carrying the tension colour. The previous treatment — 9px, weight
+ * 700, uppercase, 0.09em tracking, printed in the tension hue and prefixed
+ * with a literal "|" character — was five emphasis devices stacked on a piece
+ * of secondary information, and the pipe was a glyph standing in for a rule it
+ * could not align with.
+ */
+function sceneTagStyle(confidence: number): CSSProperties {
   return {
     position: "absolute",
     left: 0,
     bottom: "3.15em", // floats into the inter-paragraph whitespace above
+    display: "flex",
+    alignItems: "center",
+    gap: "0.55em",
     whiteSpace: "nowrap",
-    fontSize: "9px",
+    fontSize: "10px",
     lineHeight: 1,
-    letterSpacing: "0.09em",
+    letterSpacing: "0.05em",
     fontFamily: "var(--font-ui)",
-    fontWeight: 700,                 // slightly heavier so the iOS hue reads
-    color: SCENE_T[tension],
-    opacity: 0.85,                   // bumped from 0.65 — iOS palette is balanced for it
-    textTransform: "uppercase",
+    fontWeight: 500,
+    color: "var(--text-secondary)",
+    // ★ A marginal reading must LOOK marginal. The engine reports how far the
+    //   winning label cleared the runner-up, and a call that barely won has no
+    //   business looking as settled as one that was unambiguous.
+    opacity: 0.52 + 0.36 * Math.max(0, Math.min(1, confidence)),
     pointerEvents: "none",
     userSelect: "none",
+  };
+}
+
+/** The hairline that replaces the old "|" glyph and carries the tension hue. */
+function sceneRuleStyle(tension: "calm" | "rising" | "high"): CSSProperties {
+  return {
+    width: "13px",
+    height: "1px",
+    flex: "none",
+    background: SCENE_T[tension],
+    // The rule is the one saturated element, so it can afford full strength.
+    opacity: 0.9,
   };
 }
 
@@ -928,7 +960,10 @@ function HighlightLayerImpl({
         <span key={`para${pi}`}>
           {meta?.sceneStart && meta.sceneLabel && (
             <span aria-hidden="true" style={SCENE_ANCHOR}>
-              <span style={sceneTagStyle(tension)}>| {meta.sceneLabel}</span>
+              <span style={sceneTagStyle(meta.sceneConfidence ?? 0.5)}>
+                <span style={sceneRuleStyle(tension)} />
+                {meta.sceneLabel}
+              </span>
             </span>
           )}
           {snapshotPlan.paragraphNodes[pi]}

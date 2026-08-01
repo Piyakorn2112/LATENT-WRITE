@@ -355,9 +355,14 @@ function extract(input: SceneFunctionInput): Features {
   // same reason as the rest of the mode features: a character SAYING "I walked
   // into the room" is not the prose arriving anywhere.
   const opening = narration.slice(0, 340);
-  const arrivalOpen =
-    countPhrases(opening, ARRIVAL_PHRASES) >= 1 ||
-    countSet(tokenise(opening), MOTION) >= 2;
+  // ★ AN ARRIVAL PHRASE IS REQUIRED — loose motion words are not enough.
+  //   This used to also accept "two or more MOTION tokens in the opening",
+  //   and MOTION contains bare `go` and `come`, which are overwhelmingly
+  //   HYPOTHETICAL in deliberation: "He could stay and let the thing happen,
+  //   or he could go and try to stop it" tripped it twice and shipped
+  //   `arrival` over a scene whose whole subject is a man deciding not to move
+  //   yet. Nobody arrives anywhere in a sentence about what they could do.
+  const arrivalOpen = countPhrases(opening, ARRIVAL_PHRASES) >= 1;
 
   const retroHits =
     (narration.match(RETRO_RE)?.length ?? 0) + countPhrases(narration, RETRO_PHRASES);
