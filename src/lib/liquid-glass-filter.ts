@@ -47,13 +47,6 @@ const PAUSE_BODY_CLASSES = ["timeline-overlay-freeze", "renderer-workspace-freez
 // Used by the SVG filter primitives below — feDisplacementMap.scale and
 // feGaussianBlur.stdDeviation read these directly.
 const DISP_PX = 40;        // max refraction shift, pixels
-/**
- * Mask value the worker writes at the very rim of the progressive-blur channel
- * (liquid-glass-worker.ts BLUR_EDGE_MIN). The chain stretches [this, 1] onto
- * [0, 1] to turn it into a usable frost mask — if the worker's value changes,
- * this must follow or the rim stops being sharp.
- */
-const BLUR_EDGE_MIN = 0.85;
 const BLUR_DEFAULT = 5;    // backdrop blur for unclassified elements, pixels
 const SATURATE = "1.8";
 
@@ -496,59 +489,6 @@ function buildFilterEl(
       }),
     );
     tail = "blurred";
-
-    // ★ PROGRESSIVE BLUR — sharp at the rim, frosted inside.
-    //
-    // The worker has always baked a rim-sharp → interior-blurred mask into the
-    // map's BLUE channel, and the chain has never consumed it: the blur was
-    // applied flat across the whole surface, so the glass frosted its own edge
-    // as much as its middle. That is the one thing a real glass sheet does not
-    // do — the rim is where you see THROUGH it most clearly, which is why the
-    // stm-page hero ring keeps a sharp edge and frosts only the body.
-    //
-    // The mask needs stretching before it is useful: the worker writes
-    // BLUR_EDGE_MIN (0.85) at the rim rising to 1.0 inside, so used raw it
-    // would swing the blur between 85% and 100% — invisible. This feColorMatrix
-    // maps B ∈ [0.85, 1] onto alpha ∈ [0, 1] (slope 1/0.15, offset −0.85/0.15)
-    // and the clamp handles everything outside. Doing the stretch HERE rather
-    // than in the worker keeps the map bytes frozen, so the byte-exact and fuzz
-    // harnesses still gate the engine unchanged.
-    //
-    // The composite is then a plain lerp: `in` gives the blurred copy the
-    // mask's alpha, and `over` lays it on the sharp one, i.e.
-    // blurred·M + displaced·(1−M). The filter is sRGB (see the filter element),
-    // so the channel arithmetic here is on the same values the worker wrote.
-    const FROST_SLOPE = 1 / (1 - BLUR_EDGE_MIN);
-    filter.append(
-      createElNS("feColorMatrix", {
-        in: dispMapInput,
-        type: "matrix",
-        values: [
-          "0 0 0 0 0",
-          "0 0 0 0 0",
-          "0 0 0 0 0",
-          `0 0 ${FROST_SLOPE.toFixed(4)} 0 ${(-BLUR_EDGE_MIN * FROST_SLOPE).toFixed(4)}`,
-        ].join(" "),
-        result: "frostMask",
-      }),
-    );
-    filter.append(
-      createElNS("feComposite", {
-        in: "blurred",
-        in2: "frostMask",
-        operator: "in",
-        result: "frostOnly",
-      }),
-    );
-    filter.append(
-      createElNS("feComposite", {
-        in: "frostOnly",
-        in2: "displaced",
-        operator: "over",
-        result: "frosted",
-      }),
-    );
-    tail = "frosted";
   }
   if (saturate !== 1) {
     filter.append(
