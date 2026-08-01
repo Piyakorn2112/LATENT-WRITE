@@ -5,8 +5,8 @@
  *  - Spine undulates with tension: high-tension chapters rise, low-tension fall
  *  - Node radius encodes narrative weight (role + tensionPeak)
  *  - Event chips use a relaxed collision layout and stay clear of chapter nodes
- *  - Character tracks: dashed baseline (full span) + solid dots (where detected)
- *    guarantees every character always appears consistently
+ *  - Cast ledger: per-character presence bars (height = share of the chapter),
+ *    ◆ where a stored event names them as agent, dashed bridges across absences
  *  - Active chapter: glowing vertical beam through full SVG height
  *  - Atmosphere: dot-grid, subtle gradient fills, cinematic not diagrammatic
  */
@@ -86,10 +86,20 @@ const BOX_MAX_W = 186;
 // Chapter labels — at fixed Y just below terrain zone
 const LABEL_Y_NUM   = SPINE_BASE + TERRAIN_AMP + 18;  // = 358
 const LABEL_Y_TITLE = SPINE_BASE + TERRAIN_AMP + 30;  // = 370
-// Character tracks
-const MAX_TRACKS    = 6;
+// ── Cast ledger ──────────────────────────────────────────────────────────────
+// One row per character: name + a compact stat line at their ENTRY point, a
+// bar per chapter whose height is that character's share of the chapter
+// (mention counts when the async track build has run; uniform otherwise), a
+// diamond over chapters where a stored event names them as AGENT, soft links
+// through continuous runs and dashed bridges across absences. Replaces the
+// dashed dot-tracks, which could only say "appears here" — never how much,
+// never who carries the chapter, and truncated every name to 7 characters.
+const MAX_TRACKS    = 8;
 const CHAR_ZONE_TOP = SPINE_BASE + TERRAIN_AMP + 52;   // = 392
-const CHAR_TRACK_H  = 33;
+const CAST_HEADER_H = 26;   // section title + legend above the rows
+const CHAR_TRACK_H  = 40;   // row: up-to-16px bars over a baseline + stats
+const CAST_BAR_MAX  = 16;
+const CAST_BAR_MIN  = 5;
 // SVG_H is computed per-render
 
 // ─── Leaf-bubbling collision layout ──────────────────────────────────────────
@@ -142,11 +152,17 @@ interface ChapterRenderData {
 interface TrackRenderData {
   name: string;
   color: string;
+  /** Row BASELINE — bars grow upward from here. */
   ty: number;
   firstX: number;
   lastX: number;
-  points: Array<{ key: string; x: number }>;
-  segments: Array<{ key: string; x1: number; x2: number }>;
+  /** The one-line story of this character's presence: "9 ch · drives 3 · away 5". */
+  stats: string;
+  bars: Array<{ key: string; x: number; h: number; drives: boolean; tip: string }>;
+  /** Continuous runs (adjacent chapters ≤2 apart). */
+  links: Array<{ key: string; x1: number; x2: number }>;
+  /** Absences longer than 2 chapters, bridged with a dash. */
+  bridges: Array<{ key: string; x1: number; x2: number }>;
 }
 
 const TIMELINE_OVERLAY_BODY_CLASS = "timeline-overlay-freeze";
@@ -378,43 +394,89 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
         />
       )}
 
-      {/* Character tracks — dashed baseline + presence dots */}
+      {/* ── Cast ledger — who is on stage, how much, and who carries it ── */}
+      {trackLayouts.length > 0 && (
+        <g>
+          <text
+            x={PAD_X - 60} y={CHAR_ZONE_TOP + 10}
+            fill="var(--panel-text-3)"
+            fontSize={9} fontFamily="var(--font-ui)"
+            fontWeight="700" letterSpacing="0.14em"
+          >
+            CAST
+          </text>
+          <text
+            x={PAD_X + 40} y={CHAR_ZONE_TOP + 10}
+            fill="var(--panel-text-4)"
+            fontSize={8.5} fontFamily="var(--font-ui)"
+          >
+            taller bar = more of the chapter&#160;&#160;·&#160;&#160;◆ = drives an event&#160;&#160;·&#160;&#160;dashed = away
+          </text>
+        </g>
+      )}
       {trackLayouts.map((track) => (
         <g key={`track-${track.name}`}>
-          <line
-            x1={track.firstX} y1={track.ty}
-            x2={track.lastX}  y2={track.ty}
-            stroke={track.color}
-            strokeWidth={1}
-            strokeOpacity={0.15}
-            strokeDasharray="2,6"
-          />
+          {/* Name + one-line story, right-aligned at the character's entry. */}
           <text
-            x={track.firstX - 10} y={track.ty}
-            textAnchor="end" dominantBaseline="central"
+            x={track.firstX - 12} y={track.ty - 8}
+            textAnchor="end"
             fill={track.color}
-            fontSize={8} fontFamily="var(--font-ui)"
-            fontWeight="700" letterSpacing="0.08em"
-            opacity={0.6}
+            fontSize={9.5} fontFamily="var(--font-ui)"
+            fontWeight="650"
           >
-            {track.name.slice(0, 7).toUpperCase()}
+            {track.name.length > 18 ? `${track.name.slice(0, 17)}…` : track.name}
           </text>
-          {detailsReady && track.segments.map((segment) => (
+          <text
+            x={track.firstX - 12} y={track.ty + 3}
+            textAnchor="end"
+            fill="var(--panel-text-4)"
+            fontSize={8} fontFamily="var(--font-ui)"
+          >
+            {track.stats}
+          </text>
+          {/* Continuous runs, then dashed bridges across absences. */}
+          {detailsReady && track.links.map((run) => (
             <line
-              key={segment.key}
-              x1={segment.x1} y1={track.ty}
-              x2={segment.x2} y2={track.ty}
+              key={run.key}
+              x1={run.x1} y1={track.ty + 1.5}
+              x2={run.x2} y2={track.ty + 1.5}
               stroke={track.color}
               strokeWidth={1.5}
-              strokeOpacity={0.35}
+              strokeOpacity={0.3}
             />
           ))}
-          {detailsReady && track.points.map((point) => (
-            <circle
-              key={point.key}
-              cx={point.x} cy={track.ty} r={4.5}
-              fill={track.color} opacity={0.82}
+          {detailsReady && track.bridges.map((bridge) => (
+            <line
+              key={bridge.key}
+              x1={bridge.x1 + 6} y1={track.ty + 1.5}
+              x2={bridge.x2 - 6} y2={track.ty + 1.5}
+              stroke={track.color}
+              strokeWidth={1}
+              strokeOpacity={0.16}
+              strokeDasharray="2,5"
             />
+          ))}
+          {/* Presence bars, growing up from the baseline. */}
+          {detailsReady && track.bars.map((bar) => (
+            <g key={bar.key}>
+              <rect
+                x={bar.x - 3.5} y={track.ty - bar.h}
+                width={7} height={bar.h}
+                rx={2.5}
+                fill={track.color} opacity={0.85}
+              >
+                <title>{bar.tip}</title>
+              </rect>
+              {bar.drives && (
+                <path
+                  d={`M ${bar.x},${track.ty - bar.h - 11} l 3.4,3.4 l -3.4,3.4 l -3.4,-3.4 Z`}
+                  fill={track.color}
+                  opacity={0.95}
+                >
+                  <title>{bar.tip}</title>
+                </path>
+              )}
+            </g>
           ))}
         </g>
       ))}
@@ -576,7 +638,7 @@ function TimelineGraphFullImpl({
   const [activeInsight, setActiveInsight] = useState(0);
   const analyzed  = Object.keys(storyGraph.entries).length;
   const svgW      = PAD_X + Math.max(0, chapters.length - 1) * CHAPTER_W + PAD_X;
-  const svgH      = CHAR_ZONE_TOP + Math.max(characterTracks.length, 1) * CHAR_TRACK_H + 20;
+  const svgH      = CHAR_ZONE_TOP + CAST_HEADER_H + Math.max(Math.min(characterTracks.length, MAX_TRACKS), 1) * CHAR_TRACK_H + 22;
 
   const handleChapterSelect = useCallback((id: string) => {
     onSelectChapter(id);
@@ -759,34 +821,69 @@ function TimelineGraphFullImpl({
   );
 
   const trackLayouts = useMemo<TrackRenderData[]>(() => {
-    const firstX = baseChData[0]?.x ?? PAD_X;
-    const lastX = baseChData[baseChData.length - 1]?.x ?? PAD_X;
     return characterTracks.slice(0, MAX_TRACKS).map((track, ti) => {
-      const ty = CHAR_ZONE_TOP + ti * CHAR_TRACK_H + CHAR_TRACK_H / 2;
+      // Baseline sits low in the row so the tallest bar stays inside it.
+      const ty = CHAR_ZONE_TOP + CAST_HEADER_H + ti * CHAR_TRACK_H + CAST_BAR_MAX + 12;
       const detected = baseChData.filter((chapter) => track.chapterIds.has(chapter.ch.id));
-      const points = detected.map((chapter) => ({
-        key: `dot-${track.name}-${chapter.ch.id}`,
-        x: chapter.x,
-      }));
-      const segments: Array<{ key: string; x1: number; x2: number }> = [];
+      const mentionsOf = (id: string) => track.mentionsByChapter?.get(id) ?? 0;
+      const maxMentions = Math.max(1, ...detected.map((c) => mentionsOf(c.ch.id)));
+      const hasMentionData = detected.some((c) => mentionsOf(c.ch.id) > 0);
+      let drivesTotal = 0;
+
+      const bars = detected.map((chapter) => {
+        const mentions = mentionsOf(chapter.ch.id);
+        const drivesCount = track.drivesByChapter?.get(chapter.ch.id) ?? 0;
+        drivesTotal += drivesCount;
+        // sqrt: presence reads perceptually, so 4x the mentions should look
+        // clearly bigger without flattening every mid-weight chapter.
+        const h = hasMentionData
+          ? CAST_BAR_MIN + (CAST_BAR_MAX - CAST_BAR_MIN) * Math.sqrt(mentions / maxMentions)
+          : (CAST_BAR_MIN + CAST_BAR_MAX) / 2;
+        return {
+          key: `bar-${track.name}-${chapter.ch.id}`,
+          x: chapter.x,
+          h,
+          drives: drivesCount > 0,
+          tip: `${track.name} — ch ${chapter.ch.number}`
+            + (hasMentionData ? ` · ${mentions} mention${mentions === 1 ? "" : "s"}` : "")
+            + (drivesCount > 0 ? ` · drives ${drivesCount} event${drivesCount === 1 ? "" : "s"}` : ""),
+        };
+      });
+
+      const links: Array<{ key: string; x1: number; x2: number }> = [];
+      const bridges: Array<{ key: string; x1: number; x2: number }> = [];
+      let longestGap = 0;
       for (let index = 0; index < detected.length - 1; index += 1) {
         const left = detected[index];
         const right = detected[index + 1];
-        if (right.ch.number - left.ch.number > 2) continue;
-        segments.push({
-          key: `seg-${track.name}-${left.ch.id}-${right.ch.id}`,
+        const gap = right.ch.number - left.ch.number - 1;
+        longestGap = Math.max(longestGap, gap);
+        const pair = {
+          key: `run-${track.name}-${left.ch.id}-${right.ch.id}`,
           x1: left.x,
           x2: right.x,
-        });
+        };
+        (gap > 2 ? bridges : links).push(pair);
       }
+
+      const entersAt = detected[0]?.ch.number;
+      const stats = [
+        `${track.count} ch`,
+        entersAt !== undefined && entersAt > 1 ? `enters ${entersAt}` : null,
+        drivesTotal > 0 ? `drives ${drivesTotal}` : null,
+        longestGap >= 3 ? `away ${longestGap}` : null,
+      ].filter(Boolean).join(" · ");
+
       return {
         name: track.name,
         color: track.color,
         ty,
-        firstX,
-        lastX,
-        points,
-        segments,
+        firstX: detected[0]?.x ?? PAD_X,
+        lastX: detected[detected.length - 1]?.x ?? PAD_X,
+        stats,
+        bars,
+        links,
+        bridges,
       };
     });
   }, [baseChData, characterTracks]);

@@ -80,7 +80,7 @@ function StoryGraphPanelImpl({
   const hasElectron   = !!electronAPI?.narrativeLMEmbed;
 
   const snapshotTracks = useMemo(
-    () => buildSnapshotTimelineCharacterTracks(storyGraph, worldData, 6),
+    () => buildSnapshotTimelineCharacterTracks(storyGraph, worldData, 8),
     [storyGraph, worldData],
   );
   const topChars = syncedTracks ?? snapshotTracks;
@@ -108,7 +108,7 @@ function StoryGraphPanelImpl({
 
     setTracksSyncing(true);
     timer = window.setTimeout(() => {
-      void buildTimelineCharacterTracks(storyGraph, syncChapters, worldData, 6, {
+      void buildTimelineCharacterTracks(storyGraph, syncChapters, worldData, 8, {
         signal: controller.signal,
         yieldEvery: syncChapters.length > 80 ? 2 : 4,
       })
