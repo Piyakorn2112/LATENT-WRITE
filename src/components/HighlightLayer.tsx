@@ -583,7 +583,15 @@ function HighlightLayerImpl({
       const meta      = speechResults[pi]?.meta;
 
       // Action sentences are detected paragraph-locally (offsets relative to para).
-      const paraActions = cachedActionSentences(para);
+      // ★ HIGH-mode predictions carry per-SEGMENT spans (a long sentence with
+      // two actors is two spans with two actors), so when they exist for this
+      // paragraph they ARE the action spans — the local sentence-level scan is
+      // the fallback for paragraphs the deep pass has not reached, and for
+      // edited paragraphs whose stored offsets have gone stale.
+      const paraPredictions = pos.matched ? actionPredictions?.[pi] : undefined;
+      const paraActions = paraPredictions && paraPredictions.length > 0
+        ? paraPredictions.map((pr) => ({ start: pr.start, end: pr.end }))
+        : cachedActionSentences(para);
       // Grammar for THIS paragraph, shifted to para-relative.
       const paraGrammar = pos.matched ? sliceGrammar(grammarSuggestions, paraStart, paraEnd) : [];
       const paraToolHL = pos.matched ? sliceToolHighlights(toolHighlights, paraStart, paraEnd) : [];

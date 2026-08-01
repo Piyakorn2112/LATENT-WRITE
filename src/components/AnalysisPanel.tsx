@@ -600,12 +600,14 @@ export function AnalysisPanel({
   onImportTools, onToolHighlights, onJumpToParagraph, onJumpToEvent,
   tier, onTierChange,
 }: Props) {
-  // High-mode gating mirrors the reader: cross-arc data is only meaningful
-  // under high intelligence. Auto resolves dynamically per chapter, so we
-  // permit it whenever the resolved analysis itself includes highModeAnalysis.
-  const showCrossArc =
-    intelMode === "high" ||
-    (intelMode === "auto" && !!result?.analysis.highModeAnalysis);
+  // ★ Widgets follow the DATA, not the mode toggle. High intelligence is the
+  // default now (fast while typing, high on idle), so the deep analysis
+  // always arrives — and a widget that hid because the SELECTOR was not on
+  // "high" was hiding real, computed results. The old gate also had the
+  // reverse bug: selector on "high" showed cross-arc widgets BEFORE the deep
+  // pass landed, rendering them from fast-pass data. Presence of
+  // highModeAnalysis is the one honest signal for both directions.
+  const showCrossArc = !!result?.analysis.highModeAnalysis;
   const [view, setView] = useState<string | null>(null);
   const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>(() => loadWidgetConfig());
   const [showWidgetConfig, setShowWidgetConfig] = useState(false);
@@ -756,8 +758,8 @@ export function AnalysisPanel({
   // One sentence about the chapter, with a location — the panel's entry
   // point. The widgets below remain the deep-dive (see chapter-observation.ts).
   const brief = useMemo(
-    () => (displayed ? buildChapterBrief(displayed, prevResult) : null),
-    [displayed, prevResult],
+    () => (displayed ? buildChapterBrief(displayed, prevResult, worldData) : null),
+    [displayed, prevResult, worldData],
   );
 
   useLayoutEffect(() => {
@@ -953,6 +955,11 @@ export function AnalysisPanel({
                   data-liquid-glass-scroll-adaptive="panel"
                 >
                   <span className="chapter-observation-eyebrow">This chapter</span>
+
+                  {/* The setting: who it is between, and where. */}
+                  {brief.setting && (
+                    <p className="chapter-observation-setting">{brief.setting}</p>
+                  )}
 
                   {/* The lead line: what happens. Built from the detected events,
                       so it varies with the prose. The version this replaces chose

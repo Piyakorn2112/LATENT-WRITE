@@ -17,7 +17,7 @@ import {
   type ChapterAnalysis,
   type ChapterStats,
 } from "./chapter-analysis";
-import { findActionSentences, predictActionActor, type ActionPrediction } from "./action-detect";
+import { findActionSentences, predictActionActor, segmentActions, type ActionPrediction } from "./action-detect";
 import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
 import { buildSpeakerAliasMap } from "./world-data";
 import type { WorldData } from "../types";
@@ -92,16 +92,27 @@ function buildActionPredictions(
         const start = action.start + chunkStart;
         const end = action.end + chunkStart;
         const spanText = para.slice(start, end);
-        const prediction = predictActionActor(
-          spanText,
-          knownNames,
-          carryingSpeaker,
-          learnedBias,
-          adaptiveContext,
-          para.slice(Math.max(0, start - 120), start),
-          para.slice(end, Math.min(para.length, end + 120)),
-        );
-        predictions.push({ start, end, ...prediction });
+        // ★ Smart segmentation first: a long sentence with several actors
+        // becomes several predictions, each scored over ITS OWN clause with
+        // the grammar's subject as a hint. A sentence that does not split
+        // goes through unchanged, hint included, so "Anne watched Marilla"
+        // belongs to Anne rather than to whichever name is longer.
+        const segments = segmentActions(spanText, knownNames, carryingSpeaker);
+        for (const segment of segments) {
+          const segStart = start + segment.start;
+          const segEnd = start + segment.end;
+          const prediction = predictActionActor(
+            para.slice(segStart, segEnd),
+            knownNames,
+            carryingSpeaker,
+            learnedBias,
+            adaptiveContext,
+            para.slice(Math.max(0, segStart - 120), segStart),
+            para.slice(segEnd, Math.min(para.length, segEnd + 120)),
+            segment.actor ?? undefined,
+          );
+          predictions.push({ start: segStart, end: segEnd, ...prediction });
+        }
       }
     };
 
@@ -167,7 +178,10 @@ export function runChapterAnalysis({
     adaptiveContext,
     predictionTraceOut,
   });
-  const actionPredictions = collectPredictionDetails
+  // ★ HIGH mode always builds real predictions now — segmentation and
+  // subject-side attribution are display accuracy, not a debug detail. The
+  // fast/typing path keeps the cheap local highlight and pays nothing.
+  const actionPredictions = (collectPredictionDetails || level === "high")
     ? buildActionPredictions(
         paragraphs,
         speechResults,

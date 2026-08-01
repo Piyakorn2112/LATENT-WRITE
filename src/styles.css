@@ -1520,6 +1520,17 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   margin: 0;
 }
 
+/* Who the chapter is between, and where — the quiet scene-setting line under
+   the eyebrow, above the synopsis. Deliberately smaller and muted: it frames
+   the headline, it must not compete with it. */
+.chapter-observation-setting {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--panel-text-3);
+  margin: 0 0 4px;
+}
+
 .chapter-observation-jump {
   font-family: var(--font-ui);
   font-size: 11px;

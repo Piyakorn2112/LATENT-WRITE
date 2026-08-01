@@ -1,4 +1,5 @@
 import type { ChapterAnalysisResult } from "./chapter-analysis-runner";
+import type { WorldData } from "../types";
 import { detectNarrativeEvents, selectTimelineChips, type NarrativeEvent } from "./narrative-events";
 
 /**
@@ -48,6 +49,11 @@ export interface BriefLine {
 }
 
 export interface ChapterBrief {
+  /** Where and between whom — "Rachel and Marilla, mostly at Green Gables."
+   *  The module's original promise ("ONE sentence about the chapter, with a
+   *  location") lost the location in the rewrite; this restores it as its own
+   *  quiet line. Absent when the text names no known place twice. */
+  setting?: string;
   /** One plain sentence: what happens. Always present. */
   headline: string;
   /** Anchored supporting facts, each from a different dimension. Up to three. */
@@ -88,6 +94,7 @@ function listOf(parts: string[]): string {
 export function buildChapterBrief(
   result: ChapterAnalysisResult,
   prevResult?: ChapterAnalysisResult | null,
+  worldData?: WorldData,
 ): ChapterBrief | null {
   const { analysis, paragraphs } = result;
   const paraCount = paragraphs.length;
@@ -123,8 +130,61 @@ export function buildChapterBrief(
       "Nothing here reads as a turn: no decision, revelation or change of state clears the bar. " +
       "If this chapter is meant to move the story, the move is currently implied rather than shown.";
   } else {
-    const clauses = lead.map((e) => `${inline(e.label)} at ${P(e.paragraphIndex)}`);
-    headline = `${capitalizeFirst(listOf(clauses))}.`;
+    // ★ Position-aware narration instead of "A at ¶2, and then B at ¶9" — the
+    // chips right below carry every ¶ anchor, so the sentence is free to read
+    // like a synopsis: where in the chapter a beat lands is said in words.
+    const openers: string[] = [];
+    const middles: string[] = [];
+    const enders: string[] = [];
+    for (const e of lead) {
+      const pos = e.tensionPosition;
+      (pos <= 0.25 ? openers : pos >= 0.75 ? enders : middles).push(inline(e.label));
+    }
+    const parts: string[] = [];
+    if (openers.length) parts.push(`opens as ${listOf(openers)}`);
+    if (middles.length) parts.push(openers.length || enders.length ? `then ${listOf(middles)}` : listOf(middles));
+    if (enders.length) parts.push(`ends as ${listOf(enders)}`);
+    headline = `${capitalizeFirst(parts.join("; "))}.`;
+  }
+
+  // ── The setting: who this chapter is between, and where. The place is the
+  //    known place most mentioned in the prose (two mentions minimum — one is
+  //    a reference, two is a location); the cast is the top speakers.
+  let setting: string | undefined;
+  {
+    // Speaker names, cleaned for DISPLAY: a mis-detected "speaker" like
+    // "Some" or a duplicate alias pair ("Holmes and Sherlock Holmes") is
+    // tolerable in a frequency table and absurd in a sentence. Require two
+    // turns, refuse determiner-shaped words, and collapse containment pairs.
+    const JUNK_SETTING_NAME = /^(?:some|one|all|then|but|and|now|well|yes|no|there|that|this|they|nobody|someone|everyone)$/i;
+    const cleaned: string[] = [];
+    for (const sc of analysis.speakerCounts ?? []) {
+      if (!sc.name || sc.turns < 2) continue;
+      if (JUNK_SETTING_NAME.test(sc.name.trim())) continue;
+      const lower = sc.name.toLowerCase();
+      if (cleaned.some((n) => n.toLowerCase().includes(lower) || lower.includes(n.toLowerCase()))) continue;
+      cleaned.push(sc.name);
+      if (cleaned.length === 2) break;
+    }
+    const names = cleaned;
+    let place: string | null = null;
+    const places = (worldData?.places ?? []);
+    if (places.length) {
+      let best = 0;
+      const joined = paragraphs.join("\n");
+      for (const pl of places) {
+        const variants = [pl.name, ...(pl.aliases ?? [])].filter(Boolean);
+        let count = 0;
+        for (const v of variants) {
+          const re = new RegExp(`\\b${v.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi");
+          count += joined.match(re)?.length ?? 0;
+        }
+        if (count >= 2 && count > best) { best = count; place = pl.name; }
+      }
+    }
+    if (names.length && place) setting = `${names.join(" and ")}, mostly at ${place}.`;
+    else if (names.length >= 2) setting = `${names[0]} and ${names[1]}.`;
+    else if (place) setting = `Mostly at ${place}.`;
   }
 
   const lines: BriefLine[] = [];
@@ -203,7 +263,7 @@ export function buildChapterBrief(
     });
   }
 
-  return { headline, lines: lines.slice(0, 3), events, eventless: lead.length === 0 };
+  return { setting, headline, lines: lines.slice(0, 3), events, eventless: lead.length === 0 };
 }
 
 function capitalizeFirst(s: string): string {
