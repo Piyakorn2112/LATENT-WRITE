@@ -76,6 +76,43 @@ function hexToHsv(hex: string): HSV {
   return rgbToHsv(r, g, b);
 }
 
+// ── Wheel geometry ───────────────────────────────────────────────────────
+//
+// ★★ THE WHEEL HAS TWO HALVES AND THEY MUST SHARE A ZERO ANGLE.
+//
+//    painter — `conic-gradient(from 0deg, …)` in `.gcp-area-cloud`. A CSS
+//              conic gradient starts at TWELVE O'CLOCK and runs clockwise, so
+//              hue 0 (red) is painted at the TOP of the wheel.
+//    reader  — `Math.atan2(dy, dx)`, which is 0 at THREE O'CLOCK. Screen y
+//              grows downward, so it also runs clockwise.
+//
+//    Same direction, zero angles 90° apart. For a long time the reader used
+//    the raw atan2 result as the hue, so clicking the red at the top of the
+//    wheel handed back hue 270 — violet. Measured over 24 points against the
+//    rendered pixels: slope +1.04 (so not a mirror) and a median delta of
+//    +90.3° (a pure rotation). scripts/test-color-wheel.cjs is that
+//    measurement, and it reads the real stylesheet so it cannot drift.
+//
+//    The offset lives in ONE constant used by BOTH directions below. If you
+//    ever change `from 0deg` in the CSS, change only this number — and do not
+//    hand-inline it into either function, because the bug was precisely that
+//    the two ends were free to disagree.
+const WHEEL_ZERO_OFFSET_DEG = 90;
+
+/** Hue (0–360) for a point offset (dx, dy) from the wheel's centre, in screen
+ *  coordinates where y grows downward. Exact inverse of `hueToUnit`. */
+export function pointToHue(dx: number, dy: number): number {
+  const deg = (Math.atan2(dy, dx) * 180) / Math.PI;
+  return ((deg + WHEEL_ZERO_OFFSET_DEG) % 360 + 360) % 360;
+}
+
+/** Unit vector on the wheel for a hue, in the same screen coordinates.
+ *  Exact inverse of `pointToHue`. */
+export function hueToUnit(h: number): { x: number; y: number } {
+  const a = ((h - WHEEL_ZERO_OFFSET_DEG) * Math.PI) / 180;
+  return { x: Math.cos(a), y: Math.sin(a) };
+}
+
 // ── Component ────────────────────────────────────────────────────────────
 //
 // Click swatch → opens a glass popover with:
@@ -182,8 +219,7 @@ export function GlassColorPicker({ value, onChange }: Props) {
     const radius = Math.min(rect.width, rect.height) / 2;
     const dist = Math.min(Math.hypot(cx, cy), radius);
     const s = radius > 0 ? dist / radius : 0;
-    const angle = Math.atan2(cy, cx);
-    const h = ((angle * 180) / Math.PI + 360) % 360;
+    const h = pointToHue(cx, cy);
     const next = { h, s, v: hsv.v < 0.02 ? 1 : hsv.v };
     setHsv(next);
     onChange(hsvToHex(next.h, next.s, next.v));
@@ -210,11 +246,13 @@ export function GlassColorPicker({ value, onChange }: Props) {
     (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
   };
 
-  // Handle position from HSV — polar mapping.
+  // Handle position from HSV — polar mapping. Uses `hueToUnit` so the handle
+  // is placed by the exact inverse of the function that reads the click; the
+  // two must never be written out separately again.
   const handleStyle: CSSProperties = (() => {
-    const a = (hsv.h * Math.PI) / 180;
-    const x = 50 + hsv.s * 50 * Math.cos(a);
-    const y = 50 + hsv.s * 50 * Math.sin(a);
+    const u = hueToUnit(hsv.h);
+    const x = 50 + hsv.s * 50 * u.x;
+    const y = 50 + hsv.s * 50 * u.y;
     return { left: `${x}%`, top: `${y}%` };
   })();
 
