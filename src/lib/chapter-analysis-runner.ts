@@ -17,7 +17,7 @@ import {
   type ChapterAnalysis,
   type ChapterStats,
 } from "./chapter-analysis";
-import { findActionSentences, predictActionActor, segmentActions, type ActionPrediction } from "./action-detect";
+import { findActionSentences, predictActionActor, segmentActions, sentenceBounds, type ActionPrediction } from "./action-detect";
 import { detectNarrativeEvents, type NarrativeEvent } from "./narrative-events";
 import { buildSpeakerAliasMap } from "./world-data";
 import type { WorldData } from "../types";
@@ -62,16 +62,6 @@ export interface RunChapterAnalysisInput {
   worldData?: WorldData;
 }
 
-function clipActionSpans(spans: Array<{ start: number; end: number }>, from: number, to: number) {
-  const out: Array<{ start: number; end: number }> = [];
-  for (const span of spans) {
-    if (span.end <= from || span.start >= to) continue;
-    if (span.start < from || span.end > to) continue;
-    out.push({ start: span.start - from, end: span.end - from });
-  }
-  return out;
-}
-
 function buildActionPredictions(
   paragraphs: string[],
   speechResults: ChapterParaResult[],
@@ -79,32 +69,64 @@ function buildActionPredictions(
   learnedBias: LearnedBias | undefined,
   adaptiveContext: AdaptiveInferenceContext | undefined,
 ): ActionPrediction[][] {
+  // ★ THE CARRY IS THE WHOLE GAME, and the old shape had none: it walked only
+  // ACTION sentences and its carry came only from SPEECH, so "Mira lit the
+  // lantern. She had run this place alone..." left every pronoun sentence
+  // unattributed, and the anywhere-fallback then let object names steal ("He
+  // nodded once at Mira" -> Mira). This version walks EVERY sentence in
+  // order: a clause-initial known name advances the carry whether or not the
+  // sentence is an action; a pronoun resolves to the carry, or — when the
+  // carry is empty — to the paragraph's single distinct name seen so far
+  // (the same singleton rule the timeline's pronoun resolution earned).
+  const nameSweeps = knownNames.map((name) => ({
+    name,
+    // Case-exact: "the frank curiosity of someone" is not the peddler Frank.
+    re: new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"),
+  }));
+
   return paragraphs.map((para, paragraphIndex) => {
     const paraActions = findActionSentences(para);
     const segs = [...(speechResults[paragraphIndex]?.segments ?? [])].sort((a, b) => a.start - b.start);
     const predictions: ActionPrediction[] = [];
     let carryingSpeaker: string | null = null;
-    let cursor = 0;
+    let actorCarry: string | null = null;
+    const seenNames: string[] = [];
 
-    const pushPredictions = (chunkStart: number, chunkEnd: number) => {
-      const localActions = clipActionSpans(paraActions, chunkStart, chunkEnd);
-      for (const action of localActions) {
-        const start = action.start + chunkStart;
-        const end = action.end + chunkStart;
+    for (const [sStart, sEnd] of sentenceBounds(para)) {
+      const speech = segs.find((g) => g.type === "speech" && g.start < sEnd && g.end > sStart);
+      if (speech) {
+        if ((speech.confidence ?? 0) >= 0.65 && speech.speaker) {
+          carryingSpeaker = speech.speaker;
+          actorCarry = speech.speaker;
+        }
+      }
+      const sentText = para.slice(sStart, sEnd);
+      const action = !speech && paraActions.find((a) => a.start >= sStart && a.start < sEnd);
+      if (action) {
+        const start = Math.max(action.start, sStart);
+        const end = Math.min(action.end, sEnd);
         const spanText = para.slice(start, end);
-        // ★ Smart segmentation first: a long sentence with several actors
-        // becomes several predictions, each scored over ITS OWN clause with
-        // the grammar's subject as a hint. A sentence that does not split
-        // goes through unchanged, hint included, so "Anne watched Marilla"
-        // belongs to Anne rather than to whichever name is longer.
-        const segments = segmentActions(spanText, knownNames, carryingSpeaker);
+        const carryForSentence = actorCarry
+          ?? (new Set(seenNames).size === 1 ? seenNames[0] : null)
+          ?? carryingSpeaker;
+        const segments = segmentActions(spanText, knownNames, carryForSentence);
         for (const segment of segments) {
           const segStart = start + segment.start;
           const segEnd = start + segment.end;
+          // A COLLECTIVE segment is a decision, not a gap: "they stood for a
+          // moment" is six people, and letting the ranker's carry candidate
+          // fill it credits one person with a crowd's action.
+          if (segment.via === "collective") {
+            predictions.push({
+              start: segStart, end: segEnd, actor: null,
+              confidence: 0.9, needsReview: false, ambiguityGap: 1, candidates: [],
+            });
+            continue;
+          }
           const prediction = predictActionActor(
             para.slice(segStart, segEnd),
             knownNames,
-            carryingSpeaker,
+            carryForSentence,
             learnedBias,
             adaptiveContext,
             para.slice(Math.max(0, segStart - 120), segStart),
@@ -112,18 +134,20 @@ function buildActionPredictions(
             segment.actor ?? undefined,
           );
           predictions.push({ start: segStart, end: segEnd, ...prediction });
+          if (prediction.actor) actorCarry = prediction.actor;
         }
       }
-    };
-
-    for (const seg of segs) {
-      if (seg.start > cursor) pushPredictions(cursor, seg.start);
-      if (seg.type === "speech" && seg.confidence >= 0.65) {
-        carryingSpeaker = seg.speaker ?? carryingSpeaker;
+      // Advance the paragraph's name memory AFTER the sentence is judged, so
+      // a sentence never resolves its own subject off its own objects.
+      for (const { name, re } of nameSweeps) {
+        re.lastIndex = 0;
+        if (re.test(sentText) && !seenNames.includes(name)) seenNames.push(name);
       }
-      cursor = seg.end;
+      const initial = sentText.replace(/^[\s"'\u201c\u2018(]+/, "");
+      for (const { name } of nameSweeps) {
+        if (initial.startsWith(name)) { actorCarry = name; break; }
+      }
     }
-    if (cursor < para.length) pushPredictions(cursor, para.length);
 
     return predictions;
   });

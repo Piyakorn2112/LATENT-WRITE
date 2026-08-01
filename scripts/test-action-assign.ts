@@ -19,7 +19,11 @@
  *   node node_modules/tsx/dist/cli.mjs scripts/test-action-assign.ts
  */
 
+import { readFileSync } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { findActionSentences, segmentActions, attributeActor, predictActionActor } from "../src/lib/action-detect";
+import { runChapterAnalysis } from "../src/lib/chapter-analysis-runner";
 
 let failed = 0;
 const ok = (label: string, cond: boolean, detail?: string) => {
@@ -154,6 +158,64 @@ ok("subject-side actor wins over object name", p1.actor === "Anne", `got ${p1.ac
 const p2 = predictActionActor("Anne threw the book to Marilla.", ["Anne", "Marilla"], null);
 ok("without the hint the ranker records candidates for both",
   p2.candidates.filter((c) => c.label).length >= 2, `${p2.candidates.length} candidates`);
+
+// ─── Real prose: the owner's stress story, full high-mode pipeline ──────────
+//
+// "The Lantern at Half Moon Cove" — six characters, cleft sentences,
+// participle lists, pronoun chains, a name that is also an adjective
+// ("frank curiosity"). Every case below was WRONG before the carry walk,
+// case-exact matching, the dominant subject hint, participle joints and the
+// collective guard landed. Gold is hand-labelled from reading the story.
+console.log("\nreal prose — the Lantern stress story (full high-mode pipeline):");
+const ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const story = readFileSync(path.join(ROOT, "scripts", "fixtures", "lantern-cove.txt"), "utf8");
+const storyResult = runChapterAnalysis({
+  chapter: { id: "story", number: 1, title: "The Lantern at Half Moon Cove", content: story },
+  knownNames: ["Mira", "Thomas", "Elena", "Adrian", "Frank", "Lio"],
+  level: "high",
+});
+const allPreds: Array<{ text: string; actor: string | null }> = [];
+for (let pi = 0; pi < storyResult.paragraphs.length; pi++) {
+  for (const pr of storyResult.actionPredictions[pi] ?? []) {
+    allPreds.push({ text: storyResult.paragraphs[pi].slice(pr.start, pr.end), actor: pr.actor });
+  }
+}
+const actorOf = (substr: string) => allPreds.find((pr) => pr.text.includes(substr));
+
+const STORY_GOLD: Array<[string, string | null]> = [
+  ["She had run this place", "Mira"],          // pronoun chain after a named subject
+  ["She banked the fire", "Mira"],
+  ["He nodded once at Mira", "Thomas"],        // object must not steal from the carry
+  ["He set the case down", "Adrian"],          // "frank curiosity" must not match Frank
+  ["Mira gave him the whiskey", "Mira"],       // gave: verb the registry missed
+  ["He dropped his sample case", "Frank"],
+  ["He came back in carrying", "Thomas"],
+  ["Adrian tuning his violin", "Adrian"],      // participle list, ¶6
+  ["Elena watching the black glass", "Elena"],
+  ["Thomas at the flue", "Thomas"],            // the six-actor chimney sentence
+  ["Frank hauling", "Frank"],
+  ["Mira flinging", "Mira"],
+  ["Elena keeping", "Elena"],
+  ["still holding his violin", "Adrian"],
+  ["they stood for a moment", null],           // collective — a decision, not a gap
+  ["tucked the barley sugar wrapper", "Elena"],// subordinate clause's object must not steal
+  ["It was Elena who moved first", "Elena"],   // cleft
+];
+let storyHits = 0;
+for (const [substr, gold] of STORY_GOLD) {
+  const found = actorOf(substr);
+  const pass = !!found && found.actor === gold;
+  if (pass) storyHits++;
+  ok(`"${substr}" → ${gold ?? "nobody"}`, pass, found ? `got ${found.actor ?? "—"}` : "span not found");
+}
+// KNOWN MISS, documented rather than hidden: "He took the chair across from
+// Thomas" is Frank, but the pronoun follows a Mira-subject sentence and the
+// engine has no gender model, so the carry answers Mira. If this line ever
+// PASSES, gender inference has landed — promote it into STORY_GOLD.
+const knownMiss = actorOf("He took the chair across from Thomas");
+console.log(`  · known miss (gender-blind carry): "He took the chair across from Thomas" → ${knownMiss?.actor ?? "—"} (gold Frank)`);
+const storyRate = storyHits / STORY_GOLD.length;
+ok(`story accuracy ${storyHits}/${STORY_GOLD.length} clears 90%`, storyRate >= 0.9, `${(storyRate * 100).toFixed(0)}%`);
 
 console.log(failed ? `\nFAILED ${failed}` : "\nPASS — all action-assignment cases hold");
 process.exit(failed ? 1 : 0);

@@ -208,7 +208,21 @@ const ACTION_VERBS = new Set([
   "gallop","galloped","gallops","galloping",
   "kneel","knelt","kneeled","kneels","kneeling",
   "fetch","fetched","fetches","fetching",
-  "fling","flung",
+  // The everyday transfers the first two passes both missed — caught by the
+  // owner's stress story, where "Mira gave him the whiskey" and "He took the
+  // chair" were not even action sentences.
+  "take","took","taken","takes","taking",
+  "give","gave","given","gives","giving",
+  "put","puts","putting",
+  "bring","brought","brings","bringing",
+  "hand","handed","hands","handing",
+  "arrive","arrived","arrives","arriving",
+  "produce","produced","produces","producing",
+  "wrestle","wrestled","wrestles","wrestling",
+  "tune","tuned","tuning",
+  "played","playing",
+  "shouldered","shouldering",
+  "bank","banked","banking",
 ]);
 
 export interface ActionSpan {
@@ -254,12 +268,16 @@ export interface ActionSegment {
   end: number;
   /** The assigned actor, resolved by subject position. */
   actor: string | null;
-  /** Which rule assigned it, for the harness and the review UI. */
-  via: "subject" | "pronoun" | "anywhere" | "carry" | "none";
+  /** Which rule assigned it, for the harness and the review UI.
+   *  "collective" is a DECISION that nobody in particular acts ("they stood
+   *  for a moment") — downstream must not let a carry resurrect an actor. */
+  via: "subject" | "pronoun" | "anywhere" | "carry" | "none" | "collective";
 }
 
 const CLAUSE_CONNECTIVE = /\b(?:and|but|while|as|then|before|after|until)\s+/gi;
-const SUBJECT_PRONOUN_RE = /^(?:she|he|they)\b/i;
+// Singular only. "They stood for a moment" is six people; resolving it to
+// whoever acted last credits one person with a crowd's action.
+const SUBJECT_PRONOUN_RE = /^(?:she|he)\b/i;
 
 /** All action-verb hits in `text`, as offsets. */
 function actionVerbOffsets(text: string): number[] {
@@ -301,9 +319,12 @@ export function segmentActions(
   knownNames: string[],
   carryingSpeaker: string | null,
 ): ActionSegment[] {
+  // ★ CASE-EXACT. Character names are capitalised in prose, and a
+  // case-blind match turned "the frank curiosity of someone" into the
+  // peddler Frank acting in a scene he had not yet entered.
   const nameRes = [...knownNames]
     .sort((a, b) => b.length - a.length)
-    .map((name) => ({ name, re: new RegExp(`\\b${escapeRegex(name)}\\b`, "gi") }));
+    .map((name) => ({ name, re: new RegExp(`\\b${escapeRegex(name)}\\b`, "g") }));
 
   // Candidate joints: a connective whose right side opens with a known name
   // (allowing one leading comma/space) followed within a few words by an
@@ -327,6 +348,32 @@ export function segmentActions(
     joints.push(cm.index);
   }
 
+  // ★ PARTICIPLE LISTS — the construction the connective scan cannot see:
+  // "Thomas at the flue with the poker, Frank hauling the chair back, Mira
+  // flinging open the shutter, Elena keeping Lio's face turned away". Six
+  // actors, zero connectives. A joint opens before `Name + (light adverbs) +
+  // V-ing` when the name follows a comma or a dash, and before `— Name`
+  // (the dash itself introduces a new clause). The left side may be a
+  // verbless intro; the participle IS the verb.
+  const PARTICIPLE_AFTER = /^\s*,?\s*(?:\w+ly,?\s+)*(?:still\s+|already\s+)?\w+ing\b/;
+  for (const { re } of nameRes) {
+    re.lastIndex = 0;
+    let nm: RegExpExecArray | null;
+    while ((nm = re.exec(sentence)) !== null) {
+      if (nm.index === 0) continue;
+      const before = sentence.slice(Math.max(0, nm.index - 4), nm.index);
+      const after = sentence.slice(nm.index + nm[0].length, nm.index + nm[0].length + 40);
+      const afterComma = /[,;]\s*$/.test(before) && PARTICIPLE_AFTER.test(after);
+      const afterDash = /[—–]\s*$|--\s*$/.test(before);
+      if (afterComma || afterDash) joints.push(nm.index);
+    }
+  }
+  joints.sort((a, b) => a - b);
+  // Collapse joints closer than a few words — one split point per clause.
+  for (let i = joints.length - 1; i > 0; i--) {
+    if (joints[i] - joints[i - 1] < 8) joints.splice(i, 1);
+  }
+
   const bounds = [0, ...joints, sentence.length];
   const segments: ActionSegment[] = [];
   let prevActor: string | null = carryingSpeaker;
@@ -338,8 +385,32 @@ export function segmentActions(
     const verbs = actionVerbOffsets(text);
     const firstVerb = verbs.length ? verbs[0] : text.length;
 
-    // ── Subject position: the last name BEFORE the first action verb.
-    const subject = lastNameBefore(text, firstVerb, nameRes);
+    // ── Collective subjects pin the segment to NOBODY. "They stood for a
+    // moment", "the six of them stood blinking" — crediting the carry with a
+    // crowd's action is exactly the kind of confident wrong answer that
+    // costs more trust than a neutral span. Checked before every fallback.
+    const head = text.replace(/^[\s,;—–-]+/, "").replace(/^(?:and|but|while|as|then|before|after|until|when)\s+/i, "")
+      .replace(/^[\w\s,]*?(?=\b(?:they|everyone|nobody|both|all|the \w+ of them)\b)/i, "");
+    if (/^(?:they|everyone|nobody|both|all of them|the \w+ of them)\b/i.test(head) &&
+        !lastNameBefore(text, text.length, nameRes)) {
+      segments.push({ start, end, actor: null, via: "collective" });
+      continue;
+    }
+
+    // ── Subject position. A CLAUSE-INITIAL name is the subject whatever
+    // follows — "Elena, before she let Lio go, tucked the wrapper" must not
+    // let the subordinate clause's object (Lio) steal the slot. Otherwise,
+    // the last name before the first action verb.
+    const trimmed = text.replace(/^[\s,;—–-]+/, "");
+    const lead = trimmed.match(/^(?:and\s+|but\s+|while\s+|as\s+|then\s+|before\s+|after\s+|until\s+)?/i);
+    const headStart = text.length - trimmed.length + (lead?.[0]?.length ?? 0);
+    let subject: { name: string; index: number } | null = null;
+    for (const { name, re } of nameRes) {
+      re.lastIndex = headStart;
+      const m = re.exec(text);
+      if (m && m.index === headStart) { subject = { name, index: m.index }; break; }
+    }
+    if (!subject) subject = lastNameBefore(text, firstVerb, nameRes);
     let actor: string | null = null;
     let via: ActionSegment["via"] = "none";
     if (subject) {
@@ -371,7 +442,9 @@ export function segmentActions(
 
 function countNameMentions(text: string, name: string) {
   if (!text || !name) return 0;
-  const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "gi");
+  // Case-exact: names are capitalised in prose, and a case-blind count reads
+  // "the frank curiosity of someone" as the peddler Frank.
+  const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "g");
   return (text.match(re) ?? []).length;
 }
 
@@ -405,7 +478,7 @@ export function attributeActor(
     if (knownNames.length > 0) {
       const sorted = [...knownNames].sort((a, b) => b.length - a.length);
       for (const name of sorted) {
-        const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
+        const re = new RegExp(`\\b${escapeRegex(name)}\\b`);
         if (re.test(actionText)) return name;
       }
     }
@@ -438,7 +511,7 @@ export function predictActionActor(
   const sorted = [...knownNames].sort((a, b) => b.length - a.length);
 
   for (const name of sorted) {
-    const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
+    const re = new RegExp(`\\b${escapeRegex(name)}\\b`);
     const explicitMatch = re.test(actionText) ? 1 : 0;
     const carryingMatch = carryingSpeaker && carryingSpeaker.toLowerCase() === name.toLowerCase() ? 1 : 0;
     const actorPrior = learnedBias?.actorPriors[name] ?? 0;
@@ -451,13 +524,20 @@ export function predictActionActor(
         (beforeMentions + afterMentions > 0 ? cueWeights.surroundingName * 8 : 0)
       : 0;
     const subjectMatch = subjectHint && subjectHint.toLowerCase() === name.toLowerCase() ? 1 : 0;
-    const baseScore = (explicitMatch
+    const baseCore = explicitMatch
       ? 78 + actorPrior * 8 + carryingMatch * 6
       : carryingMatch
       ? 58 + actorPrior * 6
       : actorPrior > 0
       ? 18 + actorPrior * 5
-      : 0) + subjectMatch * 14;
+      : 0;
+    // ★ The grammar's subject must OUTRANK a bare explicit match: "He nodded
+    // once at Mira" is Thomas acting, however loudly Mira's name appears in
+    // object position. Floor + bonus puts the hint at 86 against 78; a hint
+    // that is ALSO the explicit subject lands at 104 and is untouchable.
+    // Learned adjustments still apply on top, so annotation corrections can
+    // overrule the grammar where it is genuinely wrong.
+    const baseScore = subjectMatch ? Math.max(baseCore, 60) + 26 : baseCore;
     if (baseScore <= 0) continue;
     candidates.push({
       label: name,
@@ -522,6 +602,29 @@ export function predictActionActor(
 
 // Sentence boundary: . ! ? optionally followed by closing quote/paren, then whitespace or EOL.
 const SENT_BOUNDARY = /[.!?]['")\]]?(?=\s|$)/g;
+
+/** Every sentence's [start, end) in `text` — the same boundaries
+ *  findActionSentences uses, exported so the prediction builder can walk the
+ *  WHOLE paragraph in order (the actor carry must advance through sentences
+ *  that are not actions: "Mira lit the lantern. She had run this place..."). */
+export function sentenceBounds(text: string): Array<[number, number]> {
+  const ends: number[] = [];
+  SENT_BOUNDARY.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = SENT_BOUNDARY.exec(text)) !== null) ends.push(m.index + m[0].length);
+  for (let i = 0; i < text.length; i++) if (text[i] === "\n") ends.push(i);
+  ends.push(text.length);
+  ends.sort((a, b) => a - b);
+  const out: Array<[number, number]> = [];
+  let cursor = 0;
+  for (const end of ends) {
+    let s2 = cursor;
+    while (s2 < end && /\s/.test(text[s2])) s2++;
+    if (s2 < end) out.push([s2, end]);
+    cursor = end;
+  }
+  return out;
+}
 
 /** Walk over `text` and emit ranges for every sentence that contains at
  *  least one action verb. Sentence boundaries are end-punctuation OR newline. */
