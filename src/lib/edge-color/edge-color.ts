@@ -212,6 +212,7 @@ interface Entry {
   // last geometry written to the body overlay (fixed mode re-syncs on change only)
   gx: number; gy: number; gw: number; gh: number;
   restorePosition: string | null;
+  glowBoost: number;      // this element's --lqg-glow-boost; re-read on scheme flip
 }
 
 interface ColorSrc { cx: number; cy: number; x0: number; y0: number; x1: number; y1: number; r: number; g: number; b: number; w: number; }
@@ -372,18 +373,28 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
   // dark one, so light mode needs more of it for the same read. Read ONCE (and
   // again only when the scheme actually flips) — this must never touch
   // getComputedStyle from the frame loop, which is what the perf gates assert.
+  //
+  // ★ Read PER ELEMENT, not once from the root. Surfaces do not all carry the
+  // same tint any more: `.liquid-glass` took a denser fill (--bg-glass-dense)
+  // and therefore transmits less of this glow, while the sidebar tab buttons
+  // kept the original. A single root-level number cannot compensate one
+  // without over-driving the other, so each element brings its own — the
+  // token still cascades from :root, so anything that does not override it
+  // behaves exactly as before. Still never read from the frame loop: adopt()
+  // already holds a computed style, and a scheme flip re-reads explicitly.
   let glowBoost = 1;
-  function readGlowBoost(): number {
-    const raw = getComputedStyle(document.documentElement)
-      .getPropertyValue("--lqg-glow-boost").trim();
-    const v = parseFloat(raw);
+  function readGlowBoostFrom(cs: CSSStyleDeclaration): number {
+    const v = parseFloat(cs.getPropertyValue("--lqg-glow-boost").trim());
     return Number.isFinite(v) && v > 0 ? v : 1;
+  }
+  function readGlowBoost(): number {
+    return readGlowBoostFrom(getComputedStyle(document.documentElement));
   }
   glowBoost = readGlowBoost();
 
-  function opacityFor(w: number, h: number): number {
+  function opacityFor(w: number, h: number, boost: number): number {
     const base = Math.max(w, h) >= opt.largeThreshold ? opt.opacityLarge : opt.opacity;
-    return Math.min(1, base * glowBoost);
+    return Math.min(1, base * boost);
   }
   function applyShape(entry: Entry, _w: number, _h: number, r: number, op: number): void {
     const s = entry.body.style;
@@ -794,6 +805,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     const entry: Entry = {
       glass, body, rim, rings: [], mode, visible: true, radius, shape: "",
       gx: 0, gy: 0, gw: 0, gh: 0, restorePosition,
+      glowBoost: readGlowBoostFrom(cs),
     };
     entries.set(glass, entry);
     layoutBody(entry, rect);
@@ -831,7 +843,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       for (const entry of entries.values()) {
         if (!entry.visible) continue;
         const gr = entry.glass.getBoundingClientRect();
-        const op = opacityFor(gr.width, gr.height);
+        const op = opacityFor(gr.width, gr.height, entry.glowBoost);
         const key = `${Math.round(gr.width)}x${Math.round(gr.height)}x${Math.round(entry.radius)}x${op}`;
         if (key !== entry.shape) { entry.shape = key; applyShape(entry, gr.width, gr.height, entry.radius, op); }
         // re-sync a fixed overlay only if the glass actually moved/resized
@@ -927,7 +939,13 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     const next = readGlowBoost();
     if (next === glowBoost) return;
     glowBoost = next;
-    for (const entry of entries.values()) entry.shape = "";
+    // Per-element boosts follow the scheme too (the dense token has its own
+    // dark-mode value), so re-read each one. A flip is rare and this is the
+    // only getComputedStyle sweep in the module — never the frame loop.
+    for (const entry of entries.values()) {
+      entry.glowBoost = readGlowBoostFrom(getComputedStyle(entry.glass));
+      entry.shape = "";
+    }
     wake();
   };
   schemeMq?.addEventListener?.("change", onScheme);

@@ -43,6 +43,33 @@
   --bg-glass-hover: rgba(255, 255, 255, 0.82);
   --bg-glass-strong: rgba(255, 255, 255, 0.76);
 
+  /* ★ DENSE tint — cards, top bar, annotation bar, popovers, search modal:
+     everything carrying `.liquid-glass`, which by construction is every glass
+     surface EXCEPT the sidebar tab buttons (.analysis-tab and
+     .analysis-action-group set --bg-glass themselves and are deliberately
+     left out of this pass).
+
+     "More opaque" is one half of a pair — those same surfaces drop to a much
+     lower blur (readBlur in liquid-glass-filter.ts). Opacity buys back the
+     separation the blur used to provide, and unlike blur it costs nothing per
+     frame and does not smear the colour the chroma gate works to keep sharp.
+
+     Per the note above this alpha is ALSO the edge-colour glow's transmission
+     budget: 0.56 passes 44% where 0.44 passed 56%. --lqg-glow-boost-dense
+     restores the wash to the same strength on exactly these surfaces (the
+     tab buttons keep the plain boost, since their tint has not moved). The
+     two must move together. */
+  --bg-glass-dense: rgba(255, 255, 255, 0.56);
+  --lqg-glow-boost-dense: 1.72;
+
+  /* Luminance (0-1) the glass fades neutral backdrop content toward — see the
+     chroma flatten in liquid-glass-filter.ts. This is --bg-page's own
+     luminance, so black text behind the glass lifts toward the page it sits
+     on and stops competing, while anything coloured passes through untouched.
+     Read by JS at startup and re-read when the scheme flips; keep it tracking
+     --bg-page or the glass will drift off the page tone. #eef0f3 → 0.94. */
+  --lqg-flatten-target: 0.94;
+
   /* Flat-blur surface, for overlays that sit ON a glass card and so must not
      be glass themselves (timeline inspector + event hover card). Tint carries
      enough opacity for body text over a busy canvas; the outline is a plain
@@ -65,7 +92,8 @@
      src/lib/edge-color (and re-read when the colour scheme flips). Light mode
      needs more: a bright surface gives a colour wash far less to work against
      than a dark one does, so the same alpha reads weaker. Dark mode stays 1. */
-  --lqg-glow-boost: 1.35;
+  --lqg-glow-boost-base: 1.35;
+  --lqg-glow-boost: var(--lqg-glow-boost-base);
 
   /* Liquid glass edge system — drives the border ring (::before) and the
      additive edge glow (::after) on every glass surface, so updating these
@@ -193,12 +221,19 @@
     --bg-glass: rgba(45, 45, 45, 0.415);
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
+    --bg-glass-dense: rgba(45, 45, 45, 0.53);
     --bg-glass-unfocused: rgb(24, 24, 22);
     --tl-flat-fill: rgba(28, 28, 27, 0.66);
     --tl-flat-line: rgba(255, 255, 255, 0.13);
     --intel-eye-ink: #ffffff;
     /* Dark glass already gives a colour wash plenty to read against. */
-    --lqg-glow-boost: 1;
+    --lqg-glow-boost-base: 1;
+    --lqg-glow-boost: var(--lqg-glow-boost-base);
+    --lqg-glow-boost-dense: 1.25;
+    /* #191919 → 0.098. White text behind the glass now settles toward the
+       dark page instead of toward a light grey, which would have inverted the
+       effect and made prose MORE prominent in dark mode. */
+    --lqg-flatten-target: 0.098;
     --overlay-scrim-bg-unfocused: rgba(8, 10, 14, 0.58);
     --border-glass-grad: linear-gradient(
       0deg,
@@ -294,13 +329,16 @@ body {
    The specular ring lives entirely in ::before, masked to the 1px border area only. */
 .liquid-glass {
   position: relative;
-  background: var(--bg-glass);
+  background: var(--bg-glass-dense);
+  /* Denser tint means less glow gets through; hand the edge-colour engine the
+     compensated boost for exactly the surfaces that got denser. */
+  --lqg-glow-boost: var(--lqg-glow-boost-dense);
   border: none;
   box-shadow: var(--shadow-glass);
   /* Fallback before JS upgrades to per-element refraction filter — same
      blur strength JS uses, so the upgrade is seamless. */
-  backdrop-filter: blur(6px) saturate(1.45);
-  -webkit-backdrop-filter: blur(6px) saturate(1.45);
+  backdrop-filter: blur(3px) saturate(2.15);
+  -webkit-backdrop-filter: blur(3px) saturate(2.15);
   /* The idle path swaps the SVG liquid-glass composite for a plain backdrop
      blur to save work. That swap used to be an instant cut; crossing it on a
      short transition makes it a fade instead. Kept quick (0.22s) on purpose —
@@ -317,6 +355,19 @@ body {
 
 /* Specular ring (::before) — masked 1px ring filled with the shared
    --border-glass-grad (white top/bottom, transparent sides, per scheme). */
+/* ★ A CUSTOM PROPERTY INHERITS, AND THESE ARE ALL DESCENDANTS OF GLASS.
+   The tab buttons live inside .settings-panel.liquid-glass and the control
+   knobs inside whatever panel owns them, so the dense boost set above would
+   cascade straight into surfaces that never got the dense TINT — over-driving
+   the glow on exactly the elements this pass promised to leave alone. Reset
+   them to the base explicitly rather than relying on where they happen to sit
+   in the DOM. */
+.analysis-tab,
+.analysis-action-group,
+.liquid-glass-control-knob {
+  --lqg-glow-boost: var(--lqg-glow-boost-base);
+}
+
 .liquid-glass::before {
   content: "";
   position: absolute;

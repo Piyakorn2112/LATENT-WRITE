@@ -1,0 +1,41 @@
+<!doctype html>
+<!-- Dev-only scratch harness: a REALISTIC backdrop for the chroma flatten —
+     prose (neutral) carrying coloured entity/action spans, under the real
+     toolbar / settings-panel / annotation-popover presets driven by the
+     shipping engine. The frozen glass-verify.html backdrop is deliberately
+     hostile (saturated blocks, 1px checks) and cannot show what the flatten
+     does to TEXT, which is the whole point of it. Not part of the app build. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Glass over prose</title>
+    <style>
+      html, body { margin: 0; background: var(--bg-page, #eef0f3); }
+      #prose {
+        position: absolute; inset: 0; padding: 26px 44px;
+        font: 15px/1.8 -apple-system, system-ui, sans-serif;
+        color: #1c1c1e; letter-spacing: 0.1px;
+      }
+      /* Or the dark capture shows dark-on-dark and the flatten looks stronger
+         than it is — the harness, not the engine. */
+      @media (prefers-color-scheme: dark) { #prose { color: #e7e7ea; } }
+      /* Unique names: the app stylesheet owns .entity-tag/.action-phrase and
+         imports LATER than this block, so those would silently win and leave
+         the harness with no coloured content at all. */
+      .pg-blue { background: #3b82f6; color: #fff;    padding: 1px 5px; border-radius: 5px; }
+      .pg-warm { background: #f59e0b; color: #3a2a00; padding: 1px 5px; border-radius: 5px; }
+      .pg-teal { background: #14b8a6; color: #fff;    padding: 1px 5px; border-radius: 5px; }
+      .spec { position: absolute; }
+      .card { left: 56px;  top: 116px; width: 420px; height: 250px; border-radius: 22px; }
+      .bar  { left: 56px;  top: 22px;  width: 880px; height: 44px;  border-radius: 22px; }
+      .pop  { left: 540px; top: 140px; width: 330px; height: 190px; border-radius: 14px; }
+    </style>
+  </head>
+  <body>
+    <div id="prose"></div>
+    <div class="spec card settings-panel liquid-glass"></div>
+    <div class="spec bar toolbar liquid-glass"></div>
+    <div class="spec pop annotation-popover liquid-glass"></div>
+    <script type="module" src="/src/prose-glass.ts"></script>
+  </body>
+</html>
