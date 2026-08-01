@@ -16,6 +16,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { initLiquidGlassFilter } from "./lib/liquid-glass-filter";
 import { GlassToggle } from "./components/GlassToggle";
+import { GlassRange } from "./components/GlassRange";
 
 const backdrop = document.getElementById("backdrop")!;
 const stage = document.getElementById("stage")!;
@@ -41,7 +42,25 @@ Object.assign(stage.style, { position: "fixed", left: "160px", top: "160px", pad
 
 function Harness() {
   const [on, setOn] = useState(false);
-  return <GlassToggle checked={on} onChange={setOn} ariaLabel="verify" />;
+  const [v, setV] = useState(0.55);
+  return (
+    <>
+      <GlassToggle checked={on} onChange={setOn} ariaLabel="verify" />
+      {/* ★ The COLOUR-PICKER case: a slider whose track is a GRADIENT, not a
+          flat colour. An element painted with a gradient reports
+          `backgroundColor: transparent`, so the knob's backdrop reconstruction
+          has to read background-IMAGE too or it paints nothing over the one
+          control where the backdrop is the whole point. */}
+      <div style={{ width: 220, marginTop: 28 }}>
+        <GlassRange
+          min={0} max={1} step={0.01} value={v} onChange={setV}
+          enableGlass showFill={false} ariaLabel="verify gradient"
+          className="gcp-slider"
+          trackUnderlayStyle={{ background: "linear-gradient(to right, #000 0%, #ff3b30 100%)" }}
+        />
+      </div>
+    </>
+  );
 }
 
 createRoot(stage).render(<StrictMode><Harness /></StrictMode>);
@@ -49,6 +68,7 @@ initLiquidGlassFilter();
 
 interface W extends Window {
   __tap?: (downMs?: number, pointerType?: string, wobblePx?: number) => void;
+  __pressRange?: (down: boolean) => void;
   __press?: (down: boolean) => void;
   __click?: (holdMs?: number) => void;
   __reset?: () => void;
@@ -113,6 +133,19 @@ w.__tap = (downMs = 50, pointerType = "mouse", wobblePx = 0) => {
     el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0, clientX: opts.clientX + wobblePx }));
     el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   }, downMs);
+};
+
+/** Press the gradient slider's knob, so its painted glass mounts. */
+w.__pressRange = (down: boolean) => {
+  const input = document.querySelector<HTMLElement>(".gcp-slider input[type=range]");
+  if (!input) return;
+  const r = input.getBoundingClientRect();
+  const o = {
+    bubbles: true, cancelable: true, pointerId: 2, pointerType: "mouse" as const,
+    button: 0, buttons: down ? 1 : 0,
+    clientX: r.left + r.width * 0.55, clientY: r.top + r.height / 2,
+  };
+  input.dispatchEvent(new PointerEvent(down ? "pointerdown" : "pointerup", o));
 };
 
 w.__probe = () => {

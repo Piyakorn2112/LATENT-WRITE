@@ -14,6 +14,81 @@ import { paintKnobGlass, type KnobBackdropLayer } from "../lib/knob-glass-paint"
  * Repaints while pressed (the knob slides across the track, so the backdrop
  * under it changes every frame) and stops the moment the press ends.
  */
+/**
+ * Parse the linear-gradients the app actually paints with: an explicit
+ * `to right` / `to bottom` (or the equivalent computed angle), with rgb/rgba
+ * stops. Anything else returns null and the caller uses the flat colour —
+ * this is a backdrop reproduction, not a CSS engine.
+ */
+function parseLinearGradient(
+  bgImage: string,
+  rect: DOMRect,
+  knobRect: DOMRect,
+  opacity: number,
+): KnobBackdropLayer["gradient"] | null {
+  if (!bgImage || !bgImage.startsWith("linear-gradient")) return null;
+  const body = bgImage.slice(bgImage.indexOf("(") + 1, bgImage.lastIndexOf(")"));
+  // Split on commas that are NOT inside rgb()/rgba().
+  const parts: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of body) {
+    if (ch === "(") depth++;
+    if (ch === ")") depth--;
+    if (ch === "," && depth === 0) { parts.push(cur.trim()); cur = ""; continue; }
+    cur += ch;
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  if (parts.length < 2) return null;
+
+  let horizontal = true;
+  let reversed = false;
+  let first = 0;
+  const head = parts[0].toLowerCase();
+  if (/^(to\s|[\d.]+deg)/.test(head)) {
+    first = 1;
+    if (head.startsWith("to ")) {
+      horizontal = head.includes("right") || head.includes("left");
+      reversed = head.includes("left") || head.includes("top");
+    } else {
+      const deg = ((parseFloat(head) % 360) + 360) % 360;
+      horizontal = deg > 45 && deg < 135 || deg > 225 && deg < 315;
+      reversed = deg > 180;
+    }
+  }
+  const stopParts = parts.slice(first);
+  if (stopParts.length < 2) return null;
+
+  const stops: Array<[number, string]> = [];
+  stopParts.forEach((sp, i) => {
+    const posMatch = sp.match(/([\d.]+)%\s*$/);
+    const at = posMatch ? Number(posMatch[1]) / 100 : i / (stopParts.length - 1);
+    const colour = posMatch ? sp.slice(0, posMatch.index).trim() : sp.trim();
+    if (!colour) return;
+    stops.push([Math.min(1, Math.max(0, at)), applyOpacity(colour, opacity)]);
+  });
+  if (stops.length < 2) return null;
+
+  const x = rect.left - knobRect.left;
+  const y = rect.top - knobRect.top;
+  const a = horizontal
+    ? { x0: x, y0: y, x1: x + rect.width, y1: y }
+    : { x0: x, y0: y, x1: x, y1: y + rect.height };
+  return reversed
+    ? { x0: a.x1, y0: a.y1, x1: a.x0, y1: a.y0, stops }
+    : { ...a, stops };
+}
+
+/** Fold an element's opacity into a colour the canvas will paint. */
+function applyOpacity(colour: string, opacity: number): string {
+  if (opacity >= 0.999) return colour;
+  const m = colour.match(/^rgba?\(([^)]+)\)$/);
+  if (!m) return colour;
+  const n = m[1].split(",").map((v) => v.trim());
+  const a = n.length > 3 ? Number(n[3]) : 1;
+  return `rgba(${n[0]}, ${n[1]}, ${n[2]}, ${a * opacity})`;
+}
+
 export function KnobGlass({ active }: { active: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
 
@@ -55,13 +130,32 @@ export function KnobGlass({ active }: { active: boolean }) {
           // of reading the colour alone.
           const elemOpacity = Number(cs.opacity);
           if (!(elemOpacity > 0.02)) continue;
+          const r = el.getBoundingClientRect();
+          if (r.width < 0.5 || r.height < 0.5) continue;
+
+          // ★ A GRADIENT BACKGROUND REPORTS NO backgroundColor. The colour
+          // picker's brightness rail is `linear-gradient(to right, #000,
+          // <hue>)` — reading the colour alone found `transparent` and the
+          // knob showed nothing over the one control whose backdrop matters
+          // most. Parse the simple horizontal/vertical case, which is what
+          // the app actually uses, and fall through to the flat colour when
+          // it is anything more exotic.
+          const grad = parseLinearGradient(cs.backgroundImage, r, knobRect, elemOpacity);
+          if (grad) {
+            layers.push({
+              x: r.left - knobRect.left, y: r.top - knobRect.top,
+              w: r.width, h: r.height,
+              r: parseFloat(cs.borderRadius) || 0,
+              color: "transparent", gradient: grad,
+            });
+            continue;
+          }
+
           const bg = cs.backgroundColor;
           const m = bg.match(/[\d.]+/g);
           if (!m || m.length < 3) continue;
           const alpha = (m.length > 3 ? Number(m[3]) : 1) * elemOpacity;
           if (alpha <= 0.01) continue;
-          const r = el.getBoundingClientRect();
-          if (r.width < 0.5 || r.height < 0.5) continue;
           layers.push({
             x: r.left - knobRect.left,
             y: r.top - knobRect.top,

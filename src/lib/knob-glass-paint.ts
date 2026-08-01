@@ -132,6 +132,14 @@ export interface KnobBackdropLayer {
   r: number;
   /** Any canvas fillStyle. */
   color: string;
+  /**
+   * A LINEAR GRADIENT to fill with instead of `color`, in knob-local CSS px.
+   * The colour picker's brightness rail is `linear-gradient(to right, #000,
+   * <hue>)`, and an element painted with a gradient reports `backgroundColor:
+   * transparent` — so reading the colour alone showed the knob nothing at all
+   * over the one control where the backdrop is the most interesting.
+   */
+  gradient?: { x0: number; y0: number; x1: number; y1: number; stops: Array<[number, string]> };
 }
 
 export interface KnobGlassScene {
@@ -213,7 +221,14 @@ export function paintKnobGlass(canvas: HTMLCanvasElement, scene: KnobGlassScene)
   ctx.fillStyle = scene.base;
   ctx.fillRect(0, 0, W, H);
   for (const l of scene.layers) {
-    ctx.fillStyle = l.color;
+    if (l.gradient) {
+      const g = ctx.createLinearGradient(
+        l.gradient.x0 * dpr, l.gradient.y0 * dpr, l.gradient.x1 * dpr, l.gradient.y1 * dpr);
+      for (const [at, col] of l.gradient.stops) g.addColorStop(at, col);
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = l.color;
+    }
     roundRect(ctx, l.x * dpr, l.y * dpr, l.w * dpr, l.h * dpr, l.r * dpr);
     ctx.fill();
   }
