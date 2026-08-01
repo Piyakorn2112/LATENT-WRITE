@@ -50,85 +50,38 @@
 const ETA = 1 / 1.5;
 
 /**
- * Bezel depth as a fraction of the pill's half-short-side.
+ * ★ THE BEVEL — thin band at the rim, and a pull much BIGGER than the band.
  *
- * This is the single dial that sets HOW MUCH the glass can bend: the pull is
- * bounded by `bezel / max|g′|`, so a wider bezel buys a proportionally
- * stronger refraction. Kept well under 1 so the lens still reads as an EDGE
- * rather than the whole button smearing, but pushed up from the first pass —
- * the owner wanted the effect obvious, and at 0.34 the bend maxed out at
- * about 11 device px on a pressed toggle knob.
+ * A real glass slab's rounded edge does not bend the backdrop gently across
+ * half the object. It is FLAT over almost its whole area — normal straight up,
+ * rays pass through undeviated, the backdrop shows through exactly — and then
+ * rolls over in a narrow bevel where the surface tips toward vertical and the
+ * deviation becomes large. Because the deviation there is far larger than the
+ * bevel is wide, that thin band shows a COMPRESSED, partly MIRRORED strip of
+ * the wide interior. That squeezed rim strip is the thing that reads as
+ * "thick glass", and it is what the earlier profiles were missing.
  *
- * ★ IT ALSO SETS HOW MUCH OF THE KNOB IS GLASS-EDGE AND HOW MUCH IS FLAT.
- * The interior beyond the bezel is refraction-FREE by construction, so this
- * fraction is literally "how far in the bevel reaches": at 0.72 the inner
- * ~28% of the pill passes the backdrop through untouched. Raising it buys
- * strength (the pull is capped at bezel/max|g'|) and spends the flat centre;
- * lowering it does the reverse. That trade is unavoidable — a lens cannot
- * bend further than its own edge is thick.
+ * ★ WHICH MEANS THE SAMPLING FOLDS ON PURPOSE, and that is a reversal of what
+ * the previous two attempts here assumed. `y + disp(y)` is NOT monotone in the
+ * bevel — it runs inward, turns, and comes back — so the band mirrors. Every
+ * earlier version bounded the pull to `bezel / max|g′|` to prevent exactly
+ * that, and paid for it by spreading a weak bend across most of the knob.
  *
- * ★ NOTE THAT THE REFRACTIVE INDEX IS NOT THE DIAL. `snellDisp` sets the RIM
- * magnitude, but the field is then normalised to the fold-free budget
- * (`amp = peak / RIM_DISP`), so η cancels out entirely — raising it changes
- * nothing on screen. How hard this glass bends is set by GEOMETRY: the bezel
- * width and how close the pull runs to `bezel / max|g′|`. Those two are the
- * dials; the index only decides the SHAPE the physics gives the rim.
+ * The fold was never the defect. The DEFECT was folding inside an 8-BIT
+ * DISPLACEMENT MAP: quantised sampling positions turn a fold into a comb of
+ * stripes (one byte = 0.157 element px, so the sampling stalls and jumps in
+ * visible steps). This painter works in float with bilinear sampling, so the
+ * same fold is a smooth compressed reflection — a glass edge instead of a
+ * comb. That is the whole reason the rebuild was worth doing.
  */
-const BEZEL_FRAC = 0.72;
-/**
- * ★ THE FALLOFF SHAPE — zero in the middle, strongest at the very edge.
- *
- * The bevel model the liquid-glass write-ups describe: the glass is FLAT
- * across its interior (surface normal straight up ⇒ a view ray passes
- * through undeviated ⇒ no refraction at all) and rolls over through a bevel
- * at the rim, where the normal swings toward horizontal and the deviation
- * peaks. So the displacement must be 0 through the middle and climb smoothly
- * to its maximum AT the edge — which is what this profile is, expressed as
- * `g(t)`, t = distance-from-edge / bezel, g(0) = 1 at the rim, g(1) = 0.
- *
- * ★ WHY IT IS (NEARLY) A LINEAR RAMP, and this is the non-obvious part.
- * The resample must stay monotone or the backdrop mirrors:
- *
- *      A · max|g′| ≤ bezel        ⇒        A ≤ bezel / max|g′|
- *
- * and for ANY curve running 1 → 0 across the band, max|g′| ≥ 1, with equality
- * only for a straight ramp. So every bit of "concentration near the edge"
- * costs strength: a profile that dumps its fall into the outer tenth has
- * max|g′| ≈ 10 and must therefore be TEN TIMES weaker to avoid tearing. That
- * is exactly why the original squircle→Snell curve tore — it is the right
- * shape for a THICK bevel and far too steep for a knob's thin one.
- *
- * The optimum is therefore a ramp with just enough easing at both ends to
- * avoid a visible ring where it starts and stops. Its derivative is a
- * trapezoid: 0 at both ends, flat at k in between, with area 1, so
- * k = 1/(1 − EASE) — only 22% worse than the theoretical floor instead of
- * 10x, and the interior stays genuinely untouched.
- */
-const EASE = 0.18;
-const MAX_G_SLOPE = 1 / (1 - EASE);   // 1.22
 
+/** Bevel width as a fraction of the pill's half-short-side. THIN. */
+const BEZEL_FRAC = 0.26;
 /**
- * ★ HOW CLOSE TO THE FOLD BOUND THE PULL ACTUALLY RUNS.
- *
- * At exactly `A·max|g′| = bezel` the sampling advance reaches ZERO where the
- * profile is steepest — infinite compression, which smears rather than bends
- * (the first "stronger" attempt tore at the cap for precisely this reason).
- * At 0.85 the sampling never advances slower than 0.15x normal: compressed
- * hard, which is what a strong glass edge looks like, but never stalled.
+ * Peak pull, in units of the bevel width. Greater than 1 means the rim samples
+ * from beyond the bevel — the compression that makes the edge read as thick.
  */
-const FOLD_SAFETY = 0.85;
-
-function falloff(t: number): number {
-  if (t <= 0) return 1;
-  if (t >= 1) return 0;
-  const k = MAX_G_SLOPE;
-  if (t < EASE) return 1 - (k * t * t) / (2 * EASE);
-  if (t > 1 - EASE) {
-    const u = 1 - t;
-    return (k * u * u) / (2 * EASE);
-  }
-  return 1 - (k * EASE) / 2 - k * (t - EASE);
-}
+const PULL_X_BEZEL = 4.0;
 
 /** Squircle height profile, and its slope — the same optics as everywhere else. */
 function h(t: number): number {
@@ -143,18 +96,32 @@ function snellDisp(slope: number, eta: number): number {
   return (Math.sqrt(1 - sinSq) - eta * nZ) * (slope / nLen);
 }
 
-/** The rim magnitude, in units of the bezel — the physics, evaluated once. */
+/** The rim magnitude — the profile's value at the very edge, for normalising. */
 const RIM_DISP = (() => {
   const dt = 5e-4;
   const slope = Math.min((h(dt) - h(0)) / dt, 5);
   return snellDisp(slope, ETA);
 })();
 
-/** Refraction profile over the bezel band, sampled once. */
+/**
+ * The PHYSICAL profile over the bevel, sampled once: the squircle's surface
+ * slope refracted through Snell. Steep at the very rim and collapsing within a
+ * fraction of the bevel — the shape a rounded glass edge actually has.
+ *
+ * No slope bound is imposed on it. Earlier versions flattened this curve to
+ * keep the resample monotone, which is what spread a weak bend across most of
+ * the knob; the fold it produces here is the look, not a defect (see the bevel
+ * note above).
+ */
 const LUT_N = 512;
 const PROFILE = (() => {
   const lut = new Float32Array(LUT_N + 1);
-  for (let i = 0; i <= LUT_N; i++) lut[i] = RIM_DISP * falloff(i / LUT_N);
+  const dt = 5e-4;
+  for (let i = 0; i <= LUT_N; i++) {
+    const t = i / LUT_N;
+    const slope = Math.min((h(Math.min(t + dt, 1)) - h(Math.max(t - dt, 0))) / (2 * dt), 5);
+    lut[i] = snellDisp(slope, ETA);
+  }
   return lut;
 })();
 
@@ -269,7 +236,7 @@ export function paintKnobGlass(canvas: HTMLCanvasElement, scene: KnobGlassScene)
   // than this does not make the glass stronger, it makes the backdrop mirror
   // — so `strength` scales toward it and is clamped at it.
   const wanted = Math.max(0, scene.strength ?? 1);
-  const peak = (bezel / MAX_G_SLOPE) * FOLD_SAFETY * Math.min(wanted, 1);
+  const peak = bezel * PULL_X_BEZEL * wanted;
   const amp = peak / Math.max(RIM_DISP, 1e-6);
   const chroma = scene.chroma ?? 0.04;
   const sat = scene.saturate ?? 1.45;
