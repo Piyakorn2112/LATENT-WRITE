@@ -109,8 +109,16 @@
      out a multiply, so light mode pulls it down instead and keeps the colour
      saturated enough to register. Same effect, opposite arithmetic. */
   --lqg-rim-blend: multiply;
-  --lqg-rim-intensity: 1.05;
+  /* Between the old (invisible) rim and the full-strength match to dark: the
+     isolated rim contribution measures mean 1.2 on a card where the old value
+     gave 0.2 and the dark reference is 2.2. */
+  --lqg-rim-intensity: 0.75;
   --lqg-rim-brightness: 0.92;
+
+  /* The "set amount" colour, shared by the toggle's on-state and the slider's
+     fill so both controls report a value in the same voice. One value for both
+     schemes, as .glass-toggle--on already had. */
+  --control-value-fill: rgba(59, 130, 246, 0.88);
 
   /* Liquid glass edge system — drives the border ring (::before) and the
      additive edge glow (::after) on every glass surface, so updating these
@@ -7270,17 +7278,21 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   pointer-events: none;
 }
 
+/* ★ The FILL IS A VALUE READOUT, so it carries the same blue the toggle uses
+   for "on" — the two controls now say "this is the set amount" in one colour
+   instead of the slider saying it in neutral ink. Same token in both schemes,
+   like .glass-toggle--on, which already ships one value for both: the blue is
+   an accent, not a surface, so it does not need to re-tone per scheme. The
+   TRACK stays neutral — it is the empty remainder, and tinting it too would
+   leave the fill with nothing to read against. */
 .glass-range-fill {
   position: absolute;
   left: 0;
   top: 0;
   height: 100%;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--control-value-fill);
   pointer-events: none;
-}
-@media (prefers-color-scheme: light) {
-  .glass-range-fill { background: rgba(0, 0, 0, 0.32); }
 }
 
 /* Knob: pill div absolutely placed along the track via CSS custom property.
@@ -7344,6 +7356,16 @@ body.scroll-edge-idle .toolbar-ambient-orb {
      painter reads. Same value the pressed rule used to set as `background`. */
   --knob-fill: rgba(255, 255, 255, 0.18);
   background: transparent !important;
+}
+
+/* ★ The slider knob is 20x14 where the toggle's is 32x24, and the bevel is a
+   fraction of the SHORT SIDE — so at the shared fraction its glass edge comes
+   out a little over half as thick and reads thinner than the toggle's despite
+   identical optics. Give it more of the fraction to land in the same place.
+   The pull scales with the bevel, so this thickens the band and deepens the
+   bend together, which is how a thicker piece of glass behaves. */
+.glass-range-knob--painted {
+  --knob-bezel-frac: 0.40;
 }
 
 .knob-glass-canvas {
@@ -10243,15 +10265,11 @@ body.scroll-edge-idle .toolbar-ambient-orb {
 }
 
 .glass-toggle--on {
-  background: rgba(59, 130, 246, 0.88);
+  /* Shared with .glass-range-fill — see --control-value-fill. The dark-mode
+     block that used to follow set the identical pair of values, so it is gone
+     rather than restated. */
+  background: var(--control-value-fill);
   border-color: rgba(59, 130, 246, 0.42);
-}
-
-@media (prefers-color-scheme: dark) {
-  .glass-toggle--on {
-    background: rgba(59, 130, 246, 0.88);
-    border-color: rgba(59, 130, 246, 0.42);
-  }
 }
 
 

@@ -173,6 +173,14 @@ export interface KnobGlassScene {
   /** Saturation of the refracted backdrop — the filter chain's saturate(1.45),
    *  which the painted path has to supply itself. */
   saturate?: number;
+  /** Bevel width as a fraction of the half-short-side; defaults to BEZEL_FRAC.
+   *
+   *  ★ Per-knob because the bevel scales with the knob's SHORT SIDE, so one
+   *  fraction gives two different absolute thicknesses: the slider knob is
+   *  20x14 against the toggle's 32x24, so at a shared fraction its glass edge
+   *  is a little over half as thick and reads thinner than the toggle's even
+   *  though the optics are identical. The slider asks for more of it. */
+  bezelFrac?: number;
 }
 
 function roundRect(
@@ -243,7 +251,7 @@ export function paintKnobGlass(canvas: HTMLCanvasElement, scene: KnobGlassScene)
   const r = Math.min(halfW, halfH);       // a pill
   const flatX = halfW - r;
   const flatY = halfH - r;
-  const bezel = Math.max(1, Math.min(halfW, halfH) * BEZEL_FRAC);
+  const bezel = Math.max(1, Math.min(halfW, halfH) * (scene.bezelFrac ?? BEZEL_FRAC));
   // ★ THE FOLD-FREE MAXIMUM, in device px: A·max|g′| ≤ bezel. Asking for more
   // than this does not make the glass stronger, it makes the backdrop mirror
   // — so `strength` scales toward it and is clamped at it.

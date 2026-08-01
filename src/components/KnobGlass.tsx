@@ -175,6 +175,7 @@ export function KnobGlass({ active }: { active: boolean }) {
         }
       }
 
+      const knobStyle = getComputedStyle(knob);
       paintKnobGlass(canvas, {
         w, h,
         dpr: Math.min(window.devicePixelRatio || 1, 3),
@@ -183,8 +184,11 @@ export function KnobGlass({ active }: { active: boolean }) {
         // The knob's own translucent surface. Read from --knob-fill, NOT from
         // backgroundColor: the painted knob sets its background transparent so
         // the canvas is the surface, which would otherwise read as "no tint".
-        fill: getComputedStyle(knob).getPropertyValue("--knob-fill").trim()
+        fill: knobStyle.getPropertyValue("--knob-fill").trim()
           || "rgba(255,255,255,0.18)",
+        // Per-knob bevel width, from CSS for the same reason the tint is: the
+        // component stays ignorant of which control it is inside.
+        bezelFrac: parseFloat(knobStyle.getPropertyValue("--knob-bezel-frac")) || undefined,
       });
       raf = requestAnimationFrame(paint);
     };
