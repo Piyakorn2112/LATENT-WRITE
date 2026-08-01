@@ -348,6 +348,17 @@ export function OrbEngine({
     // ── animation state (energy lives in the rig, which springs it)
     let offAmt = mode === "off" ? 1 : 0;   // eased drain to grey
     let vib = 0;                           // smoothed vibrance
+    // Fun-mode eyes follower. The petal cluster's visual centre LEANS while
+    // the rig works — the pulse travels round the ring and the mass goes
+    // with it — so eyes pinned to the static slot read as detached during
+    // analysis. This pair chases the cluster's area-weighted centroid and is
+    // written out as CSS vars on the parent (.intel-orb-live) for the eyes
+    // to ride; only while the fun class is present, so the style write
+    // costs nothing in normal mode.
+    let eyeX = 0;
+    let eyeY = 0;
+    let lastEyeX = 0;
+    let lastEyeY = 0;
     let lastNow = performance.now();
     let pending = 0;                       // time accrued since last draw
     let lastWake = wakeRef.current;
@@ -399,6 +410,36 @@ export function OrbEngine({
         pa[i * 4 + 3] = Math.sin(t.rot);
         pb[i * 2] = t.a;
         pb[i * 2 + 1] = t.b;
+      }
+
+      // Eyes follow the cluster (fun mode only). Area-weighted centroid in
+      // petal units, converted through the shader's own mapping — one petal
+      // unit is 0.72 x half the canvas (`p = (frag/res*2-1)/0.72`), and
+      // shader +y is screen-up, so CSS gets the sign flipped.
+      const funParent = host.parentElement;
+      if (funParent && funParent.classList.contains("intel-orb-live--fun")) {
+        let cxu = 0, cyu = 0, wsum = 0;
+        for (let i = 0; i < PETAL_COUNT; i++) {
+          const t = world.petals[i];
+          const w = t.a * t.b;
+          cxu += t.x * w;
+          cyu += t.y * w;
+          wsum += w;
+        }
+        const pxPerUnit = 0.72 * (cssSize / 2);
+        const tx = (cxu / wsum) * pxPerUnit;
+        const ty = -(cyu / wsum) * pxPerUnit;
+        // Soft attachment: the eyes are ON the cluster but not bolted to it.
+        const k = Math.min(1, dt * 14);
+        eyeX += (tx - eyeX) * k;
+        eyeY += (ty - eyeY) * k;
+        // Style writes only on real movement — a resting orb writes nothing.
+        if (Math.abs(eyeX - lastEyeX) > 0.05 || Math.abs(eyeY - lastEyeY) > 0.05) {
+          lastEyeX = eyeX;
+          lastEyeY = eyeY;
+          funParent.style.setProperty("--orb-eyes-dx", `${eyeX.toFixed(2)}px`);
+          funParent.style.setProperty("--orb-eyes-dy", `${eyeY.toFixed(2)}px`);
+        }
       }
 
       gl.uniform1f(uniforms.u_e, energy);
@@ -489,6 +530,8 @@ export function OrbEngine({
       canvas.removeEventListener("webglcontextlost", onLost);
       canvas.removeEventListener("webglcontextrestored", onRestored);
       bodyObserver.disconnect();
+      host.parentElement?.style.removeProperty("--orb-eyes-dx");
+      host.parentElement?.style.removeProperty("--orb-eyes-dy");
       gl.getExtension("WEBGL_lose_context")?.loseContext();
       canvas.remove();
     };

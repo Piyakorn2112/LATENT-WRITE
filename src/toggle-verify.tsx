@@ -48,7 +48,7 @@ createRoot(stage).render(<StrictMode><Harness /></StrictMode>);
 initLiquidGlassFilter();
 
 interface W extends Window {
-  __tap?: (downMs?: number) => void;
+  __tap?: (downMs?: number, pointerType?: string, wobblePx?: number) => void;
   __press?: (down: boolean) => void;
   __click?: (holdMs?: number) => void;
   __reset?: () => void;
@@ -90,18 +90,27 @@ w.__reset = () => {
 };
 
 /** A genuine tap: pointerdown, then pointerup `downMs` later. Default 50ms is
- *  a normal human click — the case the knob must still fully expand on. */
-w.__tap = (downMs = 50) => {
+ *  a normal human click — the case the knob must still fully expand on.
+ *
+ *  `wobblePx` simulates a FINGER: real touch contact drifts a few px between
+ *  down and up, which is enough to cross the component's 4px drag threshold.
+ *  A mouse tap wobbles 0; a thumb wobbles 5-10. */
+w.__tap = (downMs = 50, pointerType = "mouse", wobblePx = 0) => {
   const el = btn();
   if (!el) return;
   const r = el.getBoundingClientRect();
   const opts = {
-    bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse",
+    bubbles: true, cancelable: true, pointerId: 1, pointerType,
     button: 0, buttons: 1, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
   };
   el.dispatchEvent(new PointerEvent("pointerdown", opts));
+  if (wobblePx) {
+    window.setTimeout(() => {
+      el.dispatchEvent(new PointerEvent("pointermove", { ...opts, clientX: opts.clientX + wobblePx }));
+    }, Math.min(16, downMs / 2));
+  }
   window.setTimeout(() => {
-    el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 }));
+    el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0, clientX: opts.clientX + wobblePx }));
     el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
   }, downMs);
 };
@@ -109,11 +118,16 @@ w.__tap = (downMs = 50) => {
 w.__probe = () => {
   const k = knob();
   if (!k) return null;
+  // Remount detector: a CSS transition cannot survive the element being
+  // recreated, so if this tag ever resets the "instant switch" is a REMOUNT.
+  const tagged = k as HTMLElement & { __tag?: number };
+  if (!tagged.__tag) tagged.__tag = performance.now();
   const cs = getComputedStyle(k);
   const m = cs.transform.match(/matrix\(([^)]+)\)/);
   const scale = m ? parseFloat(m[1].split(",")[0]) : 1;
   const r = k.getBoundingClientRect();
   return {
+    tag: tagged.__tag,
     scale,
     left: parseFloat(cs.left) || 0,
     glass: k.classList.contains("liquid-glass-control-knob"),

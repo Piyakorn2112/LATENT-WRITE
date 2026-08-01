@@ -516,13 +516,23 @@ body.scroll-edge-idle .scroll-edge-right {
 .app .annotation-popover,
 .app .annotation-panel,
 .app .word-count,
-.app .debug-panel,
-.app .liquid-glass-control-knob {
+.app .debug-panel {
   transition:
     background 0.22s ease,
     backdrop-filter 0.22s ease,
     -webkit-backdrop-filter 0.22s ease;
 }
+/* ★ .liquid-glass-control-knob is deliberately NOT in the group above.
+   The `transition` SHORTHAND replaces an element's whole transition list, and
+   the toggle/slider knobs carry that class exactly while they are pressed —
+   which is exactly when their own `left`/`transform` springs must run. With
+   the knob in this group, `.app .liquid-glass-control-knob` (0,2,0) beat
+   `.glass-toggle-knob` (0,1,0) and the knob TELEPORTED across the track
+   instead of sliding: the "instant switch" bug, in the app since the orb
+   rebuild added this sweep. The fade this group buys is for the IDLE glass
+   swap, and a knob cannot be mid-press while the app is idle, so the knob
+   loses nothing by being excluded. Regression gate: scripts/probe-app-toggle.cjs
+   drives a real toggle in the booted app and fails on a snapped slide. */
 body.scroll-edge-idle .app .liquid-glass {
   background: var(--bg-glass-strong) !important;
   -webkit-backdrop-filter: blur(2px) !important;
@@ -10350,7 +10360,17 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   height: 100%;
   pointer-events: none;
   z-index: 6;
-  scale: 1;
+  /* Smaller face: the eyes read best sitting well inside the faded core of
+     the orb, not spanning it. `scale` is the individual property, so it
+     composes with the fade keyframe's `transform` and the follower's
+     `translate` below instead of fighting them. */
+  scale: 0.8;
+  /* Follow the cluster: OrbEngine writes the petal mass's centre out as
+     these vars while the rig works (analysing sends the pulse round the
+     ring and the whole cluster leans with it). The eyes ride the same
+     centre, so the face stays ON the orb rather than hovering over an
+     empty slot. Falls back to 0 when the engine is quiet or absent. */
+  translate: var(--orb-eyes-dx, 0px) var(--orb-eyes-dy, 0px);
   animation: intel-eyes-fade 0.45s ease-out;
   /* Soft halo behind the merged eye contour — wide blur, dark, slight
      downward offset. Renders after the gooey filter on the inner <g>. */
