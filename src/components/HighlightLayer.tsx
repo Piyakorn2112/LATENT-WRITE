@@ -32,11 +32,11 @@ const BASE_COLOR      = "var(--text-body)";
 //   rising → orange (warning warmth)
 //   high   → red    (alarm)
 //
-// ★ THESE TINT THE RULE, NOT THE WORD — see sceneTagStyle. The label used to
-//   be printed in the tension colour, which quietly re-coupled the two things
+// ★ THESE ARE MIXED MOSTLY AWAY before they reach the page — see
+//   sceneNoteStyle. Printed at full strength they re-coupled the two things
 //   the label engine exists to separate: the word says what the scene DOES
-//   (scene-function.ts), the colour says how hot it is. Painting a function
-//   word in a heat colour makes it read as another way of saying "red".
+//   (scene-function.ts), the colour says how hot it is. A function word in an
+//   alarm hue just reads as another way of saying "red".
 const SCENE_T: Record<"calm" | "rising" | "high", string> = {
   calm:   IOS_COLORS.indigo.text,  // #4F45D8 — readable on white, vivid on dark
   rising: IOS_COLORS.orange.text,  // #DC7B19
@@ -58,48 +58,59 @@ const SCENE_ANCHOR: CSSProperties = {
 };
 
 /**
- * The scene label as a margin note, not a chip.
+ * The scene note — a manuscript marginal, not a UI label.
  *
- * It reads set in the body's muted ink at a manuscript-note size, preceded by
- * a hairline carrying the tension colour. The previous treatment — 9px, weight
- * 700, uppercase, 0.09em tracking, printed in the tension hue and prefixed
- * with a literal "|" character — was five emphasis devices stacked on a piece
- * of secondary information, and the pipe was a glyph standing in for a rule it
- * could not align with.
+ * Two treatments have been rejected here, and both failures were the same
+ * mistake: dressing a quiet piece of information up as an interface control.
+ *
+ *   1. `| REFLECTION` — 9px, weight 700, uppercase, 0.09em tracking, in the
+ *      tension hue, with a pipe glyph standing in for a rule. Five emphasis
+ *      devices on a secondary annotation.
+ *   2. `— reflection` — the pipe swapped for a real hairline and the caps
+ *      dropped. Better typography, same species: a rule-plus-microcopy chip,
+ *      which is a house style of every dashboard ever drawn.
+ *
+ * What it is now: the word, in the manuscript's OWN typeface, italic, hanging
+ * slightly into the left padding the way a printer sets a shoulder note. No
+ * rule, no caps, no tracking, no chrome. It reads as something written in the
+ * margin of the page rather than something laid on top of it.
+ *
+ * ★ IT MUST HANG BY LESS THAN .document's 32px LEFT PADDING. That element
+ *   carries `contain: layout paint`, so anything reaching past its padding box
+ *   is clipped outright — which is also why a true right-aligned gutter note
+ *   (the obvious next idea) is not possible here: "confrontation" set to the
+ *   left of the text column needs ~70px of a 32px gutter.
  */
-function sceneTagStyle(confidence: number): CSSProperties {
+function sceneNoteStyle(
+  tension: "calm" | "rising" | "high",
+  confidence: number,
+): CSSProperties {
   return {
     position: "absolute",
-    left: 0,
-    bottom: "3.15em", // floats into the inter-paragraph whitespace above
-    display: "flex",
-    alignItems: "center",
-    gap: "0.55em",
+    left: "-1.35em",   // hangs into the padding; see the containment note above
+    // ★ Sits INSIDE the paragraph gap, not above it. `bottom` here resolves
+    //   against the note's own 0.74em size, and at 2.9em it reached ~36px up —
+    //   far enough to land on the rule beneath the chapter title whenever the
+    //   first scene of a chapter carried a label. 2.15em keeps it in the
+    //   whitespace between paragraphs, which is where a marginal belongs.
+    bottom: "2.15em",
     whiteSpace: "nowrap",
-    fontSize: "10px",
+    fontFamily: "var(--editor-font, var(--font-body))",
+    fontStyle: "italic",
+    fontSize: "0.74em",
     lineHeight: 1,
-    letterSpacing: "0.05em",
-    fontFamily: "var(--font-ui)",
-    fontWeight: 500,
-    color: "var(--text-secondary)",
-    // ★ A marginal reading must LOOK marginal. The engine reports how far the
-    //   winning label cleared the runner-up, and a call that barely won has no
-    //   business looking as settled as one that was unambiguous.
-    opacity: 0.52 + 0.36 * Math.max(0, Math.min(1, confidence)),
+    // ★ The hue is pulled most of the way to the page's own faint ink. The
+    //   word says what the scene DOES; the tension is a whisper of warmth in
+    //   the ink, not a status colour. Printing it at full saturation made a
+    //   function word read as another way of saying "red", and color-mix
+    //   inherits the light/dark flip from --text-tertiary for free.
+    color: `color-mix(in oklab, ${SCENE_T[tension]} 38%, var(--text-tertiary))`,
+    // A marginal reading must LOOK marginal: the engine reports how far the
+    // winning label cleared the runner-up, and a call that barely won has no
+    // business looking as settled as one that was unambiguous.
+    opacity: 0.6 + 0.3 * Math.max(0, Math.min(1, confidence)),
     pointerEvents: "none",
     userSelect: "none",
-  };
-}
-
-/** The hairline that replaces the old "|" glyph and carries the tension hue. */
-function sceneRuleStyle(tension: "calm" | "rising" | "high"): CSSProperties {
-  return {
-    width: "13px",
-    height: "1px",
-    flex: "none",
-    background: SCENE_T[tension],
-    // The rule is the one saturated element, so it can afford full strength.
-    opacity: 0.9,
   };
 }
 
@@ -960,8 +971,7 @@ function HighlightLayerImpl({
         <span key={`para${pi}`}>
           {meta?.sceneStart && meta.sceneLabel && (
             <span aria-hidden="true" style={SCENE_ANCHOR}>
-              <span style={sceneTagStyle(meta.sceneConfidence ?? 0.5)}>
-                <span style={sceneRuleStyle(tension)} />
+              <span style={sceneNoteStyle(tension, meta.sceneConfidence ?? 0.5)}>
                 {meta.sceneLabel}
               </span>
             </span>

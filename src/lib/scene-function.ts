@@ -584,12 +584,17 @@ const CANDIDATES: Candidate[] = [
   {
     label: "weighted silence",
     mode: "ambient",
-    // ★ `oppose < 0.35` is load-bearing. This is the scene where the meaningful
-    //   thing is what is NOT said — which is not the same as a row. Phrases
-    //   like "refused to look" and "did not answer" are withholding AND
-    //   opposition, so a shouting match scored 1.723 here against
-    //   confrontation's 1.728 and the near-tie abstained on a correct call.
-    gate: (f) => f.silence >= 0.3 && f.oppose < 0.35,
+    // ★ THE DISCRIMINATOR IS DIALOGUE, NOT OPPOSITION. This is the scene where
+    //   the meaningful thing is what is NOT said, so it cannot be full of
+    //   speech — whereas a confrontation is people talking at each other.
+    //
+    //   Gating on `oppose` instead looked right and was wrong: "refused to
+    //   explain herself" and "would not look at him" score as opposition while
+    //   MEANING withholding, so the guard threw out the very scene the label
+    //   exists for (it broke test-tension-scene's refusal case) while a
+    //   shouting match still scored 1.723 against confrontation's 1.728.
+    //   Dialogue separates the two concepts cleanly and says what we mean.
+    gate: (f) => f.silence >= 0.3 && f.dialogue < 0.25,
     score: (f) => 0.7 * sat(f.silence, 0.5) + 0.3 * sat(f.interior, 1.8),
   },
 
