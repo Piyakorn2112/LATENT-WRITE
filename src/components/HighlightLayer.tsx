@@ -25,18 +25,13 @@ const NARRATIVE_COLOR = "#888888";
 const ACTION_TEXT     = IOS_COLORS.orange.text;
 const BASE_COLOR      = "var(--text-body)";
 
-// Scene tension colours — drawn from the same iOS-system palette used for
-// entity highlights so they read with consistent saturation in both light and
-// dark mode. The mapping is intentional, not arbitrary:
+// Scene label tension colours — drawn from the same iOS-system palette
+// used for entity highlights so they read with consistent saturation in
+// both light and dark mode (the previous slate/amber/rose values washed
+// out on light surfaces). The mapping is intentional, not arbitrary:
 //   calm   → indigo (low-key, recedes)
 //   rising → orange (warning warmth)
 //   high   → red    (alarm)
-//
-// ★ THESE ARE MIXED MOSTLY AWAY before they reach the page — see
-//   sceneNoteStyle. Printed at full strength they re-coupled the two things
-//   the label engine exists to separate: the word says what the scene DOES
-//   (scene-function.ts), the colour says how hot it is. A function word in an
-//   alarm hue just reads as another way of saying "red".
 const SCENE_T: Record<"calm" | "rising" | "high", string> = {
   calm:   IOS_COLORS.indigo.text,  // #4F45D8 — readable on white, vivid on dark
   rising: IOS_COLORS.orange.text,  // #DC7B19
@@ -57,58 +52,20 @@ const SCENE_ANCHOR: CSSProperties = {
   userSelect: "none",
 };
 
-/**
- * The scene note — a manuscript marginal, not a UI label.
- *
- * Two treatments have been rejected here, and both failures were the same
- * mistake: dressing a quiet piece of information up as an interface control.
- *
- *   1. `| REFLECTION` — 9px, weight 700, uppercase, 0.09em tracking, in the
- *      tension hue, with a pipe glyph standing in for a rule. Five emphasis
- *      devices on a secondary annotation.
- *   2. `— reflection` — the pipe swapped for a real hairline and the caps
- *      dropped. Better typography, same species: a rule-plus-microcopy chip,
- *      which is a house style of every dashboard ever drawn.
- *
- * What it is now: the word, in the manuscript's OWN typeface, italic, hanging
- * slightly into the left padding the way a printer sets a shoulder note. No
- * rule, no caps, no tracking, no chrome. It reads as something written in the
- * margin of the page rather than something laid on top of it.
- *
- * ★ IT MUST HANG BY LESS THAN .document's 32px LEFT PADDING. That element
- *   carries `contain: layout paint`, so anything reaching past its padding box
- *   is clipped outright — which is also why a true right-aligned gutter note
- *   (the obvious next idea) is not possible here: "confrontation" set to the
- *   left of the text column needs ~70px of a 32px gutter.
- */
-function sceneNoteStyle(
-  tension: "calm" | "rising" | "high",
-  confidence: number,
-): CSSProperties {
+function sceneTagStyle(tension: "calm" | "rising" | "high"): CSSProperties {
   return {
     position: "absolute",
-    left: "-1.35em",   // hangs into the padding; see the containment note above
-    // ★ Sits INSIDE the paragraph gap, not above it. `bottom` here resolves
-    //   against the note's own 0.74em size, and at 2.9em it reached ~36px up —
-    //   far enough to land on the rule beneath the chapter title whenever the
-    //   first scene of a chapter carried a label. 2.15em keeps it in the
-    //   whitespace between paragraphs, which is where a marginal belongs.
-    bottom: "2.15em",
+    left: 0,
+    bottom: "3.15em", // floats into the inter-paragraph whitespace above
     whiteSpace: "nowrap",
-    fontFamily: "var(--editor-font, var(--font-body))",
-    fontStyle: "italic",
-    fontSize: "0.74em",
+    fontSize: "9px",
     lineHeight: 1,
-    // ★ The hue is pulled most of the way to the page's own faint ink. The
-    //   word says what the scene DOES; the tension is a whisper of warmth in
-    //   the ink, not a status colour. Printing it at full saturation made a
-    //   function word read as another way of saying "red", and color-mix
-    //   inherits the light/dark flip from --text-tertiary for free.
-    color: `color-mix(in oklab, ${SCENE_T[tension]} 38%, var(--text-tertiary))`,
-    // A marginal reading must LOOK marginal: the engine reports how far the
-    // winning label cleared the runner-up, and a call that barely won has no
-    // business looking as settled as one that was unambiguous.
-    opacity: 0.6 + 0.3 * Math.max(0, Math.min(1, confidence)),
+    letterSpacing: "0.09em",
+    fontFamily: "var(--font-ui)",
+    fontWeight: 700,                 // slightly heavier so the iOS hue reads
+    color: SCENE_T[tension],
+    opacity: 0.85,                   // bumped from 0.65 — iOS palette is balanced for it
+    textTransform: "uppercase",
     pointerEvents: "none",
     userSelect: "none",
   };
@@ -971,9 +928,7 @@ function HighlightLayerImpl({
         <span key={`para${pi}`}>
           {meta?.sceneStart && meta.sceneLabel && (
             <span aria-hidden="true" style={SCENE_ANCHOR}>
-              <span style={sceneNoteStyle(tension, meta.sceneConfidence ?? 0.5)}>
-                {meta.sceneLabel}
-              </span>
+              <span style={sceneTagStyle(tension)}>| {meta.sceneLabel}</span>
             </span>
           )}
           {snapshotPlan.paragraphNodes[pi]}
