@@ -49,12 +49,45 @@ initLiquidGlassFilter();
 
 interface W extends Window {
   __tap?: (downMs?: number) => void;
+  __press?: (down: boolean) => void;
+  __click?: (holdMs?: number) => void;
+  __reset?: () => void;
   __probe?: () => Record<string, unknown> | null;
 }
 const w = window as W;
 
 const knob = () => document.querySelector<HTMLElement>(".glass-toggle-knob");
 const btn = () => document.querySelector<HTMLElement>(".glass-toggle");
+
+const pointerOpts = () => {
+  const el = btn()!;
+  const r = el.getBoundingClientRect();
+  return {
+    bubbles: true, cancelable: true, pointerId: 1, pointerType: "mouse" as const,
+    button: 0, buttons: 1, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+  };
+};
+
+/** Hold or release the pointer — half a tap, for mid-press inspection. */
+w.__press = (down) => {
+  const el = btn();
+  if (!el) return;
+  const opts = pointerOpts();
+  if (down) el.dispatchEvent(new PointerEvent("pointerdown", opts));
+  else {
+    el.dispatchEvent(new PointerEvent("pointerup", { ...opts, buttons: 0 }));
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  }
+};
+
+/** A click with an explicit hold — __tap with the naming the press harness uses. */
+w.__click = (holdMs = 50) => w.__tap!(holdMs);
+
+/** Return the toggle to OFF and wait out any animation before the next scene. */
+w.__reset = () => {
+  const el = btn();
+  if (el?.classList.contains("glass-toggle--on")) w.__tap!(10);
+};
 
 /** A genuine tap: pointerdown, then pointerup `downMs` later. Default 50ms is
  *  a normal human click — the case the knob must still fully expand on. */
@@ -78,10 +111,17 @@ w.__probe = () => {
   if (!k) return null;
   const cs = getComputedStyle(k);
   const m = cs.transform.match(/matrix\(([^)]+)\)/);
+  const scale = m ? parseFloat(m[1].split(",")[0]) : 1;
+  const r = k.getBoundingClientRect();
   return {
-    scale: m ? parseFloat(m[1].split(",")[0]) : 1,
+    scale,
     left: parseFloat(cs.left) || 0,
     glass: k.classList.contains("liquid-glass-control-knob"),
     on: !!btn()?.classList.contains("glass-toggle--on"),
+    transform: cs.transform,
+    background: cs.backgroundColor,
+    backdropFilter: cs.backdropFilter,
+    layoutW: k.offsetWidth, layoutH: k.offsetHeight,
+    paintedW: Math.round(r.width), paintedH: Math.round(r.height),
   };
 };

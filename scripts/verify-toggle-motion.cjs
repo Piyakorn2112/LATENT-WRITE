@@ -1,12 +1,20 @@
 /**
  * verify-toggle-motion.cjs — sample the toggle knob's ACTUAL motion curve.
  *
- * Screenshots cannot show whether a transition is smooth, and reading the CSS
- * has already misled me twice on this control. So this drives the real
- * stylesheet in real Chromium and records `getComputedStyle(knob).transform`
- * and `.left` every animation frame, then looks for the two things that read as
- * "broken": a DISCONTINUITY (a frame-to-frame jump far larger than its
- * neighbours, i.e. a snap) and a curve that never reaches its target.
+ * ★ THE SHIPPED CHOREOGRAPHY IS THE b3788cf ORIGINAL, RESTORED VERBATIM. The
+ * owner confirmed the keyframe version ("expand, slide, shrink — like an iOS
+ * toggle") was the working one, and a commit-by-commit hash of the CSS block
+ * proved it was byte-identical from b3788cf through 21d6410 — the only thing
+ * that ever changed it was my transition rewrite, which is therefore the
+ * regression this harness must never let back in. So the drivers here are the
+ * REAL classes the component applies:
+ *
+ *   pointerdown  → --glass-active + --press-a   (press keyframe, 0.3s, to scale 2)
+ *   pointerup    → --on                          (left slides on its own transition)
+ *   after max(MIN_GLASS_ACTIVE_MS, PRESS_ANIMATION_MS)
+ *                → drop press classes, add --release-a  (release keyframe, 0.24s, to 1)
+ *
+ * Both constants are read from GlassToggle.tsx so the harness tests what ships.
  *
  *   node scripts/verify-toggle-motion.cjs
  */
@@ -16,17 +24,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const CSS = fs.readFileSync(path.join(__dirname, "..", "src", "styles.css"), "utf8");
-
-// ★ Read the component's own hold constant so the harness tests what SHIPS and
-// cannot drift from it. This is the number the bug lived in: the hold must be
-// at least as long as the CSS press duration, or a click reverses the swell
-// before it ever arrives.
 const TSX = fs.readFileSync(path.join(__dirname, "..", "src", "components", "GlassToggle.tsx"), "utf8");
-const HOLD_MS = Number((TSX.match(/const\s+MIN_PRESS_MS\s*=\s*(\d+)/) || [])[1] || 0);
-// The press duration is the 2nd entry of the pressed rule's transition-duration.
-const PRESSED_RULE = CSS.slice(CSS.indexOf(".glass-toggle--pressed .glass-toggle-knob"));
-const PRESS_MS = Math.round(
-  parseFloat((PRESSED_RULE.match(/transition-duration:\s*[\d.]+s,\s*([\d.]+)s/) || [])[1] || "0") * 1000,
+
+const MIN_ACTIVE = Number((TSX.match(/const\s+MIN_GLASS_ACTIVE_MS\s*=\s*(\d+)/) || [])[1] || 0);
+const PRESS_MS = Number((TSX.match(/const\s+PRESS_ANIMATION_MS\s*=\s*(\d+)/) || [])[1] || 0);
+// The component starts the release after max(MIN_GLASS_ACTIVE_MS - elapsed,
+// PRESS_ANIMATION_MS - elapsed) — i.e. never before the press keyframe lands.
+const HOLD_MS = Math.max(MIN_ACTIVE, PRESS_MS);
+// The press keyframe's CSS duration, to cross-check against the component.
+const CSS_PRESS_MS = Math.round(
+  parseFloat((CSS.match(/--press-a \.glass-toggle-knob \{\s*animation:[^;]*?([\d.]+)s/) || [])[1] || "0") * 1000,
 );
 
 app.commandLine.appendSwitch("force-device-scale-factor", "1");
@@ -43,6 +50,12 @@ const RECORDER = (HOLD) => `(async () => {
   const HOLD = ${HOLD};
   const tg = document.getElementById('tg');
   const kn = document.getElementById('kn');
+  const press = () => tg.classList.add('glass-toggle--glass-active','glass-toggle--press-a');
+  const release = () => { tg.classList.remove('glass-toggle--glass-active','glass-toggle--press-a');
+    tg.classList.add('glass-toggle--release-a'); };
+  const clearAll = () => tg.classList.remove('glass-toggle--glass-active',
+    'glass-toggle--press-a','glass-toggle--press-b',
+    'glass-toggle--release-a','glass-toggle--release-b','glass-toggle--on');
   const readScale = () => {
     const t = getComputedStyle(kn).transform;
     if (!t || t === 'none') return 1;
@@ -65,38 +78,38 @@ const RECORDER = (HOLD) => `(async () => {
   await new Promise((r) => setTimeout(r, 300));
   const rest = { s: readScale(), l: readLeft() };
 
-  tg.classList.add('glass-toggle--pressed');
-  const press = await sample(500);
+  press();
+  const pressed = await sample(500);
 
-  tg.classList.remove('glass-toggle--pressed');
-  const release = await sample(500);
+  release();
+  const released = await sample(500);
+  tg.classList.remove('glass-toggle--release-a');
 
-  // The on/off slide, which is a different transition (left, not transform).
+  // The on/off slide, which is a transition on left (not part of any keyframe).
   tg.classList.add('glass-toggle--on');
   const slide = await sample(600);
-  tg.classList.remove('glass-toggle--on');
+  clearAll();
   await new Promise((r) => setTimeout(r, 500));
 
-  // ★ A REAL CLICK: press, then release after the component's hold, exactly as
-  // GlassToggle does. This is the case the user actually performs, and the one
-  // the earlier harness never exercised — it drove the classes with 500ms gaps,
-  // which quietly guaranteed the swell always had time to finish.
+  // ★ A REAL CLICK, sequenced exactly as GlassToggle sequences it: pointerdown
+  // presses, pointerup at ~50ms flips --on, and the release begins only once
+  // the press keyframe has landed (the component's HOLD).
   const clickOut = [];
   const t0 = performance.now();
-  tg.classList.add('glass-toggle--pressed');   // pointerdown: EXPAND
+  press();                                        // pointerdown: EXPAND
   let slid = false, releasedAt = null;
   await new Promise((res) => {
     const tick = () => {
       const t = performance.now() - t0;
       clickOut.push({ t, s: readScale(), l: readLeft() });
       if (!slid && t >= 50) { tg.classList.add('glass-toggle--on'); slid = true; }  // pointerup: SLIDE
-      if (releasedAt === null && t >= HOLD) { tg.classList.remove('glass-toggle--pressed'); releasedAt = t; }  // SHRINK
+      if (releasedAt === null && t >= HOLD) { release(); releasedAt = t; }          // SHRINK
       if (t < 900) requestAnimationFrame(tick); else res();
     };
     requestAnimationFrame(tick);
   });
 
-  return { rest, press, release, slide, click: clickOut, releasedAt };
+  return { rest, press: pressed, release: released, slide, click: clickOut, releasedAt };
 })()`;
 
 function analyse(name, samples, key, label) {
@@ -107,16 +120,9 @@ function analyse(name, samples, key, label) {
   for (let i = 1; i < vals.length; i++) deltas.push(Math.abs(vals[i] - vals[i - 1]));
   const maxD = Math.max(...deltas);
 
-  // ★ MEASURE ONLY WHILE IT IS MOVING.
-  //
-  // The first version of this took max/median over the whole 500ms window and
-  // reported a 38x "snap" on all three transitions — on motion that is in fact
-  // correct. The window is 500ms and the transition is 280ms, so two thirds of
-  // the frames are already settled at delta ~0 and drag the median to nothing.
-  // Any eased motion then looks like a discontinuity. A spring
-  // (cubic-bezier(.34,1.56,.64,1)) legitimately peaks around 3x its average
-  // velocity, so the honest question is whether one frame stands out among the
-  // frames that are ACTUALLY ANIMATING.
+  // Measure only while it is moving — a 500ms window around a 300ms move drags
+  // the median to zero and makes correct easing look like a snap (see the
+  // metric post-mortem in git history; the ratio is reported, never gated).
   const moving = deltas.filter((d) => d > maxD * 0.02);
   const median = [...moving].sort((a, b) => a - b)[Math.floor(moving.length / 2)] || 0;
   const snapRatio = median > 1e-9 ? maxD / median : (maxD > 0.02 ? Infinity : 0);
@@ -135,49 +141,36 @@ app.whenReady().then(async () => {
   const d = await win.webContents.executeJavaScript(RECORDER(HOLD_MS));
 
   console.log(`\ntoggle knob motion  (resting scale ${d.rest.s.toFixed(3)}, left ${d.rest.l.toFixed(1)}px)`);
-  const press = analyse("PRESS", d.press, "s", "scale should ramp 1 -> 2 and SETTLE, not overshoot");
-  const release = analyse("RELEASE", d.release, "s", "scale should settle back to 1");
+  const press = analyse("PRESS", d.press, "s", "keyframe should ramp 1 -> 2 and hold (forwards)");
+  const release = analyse("RELEASE", d.release, "s", "keyframe should ramp 2 -> 1");
   const slide = analyse("SLIDE (on)", d.slide, "l", "left should travel to the far end");
-  const click = analyse("REAL CLICK", d.click, "s", `press then release after the component's ${HOLD_MS}ms hold`);
-  console.log(`    press duration in CSS ${PRESS_MS}ms, component hold ${HOLD_MS}ms, released at ${Math.round(d.releasedAt)}ms`);
+  const click = analyse("REAL CLICK", d.click, "s", `press, slide at 50ms, release at the component's ${HOLD_MS}ms hold`);
+  console.log(`    press keyframe in CSS ${CSS_PRESS_MS}ms, component PRESS_ANIMATION_MS ${PRESS_MS}ms, released at ${Math.round(d.releasedAt)}ms`);
 
-  // ★ WHAT THIS CAN AND CANNOT ASSERT.
-  //
-  // The snap RATIO is reported but NOT gated, and that is a deliberate retreat.
-  // A ratio gate was tried at 8x and at 4x and failed all three transitions on
-  // motion that is provably correct — because the easing is a spring
-  // (cubic-bezier(.34,1.56,.64,1)), whose velocity peaks early and then crawls
-  // through a long settle, so peak-over-median is legitimately ~6-12x. Two
-  // thresholds in a row that only ever produced false alarms is a metric
-  // problem, not a code problem, and gating on it would have sent me hunting a
-  // bug that was not there.
-  //
-  // What IS checkable without a model of the easing: every transition ENDS on
-  // its declared target, the spring's overshoot stays within sane bounds, and
-  // the motion is spread over real frames rather than jumping in one.
   const fails = [];
   if (Math.abs(press.last - 2) > 0.02) fails.push(`press never reaches 2 (ended ${press.last.toFixed(3)})`);
   if (Math.abs(release.last - 1) > 0.02) fails.push(`release never settles at 1 (ended ${release.last.toFixed(3)})`);
-  // ★ The press easing, cubic-bezier(0.22, 0.61, 0.36, 1), is a DECELERATE:
-  // it must arrive at 2 and stop. Any overshoot means the knob is being driven
-  // by the base spring (0.34, 1.56, 0.64, 1) again, which is the bug that made
-  // the swell bounce past its size and snap back. Same for the release.
-  if (press.peak > 2.03) fails.push(`press OVERSHOOTS (${press.peak.toFixed(3)}) — wrong easing, should settle on 2`);
-  if (release.trough < 0.97) fails.push(`release UNDERSHOOTS (${release.trough.toFixed(3)}) — wrong easing, should settle on 1`);
+  // The keyframe easing, cubic-bezier(0.22, 0.61, 0.36, 1), is a decelerate: it
+  // must arrive and stop, both directions.
+  if (press.peak > 2.03) fails.push(`press OVERSHOOTS (${press.peak.toFixed(3)}) — wrong easing`);
+  if (release.trough < 0.97) fails.push(`release UNDERSHOOTS (${release.trough.toFixed(3)}) — wrong easing`);
   if (press.moving < 8) fails.push(`press animated over only ${press.moving} frames`);
-  // ★ THE ONE THAT MATTERS. On a real click the swell must actually ARRIVE.
-  if (HOLD_MS < PRESS_MS) {
-    fails.push(`hold ${HOLD_MS}ms is SHORTER than the ${PRESS_MS}ms press — the swell reverses before it lands`);
+  // ★ The constant the regression lived in: the component must never start the
+  // release before the press keyframe has landed.
+  if (HOLD_MS < CSS_PRESS_MS) {
+    fails.push(`component hold ${HOLD_MS}ms is SHORTER than the ${CSS_PRESS_MS}ms press keyframe — the swell reverses mid-flight`);
+  }
+  if (PRESS_MS !== CSS_PRESS_MS) {
+    fails.push(`PRESS_ANIMATION_MS (${PRESS_MS}) no longer matches the CSS keyframe (${CSS_PRESS_MS}ms) — the release timer and the animation have drifted apart`);
   }
   if (click.peak < 1.98) {
     fails.push(`REAL CLICK never reaches full size (peak ${click.peak.toFixed(3)} of 2.000) — stunted swell`);
   }
 
-  // ★ THE SEQUENCE, which is the actual specification: the knob EXPANDS, then
-  // SLIDES WHILE EXPANDED, then SHRINKS. Checking the three moves separately
-  // (as this harness used to) can never catch the failure where the shrink
-  // starts early and the knob slides small — which is precisely what a hold
-  // shorter than the press produced.
+  // ★ THE SEQUENCE, which is the actual specification: EXPAND, SLIDE WHILE
+  // EXPANDED, THEN SHRINK. The gate number comes from the known-good version
+  // measured by scripts/diff-toggle-sequence.cjs (scale 1.93 when the slide
+  // completes), not from intuition.
   const cs = d.click;
   const lFrom = cs[0].l, lTo = cs[cs.length - 1].l;
   const dist = Math.abs(lTo - lFrom) || 1;
@@ -187,16 +180,6 @@ app.whenReady().then(async () => {
     ` 50% at ${half ? Math.round(half.t) : "-"}ms (scale ${half ? half.s.toFixed(3) : "-"}),` +
     ` complete at ${done ? Math.round(done.t) : "-"}ms (scale ${done ? done.s.toFixed(3) : "-"})`);
 
-  // ★ THRESHOLD TAKEN FROM THE KNOWN-GOOD VERSION, NOT FROM INTUITION.
-  // scripts/diff-toggle-sequence.cjs replays this exact click against
-  // a6d7caf's stylesheet — the version the owner confirms was working — and
-  // measures: slide completes at 182ms with the knob still at scale 1.932,
-  // full size arriving at 257ms. My first attempt at this gate demanded 1.8 at
-  // the slide's HALFWAY point, which the working version fails (1.751): I had
-  // invented the number. The invariant that actually distinguishes good from
-  // broken is that the knob is still near full size WHEN THE SLIDE FINISHES —
-  // that is what collapses when the shrink starts too early, which is what a
-  // hold shorter than the press caused.
   const scaleAtSlideEnd = done ? done.s : 0;
   if (scaleAtSlideEnd < 1.85) {
     fails.push(`knob has already SHRUNK by the time the slide finishes ` +
@@ -207,7 +190,7 @@ app.whenReady().then(async () => {
   if (slide.moving < 8) fails.push(`slide animated over only ${slide.moving} frames`);
 
   console.log("");
-  if (fails.length === 0) console.log("PASS — every transition lands on its target, overshoot in range, motion spread over real frames.");
+  if (fails.length === 0) console.log("PASS — every move lands on its target and the click keeps the iOS order.");
   else for (const f of fails) console.log(`FAIL — ${f}`);
   app.exit(fails.length ? 1 : 0);
 });

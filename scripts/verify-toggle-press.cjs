@@ -45,16 +45,20 @@ app.whenReady().then(async () => {
   const probe = () => win.webContents.executeJavaScript("window.__probe && window.__probe()");
 
   // ─── FILMSTRIP of a full click, cropped to the toggle ───────────────────
-  const HOLD = Number(
-    (fs.readFileSync(path.join(__dirname, "..", "src", "components", "GlassToggle.tsx"), "utf8")
-      .match(/const\s+MIN_PRESS_MS\s*=\s*(\d+)/) || [])[1] || 300,
+  // The restored component releases after max(MIN_GLASS_ACTIVE_MS, PRESS_ANIMATION_MS).
+  const TSX = fs.readFileSync(path.join(__dirname, "..", "src", "components", "GlassToggle.tsx"), "utf8");
+  const HOLD = Math.max(
+    Number((TSX.match(/const\s+MIN_GLASS_ACTIVE_MS\s*=\s*(\d+)/) || [])[1] || 0),
+    Number((TSX.match(/const\s+PRESS_ANIMATION_MS\s*=\s*(\d+)/) || [])[1] || 300),
   );
   await win.webContents.executeJavaScript("window.__reset()");
   await wait(400);
+  // The page mounts the REAL <GlassToggle/>, so there is no #tg id — find the
+  // control by its class. capturePage wants {x, y, width, height} in DIP.
   const box = await win.webContents.executeJavaScript(
-    "(() => { const r = document.getElementById('tg').getBoundingClientRect();" +
+    "(() => { const r = document.querySelector('.glass-toggle').getBoundingClientRect();" +
     "  return { x: Math.round(r.x) - 40, y: Math.round(r.y) - 40," +
-    "    w: Math.round(r.width) + 80, h: Math.round(r.height) + 80, dpr: devicePixelRatio }; })()",
+    "    width: Math.round(r.width) + 80, height: Math.round(r.height) + 80 }; })()",
   );
   const strip = [0, 80, 160, 240, 320, 400, 480, 560, 660];
   await win.webContents.executeJavaScript(`window.__click(${HOLD})`);

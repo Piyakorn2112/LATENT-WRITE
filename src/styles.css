@@ -10157,22 +10157,11 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.109),
     0 4px 10px rgba(0, 0, 0, 0.10);
-  /* ★ PER-PROPERTY LONGHANDS, so the press and the release can keep the
-     DIFFERENT durations they have always had (0.3s in, 0.24s out) without
-     going back to @keyframes. `transform` uses the press/release easing,
-     cubic-bezier(0.22, 0.61, 0.36, 1) — a clean decelerate that SETTLES ON
-     the target. It must not use the knob's spring (0.34, 1.56, 0.64, 1):
-     that easing overshoots by design, which is right for the `left` slide
-     and wrong for the swell, where it makes the bubble bounce past its size
-     and snap back. Driving the press off the base spring is what made the
-     expansion feel wrong after I replaced the keyframes. */
-  transition-property: left, transform, background, box-shadow;
-  transition-duration: 0.34s, 0.24s, 0.18s, 0.18s;
-  transition-timing-function:
-    cubic-bezier(0.34, 1.56, 0.64, 1),
-    cubic-bezier(0.22, 0.61, 0.36, 1),
-    ease,
-    ease;
+  transition:
+    left 0.34s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.18s ease,
+    box-shadow 0.18s ease;
   will-change: transform, left;
 }
 
@@ -10205,43 +10194,99 @@ body.scroll-edge-idle .toolbar-ambient-orb {
   transform: translateY(-50%) scale(1.08);
 }
 
+.glass-toggle--press-a .glass-toggle-knob {
+  animation: glass-toggle-knob-press-a 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.glass-toggle--press-b .glass-toggle-knob {
+  animation: glass-toggle-knob-press-b 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.glass-toggle--release-a .glass-toggle-knob {
+  animation: glass-toggle-knob-release-a 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+.glass-toggle--release-b .glass-toggle-knob {
+  animation: glass-toggle-knob-release-b 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+
+@keyframes glass-toggle-knob-press-a {
+  0% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+  100% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+}
+
+@keyframes glass-toggle-knob-press-b {
+  0% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+  100% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+}
+
+@keyframes glass-toggle-knob-release-a {
+  0% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+  100% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+}
+
+@keyframes glass-toggle-knob-release-b {
+  0% {
+    transform: translateY(-50%) scale(2);
+    background: rgba(255, 255, 255, 0.18);
+    box-shadow:
+      0 2px 6px rgba(0, 0, 0, 0.22),
+      0 12px 28px rgba(0, 0, 0, 0.22);
+  }
+  100% {
+    transform: translateY(-50%) scale(1);
+    background: rgb(255, 255, 255);
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.109),
+      0 4px 10px rgba(0, 0, 0, 0.10);
+  }
+}
+
 /* Active — bigger scale + semi-transparent fill, same press-feel as
    .glass-range-knob's active state. The transparent fill lets the
    underlying track colour bleed through (track-coloured tint when ON,
    subtle dark tint when OFF), which is what makes the knob feel like
-   it's lifting OFF the track on press.
-
-   ★ THIS USED TO BE FOUR @keyframes PLUS AN A/B RESTART HACK, and that is
-   what made the toggle feel broken.
-
-   The press and release were `animation: … forwards` on `transform`, with
-   `--press-a`/`--press-b` alternating only to force a restart, four pieces of
-   React state, and a timer computing `max(MIN_GLASS_ACTIVE_MS - elapsed,
-   PRESS_ANIMATION_MS - elapsed)` to decide when to start the release. That
-   timer fires on the same frame the press animation ends, so press-end and
-   release-start RACE: whenever release won, the knob snapped from wherever the
-   press had reached back to the release keyframe's 0% (scale 2) before
-   animating down. A running animation also outranks the `:hover` declaration,
-   so the hover scale was swallowed mid-gesture.
-
-   A transition cannot have that bug: interrupt it at any point and it
-   retargets smoothly FROM THE CURRENT COMPUTED VALUE. The slider
-   (.glass-range-knob) has always worked this way, driven by :has(:active) —
-   the toggle's own comments already claimed to mirror it. Now it does, and the
-   ORIGINAL toggle (3aabd70) was exactly this: a handful of CSS rules, no JS.
-
-   ★ SCALE IS 2, AND I GOT THIS WRONG ONCE BY READING THE WRONG "ORIGINAL".
-   The very first commit (3aabd70) used 1.35, so restoring that looked like
-   fidelity. It was not: b3788cf raised it to 2 and a6d7caf kept it, which means
-   2 is what the control has actually BEEN for its whole liquid-glass life — the
-   swell IS the effect, and 1.35 reads as a timid nudge. The lesson is that
-   "the original" is whichever version the thing has actually been living as,
-   not whichever commit happens to be oldest. */
+   it's lifting OFF the track on press. Slightly less aggressive scale
+   than the slider (1.42 vs 1.62) because the toggle knob is already
+   bigger at rest (32×24 vs the slider's 20×14). */
 .glass-toggle:active .glass-toggle-knob,
-.glass-toggle--pressed .glass-toggle-knob {
-  /* Press takes 0.3s; the release above takes 0.24s. Only the duration
-     changes here — the easing is the same both ways. */
-  transition-duration: 0.34s, 0.3s, 0.18s, 0.18s;
+.glass-toggle--glass-active .glass-toggle-knob {
   transform: translateY(-50%) scale(2);
   background: rgba(255, 255, 255, 0.18);
   box-shadow:
@@ -10331,38 +10376,65 @@ body.scroll-edge-idle .toolbar-ambient-orb {
    `:not(.intel-eyes)` is what makes this the ORB fading and not the face. The
    eyes are a SIBLING of the orb canvas inside the same box, so masking the
    parent would take them with it. */
-.intel-orb-live--fun > :not(.intel-eyes) {
-  /* ★ THE MASK BOX IS 2x THE ELEMENT, CENTRED.
-     A mask defaults to the border box and is TRANSPARENT outside it, so
-     anything the orb paints beyond its own box — the halo, and the analysing
-     animation, which is rendered well past the edge — was being clipped away.
-     Doubling the mask box with `mask-size` gives that overflow room to exist:
-     the gradient reaches full opacity before the element's edge, so everything
-     from there outward, inside the box or beyond it, is left untouched.
+/* ★ THE MASK LIVES ON THE CANVAS, NOT ON THE ORB HOST — that is the whole fix.
 
-     Because the gradient now spans twice the radius, its percentages are
-     halved in element terms: `#000 43%` lands at ~86% of the orb's own radius.
-     The fade also reaches further than before — the soft core runs to ~60% of
-     the orb where it used to stop at 48% — which is the bigger centre fade,
-     and the middle alpha drops 0.55 -> 0.45 to deepen it. */
+   A mask's painting area is clipped to the masked ELEMENT's border box
+   (`mask-clip: border-box` is the default), and `mask-size` cannot change
+   that: it only scales the gradient image. The previous version masked the
+   26px host with a 200% mask-size and believed the bigger image bought room —
+   it did not, and everything the orb painted beyond the host box was still
+   cut. The canvas is deliberately 1.5x the host ("so a petal can reach past
+   the nominal slot", orb-engine.css), so the analysing/loading animation and
+   the petals' reach live exactly in the region a host-box mask amputates.
+
+   Masking the CANVAS removes the problem by construction: the canvas is the
+   only painter, nothing paints outside its own box, so nothing can be
+   clipped — in any engine, with no reliance on `mask-clip: no-clip`.
+
+   Geometry: the gradient is sized `closest-side` of the canvas, whose ray is
+   1.5x the orb radius R. The stops keep the fade at the same PHYSICAL radii
+   the previous version measured (centre ~50% faded, opaque past the rim):
+     26% of ray = 0.40 R   (soft core)
+     57% of ray = 0.85 R   (approaching the rim)
+     81% of ray = 1.22 R   (fully opaque just past the rim)
+   Everything from 81% to the canvas edge is untouched — that band is where
+   the loading animation draws. */
+.intel-orb-live--fun .orb-engine-canvas {
   -webkit-mask-image: radial-gradient(
-    circle at 50% 50%,
+    circle closest-side at 50% 50%,
     rgba(0, 0, 0, 0.45) 0%,
-    rgba(0, 0, 0, 0.58) 14%,
-    rgba(0, 0, 0, 0.86) 30%,
-    #000 43%
+    rgba(0, 0, 0, 0.58) 26%,
+    rgba(0, 0, 0, 0.86) 57%,
+    #000 81%
   );
   mask-image: radial-gradient(
-    circle at 50% 50%,
+    circle closest-side at 50% 50%,
     rgba(0, 0, 0, 0.45) 0%,
-    rgba(0, 0, 0, 0.58) 14%,
-    rgba(0, 0, 0, 0.86) 30%,
-    #000 43%
+    rgba(0, 0, 0, 0.58) 26%,
+    rgba(0, 0, 0, 0.86) 57%,
+    #000 81%
   );
-  -webkit-mask-size: 200% 200%;
-  mask-size: 200% 200%;
-  -webkit-mask-position: center;
-  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* Legacy CSS orb (USE_ORB_ENGINE=false): the mesh-dot layers paint inside
+   their own box, so the host-box geometry is safe there. Same physical fade. */
+.intel-orb-live--fun > .intel-mesh-dot {
+  -webkit-mask-image: radial-gradient(
+    circle closest-side at 50% 50%,
+    rgba(0, 0, 0, 0.45) 0%,
+    rgba(0, 0, 0, 0.58) 40%,
+    rgba(0, 0, 0, 0.86) 85%,
+    #000 100%
+  );
+  mask-image: radial-gradient(
+    circle closest-side at 50% 50%,
+    rgba(0, 0, 0, 0.45) 0%,
+    rgba(0, 0, 0, 0.58) 40%,
+    rgba(0, 0, 0, 0.86) 85%,
+    #000 100%
+  );
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
