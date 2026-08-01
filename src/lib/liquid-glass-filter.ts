@@ -913,7 +913,17 @@ export function initLiquidGlassFilter(): void {
       const next = readFlattenTarget();
       if (next === flattenTarget) return;
       flattenTarget = next;
-      trackedElements.forEach((el) => applyTo(el));
+      // ★ SCHEDULE, do not applyTo. applyTo() opens with
+      // `if (elementSchedule.has(element)) return` — it is the ADOPT path, so
+      // on an already-tracked element it is a silent no-op and nothing
+      // rebuilds. Every element here is tracked by definition, so calling it
+      // refreshed exactly nothing; surfaces kept their light-mode filter until
+      // something else happened to re-run their update (a resize, a remount,
+      // or the pause/resume cycle an unfocus gives you — which is why the bug
+      // hid whenever the flip was done by leaving the app, and showed on a
+      // flip with the window focused, e.g. macOS auto light/dark at sunset).
+      // Gated by scripts/verify-theme-flip.cjs, which flips BOTH ways.
+      for (const el of trackedElements) elementSchedule.get(el)?.();
     });
 
     const mo = new MutationObserver((muts) => {

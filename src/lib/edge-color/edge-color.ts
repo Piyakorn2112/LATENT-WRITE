@@ -382,6 +382,26 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
   // token still cascades from :root, so anything that does not override it
   // behaves exactly as before. Still never read from the frame loop: adopt()
   // already holds a computed style, and a scheme flip re-reads explicitly.
+  // ── Specular rim tuning, per scheme ───────────────────────────────────────
+  // The rim's blend mode decides what these two numbers should even mean (see
+  // --lqg-rim-blend in styles.css: light multiplies, dark screens), so all
+  // three live together in CSS and are read here. The blend itself is handed
+  // to the element as a var() so the cascade re-resolves it on a flip with no
+  // JS involved; only the numbers, which are baked into painted shadow
+  // colours, need re-reading.
+  let rimIntensity = opt.rimIntensity;
+  let rimBrightness = opt.rimBrightness;
+  function readRimTuning(): void {
+    const cs = getComputedStyle(document.documentElement);
+    const num = (name: string, fallback: number) => {
+      const v = parseFloat(cs.getPropertyValue(name).trim());
+      return Number.isFinite(v) && v >= 0 ? v : fallback;
+    };
+    rimIntensity = num("--lqg-rim-intensity", opt.rimIntensity);
+    rimBrightness = num("--lqg-rim-brightness", opt.rimBrightness);
+  }
+  readRimTuning();
+
   let glowBoost = 1;
   function readGlowBoostFrom(cs: CSSStyleDeclaration): number {
     const v = parseFloat(cs.getPropertyValue("--lqg-glow-boost").trim());
@@ -637,10 +657,10 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
           // largest channel, brightens without moving the hue; brightness the
           // headroom cannot supply is handed to alpha instead.
           const peak = Math.max(r, g, b, 1);
-          const k = Math.min(opt.rimBrightness, 255 / peak);
+          const k = Math.min(rimBrightness, 255 / peak);
           const rr = Math.round(r * k), rg = Math.round(g * k), rb = Math.round(b * k);
-          const spill = opt.rimBrightness > k ? Math.min(1.25, opt.rimBrightness / k) : 1;
-          const ra = Math.min(1, wr * opt.rimIntensity * spill);
+          const spill = rimBrightness > k ? Math.min(1.25, rimBrightness / k) : 1;
+          const ra = Math.min(1, wr * rimIntensity * spill);
 
           // Mask centre: the source centre clamped into the glass, then pushed
           // to the nearest edge if it landed in the interior. A corner source
@@ -796,7 +816,12 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
       rsx.zIndex = "1";
       rsx.pointerEvents = "none";
       rsx.boxSizing = "border-box";
-      rsx.mixBlendMode = opt.rimBlend;
+      // ★ var(), not the resolved value: an inline blend mode would freeze the
+      // light-mode arithmetic into a dark-mode surface. Custom properties
+      // resolve in inline styles and re-resolve on a scheme flip for free, so
+      // the rim swaps multiply↔screen with no listener at all. opt.rimBlend
+      // stays the fallback for any host that does not define the token.
+      rsx.mixBlendMode = `var(--lqg-rim-blend, ${opt.rimBlend})`;
       glass.appendChild(rim);
     }
 
@@ -939,6 +964,7 @@ export function initEdgeColor(options: EdgeColorOptions = {}): EdgeColorHandle {
     const next = readGlowBoost();
     if (next === glowBoost) return;
     glowBoost = next;
+    readRimTuning();
     // Per-element boosts follow the scheme too (the dense token has its own
     // dark-mode value), so re-read each one. A flip is rare and this is the
     // only getComputedStyle sweep in the module — never the frame loop.

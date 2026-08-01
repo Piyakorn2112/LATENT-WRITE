@@ -95,6 +95,23 @@
   --lqg-glow-boost-base: 1.35;
   --lqg-glow-boost: var(--lqg-glow-boost-base);
 
+  /* ── Specular rim, per scheme ────────────────────────────────────────────
+     `screen` CANNOT show on a light surface, and no amount of intensity fixes
+     it: screening a backdrop b with a colour c gives b + (1−b)·c, so on the
+     ~0.9 white of light-mode glass the entire available range is 0.1. The rim
+     was arithmetically capped at a 10% lift, which is why it read as absent in
+     light mode and obvious in dark (where b ≈ 0.2 leaves 0.8 to play with).
+
+     On a bright surface colour can only register by SUBTRACTION, so light mode
+     multiplies instead — the caught colour tints the hairline downward and
+     reads as the edge picking something up. That also flips what "brightness"
+     should do: pushing the colour toward white (1.2, right for screen) washes
+     out a multiply, so light mode pulls it down instead and keeps the colour
+     saturated enough to register. Same effect, opposite arithmetic. */
+  --lqg-rim-blend: multiply;
+  --lqg-rim-intensity: 1.05;
+  --lqg-rim-brightness: 0.92;
+
   /* Liquid glass edge system — drives the border ring (::before) and the
      additive edge glow (::after) on every glass surface, so updating these
      two variables restyles all glass at once.
@@ -230,6 +247,11 @@
     --lqg-glow-boost-base: 1;
     --lqg-glow-boost: var(--lqg-glow-boost-base);
     --lqg-glow-boost-dense: 1.25;
+    /* Dark glass has the headroom for additive light — these are the values
+       the rim was tuned at, and they stay exactly as they were. */
+    --lqg-rim-blend: screen;
+    --lqg-rim-intensity: 0.66;
+    --lqg-rim-brightness: 1.2;
     /* #191919 → 0.098. White text behind the glass now settles toward the
        dark page instead of toward a light grey, which would have inverted the
        effect and made prose MORE prominent in dark mode. */

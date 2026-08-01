@@ -26,9 +26,11 @@
       .pg-warm { background: #f59e0b; color: #3a2a00; padding: 1px 5px; border-radius: 5px; }
       .pg-teal { background: #14b8a6; color: #fff;    padding: 1px 5px; border-radius: 5px; }
       .spec { position: absolute; }
-      .card { left: 56px;  top: 116px; width: 420px; height: 250px; border-radius: 22px; }
-      .bar  { left: 56px;  top: 22px;  width: 880px; height: 44px;  border-radius: 22px; }
-      .pop  { left: 540px; top: 140px; width: 330px; height: 190px; border-radius: 14px; }
+      /* !important: the app's own .settings-panel / .toolbar rules set width
+         and height, and silently stretched the card to 1000px here. */
+      .card { left: 56px !important;  top: 116px !important; width: 380px !important; height: 240px !important; border-radius: 22px !important; }
+      .bar  { left: 56px !important;  top: 22px !important;  width: 880px !important; height: 44px !important;  border-radius: 22px !important; }
+      .pop  { left: 520px !important; top: 130px !important; width: 330px !important; height: 200px !important; border-radius: 14px !important; }
     </style>
   </head>
   <body>
