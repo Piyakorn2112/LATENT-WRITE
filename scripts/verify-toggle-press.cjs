@@ -44,6 +44,31 @@ app.whenReady().then(async () => {
   };
   const probe = () => win.webContents.executeJavaScript("window.__probe && window.__probe()");
 
+  // ─── FILMSTRIP of a full click, cropped to the toggle ───────────────────
+  const HOLD = Number(
+    (fs.readFileSync(path.join(__dirname, "..", "src", "components", "GlassToggle.tsx"), "utf8")
+      .match(/const\s+MIN_PRESS_MS\s*=\s*(\d+)/) || [])[1] || 300,
+  );
+  await win.webContents.executeJavaScript("window.__reset()");
+  await wait(400);
+  const box = await win.webContents.executeJavaScript(
+    "(() => { const r = document.getElementById('tg').getBoundingClientRect();" +
+    "  return { x: Math.round(r.x) - 40, y: Math.round(r.y) - 40," +
+    "    w: Math.round(r.width) + 80, h: Math.round(r.height) + 80, dpr: devicePixelRatio }; })()",
+  );
+  const strip = [0, 80, 160, 240, 320, 400, 480, 560, 660];
+  await win.webContents.executeJavaScript(`window.__click(${HOLD})`);
+  const t0 = Date.now();
+  for (const at of strip) {
+    const due = at - (Date.now() - t0);
+    if (due > 0) await wait(due);
+    const img = await win.capturePage(box);
+    fs.writeFileSync(path.join(OUT, `toggle-click-${String(at).padStart(3, "0")}ms.png`), img.toPNG());
+  }
+  console.log(`filmstrip (hold ${HOLD}ms): ${strip.map((s) => s + "ms").join(", ")}`);
+  await win.webContents.executeJavaScript("window.__reset()");
+  await wait(500);
+
   const rest = await probe();
   if (!rest) { console.error("harness hooks missing — did the module fail to load?"); app.exit(2); return; }
   await shot("1-rest");

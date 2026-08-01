@@ -61,12 +61,36 @@ initLiquidGlassFilter();
 // Driver hooks. Class flipping mirrors GlassToggle's own state exactly.
 interface PressWindow extends Window {
   __press?: (on: boolean) => void;
+  __click?: (hold: number) => void;
+  __reset?: () => void;
   __probe?: () => Record<string, unknown>;
 }
 const w = window as PressWindow;
 
 w.__press = (on: boolean) => {
   btn.classList.toggle("glass-toggle--pressed", on);
+};
+
+/**
+ * A FULL CLICK, timed exactly as GlassToggle drives it, because the thing
+ * being judged is a SEQUENCE — expand, slide while expanded, then shrink —
+ * and testing the three moves separately can never show whether they overlap
+ * correctly.
+ *
+ *   t=0    pointerdown  -> --pressed  (knob expands, 300ms)
+ *   t=50   pointerup    -> --on       (knob slides, 340ms) and the shrink is
+ *                                      scheduled for MIN_PRESS_MS
+ *   t=hold              -> --pressed removed (knob shrinks, 240ms)
+ */
+w.__click = (hold: number) => {
+  btn.classList.remove("glass-toggle--on");
+  btn.classList.add("glass-toggle--pressed");
+  window.setTimeout(() => btn.classList.add("glass-toggle--on"), 50);
+  window.setTimeout(() => btn.classList.remove("glass-toggle--pressed"), hold);
+};
+
+w.__reset = () => {
+  btn.classList.remove("glass-toggle--on", "glass-toggle--pressed");
 };
 
 w.__probe = () => {

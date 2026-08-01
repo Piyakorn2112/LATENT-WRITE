@@ -83,13 +83,14 @@ const RECORDER = (HOLD) => `(async () => {
   // which quietly guaranteed the swell always had time to finish.
   const clickOut = [];
   const t0 = performance.now();
-  tg.classList.add('glass-toggle--pressed');
-  let releasedAt = null;
+  tg.classList.add('glass-toggle--pressed');   // pointerdown: EXPAND
+  let slid = false, releasedAt = null;
   await new Promise((res) => {
     const tick = () => {
       const t = performance.now() - t0;
       clickOut.push({ t, s: readScale(), l: readLeft() });
-      if (releasedAt === null && t >= HOLD) { tg.classList.remove('glass-toggle--pressed'); releasedAt = t; }
+      if (!slid && t >= 50) { tg.classList.add('glass-toggle--on'); slid = true; }  // pointerup: SLIDE
+      if (releasedAt === null && t >= HOLD) { tg.classList.remove('glass-toggle--pressed'); releasedAt = t; }  // SHRINK
       if (t < 900) requestAnimationFrame(tick); else res();
     };
     requestAnimationFrame(tick);
@@ -170,6 +171,37 @@ app.whenReady().then(async () => {
   }
   if (click.peak < 1.98) {
     fails.push(`REAL CLICK never reaches full size (peak ${click.peak.toFixed(3)} of 2.000) — stunted swell`);
+  }
+
+  // ★ THE SEQUENCE, which is the actual specification: the knob EXPANDS, then
+  // SLIDES WHILE EXPANDED, then SHRINKS. Checking the three moves separately
+  // (as this harness used to) can never catch the failure where the shrink
+  // starts early and the knob slides small — which is precisely what a hold
+  // shorter than the press produced.
+  const cs = d.click;
+  const lFrom = cs[0].l, lTo = cs[cs.length - 1].l;
+  const dist = Math.abs(lTo - lFrom) || 1;
+  const atFrac = (f) => cs.find((p) => Math.abs(p.l - lFrom) >= dist * f);
+  const half = atFrac(0.5), done = atFrac(0.98);
+  console.log(`\n  SEQUENCE — slide ${lFrom.toFixed(0)} -> ${lTo.toFixed(0)}px;` +
+    ` 50% at ${half ? Math.round(half.t) : "-"}ms (scale ${half ? half.s.toFixed(3) : "-"}),` +
+    ` complete at ${done ? Math.round(done.t) : "-"}ms (scale ${done ? done.s.toFixed(3) : "-"})`);
+
+  // ★ THRESHOLD TAKEN FROM THE KNOWN-GOOD VERSION, NOT FROM INTUITION.
+  // scripts/diff-toggle-sequence.cjs replays this exact click against
+  // a6d7caf's stylesheet — the version the owner confirms was working — and
+  // measures: slide completes at 182ms with the knob still at scale 1.932,
+  // full size arriving at 257ms. My first attempt at this gate demanded 1.8 at
+  // the slide's HALFWAY point, which the working version fails (1.751): I had
+  // invented the number. The invariant that actually distinguishes good from
+  // broken is that the knob is still near full size WHEN THE SLIDE FINISHES —
+  // that is what collapses when the shrink starts too early, which is what a
+  // hold shorter than the press caused.
+  const scaleAtSlideEnd = done ? done.s : 0;
+  if (scaleAtSlideEnd < 1.85) {
+    fails.push(`knob has already SHRUNK by the time the slide finishes ` +
+      `(scale ${scaleAtSlideEnd.toFixed(3)}, known-good is 1.93) — the iOS order is ` +
+      `expand, slide while expanded, THEN shrink`);
   }
   if (release.moving < 8) fails.push(`release animated over only ${release.moving} frames`);
   if (slide.moving < 8) fails.push(`slide animated over only ${slide.moving} frames`);
