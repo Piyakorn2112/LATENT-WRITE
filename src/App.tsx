@@ -956,21 +956,16 @@ export default function App() {
       ? "Inserting scene breaks…"
       : "";
 
-  // ★ NO PILL FOR ORDINARY CHAPTER ANALYSIS. The toolbar orb already animates
-  // for the whole of that pass (Toolbar `isAnalyzing`), so a pill reading
-  // "Analysing chapter…" was a second readout of a state the user can already
-  // see — and on a 1s debounce it reappeared after almost every edit.
+  // ★ NO PILL FOR ANALYSIS AT ALL — neither the fast pass nor the deep refine.
+  // The toolbar orb animates for both (Toolbar `isAnalyzing` takes
+  // `analysisRunning || analysisRefining`), so either pill was a second readout
+  // of a state already on screen, and on a 1s debounce the first one reappeared
+  // after almost every edit.
   //
-  // REFINING KEEPS ITS PILL deliberately: the orb animates identically for
-  // both phases, so it cannot distinguish "still working" from "revisiting who
-  // said what". The pill is the only thing that says which, and that phase is
-  // rare enough not to read as noise.
-  const statusTask: StatusTask | null = lensActive
-    ? null
-    : renameTask
-      ?? (analysisRefining
-        ? { kind: "analyzing", label: "Refining attribution…" }
-        : null);
+  // The pill is now for tasks the orb says NOTHING about — currently just the
+  // rename task. Keep it that way: if a new pill only restates the orb, it does
+  // not belong here.
+  const statusTask: StatusTask | null = lensActive ? null : renameTask;
 
   // Initialize secondaryId when entering split mode
   useEffect(() => {
