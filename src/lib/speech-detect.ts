@@ -1,5 +1,6 @@
 // @ts-nocheck — vendored copy; suppress unused-variable errors from the original source
 import { rerankAdaptiveCandidates } from "./adaptive-inference";
+import { classifyScene, type SceneMode } from "./scene-function";
 /**
  * speech-detect.ts  (v2 — smarter attribution)
  *
@@ -186,13 +187,17 @@ export interface ParagraphMeta {
   label?: string;
   /** Ratio of speech characters to total paragraph characters (0–1). */
   dialogueDensity: number;
-  /** Quality hint for calm paragraphs — aggregated by groupIntoScenes for scene labels. */
-  paragraphHint?: 'reflective' | 'intimate' | 'celebratory' | 'weighted' | 'significant';
   // ── Scene-level fields (set by groupIntoScenes post-pass) ──
   /** True on the first paragraph of a detected scene group. */
   sceneStart?: boolean;
-  /** Human-readable scene label shown as the scene header. */
+  /** Human-readable scene label shown as the scene header. Absent whenever the
+   *  evidence does not support a single reading — see scene-function.ts. */
   sceneLabel?: string;
+  /** How far clear of the runner-up reading the label won, 0–1. The UI leans on
+   *  this so a marginal call is visibly quieter than a confident one. */
+  sceneConfidence?: number;
+  /** Which side of the Swain scene/sequel alternation the scene sits on. */
+  sceneMode?: SceneMode;
   /** Dominant tension across the scene (drives header colour). */
   sceneTension?: 'calm' | 'rising' | 'high';
 }
@@ -2529,44 +2534,6 @@ const META_QUIET_PIVOT_TERMS: readonly string[] = [
   'she found', 'he found', 'discovered',
 ];
 
-const META_CELEB_HINTS: readonly string[] = [
-  'festival', 'celebration', 'music', 'laughter', 'dancing',
-  'golden light', 'warm light', 'gathered', 'joy', 'singing',
-  'at the inn', 'the tavern', 'the guild', 'the village', 'at the feast',
-  'sat down to eat', 'cooked', 'prepared a meal', 'shared a meal',
-];
-
-const META_INTIMATE_HINTS: readonly string[] = [
-  'warmth', 'smiled', 'laughed', 'between them', 'beside her',
-  'beside him', 'her hand', 'his hand', 'their hands',
-  'familiar', 'close to', 'at ease', 'comfortable', 'gentle',
-  'the warmth of',
-  'across from her', 'across from him', 'sat together',
-  'looked at each other', 'met his eyes', 'met her eyes',
-  'the party', 'his companion', 'her companion',
-];
-
-const META_REFLECTIVE_HINTS: readonly string[] = [
-  'remembered', 'thinking', 'thought about', 'wondered',
-  'watching', 'listening', 'waiting', 'observed', 'noticed',
-  'memory', 'for years', 'for so long', 'had always',
-  'meaning', 'understood', 'realized', 'as though', 'felt like',
-  'i thought', 'my mind', 'i realized', 'it occurred to me', 'in my head',
-  'i had been', 'i wondered', 'i considered',
-];
-
-const META_WEIGHTED_HINTS: readonly string[] = [
-  'carried for', 'borne for', 'held for', 'for decades',
-  'for centuries', 'for longer than', 'across the years',
-  'the weight of', 'the cost of', 'no one alive',
-];
-
-const META_SIGNIFICANT_HINTS: readonly string[] = [
-  'for the first time', 'the last time', 'never before', 'never again',
-  'would remember', 'would not forget', 'something changed',
-  'the moment', 'in that moment',
-];
-
 // Explicit violence / combat / injury vocabulary. Weighted moderately so a
 // single stray gothic term ("blood", "bone") can't flip calm prose, but a
 // genuine action beat (several terms) reads high. Substring-matched.
@@ -2590,6 +2557,11 @@ const META_UNEASE_TERMS: readonly string[] = [
   'chest tightened', 'chest tightening', 'went cold', 'blood ran cold',
   'a chill', 'uneasy', 'unease', 'on edge', 'wary',
 ];
+
+// ★ Five hint vocabularies (celebratory / intimate / reflective / weighted /
+// significant) were deleted from here along with the paragraphHint they fed.
+// Their only reader was the old computeSceneLabel. Scene labels now come from
+// scene-function.ts, which scores narrative function rather than mood words.
 
 // ── Paragraph tension metadata ───────────────────────────────────────────
 
@@ -2842,28 +2814,16 @@ function computeParagraphMeta(
     }
   }
 
-  // ── Paragraph quality hint (aggregated by groupIntoScenes) ────────────
-  // Computed regardless of tension level so the scene grouper has signals
-  // for labelling calm scenes (celebration, connection, reflection, etc.).
-  let celebCount = 0, intimateCount = 0, reflectCount = 0;
-  let weightedHintCount = 0, significantCount = 0;
-  for (const w of META_CELEB_HINTS)       if (has(w)) celebCount++;
-  for (const w of META_INTIMATE_HINTS)    if (has(w)) intimateCount++;
-  for (const w of META_REFLECTIVE_HINTS)  if (has(w)) reflectCount++;
-  for (const w of META_WEIGHTED_HINTS)    if (has(w)) weightedHintCount++;
-  for (const w of META_SIGNIFICANT_HINTS) if (has(w)) significantCount++;
-
-  let paragraphHint: ParagraphMeta['paragraphHint'];
-  if      (celebCount >= 2)                               paragraphHint = 'celebratory';
-  else if (intimateCount >= 3)                            paragraphHint = 'intimate';
-  else if (significantCount >= 2)                         paragraphHint = 'significant';
-  else if (reflectCount >= 3 || avgSentenceLength > 130)  paragraphHint = 'reflective';
-  else if (weightedHintCount >= 2)                        paragraphHint = 'weighted';
+  // ★ The five `paragraphHint` vocabulary scans that used to run here are GONE.
+  //   Their only consumer was `computeSceneLabel`, which has been replaced by
+  //   scene-function.ts (see the note where that function used to live). They
+  //   were five whole-list substring passes PER PARAGRAPH computing a value
+  //   nothing read — dead work on the analysis hot path, not just dead code.
 
   // Store the EWMA state on the meta object so it can be passed to the next para.
   // Using a type assertion to keep the public ParagraphMeta interface clean.
   const meta: ParagraphMeta & { __ewma: number } = {
-    tension, label, dialogueDensity, paragraphHint, __ewma: nextEWMA,
+    tension, label, dialogueDensity, __ewma: nextEWMA,
   };
   return meta;
 }
@@ -2871,80 +2831,20 @@ function computeParagraphMeta(
 // ── Scene grouping ────────────────────────────────────────────────────────
 
 /**
- * Derives a human-readable scene label from the aggregate text and hints
- * of all paragraphs belonging to a single scene group.
+ * ★ `computeSceneLabel` USED TO LIVE HERE and has been deleted, not moved.
+ *
+ * It derived the scene label from the tension level plus bag-of-words votes,
+ * and measured across 1566 scenes of real prose a single expression inside it
+ * (`avgDialogueDensity > 0.25 ? 'friction' : 'undercurrent'`) produced 65% of
+ * every label a reader saw. Its remaining vocabulary was largely synonyms for
+ * "loud", so 51% of the label's information was already in the header colour.
+ *
+ * The replacement is `classifyScene` in scene-function.ts, which scores
+ * narrative FUNCTION and abstains when the evidence is thin. Do not
+ * reintroduce a tension→word mapping here: the colour already says tension,
+ * and a word that restates it is decoration. scripts/test-scene-labels.ts
+ * measures exactly that and will catch a regression.
  */
-function computeSceneLabel(
-  paragraphTexts: string[],
-  sceneTension: 'calm' | 'rising' | 'high',
-  sceneResults: ChapterParaResult[],
-): string | undefined {
-  // High-tension: use the dominant per-paragraph label
-  if (sceneTension === 'high') {
-    const highLabel = sceneResults
-      .filter(r => r.meta.tension === 'high' && r.meta.label)
-      .map(r => r.meta.label as string)[0];
-    return highLabel ?? 'intense';
-  }
-
-  // Rising-tension: characterise the flavour of pressure
-  if (sceneTension === 'rising') {
-    const topLabel = sceneResults.map(r => r.meta.label).find(l => l);
-    if (topLabel) return topLabel;
-    const sceneText = paragraphTexts.join(' ').toLowerCase();
-    if (sceneText.includes('silence') || sceneText.includes('said nothing')
-        || sceneText.includes('refused to') || sceneText.includes('turned away'))
-      return 'weighted silence';
-    const avgDd = sceneResults.reduce((a, r) => a + r.meta.dialogueDensity, 0) / sceneResults.length;
-    return avgDd > 0.25 ? 'friction' : 'undercurrent';
-  }
-
-  // Calm scenes: aggregate hint votes across all paragraphs in the scene
-  const hints = sceneResults
-    .map(r => r.meta.paragraphHint)
-    .filter((h): h is NonNullable<ParagraphMeta['paragraphHint']> => h !== undefined);
-
-  const votes = new Map<string, number>();
-  for (const h of hints) votes.set(h, (votes.get(h) ?? 0) + 1);
-
-  const sceneText = paragraphTexts.join(' ').toLowerCase();
-
-  // Silence / withholding scene → the "weighted silence" beat. Fires on a
-  // concentration of silence + refusal vocabulary even when tension stays calm.
-  const silenceVocab = ['silence', 'said nothing', 'refused', 'would not', 'turned away', 'looked away', 'without a word', 'no words']
-    .filter(w => sceneText.includes(w)).length;
-  if (silenceVocab >= 2) return 'weighted silence';
-
-  // Celebratory: needs both hint vote and strong vocabulary overlap
-  const celebVocab = ['festival', 'celebration', 'music', 'laughter', 'dancing', 'joy', 'golden', 'together']
-    .filter(w => sceneText.includes(w)).length;
-  if ((votes.get('celebratory') ?? 0) >= 1 && celebVocab >= 3) return 'celebration';
-
-  // Intimate / conversation
-  const avgDialogue = sceneResults.reduce((a, r) => a + r.meta.dialogueDensity, 0) / sceneResults.length;
-  if ((votes.get('intimate') ?? 0) >= 2)
-    return avgDialogue > 0.25 ? 'conversation' : 'connection';
-
-  // Pivotal moment
-  if ((votes.get('significant') ?? 0) >= 2) return 'pivotal';
-
-  // Weighted / heavy prose
-  if ((votes.get('weighted') ?? 0) >= 2) return 'weighted';
-
-  // Reflection (most common calm quality)
-  if ((votes.get('reflective') ?? 0) >= 2) return 'reflection';
-
-  // Single strong signal from a short standalone scene
-  if (hints.length === 1) {
-    const singleMap: Record<string, string> = {
-      reflective: 'reflection', intimate: 'connection',
-      celebratory: 'celebration', weighted: 'weighted', significant: 'pivotal',
-    };
-    return singleMap[hints[0]];
-  }
-
-  return undefined;
-}
 
 /**
  * Post-processing pass: groups consecutive paragraphs into "scenes" and
@@ -2985,6 +2885,9 @@ function groupIntoScenes(paragraphs: string[], results: ChapterParaResult[]): vo
   }
 
   // Annotate the first paragraph of each scene
+  let prevTension: 'calm' | 'rising' | 'high' | undefined;
+  let prevLabel: string | undefined;
+
   for (let s = 0; s < boundaries.length; s++) {
     const start       = boundaries[s];
     const end         = s + 1 < boundaries.length ? boundaries[s + 1] : results.length;
@@ -2995,11 +2898,28 @@ function groupIntoScenes(paragraphs: string[], results: ChapterParaResult[]): vo
     const sceneTension: 'calm' | 'rising' | 'high' =
       maxLevel >= 2 ? 'high' : maxLevel >= 1 ? 'rising' : 'calm';
 
-    const sceneLabel = computeSceneLabel(sceneParas, sceneTension, sceneResult);
+    // ★ The label is NOT a description of the tension — see scene-function.ts.
+    //   It names what the scene DOES (Swain mode × Story Grid value shift) and
+    //   returns null whenever the evidence will not support one reading, which
+    //   is why `sceneLabel` is legitimately absent on many scenes.
+    const fn = classifyScene({
+      paragraphs: sceneParas,
+      dialogueDensity: sceneResult.map(r => r.meta.dialogueDensity),
+      tension: sceneTension,
+      prevTension,
+      prevLabel,
+    });
 
     results[start].meta.sceneStart   = true;
     results[start].meta.sceneTension = sceneTension;
-    if (sceneLabel) results[start].meta.sceneLabel = sceneLabel;
+    if (fn) {
+      results[start].meta.sceneLabel      = fn.label;
+      results[start].meta.sceneConfidence = fn.confidence;
+      results[start].meta.sceneMode       = fn.mode;
+    }
+
+    prevTension = sceneTension;
+    prevLabel   = fn?.label;
   }
 }
 
