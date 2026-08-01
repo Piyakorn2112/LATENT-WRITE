@@ -238,7 +238,16 @@ function readBlur(el: Element): number {
   if (el.classList.contains("settings-panel")) return 3;
   if (el.matches(".analysis-tab, .analysis-action-group")) return 1.2;
   if (el.classList.contains("status-pill")) return 1.2;
-  if (el.matches(".annotation-popover, .annotation-panel")) return 2;
+  // ★ The annotation POPOVER is deliberately absent here, so it falls through
+  // to BLUR_DEFAULT and matches the entity popover exactly. The two are the
+  // same kind of surface — a small card that opens over the prose to say
+  // something about the span under the caret — and they were reading as
+  // different materials only because this line pinned one of them to 2px while
+  // the other took the 5px default. Blur was the ONLY reader that told them
+  // apart; displacement, bezel, supersample and saturation were already shared.
+  // The annotation PANEL keeps 2: it is a wide persistent bar, not a card, and
+  // a heavier blur over that much text costs legibility.
+  if (el.classList.contains("annotation-panel")) return 2;
   return BLUR_DEFAULT;
 }
 

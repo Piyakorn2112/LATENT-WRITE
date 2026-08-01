@@ -59,6 +59,7 @@ app.whenReady().then(async () => {
     const r = host.getBoundingClientRect();
     return {
       orbMask: hs.maskImage || hs.webkitMaskImage,
+      orbMaskSize: hs.maskSize || hs.webkitMaskSize,
       eyesMask: es.maskImage || es.webkitMaskImage,
       rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
       dpr: window.devicePixelRatio,
@@ -94,6 +95,12 @@ app.whenReady().then(async () => {
 
   ok("orb host carries the centre-fade mask", /radial-gradient/.test(probe.orbMask || ""), probe.orbMask);
   ok("eyes are NOT masked", !/radial-gradient/.test(probe.eyesMask || ""), probe.eyesMask);
+  // ★ The mask box must be BIGGER than the element. A mask is transparent
+  // outside its box, so at the default 100% it clips everything the orb paints
+  // beyond its own bounds — including the analysing/loading animation, which is
+  // rendered past the edge on purpose.
+  ok("mask box is 2x the element, so the loading halo is not clipped",
+    /200%/.test(probe.orbMaskSize || ""), probe.orbMaskSize);
   ok("centre is visibly faded vs the rim",
     rim > 40 && centre < rim * 0.8,
     `centre ${centre.toFixed(0)} vs rim ${rim.toFixed(0)} (need < ${(rim * 0.8).toFixed(0)})`);

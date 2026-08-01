@@ -10332,20 +10332,39 @@ body.scroll-edge-idle .toolbar-ambient-orb {
    eyes are a SIBLING of the orb canvas inside the same box, so masking the
    parent would take them with it. */
 .intel-orb-live--fun > :not(.intel-eyes) {
+  /* ★ THE MASK BOX IS 2x THE ELEMENT, CENTRED.
+     A mask defaults to the border box and is TRANSPARENT outside it, so
+     anything the orb paints beyond its own box — the halo, and the analysing
+     animation, which is rendered well past the edge — was being clipped away.
+     Doubling the mask box with `mask-size` gives that overflow room to exist:
+     the gradient reaches full opacity before the element's edge, so everything
+     from there outward, inside the box or beyond it, is left untouched.
+
+     Because the gradient now spans twice the radius, its percentages are
+     halved in element terms: `#000 43%` lands at ~86% of the orb's own radius.
+     The fade also reaches further than before — the soft core runs to ~60% of
+     the orb where it used to stop at 48% — which is the bigger centre fade,
+     and the middle alpha drops 0.55 -> 0.45 to deepen it. */
   -webkit-mask-image: radial-gradient(
     circle at 50% 50%,
-    rgba(0, 0, 0, 0.55) 0%,
-    rgba(0, 0, 0, 0.68) 28%,
-    rgba(0, 0, 0, 0.92) 48%,
-    #000 62%
+    rgba(0, 0, 0, 0.45) 0%,
+    rgba(0, 0, 0, 0.58) 14%,
+    rgba(0, 0, 0, 0.86) 30%,
+    #000 43%
   );
   mask-image: radial-gradient(
     circle at 50% 50%,
-    rgba(0, 0, 0, 0.55) 0%,
-    rgba(0, 0, 0, 0.68) 28%,
-    rgba(0, 0, 0, 0.92) 48%,
-    #000 62%
+    rgba(0, 0, 0, 0.45) 0%,
+    rgba(0, 0, 0, 0.58) 14%,
+    rgba(0, 0, 0, 0.86) 30%,
+    #000 43%
   );
+  -webkit-mask-size: 200% 200%;
+  mask-size: 200% 200%;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
 }
 
 .intel-eye {
