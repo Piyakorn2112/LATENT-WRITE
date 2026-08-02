@@ -21,6 +21,7 @@
 import {
   CHIP_LABEL_MAX,
   CHIP_PICK_CAP,
+  CHIP_TARGET_MIN,
   buildChipRequest,
   chipKeyFor,
   eventFingerprint,
@@ -89,15 +90,15 @@ console.log("\n── 1. normalizeChipPicks ────────────
     `{"picks":[]} → ${JSON.stringify(empty)} (an answer, never null)`);
 
   const good = pick({ picks: [{ rank: 0, label: "Ovin admits the shortfall" }] });
-  gate(good?.length === 1 && good[0].label === "Ovin admits the shortfall",
-    "a clean pick passes through", JSON.stringify(good));
+  gate(good?.[0]?.rank === 0 && good[0].label === "Ovin admits the shortfall",
+    "a clean pick passes through (then backfills to the target)", JSON.stringify(good));
 
   const outOfRange = pick({ picks: [{ rank: 9, label: "Somewhere else entirely" }, { rank: 1, label: "Rell refuses" }] });
-  gate(outOfRange?.length === 1 && outOfRange[0].rank === 1,
+  gate(outOfRange?.[0]?.rank === 1 && !outOfRange.some((p) => p.rank === 9),
     "a rank that was not offered is dropped", JSON.stringify(outOfRange));
 
   const dupe = pick({ picks: [{ rank: 1, label: "first" }, { rank: 1, label: "second" }] });
-  gate(dupe?.length === 1 && dupe[0].label === "first",
+  gate(dupe?.[0]?.label === "first" && dupe.filter((p) => p.rank === 1).length === 1,
     "a repeated rank is deduped, first wins", JSON.stringify(dupe));
 
   const fractional = pick({ picks: [{ rank: 1.5, label: "half a rank" }] });
@@ -108,19 +109,19 @@ console.log("\n── 1. normalizeChipPicks ────────────
 
   const heuristic = CANDIDATES.find((c) => c.rank === 0)!.label;
   const blank = pick({ picks: [{ rank: 0, label: "   " }] });
-  gate(blank?.length === 1 && blank[0].label === heuristic,
+  gate(blank?.[0]?.label === heuristic,
     "a blank label falls back to the heuristic one", `"${blank?.[0]?.label}"`);
 
   const tooLong = pick({ picks: [{ rank: 0, label: "x".repeat(CHIP_LABEL_MAX + 1) }] });
-  gate(tooLong?.length === 1 && tooLong[0].label === heuristic,
+  gate(tooLong?.[0]?.label === heuristic,
     `a label over ${CHIP_LABEL_MAX} chars falls back`, `"${tooLong?.[0]?.label}"`);
 
   const atCap = pick({ picks: [{ rank: 0, label: "y".repeat(CHIP_LABEL_MAX) }] });
-  gate(atCap?.length === 1 && atCap[0].label === "y".repeat(CHIP_LABEL_MAX),
+  gate(atCap?.[0]?.label === "y".repeat(CHIP_LABEL_MAX),
     `exactly ${CHIP_LABEL_MAX} chars is accepted`, `length ${atCap?.[0]?.label.length}`);
 
   const multiline = pick({ picks: [{ rank: 0, label: "Ovin admits\nthe count is short" }] });
-  gate(multiline?.length === 1 && multiline[0].label === heuristic,
+  gate(multiline?.[0]?.label === heuristic,
     "a multi-line label falls back", `"${multiline?.[0]?.label}"`);
 
   const overflow = pick({ picks: [0, 1, 2, 3].map((rank) => ({ rank, label: `label ${rank}` })) });
@@ -128,8 +129,32 @@ console.log("\n── 1. normalizeChipPicks ────────────
     `4 offered → ${overflow?.length}`);
 
   const junk = pick({ picks: [null, 7, { rank: 2, label: "Rell opens the sluice" }] });
-  gate(junk?.length === 1 && junk[0].rank === 2, "junk items are skipped, not fatal",
+  gate(junk?.[0]?.rank === 2, "junk items are skipped, not fatal",
     JSON.stringify(junk));
+
+  // ★★ THE COUNT CANNOT COLLAPSE. v1 let the model answer a five-moment
+  //    chapter with a single chip; one chip cannot remind a writer what a
+  //    chapter was. A short answer is topped up from the engine's own ranking,
+  //    and the model's own picks keep their places at the front.
+  const skimped = pick({ picks: [{ rank: 1, label: "Rell refuses the writ" }] });
+  gate(
+    skimped?.length === CHIP_TARGET_MIN &&
+      skimped[0].rank === 1 && skimped[0].label === "Rell refuses the writ" &&
+      new Set(skimped.map((p) => p.rank)).size === skimped.length,
+    `one pick is backfilled to ${CHIP_TARGET_MIN}`,
+    JSON.stringify(skimped),
+  );
+  gate(
+    (skimped?.slice(1) ?? []).every(
+      (p) => CANDIDATES.find((c) => c.rank === p.rank)?.label === p.label,
+    ),
+    "backfilled chips carry the engine's own labels",
+    (skimped?.slice(1) ?? []).map((p) => `${p.rank}:"${p.label}"`).join(" "),
+  );
+  // Abstention stays a real answer: an empty list is the model judging that
+  // nothing here turns, and there is nothing to top up from.
+  gate(pick({ picks: [] })?.length === 0,
+    "an empty answer is left empty", "silence is not padded");
 }
 
 console.log("\n── 2. buildChipRequest ─────────────────────────────────────────");

@@ -80,8 +80,8 @@ const BOX_VIS_PAD   = 220; // px overscan for off-column event boxes
 const BOX_SIDE_PAD = 10;
 const BOX_DETAIL_GAP = 6;
 const BOX_DETAIL_TRACK_W = 12;
-const BOX_LABEL_MAX = 30;
-const BOX_LABEL_MAX_WITH_DETAIL = 20;
+const BOX_LABEL_MAX = 38;
+const BOX_LABEL_MAX_WITH_DETAIL = 28;
 const BOX_MAX_W = 186;
 // Chapter labels — at fixed Y just below terrain zone
 const LABEL_Y_NUM   = SPINE_BASE + TERRAIN_AMP + 18;  // = 358

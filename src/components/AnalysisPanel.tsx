@@ -1234,8 +1234,6 @@ export function AnalysisPanel({
               currentChapterId={chapterId ?? null}
               onSelectChapter={handleGraphSelectChapter}
               onJumpToEvent={onJumpToEvent ? (cid, evt) => { onJumpToEvent(cid, evt); setView(null); } : undefined}
-              prefs={prefs}
-              onSetPrefs={onSetPrefs}
             />
           </div>
         )}

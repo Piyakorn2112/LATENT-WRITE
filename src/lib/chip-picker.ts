@@ -34,26 +34,38 @@ import type { ChapterGraphEntry, MajorEvent, TimelineChipPick } from "../types";
 
 export const CHIP_TASK = "timeline-chips";
 /** Bump on ANY change to the prompt text or the schema. Invalidates stored picks. */
-export const CHIP_PROMPT_VERSION = 1;
+export const CHIP_PROMPT_VERSION = 2;
 
 /** How many candidates the model is shown. Above this the ranking is guessing
  *  anyway, and a longer list costs prefill for events that cannot be picked. */
 export const CHIP_CANDIDATE_CAP = 8;
 /** Matches TIMELINE_CHIP_BUDGET — the model may not propose more chips than a
  *  chapter can show. Enforced in the grammar AND in `normalizeChipPicks`. */
-export const CHIP_PICK_CAP = 3;
+export const CHIP_PICK_CAP = 4;
+
+/**
+ * How many chips a chapter with real material should end up showing.
+ *
+ * ★★ THE JOB IS COVERAGE, NOT FILTERING. v1 told the model "pick at most 3,
+ *    and fewer is better than padding", and it obliged — chapters went from
+ *    three chips to one. That one was usually the strongest single moment, but
+ *    a timeline is read at a GLANCE and one chip cannot remind a writer what a
+ *    chapter was. The chips TOGETHER have to say what happens. So the model is
+ *    asked to cover the chapter, and `normalizeChipPicks` backfills from the
+ *    engine's own ranking when it under-delivers: the count can no longer
+ *    collapse, and the engine is the harness that catches the model's misses.
+ */
+export const CHIP_TARGET_MIN = 3;
 
 /**
  * Hard ceiling for a label, enforced mechanically.
  *
- * ★ MEASURED DISPLAY WIDTHS, for whoever re-points this: TimelineGraphFull
- *   ellipsis-truncates a chip at 30 chars (20 when a detail tag sits beside
- *   it), TimelineGraph the same, and the heuristic builder targets
- *   LABEL_BUDGET = 28. 44 is therefore a VALIDATION ceiling, not a fit
- *   guarantee — a 44-char label still renders with an ellipsis on the chip and
- *   in full in the inspector list.
+ * ★ POINTED AT THE DISPLAY, NOT AT VALIDATION. TimelineGraphFull truncates a
+ *   chip at BOX_LABEL_MAX; this constant and that one are raised together so a
+ *   label that validates is a label that FITS. A chip the writer reads with an
+ *   ellipsis in the middle has failed at the only thing it does.
  */
-export const CHIP_LABEL_MAX = 44;
+export const CHIP_LABEL_MAX = 38;
 
 /**
  * ★ THE GRAMMAR'S CAP IS DELIBERATELY LOOSER THAN THE VALIDATION CAP. A
@@ -126,36 +138,45 @@ export const CHIP_SCHEMA = {
  *    `normalizeChipPicks` spends an unusable label and keeps the pick, which is
  *    the half worth keeping.
  */
-export const CHIP_SYSTEM = `You choose which moments a novel chapter's timeline shows, and write the short
-label for each one. You are given the chapter's candidate events, numbered, each
-with the verbatim sentence it was found in. That is all the evidence there is.
+export const CHIP_SYSTEM = `You write the handful of chips a novel chapter shows on its timeline. A writer
+glances at them and should immediately remember what happens in that chapter.
+You are given the chapter's candidate moments, numbered, each with the verbatim
+sentence it was found in. Those sentences are all the evidence there is.
 
-Rules:
-- Pick only from the numbered candidates. Never invent an event, and never
-  describe something the sentences do not say.
-- Pick the moments that CHANGE something: a decision, a revelation, a
-  confrontation, an arrival or departure that costs someone something. Skip
-  stage business, travel, and description.
-- Pick at most 3, and fewer is better than padding. If only one moment matters,
-  pick one. If nothing in the chapter turns, pick none — an empty list is a
-  real answer.
-- Each label rewrites its own candidate's sentence in plain words. Every name
-  and object in the label must appear in that sentence.
+Your job is COVERAGE: the chips together should tell the chapter's story.
 
-Label rules:
-- AT MOST 5 WORDS, and never more than 44 characters. A chip is a headline, not
-  a summary: "Aleth burns the second writ", never "Aleth burns the second writ
-  in front of the whole council".
-- Concrete: say who does what. "Aleth burns the second writ", never
-  "things escalate".
+- Choose 3 or 4 moments, spread across the chapter rather than clustered on one
+  beat. Choose 4 whenever the chapter supports it. Choose fewer only when the
+  candidates genuinely describe fewer distinct happenings.
+- Prefer the moments that CHANGE something: a decision, a revelation, a
+  confrontation, an arrival or departure that costs someone something. Take
+  quieter moments too when they are what the chapter is made of.
+- Read the whole list before choosing. If two candidates describe the same
+  happening, use one of them and spend the other chip elsewhere.
+
+Each chip COMPRESSES its moment into a headline. You are not quoting the
+sentence, you are boiling it down to what happened:
+
+  moment: "Sefa Turow told the assembly that the well had been dry since the
+           spring, and that she had known it the whole time."
+  chip:   Sefa admits the well is dry
+
+  moment: "The harbour warden set the tally board against the wall and broke
+           it across his knee where everyone could see."
+  chip:   The warden breaks the tally board
+
+- FIVE WORDS. Not six, not a clause with "and" in it. If you cannot say it in
+  five words you are still quoting, so cut until only the action is left.
+- Say who does what. Use the shortest name that identifies them. Drop the
+  numbers, the reasons, the manner and the second half of the sentence.
+- Every name you write must appear in the sentence you anchored to.
 - Sentence case. Present tense. No quotation marks. No full stop at the end.
 - No melodrama and no selling: not "shocking", "at last", "everything changes",
   "the truth is revealed".
 
-Answer as JSON: {"picks":[{"rank","label"}]}.
+Answer as JSON: {"picks":[{"rank","label"}]}, in the order the moments happen.
 rank: the number of a candidate you were given, exactly as written.
-label: the rewritten chip for that candidate. Five words is the limit; a sixth
-makes the chip unusable, so drop a detail rather than run long.`;
+label: the compressed headline, five words at most.`;
 
 // ── request assembly ──────────────────────────────────────────────────────
 
@@ -295,6 +316,22 @@ export function normalizeChipPicks(
     const usable =
       labelRaw !== "" && labelRaw.length <= CHIP_LABEL_MAX && !/[\r\n]/.test(labelRaw);
     out.push({ rank: rankRaw, label: usable ? labelRaw : candidate.label });
+  }
+
+  // ★★ BACKFILL FROM THE ENGINE. The model decides what the chips SAY; it does
+  //    not get to decide that a chapter with five real moments shows one. When
+  //    it returns fewer than the target, the engine's own top-ranked unused
+  //    candidates fill the rest with their heuristic labels — the harness
+  //    catching the model's miss, which is the right way round. An EMPTY answer
+  //    is left empty: "nothing here turns" is a judgement worth honouring, and
+  //    a chapter the engine found nothing in has nothing to backfill from.
+  if (out.length > 0 && out.length < CHIP_TARGET_MIN) {
+    for (const candidate of candidates) {
+      if (out.length >= CHIP_TARGET_MIN) break;
+      if (seen.has(candidate.rank)) continue;
+      seen.add(candidate.rank);
+      out.push({ rank: candidate.rank, label: candidate.label });
+    }
   }
 
   return out;

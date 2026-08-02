@@ -514,7 +514,11 @@ const quietChapter = chipEntry({
 });
 
 const chipSpecs = [
-  { id: "strong", entry: strongChapter, minPicks: 2 },
+  // ★ The bar is COVERAGE now, not survival. A chapter with five distinct
+  //   moments must come back with a set a writer can read at a glance, not one
+  //   prize-winning chip; `normalizeChipPicks` backfills from the engine if the
+  //   model under-delivers, so this gate covers the whole path.
+  { id: "strong", entry: strongChapter, minPicks: 3 },
   { id: "quiet", entry: quietChapter, minPicks: null },
 ];
 

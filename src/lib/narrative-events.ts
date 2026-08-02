@@ -223,7 +223,7 @@ export const LABEL_BUDGET = 28;
  * describes the PRODUCT is precision@(this), so the harness and both renderers
  * must agree on it or the gate is measuring a view nobody sees.
  */
-export const TIMELINE_CHIP_BUDGET = 3;
+export const TIMELINE_CHIP_BUDGET = 4;
 
 /**
  * The chips a chapter shows: the best `budget` by RANK, drawn in reading order.

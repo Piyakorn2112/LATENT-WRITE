@@ -1,7 +1,6 @@
 import { memo, startTransition, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Novel, StoryGraph, WorldData } from "../types";
-import type { Preferences } from "../lib/preferences";
 import {
   buildSnapshotTimelineCharacterTracks,
   buildTimelineCharacterTracks,
@@ -9,7 +8,6 @@ import {
 } from "../lib/story-graph-display";
 import { buildArcInsights } from "../lib/story-arc-insights";
 import { Maximize2Icon } from "./Icon";
-import { GlassToggle } from "./GlassToggle";
 import { TimelineGraph } from "./TimelineGraph";
 import { TimelineGraphFull } from "./TimelineGraphFull";
 
@@ -22,18 +20,10 @@ interface Props {
   onSelectChapter: (id: string) => void;
   /** Opens a chapter and selects an event's source clause in the editor. */
   onJumpToEvent?: (chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => void;
-  prefs: Preferences;
-  onSetPrefs: (next: Preferences) => void;
 }
 
 type LMStatus = "idle" | "loading" | "ready" | "offline";
 
-const LM_STATUS_LABEL: Record<LMStatus, string> = {
-  idle:    "Idle",
-  loading: "Loading…",
-  ready:   "Active",
-  offline: "Offline",
-};
 const LM_STATUS_COLOR: Record<LMStatus, string> = {
   idle:    "var(--panel-text-4)",
   loading: "#f59e0b",
@@ -49,7 +39,7 @@ const electronAPI = (window as Window & {
 }).electronAPI;
 
 function StoryGraphPanelImpl({
-  storyGraph, chapters, syncChapters, worldData, currentChapterId, onSelectChapter, onJumpToEvent, prefs, onSetPrefs,
+  storyGraph, chapters, syncChapters, worldData, currentChapterId, onSelectChapter, onJumpToEvent,
 }: Props) {
   const [overlayOpen, setOverlayOpen] = useState(false);
   // Chapter the full view should open its inspector on. Set when an insight
@@ -76,7 +66,6 @@ function StoryGraphPanelImpl({
 
   const analyzedCount = Object.keys(storyGraph.entries).length;
   const totalWords    = Object.values(storyGraph.entries).reduce((s, e) => s + e.wordCount, 0);
-  const nlpEnabled    = prefs.storyNlpEnabled !== false;
   const hasElectron   = !!electronAPI?.narrativeLMEmbed;
 
   const snapshotTracks = useMemo(
@@ -257,46 +246,39 @@ function StoryGraphPanelImpl({
           Cross-chapter structure — complements per-chapter widget feedback.
         </p>
 
+        {/* ── Always-on engines ──────────────────────────────────────────────
+            Event detection and the embedding model are not choices: they cost
+            nothing the writer would notice, everything on this panel is built
+            from them, and a switch implies a decision worth making. They report
+            their state in the same title-plus-status register the entity scan
+            uses, WITHOUT a toggle. The one AI switch in the app is the local
+            model, and it lives in Settings under "Local enhancements". */}
         <div className="settings-toggle-row" style={{ padding: "0 2px" }}>
           <div className="settings-toggle-row-text">
-            <span className="settings-toggle-row-title">Background NLP</span>
+            <span className="settings-toggle-row-title">Event detection</span>
             <span className="settings-toggle-row-desc">
-              Detects narrative events as you write each chapter.
+              Always on. Finds each chapter's moments as you write.
             </span>
           </div>
-          <GlassToggle
-            checked={nlpEnabled}
-            onChange={v => onSetPrefs({ ...prefs, storyNlpEnabled: v })}
-            ariaLabel="Toggle story NLP analysis"
-          />
         </div>
 
-        {/* LM status indicator */}
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "6px 2px 2px", marginBottom:"40px",
-        }}>
-          <span style={{ fontFamily: "var(--font-ui)", fontSize: 10, color: "var(--panel-text-4)" }}>
-            Local LM
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            {hasElectron ? (
-              <>
-                <span
-                  className="rp-chat-status-dot"
-                  data-state={lmStatus}
-                  title={`Local LM ${LM_STATUS_LABEL[lmStatus]}`}
-                />
-                <span className="renderer-full-status-label" style={{ color: LM_STATUS_COLOR[lmStatus] }}>
-                  {LM_STATUS_LABEL[lmStatus]}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="rp-chat-status-dot" data-state="offline" title="Local LM offline — Electron required" />
-                <span className="renderer-full-status-label">Electron required</span>
-              </>
-            )}
+        <div className="settings-toggle-row" style={{ padding: "0 2px", marginBottom: 40 }}>
+          <div className="settings-toggle-row-text">
+            <span className="settings-toggle-row-title">Local LM</span>
+            <span
+              className="settings-toggle-row-desc"
+              style={{ color: hasElectron ? LM_STATUS_COLOR[lmStatus] : undefined }}
+            >
+              {!hasElectron
+                ? "Unavailable in the browser. The desktop app runs it on this Mac."
+                : lmStatus === "ready"
+                  ? "Ready. Sharpens which moments count as events."
+                  : lmStatus === "loading"
+                    ? "Loading…"
+                    : lmStatus === "offline"
+                      ? "Failed to load. Events still work without it."
+                      : "Starts with the first chapter you analyse."}
+            </span>
           </div>
         </div>
       </div>
