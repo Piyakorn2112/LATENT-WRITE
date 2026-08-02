@@ -84,6 +84,7 @@ import {
   retireDeadAnchors,
 } from "./lib/knowledge-ledger";
 import { runPendingAdjudications, ADJUDICATOR_TASK } from "./lib/adjudicator";
+import { chipKeyFor, runChipPick, CHIP_TASK } from "./lib/chip-picker";
 import {
   assistantAvailable,
   assistantModelId,
@@ -973,6 +974,76 @@ export default function App() {
       cancelAssistantWhere(({ task }) => task === ADJUDICATOR_TASK);
     };
   }, [knowledgeStore, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Timeline chip refinement ────────────────────────────────────────────
+  // The model re-picks and re-labels each chapter's timeline chips in the
+  // background, one entry per tick, keyed by chipKeyFor so work only happens
+  // when the chapter's events actually changed. Self-healing by design: an
+  // enrichment pass that re-ranks events changes the fingerprint, which
+  // invalidates the chips, which re-runs the pick over the new events. The
+  // stamp is guarded by recomputing the key against the CURRENT entry, so a
+  // pick raced by a rebuild is dropped, never misapplied.
+  const chipBusyRef = useRef(false);
+  const chipSkipRef = useRef(new Set<string>()); // `${chapterId}|${key}` failures, per session
+  useEffect(() => {
+    if (!prefs.assistant?.enabled || !window.electronAPI) return;
+    let alive = true;
+    let retryTimer: number | null = null;
+
+    const tick = async () => {
+      if (!alive || chipBusyRef.current) return;
+      if (document.hidden) {
+        document.addEventListener("visibilitychange", onVisible, { once: true });
+        return;
+      }
+      if (!(await assistantAvailable())) {
+        if (alive) retryTimer = window.setTimeout(() => { void tick(); }, 30_000);
+        return;
+      }
+      const modelId = await assistantModelId();
+      if (!modelId || !alive) return;
+
+      const target = Object.values(storyGraphRef.current.entries)
+        .filter((entry) => entry.majorEvents.length > 0)
+        .sort((a, b) => a.chapterNumber - b.chapterNumber)
+        .find((entry) => {
+          const key = chipKeyFor(entry, modelId);
+          return entry.lmChipsKey !== key && !chipSkipRef.current.has(`${entry.chapterId}|${key}`);
+        });
+      if (!target) return;
+      const key = chipKeyFor(target, modelId);
+
+      chipBusyRef.current = true;
+      try {
+        const outcome = await runChipPick(target, { run: assistantRunJSON, modelId });
+        if (!alive) return;
+        if (!outcome) { chipSkipRef.current.add(`${target.chapterId}|${key}`); return; }
+        setStoryGraph((prev) => {
+          const current = prev.entries[target.chapterId];
+          if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
+          return {
+            ...prev,
+            entries: {
+              ...prev.entries,
+              [target.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
+            },
+          };
+        });
+      } finally {
+        chipBusyRef.current = false;
+      }
+    };
+    const onVisible = () => { if (!document.hidden && alive) void tick(); };
+
+    const timer = window.setTimeout(() => { void tick(); }, 4000);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      cancelAssistantWhere(({ task }) => task === CHIP_TASK);
+    };
+  }, [storyGraph, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { saveStoryGraph(storyGraph); }, [storyGraph]);
   useEffect(() => { saveReviewResults(reviewResults); }, [reviewResults]);

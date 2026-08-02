@@ -222,9 +222,15 @@ scan review (`entity-review.ts`) is the second consumer.
 - `npm run test:evidence-pack` — pack determinism, budget, drop order, snapshot
 - `npm run verify:assistant-runtime` — utilityProcess runtime, cancellation,
   RSS reclaim (Electron, needs the downloaded model; SKIPs without it)
-- `npm run verify:assistant-tasks` — live model gates for both tasks; fixtures
-  regenerate from the real modules. ★ the wire label is `no_way_to_know`
-  because `break` was UNREACHABLE for the small model — do not "simplify" it
+- `npm run verify:assistant-tasks` — live model gates for ALL assistant tasks
+  (adjudication, entity review, timeline chips); fixtures regenerate from the
+  real modules. ★ the wire label is `no_way_to_know` because `break` was
+  UNREACHABLE for the small model — do not "simplify" it
+- `npm run test:chip-picker` — pure chip-picker gates: normalizeChipPicks,
+  chipKeyFor stability, selectDisplayChips fallback identity. ★ chips are
+  PICKED BY RANK from the heuristic engine's own candidates and relabeled —
+  the model never invents an event; all display goes through
+  selectDisplayChips (the one-selector rule)
 - `npm run verify:knowledge-e2e` — the whole chain in the real app (hermetic
   profile via LW_USER_DATA): backfill → candidate → sweep → verdict persisted.
   Verifies WIRING, not judgment — do not tighten it to demand a verdict value

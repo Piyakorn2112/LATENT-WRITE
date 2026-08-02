@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { CSSProperties } from "react";
 import type { ChapterAnalysisResult } from "../lib/use-analysis";
 import { buildChapterBrief } from "../lib/chapter-observation";
-import { selectTimelineChips } from "../lib/narrative-events";
+import { selectDisplayChips } from "../lib/narrative-events";
 import { useDebouncedValue } from "../lib/use-debounced";
 import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
@@ -1079,7 +1079,10 @@ export function AnalysisPanel({
                       event was called an event. */}
                   {brief.events.length > 0 && (
                     <div className="chapter-brief-events">
-                      {selectTimelineChips(brief.events, 4).map((e, i) => (
+                      {/* Live brief events carry no lmChips, so this resolves to
+                          the heuristic picks — routed through the ONE selector
+                          anyway so no chip consumer can drift from the picker. */}
+                      {selectDisplayChips({ majorEvents: brief.events }, 4).map((e, i) => (
                         <button
                           key={`${e.paragraphIndex}-${i}`}
                           type="button"
