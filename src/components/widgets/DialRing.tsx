@@ -3,12 +3,15 @@ import type { ReactNode } from "react";
 
 /**
  * Shared dial primitive — used only where a *dotted* gauge is the
- * appropriate visual language (Cast share, Sensory channel breakdown,
- * Style mini-rings — all cases where the underlying data is discretely
- * countable). Other widgets get bespoke faces (e.g. PacingWidget uses
- * a clock-face, MomentumWidget uses an arc-segment visualisation) so
- * the family reads with personality per data type rather than as a
- * monoculture of identical dot rings.
+ * appropriate visual language: cases where the underlying data is
+ * discretely countable, so a ring of countable dots is more honest than
+ * a continuous sweep. Widgets whose data is continuous use ArcRing
+ * instead, and some get bespoke faces entirely, so the family reads with
+ * personality per data type rather than as a monoculture of identical
+ * dot rings.
+ *
+ * In-panel widgets have all migrated to ArcRing; this now backs the
+ * System 10 tool kit via `src/tools/primitives/ToolDialRing.tsx`.
  *
  * Two modes:
  *   • SINGLE-FILL — `fill: 0..1` fills the first N×fill dots in `color`.

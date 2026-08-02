@@ -1,7 +1,7 @@
 /**
  * test-prose-profile.ts
  *
- * TDD accuracy suite for prose-profile.ts (powers ProseProfileWidget, TextureWidget).
+ * TDD accuracy suite for prose-profile.ts (powers ProseProfileWidget).
  * Tests: POV detection, tense detection, rhythm labels, show/tell ratio, FK grade.
  *
  * Run:  npx tsx scripts/test-prose-profile.ts

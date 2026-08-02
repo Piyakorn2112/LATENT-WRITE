@@ -8,7 +8,6 @@ import { TensionWidget } from "./widgets/TensionWidget";
 import { StyleWatchWidget } from "./widgets/StyleWatchWidget";
 import { RhythmWidget } from "./widgets/RhythmWidget";
 import { RepetitionWidget } from "./widgets/RepetitionWidget";
-import { TitleSuggesterWidget } from "./widgets/TitleSuggesterWidget";
 import { ProseProfileWidget } from "./widgets/ProseProfileWidget";
 import { ContinuityWidget } from "./widgets/ContinuityWidget";
 import { CharacterVoiceWidget } from "./widgets/CharacterVoiceWidget";
@@ -16,14 +15,10 @@ import { ScrollEdgeRight } from "./ScrollEdgeRight";
 import type { Chapter, WorldData } from "../types";
 import { DiagnosticsWidget } from "./widgets/DiagnosticsWidget";
 import { ShapingWidget } from "./widgets/ShapingWidget";
-import { StructureWidget } from "./widgets/StructureWidget";
 import { VoiceWidget } from "./widgets/VoiceWidget";
 import { CastWidget } from "./widgets/CastWidget";
 import { RoleWidget } from "./widgets/RoleWidget";
 import { CrossArcWidget } from "./widgets/CrossArcWidget";
-import { MomentumWidget } from "./widgets/MomentumWidget";
-import { SensoryBalanceWidget } from "./widgets/SensoryBalanceWidget";
-import { CrossPacingWidget } from "./widgets/CrossPacingWidget";
 import { PlaceholderWidget } from "./widgets/PlaceholderWidget";
 import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon, LayersIcon, Wand2Icon, resolveToolIcon } from "./Icon";
 import { StoryGraphPanel } from "./StoryGraphPanel";
@@ -605,14 +600,8 @@ function resolveWidgetSlot(
       return { show: !!hi, element: <ShapingWidget analysis={a} /> };
     case "tension":
       return { show: true, element: <TensionWidget analysis={a} paragraphs={result.paragraphs} speechResults={result.speechResults} /> };
-    case "structure":
-      return { show: !!hi, element: <StructureWidget analysis={a} /> };
-    case "momentum":
-      return { show: !!hi && hi.narrativeMomentum.segments.length > 0, element: <MomentumWidget analysis={a} /> };
     case "cross-arc":
       return { show: showCrossArc, element: <CrossArcWidget current={result} prev={prevResult} next={nextResult} /> };
-    case "cross-pacing":
-      return { show: showCrossArc && (!!prevResult || !!nextResult), element: <CrossPacingWidget current={result} prev={prevResult} next={nextResult} /> };
     case "continuity":
       return {
         show: allChapters.length > 1 && chapterIndex >= 0,
@@ -629,16 +618,12 @@ function resolveWidgetSlot(
       };
     case "prose-profile":
       return { show: wordCount > 80, element: <ProseProfileWidget content={chapterContent} /> };
-    case "sensory-balance":
-      return { show: !!hi?.proseStyle && hi.proseStyle.topChannels.length > 0, element: <SensoryBalanceWidget analysis={a} /> };
     case "style-watch":
       return { show: chapterContent.trim().length > 50, element: <StyleWatchWidget content={chapterContent} /> };
     case "rhythm":
       return { show: chapterContent.trim().length > 50, element: <RhythmWidget content={chapterContent} /> };
     case "repetition":
       return { show: chapterContent.length > 200, element: <RepetitionWidget content={chapterContent} /> };
-    case "title-suggester":
-      return { show: result.paragraphs.length > 0, element: <TitleSuggesterWidget result={result} knownNames={a.speakerCounts.map(s => s.name)} /> };
     case "character-voice":
       return { show: result.paragraphs.length > 0 && a.speakerCounts.length >= 2, element: <CharacterVoiceWidget paragraphs={result.paragraphs} speechResults={result.speechResults} worldData={worldData} content={chapterContent} /> };
     case "voice":
@@ -935,17 +920,12 @@ export function AnalysisPanel({
       "diagnostics": a.writerDiagnostics.length > 0,
       "shaping": !!hi,
       "tension": true,
-      "structure": !!hi,
-      "momentum": !!hi && hi.narrativeMomentum.segments.length > 0,
       "cross-arc": showCrossArc,
-      "cross-pacing": showCrossArc,
       "continuity": !!debouncedChapters && debouncedChapters.length > 1 && chapterIndex != null,
       "prose-profile": widgetWordCount > 80,
-      "sensory-balance": !!hi?.proseStyle && hi.proseStyle.topChannels.length > 0,
       "style-watch": !!widgetSnapshotContent && widgetSnapshotContent.trim().length > 50,
       "rhythm": !!widgetSnapshotContent && widgetSnapshotContent.trim().length > 50,
       "repetition": (widgetSnapshotContent?.length ?? 0) > 200,
-      "title-suggester": displayed!.paragraphs.length > 0,
       "character-voice": displayed!.paragraphs.length > 0 && a.speakerCounts.length >= 2,
       "voice": !!hi || a.speakerCounts.length > 0,
       "cast": a.speakerCounts.length > 0,

@@ -5,6 +5,7 @@ import {
   type WidgetConfig,
   type WidgetConfigEntry,
   type WidgetMeta,
+  WIDGET_CONFIG_VERSION,
   getWidgetLabel,
   getWidgetDescription,
 } from "../lib/widget-config";
@@ -101,7 +102,7 @@ function WidgetConfigOverlayInner({ config, extraMetas = [], onSave, onClose }: 
   }, [dragIndex, overIndex]);
 
   const handleSave = useCallback(() => {
-    onSave({ version: 1, order });
+    onSave({ version: WIDGET_CONFIG_VERSION, order });
     onClose();
   }, [order, onSave, onClose]);
 

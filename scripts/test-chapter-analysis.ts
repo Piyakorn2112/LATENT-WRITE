@@ -2,7 +2,7 @@
  * test-chapter-analysis.ts
  *
  * TDD accuracy for chapter-analysis.ts arc/role/register classification.
- * Powers TensionWidget, RegisterWidget, RoleWidget, PacingWidget, and more.
+ * Powers TensionWidget, RoleWidget, VoiceWidget, and more.
  *
  * Strategy: use detectSpeechInChapter to build real ChapterParaResult[],
  * then feed into analyzeChapter and verify key classifications.

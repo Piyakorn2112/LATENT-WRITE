@@ -2774,67 +2774,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   flex-shrink: 0;
 }
 
-/* ─── Title suggester widget ────────────────────────────────────────── */
-.wg-titles-list {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 4px 0 6px;
-}
-.wg-title-row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 9px 11px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.03);
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  color: inherit;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
-}
-.wg-title-row:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(167, 139, 250, 0.45);
-}
-.wg-title-row:active {
-  transform: scale(0.98);
-}
-.wg-title-rank {
-  font-family: var(--font-ui);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  color: rgba(255, 255, 255, 0.32);
-  width: 14px;
-  flex-shrink: 0;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.wg-title-text {
-  flex: 1;
-  font-family: var(--font-body);
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: 0.005em;
-  color: rgba(255, 255, 255, 0.92);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
-.wg-title-source {
-  font-family: var(--font-ui);
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: rgba(167, 139, 250, 0.62);
-  flex-shrink: 0;
-}
-
 /* ─── Tension widget polish ─────────────────────────────────────────── */
 .wg-tension-chart {
   /* Subtle reveal on mount — curve scales up from baseline so it reads
@@ -3511,30 +3450,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   opacity: 0.42;
 }
 
-/* ─── Clock-face dial (PacingWidget) ─────────────────────────────────── */
-.wg-clock-wrap {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.wg-clock-center {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  pointer-events: none;
-  /* Pull centre stack down a touch so the minute-hand from 12-o'clock
-     position doesn't overlap the numeric. */
-  padding-top: 3px;
-}
-.wg-clock-center .wg-dial-icon {
-  margin-top: 4px;
-}
-
 /* ─── Cast widget — floating proportional name labels around dial ──────
    Each speaker's name floats outside the ring at the angular midpoint
    of their dial segment. Font size scales with their dialogue share so
@@ -4168,52 +4083,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   text-align: center;
   padding: 8px 4px 4px;
   line-height: 1.4;
-}
-
-/* ─── Phase-arc visualization (CrossPacingWidget) ────────────────────────── */
-.wg-phase-arc {
-  display: block;
-  width: 100%;
-  overflow: visible;
-  margin-bottom: 4px;
-}
-.wg-phase-labels {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 4px;
-}
-.wg-phase-label {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  min-width: 52px;
-}
-.wg-phase-label--current .wg-phase-label-name {
-  color: rgba(255,255,255,0.75);
-}
-.wg-phase-label-name {
-  font-family: var(--font-ui);
-  font-size: 8.5px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(255,255,255,0.35);
-}
-.wg-phase-label-val {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 700;
-  color: rgba(255,255,255,0.55);
-  font-variant-numeric: tabular-nums;
-}
-.wg-phase-label-tension {
-  font-family: var(--font-ui);
-  font-size: 8px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: capitalize;
-  opacity: 0.7;
 }
 
 /* ─── Radar — processing placeholder (AirDrop / FindMy style) ─── */
