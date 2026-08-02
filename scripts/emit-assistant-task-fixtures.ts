@@ -513,6 +513,36 @@ const quietChapter = chipEntry({
   ],
 });
 
+/**
+ * (c) A chapter written the way novels actually are: once a character is
+ * established, the prose says "he" and "she". Every sentence here leads with a
+ * pronoun and the agent is resolved on the side, which is precisely the
+ * situation that put pronouns into shipped chips — a chip is read with no
+ * sentence beside it, so "He admits the shortfall" names nobody.
+ */
+const pronounChapter = chipEntry({
+  chapterId: "chip-pronoun",
+  chapterNumber: 11,
+  chapterTitle: "What the River Took",
+  tensionPeak: 0.78,
+  charactersPresent: ["Ansel Roke", "Teva Lund"],
+  contentHash: "2800|The water had been over the sill since the small hours a",
+  majorEvents: [
+    chipEvent(2, 0.12, "Ansel walks the bank",
+      "He walked the whole length of the bank before the light came up, and found the marker gone.",
+      "action", "transition", "Ansel Roke", "narration"),
+    chipEvent(0, 0.44, "Ansel admits the fault",
+      "He told her that the sluice had been his to check, and that he had not checked it since the thaw.",
+      "revelation", "revelation", "Ansel Roke", "dialogue"),
+    chipEvent(1, 0.67, "Teva refuses the offer",
+      "She refused the money outright, and said she would not take it in front of the whole village.",
+      "confrontation", "confrontation", "Teva Lund", "dialogue"),
+    chipEvent(3, 0.89, "Teva burns the ledger",
+      "She carried the ledger down to the water and let it go, and did not watch it sink.",
+      "action", "climax", "Teva Lund", "narration"),
+  ],
+});
+
 const chipSpecs = [
   // ★ The bar is COVERAGE now, not survival. A chapter with five distinct
   //   moments must come back with a set a writer can read at a glance, not one
@@ -520,6 +550,7 @@ const chipSpecs = [
   //   model under-delivers, so this gate covers the whole path.
   { id: "strong", entry: strongChapter, minPicks: 3 },
   { id: "quiet", entry: quietChapter, minPicks: null },
+  { id: "pronoun", entry: pronounChapter, minPicks: 3 },
 ];
 
 // ── emit ───────────────────────────────────────────────────────────────────

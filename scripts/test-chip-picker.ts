@@ -22,6 +22,7 @@ import {
   CHIP_LABEL_MAX,
   CHIP_PICK_CAP,
   CHIP_TARGET_MIN,
+  startsWithPronoun,
   buildChipRequest,
   chipKeyFor,
   eventFingerprint,
@@ -155,6 +156,36 @@ console.log("\n── 1. normalizeChipPicks ────────────
   // nothing here turns, and there is nothing to top up from.
   gate(pick({ picks: [] })?.length === 0,
     "an empty answer is left empty", "silence is not padded");
+
+  // ── pronouns ────────────────────────────────────────────────────────────
+  // A chip is read with no sentence beside it, so "He admits the count" names
+  // nobody. The engine already resolved the agent, so the fix is substitution,
+  // not rejection — throwing the chip away would discard a correct selection
+  // and a correct compression over one word.
+  const WITH_AGENT: typeof CANDIDATES = CANDIDATES.map((c) =>
+    c.rank === 0 ? { ...c, agent: "Ovin Marr" } : c);
+  const pickAgent = (raw: unknown) => normalizeChipPicks(raw, WITH_AGENT);
+
+  const heRepaired = pickAgent({ picks: [{ rank: 0, label: "He admits the count" }] });
+  gate(heRepaired?.[0]?.label === "Ovin admits the count",
+    "a leading pronoun is replaced with the resolved name",
+    `"${heRepaired?.[0]?.label}"`);
+
+  const possessive = pickAgent({ picks: [{ rank: 0, label: "His ledger is seized" }] });
+  gate(possessive?.[0]?.label === "Ovin's ledger is seized",
+    "a possessive pronoun becomes a possessive name",
+    `"${possessive?.[0]?.label}"`);
+
+  // Without a resolved agent there is nothing to substitute, so the chip must
+  // fall back rather than ship a pronoun.
+  const noAgent = pick({ picks: [{ rank: 0, label: "She burns the writ" }] });
+  gate(noAgent?.[0]?.label === CANDIDATES.find((c) => c.rank === 0)!.label,
+    "with no resolved agent, a pronoun chip falls back to the engine label",
+    `"${noAgent?.[0]?.label}"`);
+
+  gate(!startsWithPronoun("Ovin admits the count") && startsWithPronoun("They leave at dawn"),
+    "the pronoun test is neither blind nor trigger-happy",
+    "names pass, pronouns caught");
 }
 
 console.log("\n── 2. buildChipRequest ─────────────────────────────────────────");

@@ -451,6 +451,17 @@ async function main() {
     summaryResponses.every((r) => !r.ok || !/^in this chapter/i.test(r.json.summary)),
     'no "In this chapter"');
 
+  // ★ NO CHIP MAY SHIP A PRONOUN. A chip is read with no sentence beside it, so
+  //   "He admits the fault" names nobody. The pronoun fixture's every sentence
+  //   leads with "He"/"She" and carries a resolved agent, which is the exact
+  //   shape that put pronouns into shipped chips.
+  const LEADING_PRONOUN = /^(he|she|they|it|his|her|their|its|him|them)\b/i;
+  const pronounChips = chipResponses.flatMap((r) =>
+    (r.ok ? r.json.picks : []).filter((p) => LEADING_PRONOUN.test(String(p.label).trim()))
+      .map((p) => `${r.id}[${p.rank}] "${p.label}"`));
+  gate('no chip leads with a pronoun', pronounChips.length === 0,
+    pronounChips.length ? pronounChips.join(' · ') : 'every chip names its actor');
+
   const timed = [...responses, ...chipResponses, ...summaryResponses].filter((r) => r.timings);
   const totalTok = timed.reduce((a, r) => a + r.timings.tokens, 0);
   const totalGen = timed.reduce((a, r) => a + r.timings.genMs, 0);

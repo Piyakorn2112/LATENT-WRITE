@@ -167,9 +167,14 @@ sentence, you are boiling it down to what happened:
 
 - FIVE WORDS. Not six, not a clause with "and" in it. If you cannot say it in
   five words you are still quoting, so cut until only the action is left.
+- NEVER start a chip with "He", "She", "They" or "It", and never use a pronoun
+  where a person is meant. The sentence may say "he" — the "who" line under the
+  candidate tells you which person that is, so write that name instead. A chip
+  is read on its own, with no sentence beside it to explain a pronoun.
 - Say who does what. Use the shortest name that identifies them. Drop the
   numbers, the reasons, the manner and the second half of the sentence.
-- Every name you write must appear in the sentence you anchored to.
+- Every name you write must appear in the candidate's sentence or on its "who"
+  line.
 - Sentence case. Present tense. No quotation marks. No full stop at the end.
 - No melodrama and no selling: not "shocking", "at last", "everything changes",
   "the truth is revealed".
@@ -177,6 +182,105 @@ sentence, you are boiling it down to what happened:
 Answer as JSON: {"picks":[{"rank","label"}]}, in the order the moments happen.
 rank: the number of a candidate you were given, exactly as written.
 label: the compressed headline, five words at most.`;
+
+// ── the repair pass ───────────────────────────────────────────────────────
+//
+// ★★ A TARGETED SECOND TASK, NOT A SELF-CRITIQUE. Apple's on-device guidance
+//    (WWDC25 session 248, "Explore prompt design & safety") answers "the model
+//    got it wrong" with DECOMPOSITION — "break down your task prompt into
+//    simpler steps" — and teaches nothing about asking a small model to grade
+//    its own work. So this pass never says "review your answer". It is a second,
+//    much smaller task: here is one sentence, here is who acts in it, write the
+//    headline. It runs ONLY for the chips a deterministic check already
+//    rejected, so a clean answer costs nothing extra.
+//
+//    The same session is why the ground truth is handed over rather than
+//    recalled: for anything the model cannot be trusted to know, Apple's advice
+//    is to inject the verified fact into the prompt. The engine's resolved
+//    agent is exactly that — it is what turns "he" into a name.
+
+export const CHIP_REPAIR_SCHEMA = {
+  type: "object",
+  properties: {
+    rewrites: {
+      type: "array",
+      maxItems: CHIP_PICK_CAP,
+      items: {
+        type: "object",
+        properties: {
+          rank: { type: "integer" },
+          label: { type: "string", maxLength: SCHEMA_LABEL_MAX },
+        },
+        required: ["rank", "label"],
+      },
+    },
+  },
+  required: ["rewrites"],
+} as const;
+
+export const CHIP_REPAIR_SYSTEM = `You write one short headline for each moment you are given. Each moment comes
+with the sentence it was found in and the name of the person who acts in it.
+
+  moment: "Sefa Turow told the assembly that the well had been dry since the
+           spring, and that she had known it the whole time."
+  who:    Sefa Turow
+  chip:   Sefa admits the well is dry
+
+- FIVE WORDS. Not six, and no clause with "and" in it.
+- Use the name from "who". DO NOT begin with "He", "She", "They" or "It", and
+  do not use a pronoun where a person is meant.
+- Say who does what. Drop the numbers, the reasons and the second half of the
+  sentence.
+- Sentence case. Present tense. No quotation marks. No full stop at the end.
+
+Answer as JSON: {"rewrites":[{"rank","label"}]}, one entry per moment given.`;
+
+export interface ChipRepairRequest {
+  systemPrompt: string;
+  userText: string;
+  schema: typeof CHIP_REPAIR_SCHEMA;
+  maxTokens: number;
+}
+
+export function buildChipRepairRequest(
+  needing: readonly ChipCandidate[],
+  maxTokens = 120,
+): ChipRepairRequest {
+  const lines = needing.map(
+    (c) => `[${c.rank}]${c.agent ? `\n    who: ${c.agent}` : ""}\n    ${c.sentence}`,
+  );
+  return {
+    systemPrompt: CHIP_REPAIR_SYSTEM,
+    userText: ["MOMENTS", ...lines, "", "Write one headline for each."].join("\n"),
+    schema: CHIP_REPAIR_SCHEMA,
+    maxTokens,
+  };
+}
+
+/** Apply repaired labels, keeping every mechanical guard the first pass used. */
+export function applyChipRepairs(
+  picks: readonly TimelineChipPick[],
+  raw: unknown,
+  candidates: readonly ChipCandidate[],
+): TimelineChipPick[] {
+  if (!raw || typeof raw !== "object") return [...picks];
+  const rewrites = (raw as Record<string, unknown>).rewrites;
+  if (!Array.isArray(rewrites)) return [...picks];
+
+  const byRank = new Map<number, string>();
+  for (const item of rewrites) {
+    if (!item || typeof item !== "object") continue;
+    const value = item as Record<string, unknown>;
+    if (typeof value.rank !== "number" || typeof value.label !== "string") continue;
+    const candidate = candidates.find((c) => c.rank === value.rank);
+    if (!candidate) continue;
+    const repaired = repairLeadingPronoun(value.label, candidate);
+    if (!repaired || repaired.length > CHIP_LABEL_MAX) continue;
+    if (/[\r\n]/.test(repaired) || startsWithPronoun(repaired)) continue;
+    byRank.set(value.rank, repaired);
+  }
+  return picks.map((p) => (byRank.has(p.rank) ? { ...p, label: byRank.get(p.rank)! } : p));
+}
 
 // ── request assembly ──────────────────────────────────────────────────────
 
@@ -186,6 +290,9 @@ export interface ChipCandidate {
   /** The heuristic label — the per-pick fallback, never shown to the model. */
   label: string;
   sentence: string;
+  /** Who the engine resolved as acting here. Shown to the model as "who", and
+   *  used to repair a chip that reached for a pronoun anyway. */
+  agent?: string;
 }
 
 export interface ChipRequest {
@@ -232,6 +339,9 @@ export function buildChipRequest(
       rank,
       label: event.label,
       sentence: (event.sentence as string).replace(/\s+/g, " ").trim(),
+      // The engine already resolved who acts here. Carried on the candidate so
+      // the pronoun repair in `normalizeChipPicks` has a name to substitute.
+      agent: event.agent,
     }));
 
   const header = [
@@ -249,12 +359,17 @@ export function buildChipRequest(
     .map(({ event, rank }) => {
       const facets = [
         event.narrativeType ?? event.type,
-        event.agent,
         event.channel,
         pct(event.tensionPosition),
       ].filter(Boolean);
       const sentence = candidates.find((c) => c.rank === rank)!.sentence;
-      return `[${rank}] ${facets.join(" · ")}\n    ${sentence}`;
+      // ★ WHO ON ITS OWN LINE. The agent used to sit in the facet run, where
+      //   the model read past it and copied the sentence's own "he"/"she" into
+      //   the chip. A chapter's chips are read out of context, so a pronoun in
+      //   one is unreadable. This is the engine acting as the model's harness:
+      //   it resolved the reference already, and the prompt says to spend it.
+      const who = event.agent ? `\n    who: ${event.agent}` : "";
+      return `[${rank}] ${facets.join(" · ")}${who}\n    ${sentence}`;
     });
 
   const userText = [
@@ -289,6 +404,34 @@ export function buildChipRequest(
  *     prose does not, which is the half of the answer worth keeping
  *   · the list is capped at CHIP_PICK_CAP
  */
+/** Subject pronouns that make a chip unreadable on its own. */
+const LEADING_PRONOUN = /^(he|she|they|it|his|her|their|its|him|them)\b/i;
+
+export function startsWithPronoun(label: string): boolean {
+  return LEADING_PRONOUN.test(label.trim());
+}
+
+/**
+ * "He admits the count is short" → "Ferren admits the count is short".
+ *
+ * ★ REPAIR, NOT REJECT, WHEN A NAME IS KNOWN. The model's SELECTION and its
+ *   compression are usually right even when it copies the sentence's pronoun,
+ *   and the engine already resolved the referent — throwing the whole chip away
+ *   over one word would discard the better half of the answer. When no agent
+ *   was resolved there is nothing to substitute, so the caller falls back.
+ */
+export function repairLeadingPronoun(label: string, candidate: ChipCandidate): string {
+  const trimmed = label.trim();
+  if (!candidate.agent || !startsWithPronoun(trimmed)) return trimmed;
+  // The shortest name that still identifies them — chips are tight.
+  const name = candidate.agent.split(/\s+/)[0];
+  const repaired = trimmed.replace(LEADING_PRONOUN, name);
+  // A possessive pronoun becomes a possessive name: "Her ledger" → "Marda's".
+  return /^(his|her|their|its)\b/i.test(trimmed)
+    ? repaired.replace(new RegExp(`^${name}\\b`), `${name}'s`)
+    : repaired;
+}
+
 export function normalizeChipPicks(
   raw: unknown,
   candidates: readonly ChipCandidate[],
@@ -313,9 +456,11 @@ export function normalizeChipPicks(
     seen.add(rankRaw);
 
     const labelRaw = typeof value.label === "string" ? value.label.trim() : "";
+    const repaired = repairLeadingPronoun(labelRaw, candidate);
     const usable =
-      labelRaw !== "" && labelRaw.length <= CHIP_LABEL_MAX && !/[\r\n]/.test(labelRaw);
-    out.push({ rank: rankRaw, label: usable ? labelRaw : candidate.label });
+      repaired !== "" && repaired.length <= CHIP_LABEL_MAX &&
+      !/[\r\n]/.test(repaired) && !startsWithPronoun(repaired);
+    out.push({ rank: rankRaw, label: usable ? repaired : candidate.label });
   }
 
   // ★★ BACKFILL FROM THE ENGINE. The model decides what the chips SAY; it does
@@ -410,5 +555,30 @@ export async function runChipPick(
   const lmChips = normalizeChipPicks(result.json, request.candidates);
   if (!lmChips) return null;
 
-  return { lmChips, lmChipsKey: chipKeyFor(entry, opts.modelId) };
+  // A chip whose label came back as the ENGINE's own is one the first pass
+  // failed to write: it ran long, led with a pronoun, or was blank. Those, and
+  // only those, get the second, smaller task. A clean answer costs nothing.
+  const needing = lmChips
+    .map((pick) => request.candidates.find((c) => c.rank === pick.rank))
+    .filter((c): c is ChipCandidate => !!c)
+    .filter((c) => lmChips.some((p) => p.rank === c.rank && p.label === c.label));
+
+  let finalChips = lmChips;
+  if (needing.length > 0) {
+    const repair = buildChipRepairRequest(needing);
+    const repaired = await opts.run<unknown>({
+      task: CHIP_TASK,
+      tag: `${entry.chapterId}:repair`,
+      systemPrompt: repair.systemPrompt,
+      userText: repair.userText,
+      schema: repair.schema,
+      maxTokens: repair.maxTokens,
+      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    });
+    // A failed repair is not a failed chapter: the engine labels already there
+    // are a working answer, which is the point of repairing rather than retrying.
+    if (repaired.ok) finalChips = applyChipRepairs(lmChips, repaired.json, request.candidates);
+  }
+
+  return { lmChips: finalChips, lmChipsKey: chipKeyFor(entry, opts.modelId) };
 }
