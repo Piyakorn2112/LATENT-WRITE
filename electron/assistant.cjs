@@ -354,10 +354,36 @@ function fileStamp(p) {
  * (path, size, mtime) per app session — hashing 1.1 GB costs ~1 s and belongs
  * on the load path, not the run path.
  */
+/**
+ * ★★ VERIFY ONCE PER FILE, NOT ONCE PER LAUNCH.
+ *
+ *    Hashing 1.1 GB costs ~2.4s and it was paid on the first load of EVERY app
+ *    session — the writer's first continuity check of the day waited on it,
+ *    behind nothing else. `_verifiedPaths` dies with the process, so a relaunch
+ *    re-hashed a file that had not moved.
+ *
+ *    The stamp (size + mtime) is persisted beside the sha256 once the hash has
+ *    passed. Same size and mtime means the same file: a torn download is caught
+ *    by the hash at download time, and rot that preserved both fields would
+ *    still fail GGUF parsing at load. What this deliberately does NOT defend
+ *    against is a swap that forges both fields, which is not the threat a
+ *    download checksum exists for.
+ */
+function verifiedStampPath(modelPath) {
+  return `${modelPath}.verified`;
+}
+
 async function verifyModelFile(modelPath) {
   let stamp;
   try { stamp = fileStamp(modelPath); } catch { return { ok: false, error: 'missing' }; }
   if (_verifiedPaths.get(modelPath) === stamp) return { ok: true, cached: true, ms: 0 };
+
+  try {
+    if (fs.readFileSync(verifiedStampPath(modelPath), 'utf8').trim() === stamp) {
+      _verifiedPaths.set(modelPath, stamp);
+      return { ok: true, cached: 'persisted', ms: 0 };
+    }
+  } catch { /* no stamp yet, or unreadable — fall through and hash */ }
 
   const sidecar = `${modelPath}.sha256`;
   let expected = null;
@@ -370,10 +396,12 @@ async function verifyModelFile(modelPath) {
   if (!expected) {
     fs.writeFileSync(sidecar, `${digest}  ${path.basename(modelPath)}\n`, 'utf8');
     _verifiedPaths.set(modelPath, stamp);
+  try { fs.writeFileSync(verifiedStampPath(modelPath), stamp, "utf8"); } catch { /* best effort */ }
     return { ok: true, wrote: true, sha256: digest, ms };
   }
   if (digest !== expected) return { ok: false, error: 'sha256-mismatch', sha256: digest, expected, ms };
   _verifiedPaths.set(modelPath, stamp);
+  try { fs.writeFileSync(verifiedStampPath(modelPath), stamp, "utf8"); } catch { /* best effort */ }
   return { ok: true, sha256: digest, ms };
 }
 
@@ -417,6 +445,7 @@ function onHostMessage(msg) {
       _hostLoaded = {
         modelPath: msg.modelPath, contextSize: msg.contextSize,
         gpu: msg.gpu, gpuLayers: msg.gpuLayers, loadMs: msg.loadMs,
+        marks: { ...(msg.marks || {}), bootMs: _lastBootMs },
         kvCacheTypeRequested: msg.kvCacheTypeRequested,
         kvCacheTypeApplied: msg.kvCacheTypeApplied,
       };
@@ -442,8 +471,10 @@ function onHostMessage(msg) {
   }
 }
 
+let _lastBootMs = null;
 async function ensureHost() {
   if (_hostAlive && _host) return _host;
+  const bootStart = Date.now();
   if (_hostReady) { await _hostReady; return _host; }
 
   const child = utilityProcess.fork(path.join(__dirname, 'assistant-host.cjs'), [], {
@@ -478,6 +509,7 @@ async function ensureHost() {
   });
 
   await _hostReady;
+  _lastBootMs = Date.now() - bootStart;
   return child;
 }
 

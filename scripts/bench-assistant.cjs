@@ -57,7 +57,9 @@ async function main() {
 
   const t0 = Date.now();
   await assistant.ensureLoaded();
-  console.log(`\nmodel load: ${Date.now() - t0}ms\n`);
+  const st = assistant.assistantStatus();
+  const mk = (st.host && st.host.loaded && st.host.loaded.marks) || {};
+  console.log(`\nmodel load: ${Date.now() - t0}ms  (fork+boot ${mk.bootMs ?? "?"}ms · binding ${mk.bindingMs ?? "?"}ms · weights ${mk.modelMs ?? "?"}ms · context ${mk.contextMs ?? "?"}ms)\n`);
   console.log(`${'task'.padEnd(26)} ${'sysTok'.padStart(7)} ${'prefill'.padStart(9)} ${'gen'.padStart(8)} ${'tok'.padStart(5)} ${'gen tok/s'.padStart(10)} ${'total'.padStart(8)}`);
 
   const totals = { prefill: [], gen: [], total: [] };

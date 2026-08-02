@@ -130,9 +130,15 @@ async function handleLoad(msg) {
 
   setState('loading');
   const t0 = Date.now();
+  const marks = {};
   loadingPromise = (async () => {
+    const m0 = Date.now();
     await ensureBinding();
+    marks.bindingMs = Date.now() - m0;
+    const m1 = Date.now();
     model = await llama.loadModel({ modelPath, gpuLayers, useMmap: true });
+    marks.modelMs = Date.now() - m1;
+    const m2 = Date.now();
     // ★ MEASURED AND REJECTED: batchSize. The default is 512 and our prompts run
     //   to ~1300 tokens, so a COLD prefill splits across passes. batchSize 2048
     //   cut the longest cold prefill (timeline-chips, 911-token system prompt)
@@ -144,12 +150,14 @@ async function handleLoad(msg) {
     //   Re-measure with scripts/bench-assistant.cjs before revisiting.
     context = await model.createContext({ contextSize, sequences: 1 });
     sequence = context.getSequence();
+    marks.contextMs = Date.now() - m2;
     loaded = {
       modelPath,
       contextSize: context.contextSize,
       gpuLayers: model.gpuLayers,
       gpu: llama.gpu,
       loadMs: Date.now() - t0,
+      marks,
     };
   })();
 
