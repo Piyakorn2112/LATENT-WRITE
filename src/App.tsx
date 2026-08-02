@@ -66,6 +66,24 @@ import {
 } from "./lib/annotation-store";
 import { computeLearnedBias, characterBreakdown } from "./lib/annotation-learn";
 import {
+  addDecision as addKnowledgeDecision,
+  emptyKnowledgeLedger,
+  loadKnowledgeLedger,
+  loadKnowledgeLedgerFromProject,
+  mergeLedgerCandidates,
+  saveKnowledgeLedger,
+  type ChapterKnowledgeFacts,
+  type KnowledgeCandidate,
+  type KnowledgeFact,
+  type KnowledgeLedgerStore,
+} from "./lib/knowledge-store";
+import {
+  buildChapterKnowledgeFacts,
+  buildLedger,
+  knowledgeContentHash,
+  retireDeadAnchors,
+} from "./lib/knowledge-ledger";
+import {
   computeAdaptiveMetrics,
   emptyAdaptiveStore,
   loadAdaptiveStore,
@@ -191,14 +209,36 @@ export default function App() {
   const [activeSide, setActiveSide] = useState<"left" | "right">("left");
   const [splitRatio, setSplitRatio] = useState(0.5);
 
+  // ── Knowledge ledger ────────────────────────────────────────────────────
+  // "Who knows what, and since when", accumulated chapter by chapter from the
+  // analysis that already runs. Free to keep even when the assistant is off —
+  // the ledger is set algebra, and if the model ever arrives it wants a full
+  // book of facts waiting for it (plan §2). Ref + state like storyGraph: the
+  // ref is what the rebuild effect reads, so it never works off a stale store.
+  const [knowledgeStore, setKnowledgeStore] = useState<KnowledgeLedgerStore>(() => loadKnowledgeLedger());
+  const knowledgeStoreRef = useRef(knowledgeStore);
+  const knowledgeSaveTimerRef = useRef<number | null>(null);
+  const commitKnowledgeStore = useCallback((next: KnowledgeLedgerStore, save: "now" | "debounced" | "never" = "never") => {
+    knowledgeStoreRef.current = next;
+    setKnowledgeStore(next);
+    if (save === "now") { saveKnowledgeLedger(next); return; }
+    if (save !== "debounced") return;
+    if (knowledgeSaveTimerRef.current !== null) window.clearTimeout(knowledgeSaveTimerRef.current);
+    knowledgeSaveTimerRef.current = window.setTimeout(() => {
+      knowledgeSaveTimerRef.current = null;
+      saveKnowledgeLedger(knowledgeStoreRef.current);
+    }, 500);
+  }, []);
+
   const hydrateProjectState = useCallback(async () => {
-    const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive] = await Promise.all([
+    const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive, pKnowledge] = await Promise.all([
       loadNovelFromProject(),
       loadCurrentChapterIdFromProject(),
       loadStoryGraphFromProject(),
       loadReviewResultsFromProject(),
       loadAnnotationStoreFromProject(),
       loadAdaptiveStoreFromProject(),
+      loadKnowledgeLedgerFromProject(),
     ]);
 
     const nextNovel = pNovel ?? emptyNovel();
@@ -208,6 +248,7 @@ export default function App() {
     const nextReviewResults = pReviews ?? {};
     const nextAnnotationStore = pAnnotations ?? { version: 1, corrections: [] };
     const nextAdaptiveStore = pAdaptive ?? emptyAdaptiveStore();
+    const nextKnowledgeLedger = pKnowledge ?? emptyKnowledgeLedger();
 
     setNovel(nextNovel);
     setCurrentId(nextChapterId);
@@ -216,6 +257,7 @@ export default function App() {
     setReviewResults(nextReviewResults);
     setAnnotationStore(nextAnnotationStore);
     setAdaptiveStore(nextAdaptiveStore);
+    commitKnowledgeStore(nextKnowledgeLedger);
     setAnnotationTarget(null);
     setEntityPopover(null);
     setToolHighlights([]);
@@ -233,7 +275,8 @@ export default function App() {
     if (!pReviews) saveReviewResults(nextReviewResults);
     if (!pAnnotations) saveAnnotationStore(nextAnnotationStore);
     if (!pAdaptive) saveAdaptiveStore(nextAdaptiveStore);
-  }, []);
+    if (!pKnowledge) saveKnowledgeLedger(nextKnowledgeLedger);
+  }, [commitKnowledgeStore]);
 
   // ── Desktop project hydration ──────────────────────────────────────────
   // On mount in Electron: reopen the last project and load all state from
@@ -499,6 +542,23 @@ export default function App() {
     });
   }, []);
   const [renameTask, setRenameTask] = useState<StatusTask | null>(null);
+  // Model download is the ONLY assistant progress the writer ever sees, and it
+  // reuses the existing pill. One subscription for the app's lifetime; the pill
+  // clears itself the moment the download stops. `kind` is deliberately stable
+  // so ticking the percentage updates the label in place instead of re-keying
+  // (and replaying) the pill's entrance animation.
+  const [assistantTask, setAssistantTask] = useState<StatusTask | null>(null);
+  useEffect(() => {
+    const off = window.electronAPI?.onAssistantProgress?.((progress) => {
+      if (progress.phase !== "download" || progress.state !== "downloading") {
+        setAssistantTask(null);
+        return;
+      }
+      const pct = Math.round((progress.fraction ?? 0) * 100);
+      setAssistantTask({ kind: "assistant-download", label: `downloading assistant model · ${pct}%` });
+    });
+    return off;
+  }, []);
   const cycleIntel = useCallback(() => {
     // One decision the writer can actually make: intelligence on or off.
     setIntelMode((m) => (m === "off" ? "auto" : "off"));
@@ -634,6 +694,111 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Update the knowledge ledger whenever analysis settles — same shape, same
+  // 120ms yield, same content-hash gate as the StoryGraph effect above.
+  //
+  // Facts are extracted from the analysed SNAPSHOT, not the live chapter text:
+  // paragraphs, speech segments and the verbatim sentence anchors all come from
+  // that snapshot, so deriving them against text the writer has since changed
+  // would produce anchors that cannot be found. Anchors are then re-checked
+  // against LIVE text (retireDeadAnchors) — that is the invalidation contract.
+  useEffect(() => {
+    if (!analysisResult || !activeChapter || !activeChapter.content.trim()) return;
+    if (prefs.storyNlpEnabled === false) return; // user disabled background analysis
+    const chapter = activeChapter;
+    const content = analysisResult.contentSnapshot || chapter.content;
+    const hash = knowledgeContentHash(content);
+
+    const timer = setTimeout(() => {
+      const store = knowledgeStoreRef.current;
+      if (store.chapters[chapter.id]?.contentHash === hash) return;
+
+      const facts = buildChapterKnowledgeFacts({
+        chapterId: chapter.id,
+        chapterNumber: chapter.number ?? activeChapterIndex + 1,
+        content,
+        paragraphs: analysisResult.paragraphs,
+        speechResults: analysisResult.speechResults,
+        // Characters only: places and factions were a measured noise class.
+        characterNames: entityNameMap.characters,
+        // Whole-book corpus for the common-word-name test — chapter-scoped
+        // counts read sentence-initial words as names.
+        nameFilterText: novel.chapters.map((c) => c.content).join("\n\n"),
+      });
+
+      const chapters = { ...store.chapters, [chapter.id]: facts };
+      const ordered = novel.chapters
+        .map((c) => chapters[c.id])
+        .filter((entry): entry is ChapterKnowledgeFacts => !!entry);
+
+      // The writer's own canon and adjudicated offscreen knowledge are inputs
+      // to the rebuild, never outputs of it.
+      const durable = store.facts.filter(
+        (fact) => fact.how === "author-asserted" || fact.how === "reference-implied",
+      );
+      const built = buildLedger(ordered, { decisions: store.decisions, extraFacts: durable });
+
+      // buildLedger only emits the EARLIEST channel per pair, so a durable fact
+      // can be absent from its output while still being the writer's ruling.
+      // Carry it forward explicitly — a decision may not be lost to a rebuild.
+      const factId = (f: KnowledgeFact) => `${f.subject}${f.entity}${f.how}${f.chapterId}`;
+      const emitted = new Set(built.facts.map(factId));
+      const nextFacts = [...built.facts, ...durable.filter((f) => !emitted.has(factId(f)))];
+
+      const merged: KnowledgeLedgerStore = {
+        ...store,
+        chapters,
+        facts: nextFacts,
+        candidates: mergeLedgerCandidates(store.candidates, built.candidates),
+      };
+      const live = new Map(novel.chapters.map((c) => [c.id, c.content] as const));
+      commitKnowledgeStore(retireDeadAnchors(merged, live), "debounced");
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => {
+    if (knowledgeSaveTimerRef.current !== null) {
+      window.clearTimeout(knowledgeSaveTimerRef.current);
+      saveKnowledgeLedger(knowledgeStoreRef.current);
+    }
+  }, []);
+
+  // Writer rulings on a surfaced finding. Both are DURABLE: a dismissal is a
+  // decision, and no rebuild or re-scoring pass may resurrect the candidate.
+  const handleKnowledgeKnewAlready = useCallback((candidate: KnowledgeCandidate) => {
+    const store = knowledgeStoreRef.current;
+    const ruled = addKnowledgeDecision(store, {
+      key: candidate.key,
+      ruling: "knew-already",
+      timestamp: Date.now(),
+      sentence: candidate.sentence,
+    });
+    // "They knew already" is the writer asserting story canon: record it as a
+    // fact so the pair is evidence in every future evidence pack, not just a
+    // silenced flag.
+    const asserted: KnowledgeFact = {
+      subject: candidate.speaker,
+      entity: candidate.entity,
+      chapterId: candidate.chapterId,
+      chapterNumber: candidate.chapterNumber,
+      how: "author-asserted",
+      sentence: candidate.sentence,
+    };
+    commitKnowledgeStore({ ...ruled, facts: [...ruled.facts, asserted] }, "now");
+  }, [commitKnowledgeStore]);
+
+  const handleKnowledgeGoodCatch = useCallback((candidate: KnowledgeCandidate) => {
+    const store = knowledgeStoreRef.current;
+    commitKnowledgeStore(addKnowledgeDecision(store, {
+      key: candidate.key,
+      ruling: "good-catch",
+      timestamp: Date.now(),
+      sentence: candidate.sentence,
+    }), "now");
+  }, [commitKnowledgeStore]);
+
   useEffect(() => { saveStoryGraph(storyGraph); }, [storyGraph]);
   useEffect(() => { saveReviewResults(reviewResults); }, [reviewResults]);
 
@@ -668,11 +833,12 @@ export default function App() {
     setReviewResults({});
     setAnnotationStore({ version: 1, corrections: [] });
     setAdaptiveStore(emptyAdaptiveStore());
+    commitKnowledgeStore(emptyKnowledgeLedger(), "now");
     setAnnotationTarget(null);
     setEntityPopover(null);
     setSecondaryId(null);
     setActiveSide("left");
-  }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen]);
+  }, [cancelPendingProjectSave, hydrateProjectState, syncDesktopProjectOpen, commitKnowledgeStore]);
 
   const handleNovelRefresh = useCallback(async (incomingNovel: Novel | null) => {
     if (!incomingNovel || incomingNovel.chapters.length === 0) return;
@@ -962,10 +1128,11 @@ export default function App() {
   // of a state already on screen, and on a 1s debounce the first one reappeared
   // after almost every edit.
   //
-  // The pill is now for tasks the orb says NOTHING about — currently just the
-  // rename task. Keep it that way: if a new pill only restates the orb, it does
-  // not belong here.
-  const statusTask: StatusTask | null = lensActive ? null : renameTask;
+  // The pill is now for tasks the orb says NOTHING about — the rename task and
+  // the one-time assistant model download. Keep it that way: if a new pill only
+  // restates the orb, it does not belong here. (Routine adjudication gets NO
+  // pill — it is seconds of idle-time work, and a pill for it would be noise.)
+  const statusTask: StatusTask | null = lensActive ? null : (renameTask ?? assistantTask);
 
   // Initialize secondaryId when entering split mode
   useEffect(() => {
@@ -1218,6 +1385,8 @@ export default function App() {
     setCurrentId(nextChapterId);
     setAnnotationStore(clearedAnnotations);
     setAdaptiveStore(clearedAdaptiveStore);
+    // A wholesale document swap invalidates every fact, anchor and ruling.
+    commitKnowledgeStore(emptyKnowledgeLedger(), "now");
     setAnnotationTarget(null);
     // Reset daily baseline since the document just got swapped wholesale.
     baselineRef.current = totalWordsInNovel(parsed);
@@ -1231,7 +1400,7 @@ export default function App() {
       castPromptOfferedRef.current = true;
       setCastConfirmOpen(true);
     }
-  }, [castPromptNeeded]);
+  }, [castPromptNeeded, commitKnowledgeStore]);
 
   // Jump from the panel's chapter observation to the paragraph it names.
   // Resolves the paragraph's offset in the live chapter text and reuses the
@@ -1842,6 +2011,9 @@ export default function App() {
         chapterIndex={activeChapterIndex}
         worldData={novel.worldData}
         storyGraph={storyGraph}
+        knowledgeStore={knowledgeStore}
+        onKnowledgeKnewAlready={handleKnowledgeKnewAlready}
+        onKnowledgeGoodCatch={handleKnowledgeGoodCatch}
         onSelectChapter={(id) => {
           if (splitView && activeSide === "right") {
             setSecondaryId(id);

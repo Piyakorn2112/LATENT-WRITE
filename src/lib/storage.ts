@@ -20,6 +20,7 @@ const ALL_LS_KEYS = [
   "glass-editor:review-results-v1",
   "glass-editor:annotations-v1",
   "glass-editor:adaptive-learning-v1",
+  "glass-editor:knowledge-ledger-v1",
 ];
 
 export function clearProjectLocalStorage(): void {

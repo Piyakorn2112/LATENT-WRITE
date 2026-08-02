@@ -46,6 +46,8 @@ import {
   saveWidgetConfig,
 } from "../lib/widget-config";
 import { isDesktopApp } from "../lib/project-manager";
+import type { AssistantStatus } from "../lib/project-manager";
+import type { KnowledgeCandidate, KnowledgeLedgerStore } from "../lib/knowledge-store";
 import { activateCode, clearLicense, type Tier } from "../lib/license";
 import { ProBadge, LockedHint } from "./ProBadge";
 import { useRendererActive } from "../lib/renderer-active-store";
@@ -80,6 +82,10 @@ interface Props {
   onOpenChange?: (open: boolean) => void;
   /** Story Graph — full novel structure accumulated from NLP analysis. */
   storyGraph?: StoryGraph;
+  /** Knowledge ledger — read-only here; the widget renders surfaced findings. */
+  knowledgeStore?: KnowledgeLedgerStore;
+  onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
+  onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
   onSelectChapter?: (id: string) => void;
   /** Renderer review result for the current chapter (null = not yet run). */
   reviewResult?: ReviewResult | null;
@@ -116,6 +122,99 @@ interface SettingsProps {
 }
 
 const FONT_OPTIONS: Typography["fontFamily"][] = ["georgia", "iowan", "system", "sf-pro", "menlo"];
+
+const ASSISTANT_DESC = "Checks who could know what, using a small model that runs entirely on this Mac.";
+
+/** Bytes → the honest figure the settings copy promises ("1.1 GB"). */
+function gb(bytes: number): string {
+  return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+}
+
+/**
+ * The assistant row's second line. It is the ONLY place this feature reports
+ * itself: download progress, readiness with its real memory cost, and errors
+ * all replace the description in place — never a dialog, never a new surface.
+ */
+function assistantStatusLine(status: AssistantStatus | null, enabled: boolean): string {
+  if (!status) return ASSISTANT_DESC;
+  const label = status.model?.label || "assistant model";
+  if (status.state === "downloading") {
+    const fraction = status.progress?.fraction ?? 0;
+    const size = status.model?.bytes ? ` · ${gb(status.model.bytes)}` : "";
+    return `downloading ${label}${size} · ${Math.round(fraction * 100)}%`;
+  }
+  if (status.state === "low-memory") return "paused: not enough free memory right now";
+  if (status.state === "error") return status.error || "paused: the assistant could not start";
+  if (!enabled) return ASSISTANT_DESC;
+  if (status.state === "loading") return `loading ${label} · uses ≈1.5 GB of memory while checking`;
+  if (status.state === "ready" || status.state === "busy") {
+    return "ready · uses ≈1.5 GB of memory while checking";
+  }
+  return ASSISTANT_DESC;
+}
+
+/**
+ * "Continuity assistant" — the one opt-in for the local model. Desktop only:
+ * the browser build has no runtime to opt into, so the row does not exist
+ * there rather than existing and refusing.
+ */
+function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSetPrefs: (next: Preferences) => void }) {
+  const enabled = !!prefs.assistant?.enabled;
+  const [status, setStatus] = useState<AssistantStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Status is read when this panel mounts, and refreshed by the runtime's own
+  // download events while it is open. No interval, and nothing running when
+  // the panel is closed — the writer is not paying for a settings row.
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+    let cancelled = false;
+    const refresh = () => {
+      void api.assistantStatus().then((next) => { if (!cancelled) setStatus(next); }).catch(() => {});
+    };
+    refresh();
+    const off = api.onAssistantProgress?.(() => refresh());
+    return () => { cancelled = true; off?.(); };
+  }, []);
+
+  const handleToggle = (next: boolean) => {
+    onSetPrefs({ ...prefs, assistant: { ...(prefs.assistant ?? {}), enabled: next } });
+    const api = window.electronAPI;
+    if (!api) return;
+    if (!next) {
+      void api.assistantUnload().catch(() => {});
+      void api.assistantStatus().then(setStatus).catch(() => {});
+      return;
+    }
+    setBusy(true);
+    // "auto" is the runtime's own choice, so it is expressed by NOT pinning a
+    // tier; only an explicit pin travels.
+    const opts = prefs.assistant?.tier === "small" ? { tier: "small" as const } : undefined;
+    void api.assistantEnsureModel(opts)
+      .catch(() => undefined)
+      .then(() => api.assistantStatus())
+      .then((s) => setStatus(s ?? null))
+      .catch(() => {})
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="settings-toggle-row">
+      <div className="settings-toggle-row-text">
+        <span className="settings-toggle-row-title">Continuity assistant</span>
+        <span className="settings-toggle-row-desc">
+          {busy && !status ? ASSISTANT_DESC : assistantStatusLine(status, enabled)}
+        </span>
+      </div>
+      <GlassToggle
+        checked={enabled}
+        onChange={handleToggle}
+        ariaLabel="Toggle continuity assistant"
+      />
+    </div>
+  );
+}
 
 function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportTools, tier, onTierChange }: SettingsProps) {
   const { typography, goals } = prefs;
@@ -183,6 +282,8 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
         })}
       </div>
       <LockedHint visible={lockedHintFor !== null} />
+
+      {isDesktopApp() && <AssistantSettingsRow prefs={prefs} onSetPrefs={onSetPrefs} />}
 
       <p className="settings-section-label">Typography</p>
 
@@ -481,13 +582,19 @@ interface WidgetSlotProps {
   chapterIndex: number;
   worldData?: WorldData;
   wordCount: number;
+  knowledgeStore?: KnowledgeLedgerStore;
+  onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
+  onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
 }
 
 function resolveWidgetSlot(
   id: string,
   props: WidgetSlotProps,
 ): { show: boolean; element: React.ReactNode } | null {
-  const { result, prevResult, nextResult, showCrossArc, chapterContent, allChapters, chapterIndex, worldData, wordCount } = props;
+  const {
+    result, prevResult, nextResult, showCrossArc, chapterContent, allChapters, chapterIndex, worldData, wordCount,
+    knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch,
+  } = props;
   const a = result.analysis;
   const hi = a.highModeAnalysis;
 
@@ -507,7 +614,19 @@ function resolveWidgetSlot(
     case "cross-pacing":
       return { show: showCrossArc && (!!prevResult || !!nextResult), element: <CrossPacingWidget current={result} prev={prevResult} next={nextResult} /> };
     case "continuity":
-      return { show: allChapters.length > 1 && chapterIndex >= 0, element: <ContinuityWidget chapters={allChapters} worldData={worldData} chapterIndex={chapterIndex} /> };
+      return {
+        show: allChapters.length > 1 && chapterIndex >= 0,
+        element: (
+          <ContinuityWidget
+            chapters={allChapters}
+            worldData={worldData}
+            chapterIndex={chapterIndex}
+            knowledgeStore={knowledgeStore}
+            onKnewAlready={onKnowledgeKnewAlready}
+            onGoodCatch={onKnowledgeGoodCatch}
+          />
+        ),
+      };
     case "prose-profile":
       return { show: wordCount > 80, element: <ProseProfileWidget content={chapterContent} /> };
     case "sensory-balance":
@@ -537,6 +656,7 @@ function WidgetSet({
   result, prevResult, nextResult, showCrossArc,
   chapterContent, allChapters, chapterIndex, worldData, wordCount,
   widgetOrder, renderToolWidget,
+  knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch,
 }: {
   result: ChapterAnalysisResult;
   prevResult: ChapterAnalysisResult | null;
@@ -549,6 +669,9 @@ function WidgetSet({
   wordCount?: number;
   widgetOrder: WidgetConfigEntry[];
   renderToolWidget?: (toolName: string) => React.ReactNode;
+  knowledgeStore?: KnowledgeLedgerStore;
+  onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
+  onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
 }) {
   const slotProps: WidgetSlotProps = {
     result,
@@ -560,6 +683,9 @@ function WidgetSet({
     chapterIndex: chapterIndex ?? -1,
     worldData,
     wordCount: wordCount ?? 0,
+    knowledgeStore,
+    onKnowledgeKnewAlready,
+    onKnowledgeGoodCatch,
   };
 
   let staggerIndex = 0;
@@ -595,7 +721,7 @@ export function AnalysisPanel({
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
   onAutoSceneBreak, sceneBreaking, onOpenChange,
-  storyGraph, onSelectChapter,
+  storyGraph, knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
   onImportTools, onToolHighlights, onJumpToParagraph, onJumpToEvent,
   tier, onTierChange,
@@ -1026,6 +1152,9 @@ export function AnalysisPanel({
                       worldData={worldData}
                       widgetOrder={widgetConfig.order}
                       renderToolWidget={renderToolWidget}
+                      knowledgeStore={knowledgeStore}
+                      onKnowledgeKnewAlready={onKnowledgeKnewAlready}
+                      onKnowledgeGoodCatch={onKnowledgeGoodCatch}
                     />
                   </div>
                 )}
@@ -1042,6 +1171,9 @@ export function AnalysisPanel({
                     wordCount={widgetWordCount}
                     widgetOrder={widgetConfig.order}
                     renderToolWidget={renderToolWidget}
+                    knowledgeStore={knowledgeStore}
+                    onKnowledgeKnewAlready={onKnowledgeKnewAlready}
+                    onKnowledgeGoodCatch={onKnowledgeGoodCatch}
                   />
                   {toolRegistry.overlayTools.length > 0 && (
                     <Suspense fallback={null}>

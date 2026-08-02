@@ -5,6 +5,8 @@ import {
 } from "lucide-react";
 import { WidgetCard } from "./WidgetCard";
 import { summarizeContinuity } from "../../lib/continuity";
+import { surfacedKnowledgeFindings, isPinnedFinding } from "../../lib/knowledge-store";
+import type { KnowledgeCandidate, KnowledgeLedgerStore } from "../../lib/knowledge-store";
 import type { Chapter, WorldData } from "../../types";
 
 // Dark-mode-tuned issue colours. The system's IOS_COLORS palette is
@@ -18,6 +20,10 @@ interface Props {
   chapters: Chapter[];
   worldData: WorldData | undefined;
   chapterIndex: number;
+  /** Knowledge ledger. Findings are read through the shared selector only. */
+  knowledgeStore?: KnowledgeLedgerStore;
+  onKnewAlready?: (candidate: KnowledgeCandidate) => void;
+  onGoodCatch?: (candidate: KnowledgeCandidate) => void;
 }
 
 /**
@@ -41,6 +47,13 @@ interface Props {
  *      phrases, each with a tiny anchor icon since they're floating
  *      threads waiting for an anchor.
  *
+ *   5. KNOWLEDGE — adjudicated "this character cannot know that yet"
+ *      findings from the knowledge ledger. Same block grammar, and the
+ *      same family as a timeline slip (someone is ahead of the story),
+ *      so it carries the timeline colour rather than a new one.
+ *      SILENCE IS THE DEFAULT: no findings renders no heading, no empty
+ *      state, nothing at all.
+ *
  * Replaces the prior mixed-language layout with a unified visual
  * grammar across all three issue types.
  */
@@ -49,24 +62,47 @@ const TIMELINE_COLOR = "#fb7185"; // rose-400 — vivid against #0d1117
 const HANDOFF_COLOR  = "#fb923c"; // orange-400 — already dark-mode-friendly
 const CHEKHOV_COLOR  = "#c084fc"; // violet-400 — replaces the dim #A828B8 IOS purple
 
-function ContinuityWidgetImpl({ chapters, worldData, chapterIndex }: Props) {
+/** Quiet inline ruling — the widget's own chip geometry, in the neutral
+ *  values the hand-off cards already use, so it reads as an action rather
+ *  than another finding. Colours are inline because the card is a fixed dark
+ *  surface and inherits nothing from the theme. */
+const RULING_STYLE = {
+  color: "rgba(255, 255, 255, 0.78)",
+  borderColor: "rgba(255, 255, 255, 0.07)",
+  background: "rgba(255, 255, 255, 0.025)",
+  fontFamily: "inherit",
+  cursor: "pointer",
+} as const;
+
+function ContinuityWidgetImpl({
+  chapters, worldData, chapterIndex, knowledgeStore, onKnewAlready, onGoodCatch,
+}: Props) {
   const summary = useMemo(
     () => summarizeContinuity(chapters, worldData, chapterIndex),
     [chapters, worldData, chapterIndex],
   );
 
-  if (!summary.hasAnything) return null;
+  // ★ ONE SELECTOR. Never re-implement the surfacing conditions here — the
+  //   widget must show exactly what the harness measures.
+  const knowledge = useMemo(
+    () => (knowledgeStore ? surfacedKnowledgeFindings(knowledgeStore) : []),
+    [knowledgeStore],
+  );
+
+  if (!summary.hasAnything && knowledge.length === 0) return null;
 
   // Most-actionable signal becomes the headline & accent.
   const accent =
     summary.outOfOrder.length > 0 ? TIMELINE_COLOR :
     summary.handoff             ? HANDOFF_COLOR :
-                                  CHEKHOV_COLOR;
+    summary.chekhov.length > 0  ? CHEKHOV_COLOR :
+                                  TIMELINE_COLOR;
 
   const headline =
     summary.outOfOrder.length > 0 ? "TIMELINE SLIP" :
     summary.handoff             ? "HAND-OFF" :
-                                  "CHEKHOV";
+    summary.chekhov.length > 0  ? "CHEKHOV" :
+                                  "KNOWLEDGE";
 
   // Severity strip — only show counts that are non-zero.
   const strip: Array<{ key: string; count: number; color: string; label: string; icon: typeof AlertTriangle }> = [];
@@ -282,6 +318,59 @@ function ContinuityWidgetImpl({ chapters, worldData, chapterIndex }: Props) {
             <div className="wg-action-line">
               Concrete things mentioned here that don't return. Pay them off, fade them, or cut them.
             </div>
+          </div>
+        )}
+
+        {/* Knowledge — one plain sentence per confirmed finding, the model's
+            reason underneath, and the writer's two rulings. */}
+        {knowledge.length > 0 && (
+          <div className="wg-cont-block">
+            <div className="wg-cont-block-head">
+              <AlertTriangle size={10} strokeWidth={2.4} style={{ color: TIMELINE_COLOR }} />
+              <span style={{ color: TIMELINE_COLOR }}>Knowledge</span>
+            </div>
+            {knowledge.map((c) => {
+              // "Good catch" PINS: the writer acknowledged a real break, so it
+              // stays visible without buttons until the prose changes and the
+              // anchor retires it (plan §2). "Knew already" never reaches here.
+              const pinned = knowledgeStore ? isPinnedFinding(knowledgeStore, c.key) : false;
+              return (
+                <div key={c.key} className="wg-section">
+                  <span className="wg-diag-msg">
+                    {c.speaker} names {c.entity} in chapter {c.chapterNumber}, but has never met them or heard of them.
+                  </span>
+                  {c.verdict?.reason && (
+                    <span className="wg-action-line">{c.verdict.reason}</span>
+                  )}
+                  {pinned ? (
+                    <span className="wg-action-line">marked to fix — clears when the line changes</span>
+                  ) : (onKnewAlready || onGoodCatch) && (
+                    <div className="wg-cont-chekhov">
+                      {onKnewAlready && (
+                        <button
+                          type="button"
+                          className="wg-cont-chekhov-chip"
+                          style={RULING_STYLE}
+                          onClick={() => onKnewAlready(c)}
+                        >
+                          They knew already
+                        </button>
+                      )}
+                      {onGoodCatch && (
+                        <button
+                          type="button"
+                          className="wg-cont-chekhov-chip"
+                          style={RULING_STYLE}
+                          onClick={() => onGoodCatch(c)}
+                        >
+                          Good catch
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

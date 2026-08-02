@@ -149,3 +149,79 @@ export function addDecision(
 ): KnowledgeLedgerStore {
   return { ...store, decisions: { ...store.decisions, [decision.key]: decision } };
 }
+
+// ── Rebuild merge & the display selector ──────────────────────────────────
+
+/**
+ * Carry adjudication forward across a candidate rebuild.
+ *
+ * `buildLedger` is a pure re-derivation: it re-emits every surviving pair as
+ * `pending`, with no memory of what the model already answered. Without this
+ * merge, editing chapter 40 would throw away every verdict in the book and
+ * re-queue the whole backfill.
+ *
+ * ★ THE SENTENCE IS PART OF THE IDENTITY. A verdict was reached against one
+ *   specific claim; if the writer rewrote the line, the same pair is a NEW
+ *   question and must be asked again. Same key + different sentence therefore
+ *   carries nothing. `retired` is never carried — the anchor check owns that
+ *   status and re-decides it against current text on every rebuild.
+ */
+export function mergeLedgerCandidates(
+  prev: readonly KnowledgeCandidate[],
+  next: readonly KnowledgeCandidate[],
+): KnowledgeCandidate[] {
+  if (prev.length === 0) return [...next];
+  const before = new Map<string, KnowledgeCandidate>();
+  for (const candidate of prev) before.set(candidate.key, candidate);
+
+  return next.map((candidate) => {
+    const old = before.get(candidate.key);
+    if (!old || old.sentence !== candidate.sentence || !old.verdict) return candidate;
+    return {
+      ...candidate,
+      verdict: old.verdict,
+      verdictKey: old.verdictKey,
+      status: old.status === "adjudicated" ? "adjudicated" : candidate.status,
+    };
+  });
+}
+
+/** Confidence a "break" must clear before it is allowed to interrupt anyone. */
+export const KNOWLEDGE_SURFACE_CONFIDENCE = 0.75;
+
+/**
+ * ★★ THE ONE DISPLAY SELECTOR. Every surface (widget, margin pill, insight)
+ *    and every harness reads findings through this function, so "what the
+ *    writer sees" is one definition in one place. A second copy of these
+ *    conditions elsewhere is a bug waiting to happen — the ranked-list lesson:
+ *    when the UI and the measurement disagree about which items are selected,
+ *    the measurement is measuring nothing.
+ *
+ * Silence is the default (plan §2): only an adjudicated, confident `break` on
+ * a normal-band candidate ever surfaces. `pending`, `retired`, `unsure` and
+ * `plausible_offscreen` render NOTHING. Retired candidates are excluded by
+ * the status check — a candidate has one status, and only `adjudicated`
+ * passes.
+ *
+ * Rulings split (plan §2): "knew already" settles the pair and hides it
+ * forever; "good catch" PINS the finding — the writer acknowledged a real
+ * break and it stays visible (action buttons gone) until they fix the prose,
+ * at which point the anchor dies and retirement clears it. Hiding on
+ * good-catch would let an acknowledged break vanish before it was fixed.
+ */
+export function surfacedKnowledgeFindings(store: KnowledgeLedgerStore): KnowledgeCandidate[] {
+  return store.candidates
+    .filter((candidate) =>
+      candidate.band === "normal" &&
+      candidate.status === "adjudicated" &&
+      candidate.verdict?.verdict === "break" &&
+      candidate.verdict.confidence >= KNOWLEDGE_SURFACE_CONFIDENCE &&
+      store.decisions[candidate.key]?.ruling !== "knew-already",
+    )
+    .sort((a, b) => a.chapterNumber - b.chapterNumber);
+}
+
+/** True when the writer has already ruled "good catch" — render as pinned. */
+export function isPinnedFinding(store: KnowledgeLedgerStore, key: string): boolean {
+  return store.decisions[key]?.ruling === "good-catch";
+}

@@ -56,6 +56,30 @@ export function knowledgeContentHash(content: string): string {
   return `${content.length}|${content.slice(0, 60)}`;
 }
 
+// isCommonWordName runs two whole-corpus regex scans per name, and the app
+// calls this once per settled chapter against the WHOLE book's text — same
+// text, same cast, every time. Memoise per corpus signature; keep only the
+// two most recent corpora so an old book's cache can't linger.
+const commonWordMemo = new Map<string, Map<string, boolean>>();
+function isCommonWord(name: string, text: string): boolean {
+  const sig = `${text.length}|${text.slice(0, 60)}`;
+  let byName = commonWordMemo.get(sig);
+  if (!byName) {
+    if (commonWordMemo.size >= 2) {
+      const oldest = commonWordMemo.keys().next().value;
+      if (oldest !== undefined) commonWordMemo.delete(oldest);
+    }
+    byName = new Map();
+    commonWordMemo.set(sig, byName);
+  }
+  let hit = byName.get(name);
+  if (hit === undefined) {
+    hit = isCommonWordName(name, text);
+    byName.set(name, hit);
+  }
+  return hit;
+}
+
 // ── Reference shape classification (guard class 3) ────────────────────────
 
 const VOCATIVE_LEAD =
@@ -124,7 +148,7 @@ export function buildChapterKnowledgeFacts(input: ChapterFactsInput): ChapterKno
   //   (knownNames pool ≠ character list — the standing lesson).
   const nameFilterText = input.nameFilterText ?? input.content;
   const patterns = input.characterNames
-    .filter((name) => !isCommonWordName(name, nameFilterText))
+    .filter((name) => !isCommonWord(name, nameFilterText))
     .map((name) => ({
       name: canon(name),
       re: new RegExp(`\\b${esc(name)}\\b(?!['’])`),

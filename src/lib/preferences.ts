@@ -35,6 +35,13 @@ export interface Preferences {
   splitView?: boolean;
   /** Persisted intelligence mode. Default "auto". */
   intelMode?: "off" | "fast" | "default" | "high" | "auto";
+  /** Local continuity assistant. Absent = never opted in = dormant. The whole
+   *  feature is off until `enabled` is explicitly true, so an old prefs blob
+   *  can never turn a model download on by accident. */
+  assistant?: {
+    enabled: boolean;
+    tier?: "auto" | "small";
+  };
 }
 
 const DEFAULTS: Preferences = {
@@ -58,6 +65,14 @@ const DEFAULTS: Preferences = {
 
 const KEY = "latentwrite:prefs-v1";
 
+/** Absent, malformed, or half-written assistant prefs all read as "not opted in".
+ *  Returning undefined (rather than `{enabled:false}`) keeps "never asked" and
+ *  "asked and declined" the same state — the feature is dormant either way. */
+function readAssistant(raw: Preferences["assistant"] | undefined): Preferences["assistant"] {
+  if (!raw || typeof raw !== "object" || raw.enabled !== true) return undefined;
+  return { enabled: true, tier: raw.tier === "small" ? "small" : "auto" };
+}
+
 export function loadPrefs(): Preferences {
   try {
     const raw = localStorage.getItem(KEY);
@@ -79,6 +94,7 @@ export function loadPrefs(): Preferences {
       intelMode: (["off", "fast", "default", "high", "auto"] as const).includes(p.intelMode as never)
         ? p.intelMode
         : "auto",
+      assistant: readAssistant(p.assistant),
     };
   } catch {
     return { ...DEFAULTS };
