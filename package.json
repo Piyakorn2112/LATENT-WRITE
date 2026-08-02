@@ -42,6 +42,7 @@
     "test:knowledge-ledger": "tsx scripts/test-knowledge-ledger.ts",
     "test:evidence-pack": "tsx scripts/test-evidence-pack.ts",
     "test:chip-picker": "tsx scripts/test-chip-picker.ts",
+    "test:entity-review": "tsx scripts/test-entity-review.ts",
     "verify:assistant-tasks": "electron scripts/verify-assistant-tasks.cjs",
     "verify:knowledge-e2e": "node scripts/verify-knowledge-e2e.mjs",
     "verify:widget-help": "node scripts/verify-widget-help.mjs",

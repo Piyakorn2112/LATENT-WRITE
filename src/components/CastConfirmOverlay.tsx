@@ -262,7 +262,9 @@ async function refineScanWithAssistant(
   const untouched = { scan, changes: [] as EntityReviewChange[] };
   try {
     if (!(await assistantAvailable()) || signal.aborted) return untouched;
-    const selected = selectReviewable(reviewEntriesFromTraces(traces));
+    // Selection needs the text: the usage counts are what promote a name the
+    // scan was CONFIDENTLY wrong about, which its own flags never surface.
+    const selected = selectReviewable(reviewEntriesFromTraces(traces), { text });
     if (selected.length === 0) return untouched;
 
     let done = 0;

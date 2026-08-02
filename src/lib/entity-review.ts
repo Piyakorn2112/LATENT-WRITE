@@ -32,10 +32,22 @@ export const ENTITY_REVIEW_TASK = "entity-review";
 
 /** Below this gap between the top two labels, the scan is effectively guessing. */
 export const AMBIGUITY_GAP_FLOOR = 0.15;
-/** One pass is a background nicety, not a batch job. */
-export const REVIEW_CAP = 12;
+/** One pass is a foreground nicety, not a batch job. Raised from 12 when review
+ *  stopped being reserved for the names the scan already doubted. */
+export const REVIEW_CAP = 24;
 export const SNIPPET_RADIUS = 140;
-export const SNIPPETS_PER_NAME = 2;
+export const SNIPPETS_PER_NAME = 3;
+
+/**
+ * How confident the model must be to OVERTURN the scan.
+ *
+ * ★ ASYMMETRIC ON PURPOSE. Agreeing with a deterministic classifier is cheap;
+ *   overruling one that was sure should not be. A name the scan itself doubted
+ *   needs only the ordinary bar; a name it was confident about needs this one,
+ *   so a hesitant model cannot churn a correct scan.
+ */
+export const OVERTURN_DOUBTED_MIN = 0.6;
+export const OVERTURN_CONFIDENT_MIN = 0.8;
 
 const DEFAULT_MAX_TOKENS = 128;
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -64,59 +76,224 @@ export interface EntityReviewProposal {
   proposedType: ProposedType;
   confidence: number;
   reason: string;
+  /** True when the scan itself was unsure. Sets which overturn bar applies. */
+  scanDoubted: boolean;
 }
 
-/** Same reasoning as the adjudicator: no `minLength`, so a reason stays measurable. */
+/**
+ * ★★ THE CATCH-ALL IS CALLED "object" ON THE WIRE, NOT "entity".
+ *
+ *    Measured, and the second time this codebase has hit it (the adjudicator's
+ *    `break` was the first): with "entity" in the enum this model answered
+ *    "entity" for a name whose own reason said "clearly a person, as evidenced
+ *    by the dialogue" and for one whose reason said "used as a place". The
+ *    REASONING was right and the LABEL was wrong — "entity" is a generic word
+ *    the model reaches for whenever a thing is being named, and the whole task
+ *    is framed in terms of entities, so it is primed on every run.
+ *
+ *    Renaming the wire label fixed both without touching a single rule. The
+ *    store's own type stays `entity`; `WIRE_TO_TYPE` maps it back.
+ */
 export const ENTITY_REVIEW_SCHEMA = {
   type: "object",
   properties: {
-    type: { enum: ["character", "place", "faction", "entity", "not-a-name"] },
-    confidence: { type: "number" },
+    // ★★ REASON FIRST, AND THE ORDER IS THE FIX. A grammar emits properties in
+    //    declaration order, so with `type` first the model had to commit to a
+    //    label before it had written a single word of evidence — and it then
+    //    produced reasons that CONTRADICTED its own label ("object" for a name
+    //    whose reason read "clearly a person"). Naming the evidence first lets
+    //    the label follow from it. Do not reorder these for tidiness.
     reason: { type: "string", maxLength: REASON_MAX },
+    type: { enum: ["character", "place", "faction", "object", "not-a-name"] },
+    confidence: { type: "number" },
   },
 } as const;
 
-export const ENTITY_REVIEW_SYSTEM = `You classify how a NAME is used in a novel manuscript. You are given the name
-and one or two verbatim snippets of the manuscript around it. The snippets are
-all the evidence there is.
+/** Wire label → the type this app stores. "entity" is still accepted, because
+ *  a grammar change must never be the only thing standing between a valid
+ *  answer and a dropped one. */
+const WIRE_TO_TYPE: Record<string, ProposedType> = {
+  character: "character",
+  place: "place",
+  faction: "faction",
+  object: "entity",
+  entity: "entity",
+  "not-a-name": "not-a-name",
+};
 
-Types:
-- "character": a person or speaking being. Speaks, is spoken to, acts, is described.
-- "place": somewhere people are, go to, or come from. A city, house, road, region.
-- "faction": an organised group acting as one. An order, guild, army, court, crew.
-- "entity": a named thing that is none of the above. An object, ship, title, artefact.
-- "not-a-name": not a name at all. A capitalised sentence-opening common word, a
-  bare title, an interjection, a heading.
+/**
+ * ★★ A DECISION LADDER, NOT A LIST OF TYPES, AND THE CATCH-ALL GOES LAST.
+ *
+ *    Measured across four live runs: a longer prompt with the types listed as
+ *    peers made this model retreat to "entity" for BOTH a clear person and a
+ *    clear place. "entity" is the semantic catch-all, and a catch-all offered
+ *    as an equal option absorbs everything the moment the discriminators get
+ *    crowded — the same failure the event engine's dictionaries had. Stating
+ *    an ordered test, stopping at the first that fits, and naming the
+ *    catch-all a last resort is what separated them again.
+ *
+ *    Also measured: telling the model "the current label is often right"
+ *    anchored it so hard that "Meanwhile" stayed a character. The asymmetric
+ *    acceptance bar in `applyProposalsToScanResult` is where that caution
+ *    belongs — in code, where it cannot bias a reading.
+ */
+export const ENTITY_REVIEW_SYSTEM = `You classify how a NAME is used in a novel manuscript. You are given the name,
+counts of how it is used across the chapter, and verbatim snippets. That is all
+the evidence there is.
 
-Rules:
-- Judge only from the snippets. Do not use knowledge of any real or famous name.
-- The grammar around the name is the evidence: "the road to X" and "the streets
-  of X" are place usage; "X said" and "she asked X" are character usage.
-- PREFER a low confidence over a guess. Confidence is how much the snippets
-  show, not how certain you feel.
-- If the snippets do not show the word being used as a name, answer "not-a-name".
-Answer as JSON: {"type","confidence","reason"}.
-confidence: a number from 0 to 1. 1 means the snippets settle it, 0 means they
-show nothing. Never answer above 1.
-reason: one clause of at most 15 words, pointing at what the snippets show.
-Stop before 120 characters; a reason that runs long is cut off mid-word.`;
+Decide in this order and stop at the first that fits:
+1. It speaks, or is spoken to, or acts and is described like a person —
+   "character". Places, objects and groups do not talk.
+2. People go to it, come from it, or are inside it — "place". A city, house,
+   road, region.
+3. It is an organised group acting as one — "faction". An order, guild, army,
+   court, crew.
+4. It is not being used as a name at all — "not-a-name". A capitalised word
+   that merely opens a sentence, an interjection, a bare title, a heading.
+5. Only if none of the above fit: a physical thing that is not a person, a
+   place or a group — "object". A ship, a sword, a book, a treaty. Every name
+   is the name of something, so "it is a named thing" is NOT a reason to
+   answer "object". This is a last resort, never a default.
+
+The counts: "speaks" and "spoken to" are person usage; "after a place
+preposition" counts "at X" and "through X"; "after the/a" suggests it is not a
+personal name. Where the counts and the snippets disagree, the snippets decide.
+
+Judge only from the evidence. Do not use knowledge of any real or famous name.
+The current label is an earlier guess and is not evidence.
+PREFER a low confidence over a guess.
+Answer as JSON: {"reason","type","confidence"} in that order.
+reason: FIRST, one clause of at most 15 words naming what the evidence shows.
+type: the label that clause leads to.
+confidence: a number from 0 to 1, how much the evidence shows. Never above 1.`;
+
+// ── usage signals ─────────────────────────────────────────────────────────
+//
+// ★★ THE SCAN'S OWN DOUBT IS NOT ENOUGH. Review used to be reserved for names
+//    the scan flagged, which by construction can never reach a name it got
+//    CONFIDENTLY wrong — and "a character classified as a location" is exactly
+//    that failure. These counts are the second opinion that promotes such a
+//    name into review: cheap, deterministic, computed from the same span the
+//    snippets come from.
+//
+// They are evidence for the priority queue AND they ride along in the prompt,
+// because a count over the whole span sees what three windows cannot.
+
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+export interface UsageSignals {
+  /** "X said", "said X", "X asked" — a name that speaks is a person. */
+  spoken: number;
+  /** "asked X", "told X", "turned to X" — a name spoken TO is a person. */
+  addressed: number;
+  /** "to X", "at X", "through X" — motion and location take places. */
+  placePrep: number;
+  /** "the X", "a X" — a personal name is rarely determined. */
+  determiner: number;
+  possessive: number;
+  /** ", X," inside dialogue — direct address, so a person. */
+  vocative: number;
+  occurrences: number;
+}
+
+const count = (text: string, re: RegExp) => (text.match(re) ?? []).length;
+
+export function usageSignals(text: string, name: string): UsageSignals {
+  const n = escapeRe(name);
+  if (!text || !name) {
+    return { spoken: 0, addressed: 0, placePrep: 0, determiner: 0, possessive: 0, vocative: 0, occurrences: 0 };
+  }
+  return {
+    spoken:
+      count(text, new RegExp(`\\b${n}\\b\\s+(?:said|says|asked|asks|replied|answered|whispered|shouted|muttered|thought|nodded|smiled|laughed|cried|shrugged)\\b`, "g")) +
+      count(text, new RegExp(`\\b(?:said|asked|replied|answered|whispered|shouted|muttered|cried)\\s+${n}\\b`, "g")),
+    addressed: count(text, new RegExp(`\\b(?:asked|told|warned|reminded|thanked|greeted|assured|answered|informed|begged)\\s+${n}\\b|\\bturn(?:ed|ing)?\\s+to\\s+${n}\\b`, "g")),
+    // ★ "to" IS NOT A PLACE PREPOSITION ON ITS OWN. "turned to Doran" and
+    //   "said to Doran" are person usage, and counting them as place evidence
+    //   made a speaking character read as a location — the exact failure this
+    //   module exists to catch. Bare "to X" only counts when no attention or
+    //   speech verb governs it; the unambiguous prepositions always count.
+    placePrep:
+      count(text, new RegExp(`\\b(?:in|at|from|toward|towards|outside|inside|near|across|through|into|onto|past|beyond|around)\\s+${n}\\b`, "g")) +
+      count(text, new RegExp(`(?<!\\b(?:turn|turns|turned|turning|spoke|speak|speaks|speaking|said|says|talk|talks|talked|listen|listens|listened|whisper|whispers|whispered|shout|shouts|shouted|gesture|gestures|gestured|nod|nods|nodded|point|points|pointed|reply|replies|replied|according|close|next|back)\\s)\\bto\\s+${n}\\b`, "g")),
+    determiner: count(text, new RegExp(`\\b(?:the|a|an)\\s+${n}\\b`, "g")),
+    possessive: count(text, new RegExp(`\\b${n}(?:['’]s)`, "g")),
+    vocative: count(text, new RegExp(`[,;]\\s*${n}\\s*[,.!?]`, "g")),
+    occurrences: count(text, new RegExp(`\\b${n}\\b`, "g")),
+  };
+}
+
+const personEvidence = (s: UsageSignals) => s.spoken + s.addressed + s.vocative;
+const placeEvidence = (s: UsageSignals) => s.placePrep + s.determiner * 0.5;
+
+/**
+ * How much the prose disagrees with the label the scan assigned, 0..1.
+ *
+ * Only ever counts evidence the OTHER way with none of its own — "Doran is
+ * called a place, and the text shows him speaking three times and never shows
+ * anyone travelling to him". A name with evidence on both sides is ordinary
+ * ambiguity, not a contradiction, and its own low ambiguityGap will pick it up.
+ */
+export function contradictionScore(currentType: EntityType, s: UsageSignals): number {
+  const person = personEvidence(s);
+  const place = placeEvidence(s);
+  const strength = (n: number) => Math.min(1, n / 3);
+  if (currentType === "character") return place >= 2 && person === 0 ? strength(place) : 0;
+  if (currentType === "place" || currentType === "faction" || currentType === "entity") {
+    return person >= 2 && place === 0 ? strength(person) : 0;
+  }
+  return 0;
+}
+
+/** The scan admits it was unsure about this one. */
+export function scanDoubted(entry: EntityReviewEntry): boolean {
+  return entry.needsReview === true ||
+    (entry.ambiguityGap !== undefined && entry.ambiguityGap < AMBIGUITY_GAP_FLOOR);
+}
+
+/** Higher runs first. Contradiction outranks mere doubt: a wrong-and-confident
+ *  label costs the writer more than an honest coin-flip does. */
+export function reviewPriority(entry: EntityReviewEntry, signals?: UsageSignals): number {
+  const contradiction = signals ? contradictionScore(entry.currentType, signals) : 0;
+  const doubt = entry.needsReview === true
+    ? 0.7
+    : entry.ambiguityGap !== undefined && entry.ambiguityGap < AMBIGUITY_GAP_FLOOR
+      ? 0.5 + (AMBIGUITY_GAP_FLOOR - entry.ambiguityGap)
+      : 0;
+  // A contradiction can reach 1.0 and therefore always outranks pure doubt.
+  return Math.max(contradiction, doubt);
+}
 
 // ── selection & snippets ──────────────────────────────────────────────────
 
-/** The scan's own uncertainty picks the work; nothing else is worth a run. */
-export function selectReviewable(
-  entries: readonly EntityReviewEntry[],
-  cap = REVIEW_CAP,
-): EntityReviewEntry[] {
-  const picked = entries.filter(
-    (e) =>
-      e.needsReview === true ||
-      (e.ambiguityGap !== undefined && e.ambiguityGap < AMBIGUITY_GAP_FLOOR),
-  );
-  return picked.slice(0, cap);
+export interface SelectReviewableOptions {
+  /** The scanned span. Without it, selection degrades to the scan's own doubt. */
+  text?: string;
+  cap?: number;
 }
 
-const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+/**
+ * Order the whole cast by how much a second reading would be worth, then take
+ * the budget. Every classified name is eligible; nothing is filtered out up
+ * front, because the failure this exists to catch is a name nobody flagged.
+ */
+export function selectReviewable(
+  entries: readonly EntityReviewEntry[],
+  opts: SelectReviewableOptions = {},
+): EntityReviewEntry[] {
+  const cap = opts.cap ?? REVIEW_CAP;
+  const scored = entries.map((entry) => ({
+    entry,
+    priority: reviewPriority(entry, opts.text ? usageSignals(opts.text, entry.name) : undefined),
+  }));
+  // Stable within a priority so a rerun of the same scan asks the same
+  // questions in the same order.
+  return scored
+    .map((s, index) => ({ ...s, index }))
+    .sort((a, b) => (b.priority - a.priority) || (a.index - b.index))
+    .slice(0, cap)
+    .map((s) => s.entry);
+}
 
 /**
  * Up to `limit` windows of ±`radius` chars around real occurrences.
@@ -167,14 +344,25 @@ export function buildEntityReviewRequest(
   entry: EntityReviewEntry,
   snippets: readonly string[],
   maxTokens = DEFAULT_MAX_TOKENS,
+  signals?: UsageSignals,
 ): EntityReviewRequest {
   const lines = [
     `NAME: ${entry.name}`,
+    `CURRENT LABEL: ${entry.currentType}`,
+    ...(signals
+      ? [
+          "",
+          "COUNTS ACROSS THE CHAPTER",
+          `appears ${signals.occurrences} times · speaks ${signals.spoken} · spoken to ${signals.addressed} · ` +
+            `addressed by name ${signals.vocative} · after a place preposition ${signals.placePrep} · ` +
+            `after the/a ${signals.determiner} · possessive ${signals.possessive}`,
+        ]
+      : []),
     "",
     "SNIPPETS",
     ...snippets.map((s, i) => `${i + 1}. ${s}`),
     "",
-    `The question: how is "${entry.name}" used in these snippets?`,
+    `The question: how is "${entry.name}" used here?`,
   ];
   return {
     systemPrompt: ENTITY_REVIEW_SYSTEM,
@@ -205,8 +393,10 @@ function normalizeProposal(
 ): EntityReviewProposal | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
-  const type = value.type;
-  if (typeof type !== "string" || !TYPES.includes(type as ProposedType)) return null;
+  const wire = value.type;
+  if (typeof wire !== "string") return null;
+  const type = WIRE_TO_TYPE[wire];
+  if (!type || !TYPES.includes(type)) return null;
   const confidenceRaw = value.confidence;
   if (typeof confidenceRaw !== "number" || !Number.isFinite(confidenceRaw)) return null;
   const reasonRaw = value.reason;
@@ -216,9 +406,10 @@ function normalizeProposal(
   return {
     name: entry.name,
     currentType: entry.currentType,
-    proposedType: type as ProposedType,
+    proposedType: type,
     confidence: Math.min(1, Math.max(0, confidenceRaw)),
     reason,
+    scanDoubted: scanDoubted(entry),
   };
 }
 
@@ -235,7 +426,10 @@ export async function reviewEntities(
   opts: EntityReviewOptions,
 ): Promise<EntityReviewProposal[]> {
   const proposals: EntityReviewProposal[] = [];
-  const selected = selectReviewable(input.entries, opts.cap ?? REVIEW_CAP);
+  const selected = selectReviewable(input.entries, {
+    text: input.text,
+    cap: opts.cap ?? REVIEW_CAP,
+  });
 
   for (const entry of selected) {
     if (opts.isCancelled?.()) break;
@@ -247,7 +441,12 @@ export async function reviewEntities(
     );
     if (snippets.length === 0) continue;
 
-    const request = buildEntityReviewRequest(entry, snippets, opts.maxTokens ?? DEFAULT_MAX_TOKENS);
+    const request = buildEntityReviewRequest(
+      entry,
+      snippets,
+      opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+      usageSignals(input.text, entry.name),
+    );
     const result = await opts.run<unknown>({
       task: ENTITY_REVIEW_TASK,
       tag: entry.name,
@@ -307,14 +506,18 @@ export interface EntityReviewChange {
  * Move names between buckets according to accepted proposals, dropping
  * `not-a-name` entirely. Pure: returns a new object and never mutates `scan`.
  *
- * A proposal below `minConfidence`, one that agrees with where the name
- * already is, or one for a name the scan does not contain changes nothing —
- * the scan, not the proposal, is the source of truth about current placement.
+ * A proposal below its bar, one that agrees with where the name already is, or
+ * one for a name the scan does not contain changes nothing — the scan, not the
+ * proposal, is the source of truth about current placement.
+ *
+ * ★ TWO BARS, NOT ONE. `minConfidence` applies to names the scan itself
+ *   doubted; overturning a name it was confident about needs
+ *   OVERTURN_CONFIDENT_MIN. Same rule for deleting one as `not-a-name`.
  */
 export function applyProposalsToScanResult(
   scan: ScanBuckets,
   proposals: readonly EntityReviewProposal[],
-  minConfidence = 0.6,
+  minConfidence = OVERTURN_DOUBTED_MIN,
 ): { scan: ScanBuckets; changes: EntityReviewChange[] } {
   const next: ScanBuckets = {
     characters: [...scan.characters],
@@ -326,7 +529,13 @@ export function applyProposalsToScanResult(
   const keys: ScanBucketKey[] = ["characters", "places", "factions", "entities"];
 
   for (const proposal of proposals) {
-    if (proposal.confidence < minConfidence) continue;
+    const bar = proposal.scanDoubted
+      ? minConfidence
+      : Math.max(minConfidence, OVERTURN_CONFIDENT_MIN);
+    if (proposal.confidence < bar) continue;
+    // A silent reason is an unexplainable change; the writer would have no way
+    // to judge it, so it does not get made.
+    if (!proposal.reason.trim()) continue;
 
     const fromKey = keys.find((k) => next[k].includes(proposal.name));
     if (!fromKey) continue;
