@@ -234,16 +234,86 @@ export const TIMELINE_CHIP_BUDGET = 3;
  * as "best". Works on stored MajorEvent records too (pre-rank entries fall
  * back to array order, which is what they were rendered as anyway).
  */
+/**
+ * The rank a selector treats an event as having. Entries stored before `rank`
+ * existed fall back to array order, which is what they were rendered as anyway.
+ *
+ * ★ ONE DEFINITION, because two halves read it. chip-picker.ts NUMBERS the
+ *   candidates it offers the model with this, and `selectDisplayChips` RESOLVES
+ *   the model's answer with it. A disagreement between those two would not
+ *   throw: it would quietly attach one event's label to another event.
+ */
+export const effectiveRank = (event: { rank?: number }, index: number): number =>
+  event.rank ?? index;
+
 export function selectTimelineChips<T extends { rank?: number; tensionPosition: number }>(
   events: readonly T[],
   budget: number = TIMELINE_CHIP_BUDGET,
 ): T[] {
   return [...events]
-    .map((e, i) => ({ e, rank: e.rank ?? i }))
+    .map((e, i) => ({ e, rank: effectiveRank(e, i) }))
     .sort((a, b) => a.rank - b.rank)
     .slice(0, budget)
     .sort((a, b) => a.e.tensionPosition - b.e.tensionPosition)
     .map((x) => x.e);
+}
+
+/** Minimum an entry must expose to be a chip source. `ChapterGraphEntry`
+ *  satisfies it structurally; a live analysis pass can pass its own events. */
+export interface TimelineChipSource<T> {
+  majorEvents: readonly T[];
+  lmChips?: readonly { rank: number; label: string }[];
+}
+
+/**
+ * THE ONE DISPLAY SELECTOR. Every surface that draws chips goes through this.
+ *
+ * With no `lmChips` it is `selectTimelineChips` — the same objects, in the same
+ * order, with no copies made — so a chapter the model has not been asked about
+ * renders exactly as it did before this task existed.
+ *
+ * With picks it resolves rank → event against the entry's own events, drawn in
+ * reading order, and the picked label overrides the heuristic one for DISPLAY
+ * only (the stored event is never mutated). Ranks that no longer resolve are
+ * dropped, because the model may not add an event the engine did not find.
+ *
+ * ★ PICKS THAT RESOLVE TO NOTHING FALL BACK. A stale pick set — the events were
+ *   re-ranked under it — must not blank a chapter's timeline. The LM may
+ *   reorder and rename what the writer sees; it may never empty it.
+ */
+export function selectDisplayChips<
+  T extends { label: string; rank?: number; tensionPosition: number },
+>(
+  source: TimelineChipSource<T> | null | undefined,
+  budget: number = TIMELINE_CHIP_BUDGET,
+): T[] {
+  if (!source) return [];
+  const events = source.majorEvents;
+  const picks = source.lmChips;
+  if (!picks || picks.length === 0) return selectTimelineChips(events, budget);
+
+  const byRank = new Map<number, T>();
+  events.forEach((event, index) => {
+    const rank = effectiveRank(event, index);
+    if (!byRank.has(rank)) byRank.set(rank, event);
+  });
+
+  const resolved: T[] = [];
+  const seen = new Set<number>();
+  for (const pick of picks) {
+    if (resolved.length >= budget) break;
+    if (seen.has(pick.rank)) continue;
+    const event = byRank.get(pick.rank);
+    if (!event) continue;
+    seen.add(pick.rank);
+    const label = typeof pick.label === "string" && pick.label.trim() !== ""
+      ? pick.label
+      : event.label;
+    resolved.push(label === event.label ? event : { ...event, label });
+  }
+
+  if (resolved.length === 0) return selectTimelineChips(events, budget);
+  return resolved.sort((a, b) => a.tensionPosition - b.tensionPosition);
 }
 
 /**

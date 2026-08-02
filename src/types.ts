@@ -336,6 +336,13 @@ export interface MajorEvent {
   channel?: "dialogue" | "narration";
 }
 
+/** One local-model chip: a `rank` from the entry's own events, and the label to
+ *  show for it. The model may only PICK and RELABEL — see chip-picker.ts. */
+export interface TimelineChipPick {
+  rank: number;
+  label: string;
+}
+
 export interface ChapterGraphEntry {
   chapterId: string;
   chapterNumber: number;
@@ -350,6 +357,33 @@ export interface ChapterGraphEntry {
   majorEvents: MajorEvent[];
   lastUpdated: number;    // timestamp ms
   contentHash: string;   // cheap dedup key — prevents re-running NLP if content unchanged
+
+  // ── The local model's chip choice. Optional: entries built before the task
+  //    existed, and every entry the model has not been asked about, carry
+  //    neither field, and every display consumer must render identically then.
+
+  /**
+   * Ranks of `majorEvents` the model promoted, with the label to draw. Resolved
+   * for display by `selectDisplayChips`; an empty array means the model
+   * declined to promote anything and the heuristic chips stand.
+   *
+   * ★ STALENESS BY RECONSTRUCTION, AND THE ONE PLACE IT DOES NOT HOLD.
+   *   `buildChapterEntry` returns a fresh object literal that names every field
+   *   it sets, so a rebuild DROPS both of these — a re-analysed chapter cannot
+   *   carry chips chosen for its previous events. `enrichChapterEntryWithLM`,
+   *   by contrast, returns `{...entry, majorEvents: tagged}`: it PRESERVES
+   *   these fields while it prunes and re-ranks the events under them. Today
+   *   that is safe because App only ever enriches a freshly built entry. If
+   *   that ever changes, `lmChipsKey` is the guard, not this comment.
+   */
+  lmChips?: TimelineChipPick[];
+  /**
+   * `chipKeyFor(entry, modelId)` at the moment the picks were written. The
+   * caller (the App effect) is what compares it: chips are valid only while it
+   * still equals the current key. `selectDisplayChips` cannot check it — it has
+   * no model id — so it resolves by rank alone and drops ranks that vanished.
+   */
+  lmChipsKey?: string;
 }
 
 export interface StoryGraph {

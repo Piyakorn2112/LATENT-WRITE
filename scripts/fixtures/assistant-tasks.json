@@ -1,9 +1,10 @@
 {
-  "generatedAt": "2026-08-02T10:47:54.895Z",
+  "generatedAt": "2026-08-02T12:46:01.387Z",
   "modelId": "qwen3-1.7b-q4_k_m",
   "packVersion": 1,
   "adjudicatorPromptVersion": 1,
   "entityReviewPromptVersion": 1,
+  "chipPromptVersion": 1,
   "adjudication": [
     {
       "id": "break",
@@ -294,6 +295,148 @@
         }
       },
       "maxTokens": 128
+    }
+  ],
+  "timelineChips": [
+    {
+      "id": "strong",
+      "chapterNumber": 7,
+      "chapterTitle": "The Long Count",
+      "minPicks": 2,
+      "offeredRanks": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "candidates": [
+        {
+          "rank": 0,
+          "label": "Ferren admits the count",
+          "sentence": "Ferren Ash told the room that the count had been short for eleven years, and that she had signed every page of it."
+        },
+        {
+          "rank": 1,
+          "label": "Wick crosses the yard",
+          "sentence": "Wick Odlum crossed the yard twice while the kettle boiled, and came back with nothing to say."
+        },
+        {
+          "rank": 2,
+          "label": "Marda burns the seal",
+          "sentence": "Marda Kelp put the office seal in the fire and held it there until the wax ran off the iron."
+        },
+        {
+          "rank": 3,
+          "label": "Clerk refuses ledger",
+          "sentence": "The clerk from the upper office refused to carry the ledger back across the yard, and said so twice."
+        },
+        {
+          "rank": 4,
+          "label": "Ferren asks about food",
+          "sentence": "Ferren Ash asked whether anyone had eaten yet, and nobody answered her."
+        },
+        {
+          "rank": 5,
+          "label": "Wick resigns his post",
+          "sentence": "Wick Odlum resigned his post before the second bell, in writing, and gave no reason for it."
+        }
+      ],
+      "chipKey": "104bd9d3",
+      "labelMax": 44,
+      "pickCap": 3,
+      "systemPrompt": "You choose which moments a novel chapter's timeline shows, and write the short\nlabel for each one. You are given the chapter's candidate events, numbered, each\nwith the verbatim sentence it was found in. That is all the evidence there is.\n\nRules:\n- Pick only from the numbered candidates. Never invent an event, and never\n  describe something the sentences do not say.\n- Pick the moments that CHANGE something: a decision, a revelation, a\n  confrontation, an arrival or departure that costs someone something. Skip\n  stage business, travel, and description.\n- Pick at most 3, and fewer is better than padding. If only one moment matters,\n  pick one. If nothing in the chapter turns, pick none — an empty list is a\n  real answer.\n- Each label rewrites its own candidate's sentence in plain words. Every name\n  and object in the label must appear in that sentence.\n\nLabel rules:\n- AT MOST 5 WORDS, and never more than 44 characters. A chip is a headline, not\n  a summary: \"Aleth burns the second writ\", never \"Aleth burns the second writ\n  in front of the whole council\".\n- Concrete: say who does what. \"Aleth burns the second writ\", never\n  \"things escalate\".\n- Sentence case. Present tense. No quotation marks. No full stop at the end.\n- No melodrama and no selling: not \"shocking\", \"at last\", \"everything changes\",\n  \"the truth is revealed\".\n\nAnswer as JSON: {\"picks\":[{\"rank\",\"label\"}]}.\nrank: the number of a candidate you were given, exactly as written.\nlabel: the rewritten chip for that candidate. Five words is the limit; a sixth\nmakes the chip unusable, so drop a detail rather than run long.",
+      "userText": "CHAPTER 7 — The Long Count\ntension peak: 0.84\npresent: Ferren Ash, Wick Odlum, Marda Kelp\n\nCANDIDATES\n[0] revelation · Ferren Ash · dialogue · 58% in\n    Ferren Ash told the room that the count had been short for eleven years, and that she had signed every page of it.\n[1] action · Wick Odlum · narration · 14% in\n    Wick Odlum crossed the yard twice while the kettle boiled, and came back with nothing to say.\n[2] action · Marda Kelp · narration · 77% in\n    Marda Kelp put the office seal in the fire and held it there until the wax ran off the iron.\n[3] confrontation · the clerk · dialogue · 69% in\n    The clerk from the upper office refused to carry the ledger back across the yard, and said so twice.\n[4] action · Ferren Ash · dialogue · 31% in\n    Ferren Ash asked whether anyone had eaten yet, and nobody answered her.\n[5] decision · Wick Odlum · narration · 91% in\n    Wick Odlum resigned his post before the second bell, in writing, and gave no reason for it.\n\nPick at most 3 of these ranks and write a label for each.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "picks": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "rank": {
+                  "type": "integer"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 72
+                }
+              }
+            }
+          }
+        }
+      },
+      "maxTokens": 160
+    },
+    {
+      "id": "quiet",
+      "chapterNumber": 2,
+      "chapterTitle": "Ordinary Weather",
+      "minPicks": null,
+      "offeredRanks": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "candidates": [
+        {
+          "rank": 0,
+          "label": "Marda opens the shutters",
+          "sentence": "Marda Kelp opened the shutters on the yard side and left them open all morning, as she always did."
+        },
+        {
+          "rank": 1,
+          "label": "Wick sorts the post",
+          "sentence": "Wick Odlum carried the post up from the box and sorted it into two piles on the sill."
+        },
+        {
+          "rank": 2,
+          "label": "The kettle is filled",
+          "sentence": "The kettle was filled twice before anyone thought to drink from it."
+        },
+        {
+          "rank": 3,
+          "label": "Marda notes the tide",
+          "sentence": "Marda Kelp said the tide was running later than the book allowed for, and went back to her work."
+        },
+        {
+          "rank": 4,
+          "label": "Wick winds the clock",
+          "sentence": "Wick Odlum wound the clock on the landing, as he did on the first of every month."
+        }
+      ],
+      "chipKey": "de81ded1",
+      "labelMax": 44,
+      "pickCap": 3,
+      "systemPrompt": "You choose which moments a novel chapter's timeline shows, and write the short\nlabel for each one. You are given the chapter's candidate events, numbered, each\nwith the verbatim sentence it was found in. That is all the evidence there is.\n\nRules:\n- Pick only from the numbered candidates. Never invent an event, and never\n  describe something the sentences do not say.\n- Pick the moments that CHANGE something: a decision, a revelation, a\n  confrontation, an arrival or departure that costs someone something. Skip\n  stage business, travel, and description.\n- Pick at most 3, and fewer is better than padding. If only one moment matters,\n  pick one. If nothing in the chapter turns, pick none — an empty list is a\n  real answer.\n- Each label rewrites its own candidate's sentence in plain words. Every name\n  and object in the label must appear in that sentence.\n\nLabel rules:\n- AT MOST 5 WORDS, and never more than 44 characters. A chip is a headline, not\n  a summary: \"Aleth burns the second writ\", never \"Aleth burns the second writ\n  in front of the whole council\".\n- Concrete: say who does what. \"Aleth burns the second writ\", never\n  \"things escalate\".\n- Sentence case. Present tense. No quotation marks. No full stop at the end.\n- No melodrama and no selling: not \"shocking\", \"at last\", \"everything changes\",\n  \"the truth is revealed\".\n\nAnswer as JSON: {\"picks\":[{\"rank\",\"label\"}]}.\nrank: the number of a candidate you were given, exactly as written.\nlabel: the rewritten chip for that candidate. Five words is the limit; a sixth\nmakes the chip unusable, so drop a detail rather than run long.",
+      "userText": "CHAPTER 2 — Ordinary Weather\ntension peak: 0.28\npresent: Marda Kelp, Wick Odlum\n\nCANDIDATES\n[0] action · Marda Kelp · narration · 11% in\n    Marda Kelp opened the shutters on the yard side and left them open all morning, as she always did.\n[1] action · Wick Odlum · narration · 29% in\n    Wick Odlum carried the post up from the box and sorted it into two piles on the sill.\n[2] state-change · narration · 47% in\n    The kettle was filled twice before anyone thought to drink from it.\n[3] action · Marda Kelp · dialogue · 63% in\n    Marda Kelp said the tide was running later than the book allowed for, and went back to her work.\n[4] action · Wick Odlum · narration · 88% in\n    Wick Odlum wound the clock on the landing, as he did on the first of every month.\n\nPick at most 3 of these ranks and write a label for each.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "picks": {
+            "type": "array",
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "properties": {
+                "rank": {
+                  "type": "integer"
+                },
+                "label": {
+                  "type": "string",
+                  "maxLength": 72
+                }
+              }
+            }
+          }
+        }
+      },
+      "maxTokens": 160
     }
   ]
 }

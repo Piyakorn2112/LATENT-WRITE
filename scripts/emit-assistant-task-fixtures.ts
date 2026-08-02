@@ -5,8 +5,8 @@
  * hand-copies the prompt it is testing stops testing anything the moment the
  * real prompt moves. So this script builds the fixtures with the REAL modules —
  * `buildEvidencePack`, `buildAdjudicationRequest`, `selectReviewable`,
- * `usageSnippets`, `buildEntityReviewRequest` — and writes the exact bytes the
- * app would send to scripts/fixtures/assistant-tasks.json.
+ * `usageSnippets`, `buildEntityReviewRequest`, `buildChipRequest` — and writes
+ * the exact bytes the app would send to scripts/fixtures/assistant-tasks.json.
  * `scripts/verify-assistant-tasks.cjs` regenerates this file every run, so the
  * fixtures cannot drift from the code they test.
  *
@@ -36,7 +36,14 @@ import {
   usageSnippets,
 } from "../src/lib/entity-review";
 import type { EntityReviewEntry } from "../src/lib/entity-review";
-import type { WorldData } from "../src/types";
+import {
+  CHIP_LABEL_MAX,
+  CHIP_PICK_CAP,
+  CHIP_PROMPT_VERSION,
+  buildChipRequest,
+  chipKeyFor,
+} from "../src/lib/chip-picker";
+import type { ChapterGraphEntry, MajorEvent, WorldData } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const OUT = join(here, "fixtures", "assistant-tasks.json");
@@ -399,6 +406,112 @@ const entitySpans: Array<{ id: string; expect: string; entry: EntityReviewEntry;
   },
 ];
 
+// ── timeline-chip cases ────────────────────────────────────────────────────
+// Two whole ChapterGraphEntries, because that is what `buildChipRequest` takes.
+// Ranks are the ENGINE's ordering and are deliberately imperfect — in the
+// strong case a piece of stage business sits at rank 1, above two of the
+// chapter's real turns. Nothing gates WHICH ranks come back, only that they
+// were offered and that a chapter with obvious turns is not answered with
+// silence; picking well is what a human reads the printed labels for.
+
+const chipEvent = (
+  rank: number,
+  tensionPosition: number,
+  label: string,
+  sentence: string,
+  narrativeType: string,
+  legacy: MajorEvent["type"],
+  agent: string,
+  channel: "dialogue" | "narration",
+): MajorEvent => ({
+  label,
+  type: legacy,
+  tensionPosition,
+  confidence: 0.5,
+  sentence,
+  paragraphIndex: Math.round(tensionPosition * 40),
+  narrativeType,
+  salience: "major",
+  rank,
+  agent,
+  channel,
+});
+
+const chipEntry = (
+  over: Pick<ChapterGraphEntry, "chapterId" | "chapterNumber" | "chapterTitle" | "tensionPeak" | "charactersPresent" | "majorEvents" | "contentHash">,
+): ChapterGraphEntry => ({
+  role: "rising",
+  tensionCurve: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.5, 0.4],
+  wordCount: 3100,
+  proseRegister: "measured",
+  lastUpdated: 0,
+  ...over,
+});
+
+/** (a) A chapter with three unmistakable turns among six candidates. */
+const strongChapter = chipEntry({
+  chapterId: "chip-strong",
+  chapterNumber: 7,
+  chapterTitle: "The Long Count",
+  tensionPeak: 0.84,
+  charactersPresent: ["Ferren Ash", "Wick Odlum", "Marda Kelp"],
+  contentHash: "3100|The yard office kept two ledgers and had done for as lon",
+  majorEvents: [
+    chipEvent(1, 0.14, "Wick crosses the yard",
+      "Wick Odlum crossed the yard twice while the kettle boiled, and came back with nothing to say.",
+      "action", "transition", "Wick Odlum", "narration"),
+    chipEvent(4, 0.31, "Ferren asks about food",
+      "Ferren Ash asked whether anyone had eaten yet, and nobody answered her.",
+      "action", "transition", "Ferren Ash", "dialogue"),
+    chipEvent(0, 0.58, "Ferren admits the count",
+      "Ferren Ash told the room that the count had been short for eleven years, and that she had signed every page of it.",
+      "revelation", "revelation", "Ferren Ash", "dialogue"),
+    chipEvent(3, 0.69, "Clerk refuses ledger",
+      "The clerk from the upper office refused to carry the ledger back across the yard, and said so twice.",
+      "confrontation", "confrontation", "the clerk", "dialogue"),
+    chipEvent(2, 0.77, "Marda burns the seal",
+      "Marda Kelp put the office seal in the fire and held it there until the wax ran off the iron.",
+      "action", "climax", "Marda Kelp", "narration"),
+    chipEvent(5, 0.91, "Wick resigns his post",
+      "Wick Odlum resigned his post before the second bell, in writing, and gave no reason for it.",
+      "decision", "transition", "Wick Odlum", "narration"),
+  ],
+});
+
+/** (b) A chapter that establishes a practice and turns on nothing. Every
+ *  candidate is habit or housekeeping, so an empty answer is a right answer —
+ *  and so is one modest pick. UNGATED on count for exactly that reason. */
+const quietChapter = chipEntry({
+  chapterId: "chip-quiet",
+  chapterNumber: 2,
+  chapterTitle: "Ordinary Weather",
+  tensionPeak: 0.28,
+  charactersPresent: ["Marda Kelp", "Wick Odlum"],
+  contentHash: "2600|The shutters on the yard side were opened at seven and n",
+  majorEvents: [
+    chipEvent(0, 0.11, "Marda opens the shutters",
+      "Marda Kelp opened the shutters on the yard side and left them open all morning, as she always did.",
+      "action", "introduction", "Marda Kelp", "narration"),
+    chipEvent(1, 0.29, "Wick sorts the post",
+      "Wick Odlum carried the post up from the box and sorted it into two piles on the sill.",
+      "action", "transition", "Wick Odlum", "narration"),
+    chipEvent(2, 0.47, "The kettle is filled",
+      "The kettle was filled twice before anyone thought to drink from it.",
+      "state-change", "transition", "", "narration"),
+    chipEvent(3, 0.63, "Marda notes the tide",
+      "Marda Kelp said the tide was running later than the book allowed for, and went back to her work.",
+      "action", "transition", "Marda Kelp", "dialogue"),
+    chipEvent(4, 0.88, "Wick winds the clock",
+      "Wick Odlum wound the clock on the landing, as he did on the first of every month.",
+      "action", "transition", "Wick Odlum", "narration"),
+  ],
+});
+
+const chipSpecs = [
+  { id: "strong", entry: strongChapter, minPicks: 2 },
+  { id: "quiet", entry: quietChapter, minPicks: null },
+];
+
 // ── emit ───────────────────────────────────────────────────────────────────
 
 // The wire label the model must emit for a "break" — single-sourced from the
@@ -452,14 +565,41 @@ const entityCases = entitySpans.map((c) => {
   };
 });
 
+const chipCases = chipSpecs.map((c) => {
+  const request = buildChipRequest(c.entry);
+  if (request.candidates.length !== c.entry.majorEvents.length) {
+    throw new Error(`chip case "${c.id}" lost candidates: every fixture event carries a sentence`);
+  }
+  return {
+    id: c.id,
+    chapterNumber: c.entry.chapterNumber,
+    chapterTitle: c.entry.chapterTitle,
+    /** null = ungated on count; a quiet chapter may answer with silence. */
+    minPicks: c.minPicks,
+    /** The ranks the model was offered. Nothing outside this set is an answer. */
+    offeredRanks: request.candidates.map((x) => x.rank),
+    candidates: request.candidates,
+    chipKey: chipKeyFor(c.entry, MODEL_ID),
+    /** Caps the gate reads instead of spelling its own copy of the contract. */
+    labelMax: CHIP_LABEL_MAX,
+    pickCap: CHIP_PICK_CAP,
+    systemPrompt: request.systemPrompt,
+    userText: request.userText,
+    schema: request.schema,
+    maxTokens: request.maxTokens,
+  };
+});
+
 const payload = {
   generatedAt: new Date().toISOString(),
   modelId: MODEL_ID,
   packVersion: PACK_VERSION,
   adjudicatorPromptVersion: ADJUDICATOR_PROMPT_VERSION,
   entityReviewPromptVersion: ENTITY_REVIEW_PROMPT_VERSION,
+  chipPromptVersion: CHIP_PROMPT_VERSION,
   adjudication: adjudicationCases,
   entityReview: entityCases,
+  timelineChips: chipCases,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -468,11 +608,16 @@ writeFileSync(OUT, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 console.log(`wrote ${OUT}`);
 console.log(
   `  ${adjudicationCases.length} adjudication cases · ` +
-  `${entityCases.length} entity-review cases · modelId=${MODEL_ID}`,
+  `${entityCases.length} entity-review cases · ${chipCases.length} chip cases · modelId=${MODEL_ID}`,
 );
 for (const c of adjudicationCases) {
   console.log(`  adj/${c.id.padEnd(9)} pack ${c.tokensEstimate} tok · rungs [${c.rungsIncluded.join(", ")}] · verdictKey ${c.verdictKey}`);
 }
 for (const c of entityCases) {
   console.log(`  ent/${c.id.padEnd(9)} ${c.name} · ${c.snippets.length} snippet(s)`);
+}
+for (const c of chipCases) {
+  console.log(
+    `  chip/${c.id.padEnd(8)} ch.${c.chapterNumber} · ranks [${c.offeredRanks.join(", ")}] · chipKey ${c.chipKey}`,
+  );
 }

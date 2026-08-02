@@ -1,17 +1,18 @@
 /**
- * verify-assistant-tasks.cjs — the two renderer task engines, against the real model.
+ * verify-assistant-tasks.cjs — the three renderer task engines, against the real model.
  *
  * `verify-assistant-runtime.cjs` proves the RUNTIME works with a generic
- * payload. This proves the two TASKS work: the adjudicator's evidence pack and
- * frozen prompt, and the entity-review pass, both driven through
- * registerAssistant() → preload → ipcMain → utilityProcess → node-llama-cpp.
+ * payload. This proves the TASKS work: the adjudicator's evidence pack and
+ * frozen prompt, the entity-review pass, and the timeline chip picker, all
+ * driven through registerAssistant() → preload → ipcMain → utilityProcess →
+ * node-llama-cpp. One harness, one model load, every task.
  *
  * ★ THE HARNESS NEVER HAND-COPIES THE THING UNDER TEST. Electron cannot import
  *   TypeScript, so every run first shells out to tsx and regenerates
  *   scripts/fixtures/assistant-tasks.json from the REAL modules
  *   (buildEvidencePack, buildAdjudicationRequest, usageSnippets,
- *   buildEntityReviewRequest). A prompt edit that breaks the model shows up
- *   here; a prompt edit copied into a harness would not.
+ *   buildEntityReviewRequest, buildChipRequest). A prompt edit that breaks the
+ *   model shows up here; a prompt edit copied into a harness would not.
  *
  * ★ EVERY NAME IN THE FIXTURES IS FABRICATED, so a pass measures reading of the
  *   evidence rather than recall of the world.
@@ -26,6 +27,15 @@
  *   6. every reason is non-empty (deliberately NOT guaranteed by the grammar —
  *      the schemas carry no minLength, so this stays a measured behaviour)
  *   7. the adjudication verdicts are not all the same label
+ *   8. every chip response is schema-valid, and every rank it returns was
+ *      OFFERED — the model may pick and relabel, never invent
+ *   9. every chip label is non-empty and single line (the label CAP is reported
+ *      instead — see the ★ on labelOverruns for why that one is not a gate)
+ *  10. the chapter with three unmistakable turns is not answered with silence
+ *
+ * ★ THE CHIP GATES DO NOT JUDGE PROSE OR CHOICE. Which ranks come back and how
+ *   well the labels read is printed verbatim for a human. A gate on taste would
+ *   be a gate the prompt could be tuned against, which is worth nothing.
  *
  * ★ GATE 7 IS WHY GATES 3 AND 4 MEAN ANYTHING. A model that answers
  *   "plausible_offscreen" to every pack passes both "must NOT be break" gates
@@ -93,6 +103,57 @@ function validEntity(json, schema) {
     typeof json.reason === 'string' && json.reason.length <= maxLenOf(schema, 'reason')
   );
 }
+
+/** Shape only. Rank membership and label quality are separate, named gates. */
+function validChips(json, schema) {
+  if (!json || typeof json !== 'object' || !Array.isArray(json.picks)) return false;
+  if (json.picks.length > schema.properties.picks.maxItems) return false;
+  return json.picks.every(
+    (p) => !!p && typeof p === 'object' && Number.isInteger(p.rank) && typeof p.label === 'string',
+  );
+}
+
+const picksOf = (json) => (json && Array.isArray(json.picks) ? json.picks : []);
+const labelOf = (p) => (typeof p.label === 'string' ? p.label.trim() : '');
+
+/**
+ * Label defects the DESIGN has no answer for: a chip with no text, or one
+ * carrying a newline the SVG would render as a box. Gated.
+ */
+const labelBlockers = (json) =>
+  picksOf(json).flatMap((p) => {
+    const label = labelOf(p);
+    if (label === '') return [`rank ${p.rank}: blank label`];
+    if (/[\r\n]/.test(label)) return [`rank ${p.rank}: multi-line label`];
+    return [];
+  });
+
+/**
+ * Labels over the module's cap. REPORTED, NOT GATED, and that is a measured
+ * decision rather than a soft one.
+ *
+ * ★ THE 44-CHARACTER RULE IS NOT RELIABLY REACHABLE AT 1.7B. Seven prompt
+ *   variants were measured against these two fixtures (character cap alone;
+ *   + a 6-word budget; + "a two-word name spends two"; + the limit repeated in
+ *   the JSON contract line; a two-word exemplar name; a WHO-does-WHAT shape
+ *   rule; a 5-word budget). Naming a WORD budget cut overruns from 3-of-6 to
+ *   1-of-4 and is why the prompt carries one — but ONE label came back
+ *   byte-identical and one character over in ALL SEVEN, including the two
+ *   variants that fixed everything else. It is a lexical attractor for that
+ *   sentence, not a wording problem, and gating on it would mean either a
+ *   permanently red harness or a threshold fitted to one model.
+ *
+ *   What the product actually promises is covered by the gates above and by
+ *   `normalizeChipPicks`: an over-long label costs the model's PROSE and keeps
+ *   its PICK, falling back to the heuristic label printed beside it. So the
+ *   overrun is printed with its fallback and counted, and the writer never sees
+ *   a chip cut mid-word.
+ */
+const labelOverruns = (json, labelMax) =>
+  picksOf(json).flatMap((p) => {
+    const label = labelOf(p);
+    return label.length > labelMax ? [`rank ${p.rank}: ${label.length} > ${labelMax} — "${label}"`] : [];
+  });
 
 /**
  * The harness reports what the MODEL emitted, never what the module cleaned up.
@@ -180,7 +241,8 @@ async function main() {
   const fixtures = JSON.parse(fs.readFileSync(FIXTURES, 'utf8'));
   console.log(
     `    packVersion=${fixtures.packVersion} · adjudicatorPrompt=v${fixtures.adjudicatorPromptVersion}` +
-    ` · entityReviewPrompt=v${fixtures.entityReviewPromptVersion} · modelId=${fixtures.modelId}`,
+    ` · entityReviewPrompt=v${fixtures.entityReviewPromptVersion} · chipPrompt=v${fixtures.chipPromptVersion}` +
+    ` · modelId=${fixtures.modelId}`,
   );
   gate('fixture modelId is the live model id', fixtures.modelId === status.model.id,
     `${fixtures.modelId} != ${status.model.id}`);
@@ -234,8 +296,47 @@ async function main() {
     console.log(`    ${timingLine(res.timings)}`);
   }
 
+  // ── timeline chips ────────────────────────────────────────────────────────
+  console.log('\n[3] timeline chips — which beats does this chapter show?');
+  const chipResponses = [];
+  for (const c of fixtures.timelineChips) {
+    const res = await callBridge('assistantRun', {
+      requestId: `chip-${c.id}`,
+      task: 'timeline-chips',
+      systemPrompt: c.systemPrompt,
+      userText: c.userText,
+      schema: c.schema,
+      maxTokens: c.maxTokens,
+      timeoutMs: 60000,
+    });
+    const ok = res.ok && validChips(res.json, c.schema);
+    chipResponses.push({ kind: 'timeline-chips', id: c.id, ok, json: res.json, error: res.error, raw: res.raw, timings: res.timings, case: c });
+
+    const picks = ok ? res.json.picks : [];
+    console.log(`\n  ${c.id}  (ch.${c.chapterNumber} "${c.chapterTitle}", offered ranks [${c.offeredRanks.join(', ')}]` +
+      `${c.minPicks === null ? ', ungated on count' : `, expect ≥${c.minPicks} picks`})`);
+    if (!ok) console.log(`    response: ${JSON.stringify(res.json ?? res.error)}`);
+    if (!res.ok) console.log(`    raw: ${JSON.stringify(res.raw)}`);
+    // ★ Verbatim, beside the heuristic label it replaces and the sentence it
+    //   must be grounded in. This block is the deliverable a human reads; no
+    //   gate below scores it.
+    console.log(`    ${picks.length} pick(s)${picks.length === 0 ? '  — the model declined to promote anything' : ''}`);
+    // Same reasoning as capNote(): a label sitting exactly on the grammar's cap
+    // was cut mid-word, and that defect must not read as a strange model.
+    const schemaCap = c.schema.properties.picks.items.properties.label.maxLength;
+    for (const p of picks) {
+      const cand = c.candidates.find((x) => x.rank === p.rank);
+      const len = String(p.label ?? '').length;
+      console.log(`      [${p.rank}] "${p.label}"  (${len} chars)` +
+        (len >= schemaCap ? `  ⚠ hit the ${schemaCap}-char grammar cap and was cut mid-word` : ''));
+      console.log(`           heuristic: "${cand ? cand.label : 'RANK NOT OFFERED'}"`);
+      if (cand) console.log(`           source:    ${cand.sentence}`);
+    }
+    console.log(`    ${timingLine(res.timings)}`);
+  }
+
   // ── gates ─────────────────────────────────────────────────────────────────
-  console.log('\n[3] gates');
+  console.log('\n[4] gates');
   const invalid = responses.filter((r) => !r.ok);
   gate(`all ${responses.length} responses are schema-valid and in range`, invalid.length === 0,
     invalid.map((r) => `${r.kind}/${r.id}: ${r.error ?? JSON.stringify(r.json)}`).join(' | '));
@@ -268,7 +369,41 @@ async function main() {
   gate('every response carries a non-empty reason', blank.length === 0,
     blank.map((r) => `${r.kind}/${r.id}`).join(', '));
 
-  const timed = responses.filter((r) => r.timings);
+  // ── chip gates. Membership and mechanics only; see the header note. ───────
+  const badChips = chipResponses.filter((r) => !r.ok);
+  gate(`all ${chipResponses.length} chip responses are schema-valid`, badChips.length === 0,
+    badChips.map((r) => `${r.id}: ${r.error ?? JSON.stringify(r.json)}`).join(' | '));
+
+  const invented = chipResponses.flatMap((r) =>
+    (r.ok ? r.json.picks : []).filter((p) => !r.case.offeredRanks.includes(p.rank))
+      .map((p) => `${r.id}: rank ${p.rank} was never offered`));
+  gate('every returned rank was offered (the model picks, never invents)', invented.length === 0,
+    invented.join(' | '));
+
+  const blockers = chipResponses.flatMap((r) =>
+    labelBlockers(r.ok ? r.json : null).map((d) => `${r.id}/${d}`));
+  gate('every label is non-empty and single-line', blockers.length === 0, blockers.join(' | '));
+
+  // Reported, never gated — see the ★ on labelOverruns for the measurement.
+  const overruns = chipResponses.flatMap((r) =>
+    labelOverruns(r.ok ? r.json : null, r.case.labelMax).map((d) => `${r.id}/${d}`));
+  const labelCount = chipResponses.reduce((a, r) => a + picksOf(r.ok ? r.json : null).length, 0);
+  console.log(`    label overruns (reported, not gated): ${overruns.length}/${labelCount} over ` +
+    `${fixtures.timelineChips[0].labelMax} chars — each keeps its pick and falls back to the heuristic label`);
+  for (const o of overruns) console.log(`      · ${o}`);
+
+  for (const r of chipResponses) {
+    if (r.case.minPicks === null) {
+      console.log(`    (${r.id} is ungated on count: ${r.ok ? r.json.picks.length : 'no answer'} pick(s))`);
+      continue;
+    }
+    const picks = r.ok ? r.json.picks : [];
+    gate(`${r.id}: a chapter that turns is not answered with silence (≥${r.case.minPicks})`,
+      picks.length >= r.case.minPicks && picks.every((p) => r.case.offeredRanks.includes(p.rank)),
+      `got ${picks.length} pick(s): [${picks.map((p) => p.rank).join(', ')}]`);
+  }
+
+  const timed = [...responses, ...chipResponses].filter((r) => r.timings);
   const totalTok = timed.reduce((a, r) => a + r.timings.tokens, 0);
   const totalGen = timed.reduce((a, r) => a + r.timings.genMs, 0);
   console.log(

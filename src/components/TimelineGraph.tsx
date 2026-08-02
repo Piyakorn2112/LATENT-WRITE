@@ -15,7 +15,7 @@ import { memo } from "react";
 import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
 import { measureTextWidth } from "../lib/measure-text";
-import { selectTimelineChips } from "../lib/narrative-events";
+import { selectDisplayChips } from "../lib/narrative-events";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
 
@@ -101,7 +101,7 @@ function computeRows(chapters: TimelineChapterDisplay[], storyGraph: StoryGraph)
     // most TIMELINE_CHIP_BUDGET, so a chapter holding 20 events reserved 20 rows
     // of height and showed 3 — the big uneven vertical gaps between chapters.
     // Same selector as the render below, so the two cannot disagree again.
-    const evCount  = selectTimelineChips(entry?.majorEvents ?? []).length;
+    const evCount  = selectDisplayChips(entry).length;
     const chY      = cursor + ROW_H_BASE / 2;
     const evStartY = cursor + ROW_H_BASE + EVENT_H / 2;
     const totalH   = ROW_H_BASE + evCount * EVENT_H;
@@ -154,7 +154,10 @@ function TimelineGraphImpl({
         // ★★ And it must SELECT BY RANK, not by slicing: the stored array is in
         // reading order, so a slice shows the chapter's opening rather than its
         // strongest beats (36.1% vs 47.0% on the gold set).
-        const events   = selectTimelineChips(entry?.majorEvents ?? []);
+        // ★★ selectDisplayChips, not selectTimelineChips: it IS the rank
+        // selector until the local model has picked for this chapter, and its
+        // picks are ranks of this same array — never a second event list.
+        const events   = selectDisplayChips(entry);
         const { chapterCenterY: cy, eventStartY: evY } = geoms[i];
         const isActive = ch.id === currentChapterId;
         const analyzed = !!entry;

@@ -1,6 +1,6 @@
 import type { ChapterAnalysisResult } from "./chapter-analysis-runner";
 import type { WorldData } from "../types";
-import { detectNarrativeEvents, selectTimelineChips, type NarrativeEvent } from "./narrative-events";
+import { detectNarrativeEvents, selectDisplayChips, type NarrativeEvent } from "./narrative-events";
 
 /**
  * chapter-observation.ts — the brief above the widgets.
@@ -118,7 +118,11 @@ export function buildChapterBrief(
   // headline (measured on the gold set: 36.1% real, against 47.0% by rank).
   // The headline still reads "A at ¶2, and then B at ¶9" because that is a
   // sequence, but which three it names is now a judgement, not a position.
-  const lead = selectTimelineChips(major.length ? major : events, 3);
+  // No `lmChips` here and there cannot be: the brief runs off a LIVE analysis
+  // result, not off a stored ChapterGraphEntry, so nothing has been asked about
+  // these events yet. It goes through the one display selector anyway, so the
+  // brief and the timeline can never diverge on what "the chapter's three" are.
+  const lead = selectDisplayChips({ majorEvents: major.length ? major : events }, 3);
 
   // ── The lead line.
   let headline: string;

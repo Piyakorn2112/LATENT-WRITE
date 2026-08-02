@@ -17,7 +17,7 @@ import type { Novel, StoryGraph, MajorEvent } from "../types";
 import type { TimelineCharacterTrack } from "../lib/story-graph-display";
 import type { ArcInsight } from "../lib/story-arc-insights";
 import { measureTextWidth } from "../lib/measure-text";
-import { selectTimelineChips } from "../lib/narrative-events";
+import { selectDisplayChips } from "../lib/narrative-events";
 import { CloseIcon } from "./Icon";
 
 type TimelineChapterDisplay = Pick<Novel["chapters"][number], "id" | "number" | "title">;
@@ -807,7 +807,8 @@ function TimelineGraphFullImpl({
     const nr     = entry ? nodeRadius(entry.role, entry.tensionPeak) : 6;
     // Best by RANK, drawn in reading order — never a slice of the stored array,
     // which is ordered by paragraph and would select the chapter's opening.
-    const events = selectTimelineChips(entry?.majorEvents ?? []);
+    // The local model's picks, when it has any, are ranks OF THIS ARRAY.
+    const events = selectDisplayChips(entry);
     return { ch, entry, x, y, color, nr, isAct: false, isInspect: false, events };
   }), [chapters, storyGraph]);
 
