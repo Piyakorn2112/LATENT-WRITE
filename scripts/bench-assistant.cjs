@@ -81,9 +81,12 @@ async function main() {
     if (!prefill.length) continue;
     // A rough system-prompt size in tokens, for reading the prefill column.
     const sysTok = Math.round(c.systemPrompt.length / 4);
+    // ★ COLD vs WARM. Run 1 of a task type prefills its system prompt for real;
+    //   runs 2+ reuse the cached prefix. A median hides the difference, and the
+    //   two respond to different levers (batchSize helps only the cold one).
     const mg = median(gen);
     console.log(
-      `${task.padEnd(26)} ${String(sysTok).padStart(7)} ${`${median(prefill)}ms`.padStart(9)} ` +
+      `${task.padEnd(26)} ${String(sysTok).padStart(7)} ${`${prefill[0]}/${median(prefill.slice(1))}ms`.padStart(12)} ` +
       `${`${mg}ms`.padStart(8)} ${String(tokens).padStart(5)} ` +
       `${(mg > 0 ? (tokens / (mg / 1000)).toFixed(1) : '0').padStart(10)} ${`${median(total)}ms`.padStart(8)}`,
     );

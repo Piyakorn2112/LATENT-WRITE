@@ -133,6 +133,15 @@ async function handleLoad(msg) {
   loadingPromise = (async () => {
     await ensureBinding();
     model = await llama.loadModel({ modelPath, gpuLayers, useMmap: true });
+    // ★ MEASURED AND REJECTED: batchSize. The default is 512 and our prompts run
+    //   to ~1300 tokens, so a COLD prefill splits across passes. batchSize 2048
+    //   cut the longest cold prefill (timeline-chips, 911-token system prompt)
+    //   3027ms → 1196ms, but made the three SHORTER tasks worse (adjudication
+    //   653 → 945ms), each figure a single noisy sample. It also enlarges the
+    //   compute buffer, which is real memory on the 8 GB floor machine. The
+    //   warm path — the one that actually dominates, since the scheduler works
+    //   a burst of one task type at a time — is ~70ms either way. Not worth it.
+    //   Re-measure with scripts/bench-assistant.cjs before revisiting.
     context = await model.createContext({ contextSize, sequences: 1 });
     sequence = context.getSequence();
     loaded = {
