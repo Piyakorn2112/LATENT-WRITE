@@ -207,6 +207,30 @@ those three together and run the two suites above.
 
 Test suites exit with code 1 if below target.
 
+## Knowledge ledger + local assistant
+
+Spec and measured decisions: `plans/knowledge-ledger-and-local-adjudicator.md`.
+The deterministic ledger (`knowledge-ledger.ts`, `knowledge-store.ts`) is a
+high-recall candidate generator; a grammar-constrained local model
+(`electron/assistant*.cjs`, Qwen3-1.7B in a utilityProcess) adjudicates. Only a
+confident `break` ever surfaces, through `surfacedKnowledgeFindings` — the ONE
+display selector. Writer rulings are durable. The assistant is generic: entity
+scan review (`entity-review.ts`) is the second consumer.
+
+- `npm run test:knowledge-ledger` — funnel gates, synthetic-break recall ≥85%,
+  monotonicity, anchor retirement (DEV books only; never tune on TEST)
+- `npm run test:evidence-pack` — pack determinism, budget, drop order, snapshot
+- `npm run verify:assistant-runtime` — utilityProcess runtime, cancellation,
+  RSS reclaim (Electron, needs the downloaded model; SKIPs without it)
+- `npm run verify:assistant-tasks` — live model gates for both tasks; fixtures
+  regenerate from the real modules. ★ the wire label is `no_way_to_know`
+  because `break` was UNREACHABLE for the small model — do not "simplify" it
+- `npm run verify:knowledge-e2e` — the whole chain in the real app (hermetic
+  profile via LW_USER_DATA): backfill → candidate → sweep → verdict persisted.
+  Verifies WIRING, not judgment — do not tighten it to demand a verdict value
+- `npm run verify:cross-widgets` — deep widgets present in the panel (the
+  dropped-intelligenceLevel regression)
+
 ## Liquid glass — treat as pixel-frozen
 
 `src/lib/liquid-glass-worker.ts` (per-pixel displacement-map math) and

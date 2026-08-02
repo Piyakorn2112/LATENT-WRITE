@@ -7,7 +7,17 @@ import {
   type ScanProgress,
   type ScanResult,
 } from "../lib/world-data";
-import type { Novel, WorldData } from "../types";
+import { loadPrefs } from "../lib/preferences";
+import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
+import {
+  ENTITY_REVIEW_TASK,
+  applyProposalsToScanResult,
+  reviewEntities,
+  selectReviewable,
+  type EntityReviewChange,
+  type EntityReviewEntry,
+} from "../lib/entity-review";
+import type { AdaptivePredictionTrace, Novel, WorldData } from "../types";
 
 /**
  * CastConfirmOverlay — the cold-start moment.
@@ -178,6 +188,100 @@ function mergeShortForms(
   return [...out, ...merged.values()];
 }
 
+// ─── Assistant refinement of the scan (invisible) ──────────────────────────
+//
+// The cold-start screen is exactly where a laundered name hurts most: whatever
+// lands in the character bucket here becomes the manuscript's ground truth. So
+// after the deterministic scan finishes, the local model is handed ONLY the
+// names the scan itself flagged as uncertain, sees two ±140-char snippets of
+// each, and may move them between buckets or drop them as "not-a-name". The
+// writer sees a better list and nothing else. The deterministic result is
+// first-class — it is what ships whenever the assistant is off, absent, slow,
+// or wrong-shaped.
+//
+// The same three helpers exist in WorldDataView.tsx. They are duplicated
+// rather than shared because these two scan surfaces are the only consumers
+// and neither owns the other.
+
+/** Share of the progress bar the deterministic scan keeps when a review may
+ *  follow; the review coda owns the rest. Never reached in browser mode. */
+const REVIEW_PROGRESS_SPLIT = 0.9;
+
+/** The half of the gate that is knowable synchronously, before the scan starts.
+ *  False in the browser build, which is what keeps that path unchanged. */
+function assistantMayReview(): boolean {
+  try {
+    return (
+      loadPrefs().assistant?.enabled === true &&
+      typeof window !== "undefined" &&
+      !!window.electronAPI
+    );
+  } catch {
+    return false;
+  }
+}
+
+const REVIEWABLE_TYPES = new Set(["character", "place", "faction", "entity"]);
+
+/** Scan traces → review entries. The scan's own uncertainty rides along;
+ *  `selectReviewable` (not this) decides what is worth a model run. */
+function reviewEntriesFromTraces(
+  traces: readonly AdaptivePredictionTrace[],
+): EntityReviewEntry[] {
+  const seen = new Set<string>();
+  const entries: EntityReviewEntry[] = [];
+  for (const trace of traces) {
+    const name = trace.spanText;
+    const label = trace.predictedLabel;
+    if (!name || seen.has(name) || !label || !REVIEWABLE_TYPES.has(label)) continue;
+    seen.add(name);
+    entries.push({
+      name,
+      currentType: label as EntityReviewEntry["currentType"],
+      needsReview: trace.needsReview,
+      ambiguityGap: trace.ambiguityGap,
+    });
+  }
+  return entries;
+}
+
+/**
+ * Never throws, never rejects, never blocks the scan on the model: every exit
+ * that is not a clean set of proposals returns the scan untouched.
+ *
+ * `text` is the scanned span in full, but only `usageSnippets` reads it — the
+ * model is sent two short windows per name, never the manuscript.
+ */
+async function refineScanWithAssistant(
+  scan: ScanResult,
+  traces: readonly AdaptivePredictionTrace[],
+  text: string,
+  signal: AbortSignal,
+  onReviewProgress: (done: number, total: number) => void,
+): Promise<{ scan: ScanResult; changes: EntityReviewChange[] }> {
+  const untouched = { scan, changes: [] as EntityReviewChange[] };
+  try {
+    if (!(await assistantAvailable()) || signal.aborted) return untouched;
+    const selected = selectReviewable(reviewEntriesFromTraces(traces));
+    if (selected.length === 0) return untouched;
+
+    let done = 0;
+    onReviewProgress(done, selected.length);
+    const proposals = await reviewEntities(
+      { entries: selected, text },
+      {
+        run: assistantRunJSON,
+        isCancelled: () => signal.aborted,
+        onProposal: () => onReviewProgress((done += 1), selected.length),
+      },
+    );
+    if (signal.aborted || proposals.length === 0) return untouched;
+    return applyProposalsToScanResult(scan, proposals);
+  } catch {
+    return untouched;
+  }
+}
+
 // ─── Component ─────────────────────────────────────────────────────────────
 
 type Phase = "scanning" | "review";
@@ -204,15 +308,50 @@ function CastConfirmOverlayInner({ novel, onConfirm, onSkip }: Props) {
     let raf2 = 0;
     const controller = new AbortController();
     const scanTexts = novel.chapters.map((c) => c.content);
+    // Decided before the first byte is scanned so the progress readout can
+    // leave room for the review coda instead of jumping backwards from 100%.
+    const mayReview = assistantMayReview();
 
     raf1 = requestAnimationFrame(() => {
       raf2 = requestAnimationFrame(() => {
         void (async () => {
+          const predictionTraceOut: { value: AdaptivePredictionTrace[] } = { value: [] };
+          const reportReview = (done: number, total: number) =>
+            setProgress({
+              stage: "classify",
+              label: "Reviewing ambiguous names",
+              detail: `Name ${Math.min(done + 1, total)} / ${total}`,
+              completed: done,
+              total,
+              fraction:
+                REVIEW_PROGRESS_SPLIT +
+                (1 - REVIEW_PROGRESS_SPLIT) * (done / Math.max(1, total)),
+            });
           try {
-            const results = await scanAndClassify(scanTexts, emptyWorldData(), 2, {
-              onProgress: setProgress,
+            const scanned = await scanAndClassify(scanTexts, emptyWorldData(), 2, {
+              predictionTraceOut,
+              onProgress: mayReview
+                ? (progress) =>
+                    setProgress({
+                      ...progress,
+                      fraction: progress.fraction * REVIEW_PROGRESS_SPLIT,
+                    })
+                : setProgress,
               signal: controller.signal,
             });
+            if (controller.signal.aborted) return;
+
+            const results = mayReview
+              ? (
+                  await refineScanWithAssistant(
+                    scanned,
+                    predictionTraceOut.value,
+                    scanTexts.join("\n\n"),
+                    controller.signal,
+                    reportReview,
+                  )
+                ).scan
+              : scanned;
             if (controller.signal.aborted) return;
             scanResultRef.current = results;
 
@@ -249,6 +388,10 @@ function CastConfirmOverlayInner({ novel, onConfirm, onSkip }: Props) {
     });
     return () => {
       controller.abort();
+      // `isCancelled` stops the loop between names; this releases the request
+      // already in flight so a dismissed overlay cannot hold the single-flight
+      // queue.
+      if (mayReview) cancelWhere((job) => job.task === ENTITY_REVIEW_TASK);
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
     };

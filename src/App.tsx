@@ -83,6 +83,15 @@ import {
   knowledgeContentHash,
   retireDeadAnchors,
 } from "./lib/knowledge-ledger";
+import { runPendingAdjudications, ADJUDICATOR_TASK } from "./lib/adjudicator";
+import {
+  assistantAvailable,
+  assistantModelId,
+  assistantRunJSON,
+  cancelWhere as cancelAssistantWhere,
+} from "./lib/assistant-client";
+import { toParagraphs, type ChapterAnalysisResult } from "./lib/chapter-analysis-runner";
+import { runChapterAnalysisInWorker } from "./lib/analysis-worker-client";
 import {
   computeAdaptiveMetrics,
   emptyAdaptiveStore,
@@ -96,6 +105,7 @@ import { applyOnlineAdaptiveUpdate, retrainAdaptiveModels } from "./lib/adaptive
 import type {
   AdaptivePredictionRecord,
   AdaptivePredictionTrace,
+  Chapter,
   Novel,
   WorldData,
   AnnotationTarget,
@@ -694,69 +704,136 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Apply one chapter's analysis to the ledger: extract facts from the
+  // analysed SNAPSHOT (paragraphs, segments and verbatim anchors must match
+  // the text they came from), rebuild candidates over every chapter on file,
+  // then re-check anchors against LIVE text (retireDeadAnchors) — that is the
+  // invalidation contract. Shared by the active-chapter effect below and the
+  // background backfill.
+  const applyLedgerChapterFacts = useCallback((
+    chapter: Chapter,
+    chapterNumber: number,
+    content: string,
+    paragraphs: string[],
+    speechResults: ChapterAnalysisResult["speechResults"],
+  ) => {
+    const store = knowledgeStoreRef.current;
+    const hash = knowledgeContentHash(content);
+    if (store.chapters[chapter.id]?.contentHash === hash) return;
+
+    const facts = buildChapterKnowledgeFacts({
+      chapterId: chapter.id,
+      chapterNumber,
+      content,
+      paragraphs,
+      speechResults,
+      // Characters only: places and factions were a measured noise class.
+      characterNames: entityNameMap.characters,
+      // Whole-book corpus for the common-word-name test — chapter-scoped
+      // counts read sentence-initial words as names.
+      nameFilterText: novel.chapters.map((c) => c.content).join("\n\n"),
+    });
+
+    const chapters = { ...store.chapters, [chapter.id]: facts };
+    const ordered = novel.chapters
+      .map((c) => chapters[c.id])
+      .filter((entry): entry is ChapterKnowledgeFacts => !!entry);
+
+    // The writer's own canon and adjudicated offscreen knowledge are inputs
+    // to the rebuild, never outputs of it.
+    const durable = store.facts.filter(
+      (fact) => fact.how === "author-asserted" || fact.how === "reference-implied",
+    );
+    const built = buildLedger(ordered, { decisions: store.decisions, extraFacts: durable });
+
+    // buildLedger only emits the EARLIEST channel per pair, so a durable fact
+    // can be absent from its output while still being the writer's ruling.
+    // Carry it forward explicitly — a decision may not be lost to a rebuild.
+    const factId = (f: KnowledgeFact) => `${f.subject}${f.entity}${f.how}${f.chapterId}`;
+    const emitted = new Set(built.facts.map(factId));
+    const nextFacts = [...built.facts, ...durable.filter((f) => !emitted.has(factId(f)))];
+
+    const merged: KnowledgeLedgerStore = {
+      ...store,
+      chapters,
+      facts: nextFacts,
+      candidates: mergeLedgerCandidates(store.candidates, built.candidates),
+    };
+    const live = new Map(novel.chapters.map((c) => [c.id, c.content] as const));
+    commitKnowledgeStore(retireDeadAnchors(merged, live), "debounced");
+  }, [novel.chapters, entityNameMap.characters, commitKnowledgeStore]);
+
   // Update the knowledge ledger whenever analysis settles — same shape, same
   // 120ms yield, same content-hash gate as the StoryGraph effect above.
-  //
-  // Facts are extracted from the analysed SNAPSHOT, not the live chapter text:
-  // paragraphs, speech segments and the verbatim sentence anchors all come from
-  // that snapshot, so deriving them against text the writer has since changed
-  // would produce anchors that cannot be found. Anchors are then re-checked
-  // against LIVE text (retireDeadAnchors) — that is the invalidation contract.
   useEffect(() => {
     if (!analysisResult || !activeChapter || !activeChapter.content.trim()) return;
     if (prefs.storyNlpEnabled === false) return; // user disabled background analysis
     const chapter = activeChapter;
     const content = analysisResult.contentSnapshot || chapter.content;
-    const hash = knowledgeContentHash(content);
 
     const timer = setTimeout(() => {
-      const store = knowledgeStoreRef.current;
-      if (store.chapters[chapter.id]?.contentHash === hash) return;
-
-      const facts = buildChapterKnowledgeFacts({
-        chapterId: chapter.id,
-        chapterNumber: chapter.number ?? activeChapterIndex + 1,
+      applyLedgerChapterFacts(
+        chapter,
+        chapter.number ?? activeChapterIndex + 1,
         content,
-        paragraphs: analysisResult.paragraphs,
-        speechResults: analysisResult.speechResults,
-        // Characters only: places and factions were a measured noise class.
-        characterNames: entityNameMap.characters,
-        // Whole-book corpus for the common-word-name test — chapter-scoped
-        // counts read sentence-initial words as names.
-        nameFilterText: novel.chapters.map((c) => c.content).join("\n\n"),
-      });
-
-      const chapters = { ...store.chapters, [chapter.id]: facts };
-      const ordered = novel.chapters
-        .map((c) => chapters[c.id])
-        .filter((entry): entry is ChapterKnowledgeFacts => !!entry);
-
-      // The writer's own canon and adjudicated offscreen knowledge are inputs
-      // to the rebuild, never outputs of it.
-      const durable = store.facts.filter(
-        (fact) => fact.how === "author-asserted" || fact.how === "reference-implied",
+        analysisResult.paragraphs,
+        analysisResult.speechResults,
       );
-      const built = buildLedger(ordered, { decisions: store.decisions, extraFacts: durable });
-
-      // buildLedger only emits the EARLIEST channel per pair, so a durable fact
-      // can be absent from its output while still being the writer's ruling.
-      // Carry it forward explicitly — a decision may not be lost to a rebuild.
-      const factId = (f: KnowledgeFact) => `${f.subject}${f.entity}${f.how}${f.chapterId}`;
-      const emitted = new Set(built.facts.map(factId));
-      const nextFacts = [...built.facts, ...durable.filter((f) => !emitted.has(factId(f)))];
-
-      const merged: KnowledgeLedgerStore = {
-        ...store,
-        chapters,
-        facts: nextFacts,
-        candidates: mergeLedgerCandidates(store.candidates, built.candidates),
-      };
-      const live = new Map(novel.chapters.map((c) => [c.id, c.content] as const));
-      commitKnowledgeStore(retireDeadAnchors(merged, live), "debounced");
     }, 120);
 
     return () => clearTimeout(timer);
   }, [analysisResult]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Ledger backfill ─────────────────────────────────────────────────────
+  // The effect above only covers chapters the writer VISITS; a freshly opened
+  // book would never gain full-book coverage, so cross-chapter candidates
+  // could not exist (the knowledge e2e caught exactly this hole). Backfill
+  // analyses ONE missing or stale chapter per idle tick, through the same
+  // worker the editor uses, then re-fires off its own store commit until
+  // nothing is missing. Failures are skipped for the session — one broken
+  // chapter must not wedge the loop.
+  const ledgerBackfillBusy = useRef(false);
+  const ledgerBackfillSkip = useRef(new Set<string>());
+  useEffect(() => {
+    if (prefs.storyNlpEnabled === false) return;
+    if (entityNameMap.characters.length === 0) return; // cold start: no cast yet
+    const missingIndex = novel.chapters.findIndex((c) => {
+      if (!c.content.trim() || ledgerBackfillSkip.current.has(c.id)) return false;
+      const onFile = knowledgeStore.chapters[c.id];
+      return !onFile || onFile.contentHash !== knowledgeContentHash(c.content);
+    });
+    if (missingIndex === -1 || ledgerBackfillBusy.current) return;
+    const target = novel.chapters[missingIndex];
+
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        if (ledgerBackfillBusy.current) return;
+        ledgerBackfillBusy.current = true;
+        try {
+          const result = await runChapterAnalysisInWorker({
+            chapter: target,
+            prevContext: null,
+            siblingStats: [],
+            knownNames: entityNameMap.characters,
+            worldData: novel.worldData,
+            level: "default",
+          });
+          applyLedgerChapterFacts(
+            target,
+            target.number ?? missingIndex + 1,
+            result.contentSnapshot || target.content,
+            result.paragraphs,
+            result.speechResults,
+          );
+        } catch {
+          ledgerBackfillSkip.current.add(target.id);
+        } finally {
+          ledgerBackfillBusy.current = false;
+        }
+      })();
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [knowledgeStore, novel.chapters, prefs.storyNlpEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => {
     if (knowledgeSaveTimerRef.current !== null) {
@@ -798,6 +875,104 @@ export default function App() {
       sentence: candidate.sentence,
     }), "now");
   }, [commitKnowledgeStore]);
+
+  // ── The adjudication sweep ──────────────────────────────────────────────
+  // Idle-gated: 3s after the ledger settles with pending normal-band
+  // candidates, and only while the assistant is enabled AND a run can succeed
+  // right now (assistantAvailable is false for no-model/downloading — a
+  // sweep never triggers a download). Any ledger change or unmount bumps the
+  // sweep id, which cancels between items and aborts the in-flight request.
+  // A hidden window defers the START of a sweep (one-shot visibilitychange
+  // re-arm); an already-running item is seconds long and allowed to finish.
+  const adjudicationSweepRef = useRef(0);
+  useEffect(() => {
+    if (!prefs.assistant?.enabled || !window.electronAPI) return;
+    const hasPending = knowledgeStore.candidates.some(
+      (c) => c.status === "pending" && c.band === "normal" && !knowledgeStore.decisions[c.key],
+    );
+    if (!hasPending) return;
+
+    const sweepId = ++adjudicationSweepRef.current;
+    const cancelled = () => adjudicationSweepRef.current !== sweepId;
+
+    const sweep = async () => {
+      if (cancelled()) return;
+      if (document.hidden) {
+        document.addEventListener("visibilitychange", onVisible, { once: true });
+        return;
+      }
+      if (!(await assistantAvailable())) {
+        // Not a terminal state: the model may still be downloading or memory
+        // may be tight right now. Without a retry, a pending candidate would
+        // wait for the next ledger change, which may never come.
+        if (!cancelled()) retryTimer = window.setTimeout(() => { void sweep(); }, 30_000);
+        return;
+      }
+      const modelId = await assistantModelId();
+      if (!modelId || cancelled()) return;
+
+      const store = knowledgeStoreRef.current;
+      const orderedFacts = novel.chapters
+        .map((c) => store.chapters[c.id])
+        .filter((entry): entry is ChapterKnowledgeFacts => !!entry);
+      // The pack reads the SAME split analysis used, against live text; a
+      // candidate whose anchor died is already retired and never swept.
+      const paragraphsByChapterId = new Map(
+        novel.chapters.map((c) => [c.id, toParagraphs(c.content)] as const),
+      );
+      const majorEvents = Object.values(storyGraphRef.current.entries).flatMap((entry) =>
+        entry.majorEvents.map((event) => ({
+          chapterNumber: entry.chapterNumber,
+          label: event.label,
+          sentence: event.sentence,
+          rank: event.rank,
+          agent: event.agent,
+        })),
+      );
+
+      const result = await runPendingAdjudications(store, {
+        run: assistantRunJSON,
+        modelId,
+        packInputFor: (candidate) => ({
+          candidate,
+          chapters: orderedFacts,
+          facts: store.facts,
+          decisions: store.decisions,
+          paragraphsByChapterId,
+          worldData: novel.worldData ?? null,
+          majorEvents,
+          // Rung 6 (embedding retrieval) is not wired yet; the pack degrades
+          // honestly without it (gated in test-evidence-pack).
+          budgetTokens: 2000,
+        }),
+      }, { isCancelled: cancelled });
+
+      // Verdicts reached against a snapshot only land on candidates whose
+      // sentence is still the one that was judged.
+      if (result.candidates.length === 0 && result.impliedFacts.length === 0) return;
+      const current = knowledgeStoreRef.current;
+      const byKey = new Map(result.candidates.map((c) => [c.key, c] as const));
+      const candidates = current.candidates.map((c) => {
+        const updated = byKey.get(c.key);
+        return updated && updated.sentence === c.sentence ? updated : c;
+      });
+      const factId = (f: KnowledgeFact) => `${f.subject}|${f.entity}|${f.how}`;
+      const known = new Set(current.facts.map(factId));
+      const impliedFacts = result.impliedFacts.filter((f) => !known.has(factId(f)));
+      commitKnowledgeStore({ ...current, candidates, facts: [...current.facts, ...impliedFacts] }, "now");
+    };
+    const onVisible = () => { if (!document.hidden && !cancelled()) void sweep(); };
+
+    let retryTimer: number | null = null;
+    const timer = window.setTimeout(() => { void sweep(); }, 3000);
+    return () => {
+      window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      adjudicationSweepRef.current++;
+      cancelAssistantWhere(({ task }) => task === ADJUDICATOR_TASK);
+    };
+  }, [knowledgeStore, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { saveStoryGraph(storyGraph); }, [storyGraph]);
   useEffect(() => { saveReviewResults(reviewResults); }, [reviewResults]);

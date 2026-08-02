@@ -39,6 +39,10 @@
     "electron:dev": "npm run build && electron .",
     "electron:build": "npm run build && electron-builder --mac --config electron-builder.yml",
     "test:event-detect": "tsx scripts/test-event-detect.ts",
+    "test:knowledge-ledger": "tsx scripts/test-knowledge-ledger.ts",
+    "test:evidence-pack": "tsx scripts/test-evidence-pack.ts",
+    "verify:assistant-tasks": "electron scripts/verify-assistant-tasks.cjs",
+    "verify:knowledge-e2e": "node scripts/verify-knowledge-e2e.mjs",
     "audit:ood-events": "tsx scripts/ood-event-audit.ts",
     "print:chapter": "tsx scripts/print-chapter.ts",
     "test:narrative-lm": "tsx scripts/test-narrative-lm.ts",
@@ -86,6 +90,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^42.1.0",
     "electron-builder": "^26.8.1",
+    "playwright-core": "^1.62.1",
     "tsx": "^4.22.0",
     "typescript": "^5.6.3",
     "vite": "^6.0.0"

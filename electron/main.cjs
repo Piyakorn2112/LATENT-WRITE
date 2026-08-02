@@ -55,6 +55,12 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');
 
 app.setName('Latent Write');
 
+// Hermetic-profile seam for end-to-end harnesses (verify-knowledge-e2e):
+// a test run must never read or mutate the writer's real userData (their
+// last-project pointer, preferences, downloaded models). Harmless in
+// production — the variable is simply absent.
+if (process.env.LW_USER_DATA) app.setPath('userData', process.env.LW_USER_DATA);
+
 // ── App menu (macOS-conventional) ─────────────────────────────────────────
 // Menu items that act on document state forward to the renderer via IPC.
 // Undo/redo forward to the renderer for app-level history.
