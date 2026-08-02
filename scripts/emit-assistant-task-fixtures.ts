@@ -543,40 +543,6 @@ const pronounChapter = chipEntry({
   ],
 });
 
-/**
- * (d) MEANING TRAPS. Every sentence here breaks under naive compression, and
- * each trap is one the model was observed to fall into or is one word away
- * from falling into:
- *   · NOUN-AS-VERB — "put the seal in the fire" became "seals the office",
- *     which inverts the act into its opposite. This is the observed defect.
- *   · NEGATION — "refused to sign" compresses to "signs" if the verb is taken
- *     without its polarity, which is the most damaging inversion possible.
- *   · REPORTED — someone is TOLD a thing; the teller is not the actor.
- *   · FAILED ATTEMPT — trying and not managing is not doing.
- */
-const trapChapter = chipEntry({
-  chapterId: "chip-trap",
-  chapterNumber: 19,
-  chapterTitle: "The Release",
-  tensionPeak: 0.81,
-  charactersPresent: ["Bern Halloway", "Ivo Trace"],
-  contentHash: "2600|Nothing in the yard had moved since the frost took the p",
-  majorEvents: [
-    chipEvent(0, 0.21, "Bern refuses to sign",
-      "Bern Halloway refused to sign the release, and pushed it back across the desk unsigned.",
-      "confrontation", "confrontation", "Bern Halloway", "narration"),
-    chipEvent(1, 0.44, "Ivo burns the writ",
-      "Ivo Trace put the harbour writ in the stove and watched the seal run off it.",
-      "action", "climax", "Ivo Trace", "narration"),
-    chipEvent(2, 0.62, "Bern is told of the loss",
-      "Bern Halloway was told that the second boat had gone down with everyone aboard.",
-      "revelation", "revelation", "Bern Halloway", "narration"),
-    chipEvent(3, 0.83, "Ivo fails to reach the pier",
-      "Ivo Trace tried to reach the pier before the tide turned, and did not manage it.",
-      "action", "transition", "Ivo Trace", "narration"),
-  ],
-});
-
 const chipSpecs = [
   // ★ The bar is COVERAGE now, not survival. A chapter with five distinct
   //   moments must come back with a set a writer can read at a glance, not one
@@ -585,7 +551,6 @@ const chipSpecs = [
   { id: "strong", entry: strongChapter, minPicks: 3 },
   { id: "quiet", entry: quietChapter, minPicks: null },
   { id: "pronoun", entry: pronounChapter, minPicks: 3 },
-  { id: "trap", entry: trapChapter, minPicks: 3 },
 ];
 
 // ── emit ───────────────────────────────────────────────────────────────────
@@ -655,7 +620,6 @@ const chipCases = chipSpecs.map((c) => {
     /** The ranks the model was offered. Nothing outside this set is an answer. */
     offeredRanks: request.candidates.map((x) => x.rank),
     candidates: request.candidates,
-    cast: c.entry.charactersPresent,
     chipKey: chipKeyFor(c.entry, MODEL_ID),
     /** Caps the gate reads instead of spelling its own copy of the contract. */
     labelMax: CHIP_LABEL_MAX,

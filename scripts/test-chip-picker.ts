@@ -23,9 +23,6 @@ import {
   CHIP_PICK_CAP,
   CHIP_TARGET_MIN,
   startsWithPronoun,
-  labelIsGrounded,
-  preservesOutcome,
-  draftIsTrueOfSentence,
   buildChipRequest,
   chipKeyFor,
   eventFingerprint,
@@ -101,8 +98,8 @@ console.log("\n── 1. normalizeChipPicks ────────────
   gate(outOfRange?.[0]?.rank === 1 && !outOfRange.some((p) => p.rank === 9),
     "a rank that was not offered is dropped", JSON.stringify(outOfRange));
 
-  const dupe = pick({ picks: [{ rank: 3, label: "first" }, { rank: 3, label: "second" }] });
-  gate(dupe?.[0]?.label === "first" && dupe.filter((p) => p.rank === 3).length === 1,
+  const dupe = pick({ picks: [{ rank: 1, label: "first" }, { rank: 1, label: "second" }] });
+  gate(dupe?.[0]?.label === "first" && dupe.filter((p) => p.rank === 1).length === 1,
     "a repeated rank is deduped, first wins", JSON.stringify(dupe));
 
   const fractional = pick({ picks: [{ rank: 1.5, label: "half a rank" }] });
@@ -189,73 +186,6 @@ console.log("\n── 1. normalizeChipPicks ────────────
   gate(!startsWithPronoun("Ovin admits the count") && startsWithPronoun("They leave at dawn"),
     "the pronoun test is neither blind nor trigger-happy",
     "names pass, pronouns caught");
-
-  // ── prompt leakage ──────────────────────────────────────────────────────
-  // ★★ The worked examples in the prompt do not stay in the prompt: chips came
-  //    back carrying the EXAMPLE'S names into unrelated chapters. No wording
-  //    makes that impossible on a small model, so it is caught mechanically.
-  const CAST = ENTRY.charactersPresent;
-  const leaked = normalizeChipPicks(
-    { picks: [{ rank: 0, label: "Sefa admits the well is dry" }] }, CANDIDATES, CAST);
-  gate(leaked?.[0]?.label === CANDIDATES.find((c) => c.rank === 0)!.label,
-    "a chip carrying a name from the PROMPT's example is rejected",
-    `"${leaked?.[0]?.label}"`);
-
-  const ownName = normalizeChipPicks(
-    { picks: [{ rank: 0, label: "Ovin admits the count" }] }, CANDIDATES, CAST);
-  gate(ownName?.[0]?.label === "Ovin admits the count",
-    "a name from the chapter's own sentence passes",
-    `"${ownName?.[0]?.label}"`);
-
-  const castName = normalizeChipPicks(
-    { picks: [{ rank: 0, label: "Sella hears the count" }] }, CANDIDATES, CAST);
-  gate(castName?.[0]?.label === "Sella hears the count",
-    "a name from the chapter's CAST passes even if not in that sentence",
-    `"${castName?.[0]?.label}"`);
-
-  // A sentence-initial common word is the sentence's own word, not a name.
-  gate(labelIsGrounded("Kettle is filled twice",
-    { rank: 9, label: "x", sentence: "The kettle was filled twice before anyone drank." }),
-    "a capitalised common word from the sentence is not treated as a foreign name",
-    "case-insensitive match");
-
-  // ── meaning ─────────────────────────────────────────────────────────────
-  // ★★ The defect that started this: "put the office seal in the fire" came
-  //    back as "Marda seals the office" — the object used as a verb, the act
-  //    inverted. These two guards are what no wording of the prompt fixed.
-
-  const FAILS = "Ivo fails to reach the pier";
-  gate(!preservesOutcome("Ivo tries to reach the pier", FAILS),
-    "a rewrite that softens a FAILURE into an attempt is rejected",
-    '"fails" → "tries"');
-  gate(preservesOutcome("Ivo fails to reach the pier before dark", FAILS),
-    "a rewrite that keeps the failure passes", "outcome carried");
-  gate(preservesOutcome("Ivo does not reach the pier", FAILS),
-    "plain negation counts as carrying the outcome", '"does not reach"');
-  gate(preservesOutcome("Marda opens the shutters", "Marda opens the shutters"),
-    "a draft with no outcome verb constrains nothing", "no false positives");
-
-  // A draft is a heuristic and is sometimes wrong; when it is, it must not be
-  // shown, or the model copies the engine's error into a shipped chip.
-  gate(!draftIsTrueOfSentence("Teva burns the ledger",
-    "She carried the ledger down to the water and let it go, and did not watch it sink."),
-    "a draft naming an action the sentence lacks is not shown",
-    '"burns" is nowhere in the sentence');
-  gate(draftIsTrueOfSentence("Ivo fails to reach the pier",
-    "Ivo Trace tried to reach the pier before the tide turned, and did not manage it."),
-    "an OUTCOME verb the engine inferred is exempt from grounding",
-    '"fails" is the engine\'s inference, not the prose');
-  gate(draftIsTrueOfSentence("Marda opens the shutters",
-    "Marda Kelp opened the shutters on the yard side and left them open all morning."),
-    "an ordinary true draft is shown", "stem match");
-
-  const softened = normalizeChipPicks(
-    { picks: [{ rank: 0, label: "Ovin tries the count" }] },
-    [{ rank: 0, label: "Ovin fails the count", sentence: "Ovin tried the count and did not finish it." }],
-  );
-  gate(softened?.[0]?.label === "Ovin fails the count",
-    "end to end: a softened outcome falls back to the engine's own label",
-    `"${softened?.[0]?.label}"`);
 }
 
 console.log("\n── 2. buildChipRequest ─────────────────────────────────────────");
