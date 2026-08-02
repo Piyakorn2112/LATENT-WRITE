@@ -43,6 +43,7 @@
     "test:evidence-pack": "tsx scripts/test-evidence-pack.ts",
     "test:chip-picker": "tsx scripts/test-chip-picker.ts",
     "probe:chip-quality": "electron scripts/probe-chip-quality.cjs",
+    "bench:assistant": "electron scripts/bench-assistant.cjs",
     "test:entity-review": "tsx scripts/test-entity-review.ts",
     "test:chapter-summary": "tsx scripts/test-chapter-summary.ts",
     "verify:assistant-tasks": "electron scripts/verify-assistant-tasks.cjs",

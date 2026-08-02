@@ -462,6 +462,37 @@ async function main() {
   gate('no chip leads with a pronoun', pronounChips.length === 0,
     pronounChips.length ? pronounChips.join(' · ') : 'every chip names its actor');
 
+  // ── KV prefix reuse must not leak between requests ──────────────────────
+  // ★★ THE PRICE OF THE 8x PREFILL WIN. The host no longer clears the context
+  //    sequence between requests, so the KV cache carries the previous
+  //    request's tokens and node-llama-cpp reuses the shared prefix. That is
+  //    lossless ONLY if a differing prompt evicts the divergent tail. Run A,
+  //    run a DIFFERENT task, then run A again: if anything from B survived
+  //    into A's context, A's second answer differs from its first.
+  {
+    const a = fixtures.entityReview[0];
+    const b = fixtures.chapterSummaries[0];
+    const askA = (n) => callBridge('assistantRun', {
+      requestId: `contam-a${n}`, task: 'entity-review',
+      systemPrompt: a.systemPrompt, userText: a.userText,
+      schema: a.schema, maxTokens: a.maxTokens, timeoutMs: 90_000,
+    });
+    const first = await askA(1);
+    await callBridge('assistantRun', {
+      requestId: 'contam-b', task: 'chapter-summary',
+      systemPrompt: b.systemPrompt, userText: b.userText,
+      schema: b.schema, maxTokens: b.maxTokens, timeoutMs: 90_000,
+    });
+    const second = await askA(2);
+    const same = first && second && first.ok && second.ok &&
+      JSON.stringify(first.json) === JSON.stringify(second.json);
+    gate('a cached prefix does not leak between different prompts',
+      !!same,
+      same
+        ? 'same answer before and after an unrelated task'
+        : `A₁ ${JSON.stringify(first && first.json)} vs A₂ ${JSON.stringify(second && second.json)}`);
+  }
+
   const timed = [...responses, ...chipResponses, ...summaryResponses].filter((r) => r.timings);
   const totalTok = timed.reduce((a, r) => a + r.timings.tokens, 0);
   const totalGen = timed.reduce((a, r) => a + r.timings.genMs, 0);

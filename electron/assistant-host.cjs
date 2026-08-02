@@ -233,8 +233,29 @@ async function handleRun(msg) {
 
     // A fresh session per run: every request carries its own system prompt, so
     // requests must not inherit each other's chat history. The context SEQUENCE
-    // is reused (allocating one is the expensive part) and its KV cache cleared.
-    await sequence.clearHistory();
+    // is reused, and — the load-bearing part — its KV cache is NOT cleared.
+    //
+    // ★★ DO NOT ADD `await sequence.clearHistory()` HERE. It was here, and it
+    //    cost 8x on prefill. Every request of a task type carries a
+    //    BYTE-IDENTICAL system prompt (400–900 tokens), and LlamaChat already
+    //    calls `sequence.compareContextTokens(tokens)` to find
+    //    `firstDifferentIndex` and evaluate only from there. Clearing the
+    //    history threw that cache away and re-read the system prompt every
+    //    single time.
+    //
+    //    MEASURED, Qwen3-1.7B on Metal, 4 task types × 5 runs
+    //    (scripts/bench-assistant.cjs):
+    //      prefill  583ms → 70ms   (timeline-chips, 911 tokens: 1176ms → 69ms)
+    //      total   1184ms → 673ms  · prefill fell from 51% of the work to 11%
+    //      generation unchanged (554ms → 571ms, noise)
+    //
+    //    It is LOSSLESS because the reused tokens are the same tokens: same
+    //    prefix, same weights, same KV, same logits, and nothing about
+    //    sampling changed. The chip quality probe returned chip-for-chip
+    //    identical output. A prompt that DIFFERS diverges at its first
+    //    different token and the tail is evicted — the "cached prefix does not
+    //    leak between different prompts" gate in verify-assistant-tasks.cjs
+    //    runs A, then B, then A again, and fails if A's two answers differ.
     session = new nlc.LlamaChatSession({
       contextSequence: sequence,
       systemPrompt,
