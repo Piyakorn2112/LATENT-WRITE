@@ -1,0 +1,299 @@
+{
+  "generatedAt": "2026-08-02T10:47:54.895Z",
+  "modelId": "qwen3-1.7b-q4_k_m",
+  "packVersion": 1,
+  "adjudicatorPromptVersion": 1,
+  "entityReviewPromptVersion": 1,
+  "adjudication": [
+    {
+      "id": "break",
+      "expect": "break",
+      "expectVerdict": "no_way_to_know",
+      "expectNotVerdict": null,
+      "candidateKey": "Merrow→Vashti Orn",
+      "speaker": "Merrow",
+      "entity": "Vashti Orn",
+      "chapterNumber": 5,
+      "packHash": "b9b4b74d",
+      "rungsIncluded": [
+        "claim",
+        "facts",
+        "entity-dossier"
+      ],
+      "tokensEstimate": 197,
+      "verdictKey": "14946ce3",
+      "systemPrompt": "You judge continuity of knowledge in a novel. The question is always:\ncould SPEAKER plausibly know about ENTITY at this point in the story?\n\nRules:\n- \"no_way_to_know\": the story so far gives SPEAKER no way to know ENTITY exists,\n  and the reference reads as familiarity, not hearsay.\n- \"plausible_offscreen\": the story implies a channel — shared background,\n  reputation, an offscreen report, membership in the same world — or the\n  reference itself is hearsay/second-hand. When the entity is famous or\n  the speaker's role implies acquaintance, choose this.\n- \"unsure\": evidence is thin either way. PREFER unsure over a guess.\n  A wrong \"no_way_to_know\" wastes the writer's trust; \"unsure\" costs nothing.\n- Judge only from the evidence given. Do not invent story events.\nAnswer as JSON: {\"verdict\",\"confidence\",\"reason\",\"citedChapter\"}.\nreason: one plain sentence a writer can act on, ≤160 characters.",
+      "userText": "CLAIM\nIn chapter 5, Merrow says: “Vashti Orn owes me three winters of silence, and I mean to collect.”\nFull paragraph: Merrow set the lamp on the sill and did not turn around. “Vashti Orn owes me three winters of silence, and I mean to collect.” Talle said nothing, which was answer enough.\nThe question: could Merrow plausibly know about Vashti Orn at this point in the story?\n\nKNOWN FACTS\nMerrow is present in chapters: 1, 2, 5\nVashti Orn is named in chapters: 3, 4, 5\nBefore this claim there is NO chapter where Merrow was present while Vashti Orn came up.\n\nWHO VASHTI ORN IS\nVashti Orn: no dossier; only what the manuscript shows.\nFirst named in chapter 3: The name on the writ was Vashti Orn. Talle read it twice, folded it, and put it in the stove without saying anything to anyone.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "enum": [
+              "no_way_to_know",
+              "plausible_offscreen",
+              "unsure"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "citedChapter": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "maxTokens": 96
+    },
+    {
+      "id": "offscreen",
+      "expect": "not-break",
+      "expectVerdict": null,
+      "expectNotVerdict": "no_way_to_know",
+      "candidateKey": "Doran→Sable Rethe",
+      "speaker": "Doran",
+      "entity": "Sable Rethe",
+      "chapterNumber": 6,
+      "packHash": "d053311c",
+      "rungsIncluded": [
+        "claim",
+        "facts",
+        "entity-dossier",
+        "speaker-dossier"
+      ],
+      "tokensEstimate": 291,
+      "verdictKey": "84cc6cd8",
+      "systemPrompt": "You judge continuity of knowledge in a novel. The question is always:\ncould SPEAKER plausibly know about ENTITY at this point in the story?\n\nRules:\n- \"no_way_to_know\": the story so far gives SPEAKER no way to know ENTITY exists,\n  and the reference reads as familiarity, not hearsay.\n- \"plausible_offscreen\": the story implies a channel — shared background,\n  reputation, an offscreen report, membership in the same world — or the\n  reference itself is hearsay/second-hand. When the entity is famous or\n  the speaker's role implies acquaintance, choose this.\n- \"unsure\": evidence is thin either way. PREFER unsure over a guess.\n  A wrong \"no_way_to_know\" wastes the writer's trust; \"unsure\" costs nothing.\n- Judge only from the evidence given. Do not invent story events.\nAnswer as JSON: {\"verdict\",\"confidence\",\"reason\",\"citedChapter\"}.\nreason: one plain sentence a writer can act on, ≤160 characters.",
+      "userText": "CLAIM\nIn chapter 6, Doran says: “Sable Rethe signs every writ that leaves this house, and she has not signed this one.”\nFull paragraph: Doran read it once and pushed it back across the wood. “Sable Rethe signs every writ that leaves this house, and she has not signed this one.” He did not pick up his pen again until Hesk had gone.\nThe question: could Doran plausibly know about Sable Rethe at this point in the story?\n\nKNOWN FACTS\nDoran is present in chapters: 1, 2, 3, 6\nSable Rethe is named in chapters: 4, 5, 6\nBefore this claim there is NO chapter where Doran was present while Sable Rethe came up.\n\nWHO SABLE RETHE IS\nSable Rethe: Warden of the Ninefold Court. Her name is cried in every market from the river to the pass, and children are threatened with it. No writ leaves the Court without her seal.\nFirst named in chapter 4: Sable Rethe did not keep him waiting, which frightened him more than an hour on the bench would have. She read the page, said four words, and gave it back.\n\nWHO DORAN IS\nDoran: tax-clerk of the Ninefold Court. Keeps the Court's lower ledgers. Has served the Court eleven years and has never been called above the third stair.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "enum": [
+              "no_way_to_know",
+              "plausible_offscreen",
+              "unsure"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "citedChapter": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "maxTokens": 96
+    },
+    {
+      "id": "thin",
+      "expect": "any",
+      "expectVerdict": null,
+      "expectNotVerdict": null,
+      "candidateKey": "Pell→Iskra Bene",
+      "speaker": "Pell",
+      "entity": "Iskra Bene",
+      "chapterNumber": 3,
+      "packHash": "6236a014",
+      "rungsIncluded": [
+        "claim",
+        "facts",
+        "entity-dossier"
+      ],
+      "tokensEstimate": 179,
+      "verdictKey": "1c95ed01",
+      "systemPrompt": "You judge continuity of knowledge in a novel. The question is always:\ncould SPEAKER plausibly know about ENTITY at this point in the story?\n\nRules:\n- \"no_way_to_know\": the story so far gives SPEAKER no way to know ENTITY exists,\n  and the reference reads as familiarity, not hearsay.\n- \"plausible_offscreen\": the story implies a channel — shared background,\n  reputation, an offscreen report, membership in the same world — or the\n  reference itself is hearsay/second-hand. When the entity is famous or\n  the speaker's role implies acquaintance, choose this.\n- \"unsure\": evidence is thin either way. PREFER unsure over a guess.\n  A wrong \"no_way_to_know\" wastes the writer's trust; \"unsure\" costs nothing.\n- Judge only from the evidence given. Do not invent story events.\nAnswer as JSON: {\"verdict\",\"confidence\",\"reason\",\"citedChapter\"}.\nreason: one plain sentence a writer can act on, ≤160 characters.",
+      "userText": "CLAIM\nIn chapter 3, Pell says: “Iskra Bene will not wait past the thaw.”\nFull paragraph: Pell put the last crate down where it did not belong and straightened up. “Iskra Bene will not wait past the thaw.” Ruen went back to the ropes.\nThe question: could Pell plausibly know about Iskra Bene at this point in the story?\n\nKNOWN FACTS\nPell is present in chapters: 1, 3\nIskra Bene is named in chapters: 2, 3\nBefore this claim there is NO chapter where Pell was present while Iskra Bene came up.\n\nWHO ISKRA BENE IS\nIskra Bene: no dossier; only what the manuscript shows.\nFirst named in chapter 2: The tally for the season ran to eleven names. Iskra Bene was one of them, written small at the bottom in a different ink.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "enum": [
+              "no_way_to_know",
+              "plausible_offscreen",
+              "unsure"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "citedChapter": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "maxTokens": 96
+    },
+    {
+      "id": "canary",
+      "expect": "not-break",
+      "expectVerdict": null,
+      "expectNotVerdict": "no_way_to_know",
+      "candidateKey": "Merrow→Vashti Orn",
+      "speaker": "Merrow",
+      "entity": "Vashti Orn",
+      "chapterNumber": 5,
+      "packHash": "961394d1",
+      "rungsIncluded": [
+        "claim",
+        "facts",
+        "entity-dossier",
+        "rulings"
+      ],
+      "tokensEstimate": 217,
+      "verdictKey": "2ca8c6f0",
+      "systemPrompt": "You judge continuity of knowledge in a novel. The question is always:\ncould SPEAKER plausibly know about ENTITY at this point in the story?\n\nRules:\n- \"no_way_to_know\": the story so far gives SPEAKER no way to know ENTITY exists,\n  and the reference reads as familiarity, not hearsay.\n- \"plausible_offscreen\": the story implies a channel — shared background,\n  reputation, an offscreen report, membership in the same world — or the\n  reference itself is hearsay/second-hand. When the entity is famous or\n  the speaker's role implies acquaintance, choose this.\n- \"unsure\": evidence is thin either way. PREFER unsure over a guess.\n  A wrong \"no_way_to_know\" wastes the writer's trust; \"unsure\" costs nothing.\n- Judge only from the evidence given. Do not invent story events.\nAnswer as JSON: {\"verdict\",\"confidence\",\"reason\",\"citedChapter\"}.\nreason: one plain sentence a writer can act on, ≤160 characters.",
+      "userText": "CLAIM\nIn chapter 5, Merrow says: “Vashti Orn owes me three winters of silence, and I mean to collect.”\nFull paragraph: Merrow set the lamp on the sill and did not turn around. “Vashti Orn owes me three winters of silence, and I mean to collect.” Talle said nothing, which was answer enough.\nThe question: could Merrow plausibly know about Vashti Orn at this point in the story?\n\nKNOWN FACTS\nMerrow is present in chapters: 1, 5\nVashti Orn is named in chapters: 3, 5\nBefore this claim there is NO chapter where Merrow was present while Vashti Orn came up.\n\nWHO VASHTI ORN IS\nVashti Orn: no dossier; only what the manuscript shows.\nFirst named in chapter 3: The name on the writ was Vashti Orn. Talle read it twice, folded it, and put it in the stove without saying anything to anyone.\n\nPRIOR RULINGS\nMerrow knows Vashti Orn since chapter 1 (the writer confirmed this)",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "verdict": {
+            "enum": [
+              "no_way_to_know",
+              "plausible_offscreen",
+              "unsure"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 160
+          },
+          "citedChapter": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        }
+      },
+      "maxTokens": 96
+    }
+  ],
+  "entityReview": [
+    {
+      "id": "place",
+      "expect": "place",
+      "name": "Halloway Reach",
+      "currentType": "character",
+      "snippets": [
+        "The road to Halloway Reach ran north out of the marsh and did not pretend to be a road for the last two miles of it. Carts went up it loaded and came down empty,…",
+        "…the ford. The tolls were collected twice and recorded once, which surprised nobody who had paid them. By the second week the streets of Halloway Reach were thick with sawdust and the smell of tar, and every window on the water side had been shuttered against the wind coming off the flats."
+      ],
+      "systemPrompt": "You classify how a NAME is used in a novel manuscript. You are given the name\nand one or two verbatim snippets of the manuscript around it. The snippets are\nall the evidence there is.\n\nTypes:\n- \"character\": a person or speaking being. Speaks, is spoken to, acts, is described.\n- \"place\": somewhere people are, go to, or come from. A city, house, road, region.\n- \"faction\": an organised group acting as one. An order, guild, army, court, crew.\n- \"entity\": a named thing that is none of the above. An object, ship, title, artefact.\n- \"not-a-name\": not a name at all. A capitalised sentence-opening common word, a\n  bare title, an interjection, a heading.\n\nRules:\n- Judge only from the snippets. Do not use knowledge of any real or famous name.\n- The grammar around the name is the evidence: \"the road to X\" and \"the streets\n  of X\" are place usage; \"X said\" and \"she asked X\" are character usage.\n- PREFER a low confidence over a guess. Confidence is how much the snippets\n  show, not how certain you feel.\n- If the snippets do not show the word being used as a name, answer \"not-a-name\".\nAnswer as JSON: {\"type\",\"confidence\",\"reason\"}.\nconfidence: a number from 0 to 1. 1 means the snippets settle it, 0 means they\nshow nothing. Never answer above 1.\nreason: one clause of at most 15 words, pointing at what the snippets show.\nStop before 120 characters; a reason that runs long is cut off mid-word.",
+      "userText": "NAME: Halloway Reach\n\nSNIPPETS\n1. The road to Halloway Reach ran north out of the marsh and did not pretend to be a road for the last two miles of it. Carts went up it loaded and came down empty,…\n2. …the ford. The tolls were collected twice and recorded once, which surprised nobody who had paid them. By the second week the streets of Halloway Reach were thick with sawdust and the smell of tar, and every window on the water side had been shuttered against the wind coming off the flats.\n\nThe question: how is \"Halloway Reach\" used in these snippets?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "character",
+              "place",
+              "faction",
+              "entity",
+              "not-a-name"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      },
+      "maxTokens": 128
+    },
+    {
+      "id": "person",
+      "expect": "character",
+      "name": "Corin Ashe",
+      "currentType": "place",
+      "snippets": [
+        "“Wait,” said Corin Ashe, and put a hand flat on the table so that the cups jumped. Nobody waited. The door was already swinging and the cold was already in the…",
+        "…and the cold was already in the room, and whatever had been agreed a moment earlier was plainly not agreed any longer. Nell turned to Corin Ashe and asked whether he had eaten, which was the only kindness she had left to offer that evening."
+      ],
+      "systemPrompt": "You classify how a NAME is used in a novel manuscript. You are given the name\nand one or two verbatim snippets of the manuscript around it. The snippets are\nall the evidence there is.\n\nTypes:\n- \"character\": a person or speaking being. Speaks, is spoken to, acts, is described.\n- \"place\": somewhere people are, go to, or come from. A city, house, road, region.\n- \"faction\": an organised group acting as one. An order, guild, army, court, crew.\n- \"entity\": a named thing that is none of the above. An object, ship, title, artefact.\n- \"not-a-name\": not a name at all. A capitalised sentence-opening common word, a\n  bare title, an interjection, a heading.\n\nRules:\n- Judge only from the snippets. Do not use knowledge of any real or famous name.\n- The grammar around the name is the evidence: \"the road to X\" and \"the streets\n  of X\" are place usage; \"X said\" and \"she asked X\" are character usage.\n- PREFER a low confidence over a guess. Confidence is how much the snippets\n  show, not how certain you feel.\n- If the snippets do not show the word being used as a name, answer \"not-a-name\".\nAnswer as JSON: {\"type\",\"confidence\",\"reason\"}.\nconfidence: a number from 0 to 1. 1 means the snippets settle it, 0 means they\nshow nothing. Never answer above 1.\nreason: one clause of at most 15 words, pointing at what the snippets show.\nStop before 120 characters; a reason that runs long is cut off mid-word.",
+      "userText": "NAME: Corin Ashe\n\nSNIPPETS\n1. “Wait,” said Corin Ashe, and put a hand flat on the table so that the cups jumped. Nobody waited. The door was already swinging and the cold was already in the…\n2. …and the cold was already in the room, and whatever had been agreed a moment earlier was plainly not agreed any longer. Nell turned to Corin Ashe and asked whether he had eaten, which was the only kindness she had left to offer that evening.\n\nThe question: how is \"Corin Ashe\" used in these snippets?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "character",
+              "place",
+              "faction",
+              "entity",
+              "not-a-name"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      },
+      "maxTokens": 128
+    },
+    {
+      "id": "not-a-name",
+      "expect": "not-a-name",
+      "name": "Meanwhile",
+      "currentType": "character",
+      "snippets": [
+        "Meanwhile, the harbour bell rang twice and stopped, as if whoever pulled it had thought better of the third. Nobody came down to the water and…",
+        "…the third. Nobody came down to the water and nobody sent word up from it, and the whole business was left to stand where it had fallen. Meanwhile the rain kept on, thin and steady, and the boats knocked against one another in the dark like animals shifting in a byre."
+      ],
+      "systemPrompt": "You classify how a NAME is used in a novel manuscript. You are given the name\nand one or two verbatim snippets of the manuscript around it. The snippets are\nall the evidence there is.\n\nTypes:\n- \"character\": a person or speaking being. Speaks, is spoken to, acts, is described.\n- \"place\": somewhere people are, go to, or come from. A city, house, road, region.\n- \"faction\": an organised group acting as one. An order, guild, army, court, crew.\n- \"entity\": a named thing that is none of the above. An object, ship, title, artefact.\n- \"not-a-name\": not a name at all. A capitalised sentence-opening common word, a\n  bare title, an interjection, a heading.\n\nRules:\n- Judge only from the snippets. Do not use knowledge of any real or famous name.\n- The grammar around the name is the evidence: \"the road to X\" and \"the streets\n  of X\" are place usage; \"X said\" and \"she asked X\" are character usage.\n- PREFER a low confidence over a guess. Confidence is how much the snippets\n  show, not how certain you feel.\n- If the snippets do not show the word being used as a name, answer \"not-a-name\".\nAnswer as JSON: {\"type\",\"confidence\",\"reason\"}.\nconfidence: a number from 0 to 1. 1 means the snippets settle it, 0 means they\nshow nothing. Never answer above 1.\nreason: one clause of at most 15 words, pointing at what the snippets show.\nStop before 120 characters; a reason that runs long is cut off mid-word.",
+      "userText": "NAME: Meanwhile\n\nSNIPPETS\n1. Meanwhile, the harbour bell rang twice and stopped, as if whoever pulled it had thought better of the third. Nobody came down to the water and…\n2. …the third. Nobody came down to the water and nobody sent word up from it, and the whole business was left to stand where it had fallen. Meanwhile the rain kept on, thin and steady, and the boats knocked against one another in the dark like animals shifting in a byre.\n\nThe question: how is \"Meanwhile\" used in these snippets?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "character",
+              "place",
+              "faction",
+              "entity",
+              "not-a-name"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          }
+        }
+      },
+      "maxTokens": 128
+    }
+  ]
+}
