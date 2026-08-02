@@ -23,6 +23,7 @@ import {
   CHIP_PICK_CAP,
   CHIP_TARGET_MIN,
   startsWithPronoun,
+  labelIsGrounded,
   buildChipRequest,
   chipKeyFor,
   eventFingerprint,
@@ -186,6 +187,35 @@ console.log("\n── 1. normalizeChipPicks ────────────
   gate(!startsWithPronoun("Ovin admits the count") && startsWithPronoun("They leave at dawn"),
     "the pronoun test is neither blind nor trigger-happy",
     "names pass, pronouns caught");
+
+  // ── prompt leakage ──────────────────────────────────────────────────────
+  // ★★ The worked examples in the prompt do not stay in the prompt: chips came
+  //    back carrying the EXAMPLE'S names into unrelated chapters. No wording
+  //    makes that impossible on a small model, so it is caught mechanically.
+  const CAST = ENTRY.charactersPresent;
+  const leaked = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Sefa admits the well is dry" }] }, CANDIDATES, CAST);
+  gate(leaked?.[0]?.label === CANDIDATES.find((c) => c.rank === 0)!.label,
+    "a chip carrying a name from the PROMPT's example is rejected",
+    `"${leaked?.[0]?.label}"`);
+
+  const ownName = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Ovin admits the count" }] }, CANDIDATES, CAST);
+  gate(ownName?.[0]?.label === "Ovin admits the count",
+    "a name from the chapter's own sentence passes",
+    `"${ownName?.[0]?.label}"`);
+
+  const castName = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Sella hears the count" }] }, CANDIDATES, CAST);
+  gate(castName?.[0]?.label === "Sella hears the count",
+    "a name from the chapter's CAST passes even if not in that sentence",
+    `"${castName?.[0]?.label}"`);
+
+  // A sentence-initial common word is the sentence's own word, not a name.
+  gate(labelIsGrounded("Kettle is filled twice",
+    { rank: 9, label: "x", sentence: "The kettle was filled twice before anyone drank." }),
+    "a capitalised common word from the sentence is not treated as a foreign name",
+    "case-insensitive match");
 }
 
 console.log("\n── 2. buildChipRequest ─────────────────────────────────────────");

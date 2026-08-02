@@ -46,17 +46,6 @@
    and spin down (no low-fps chop: the loop only throttles once the rig is
    genuinely quiet), while this side softens the presentation with a light
    defocus and dim. Both ride 0.9s eases and reverse smoothly on wake. */
-.intel-btn--passive-orb-active .intel-orb-live--engine {
-  transform: none;
-  opacity: 0.62;
-}
-.intel-btn--passive-orb-active .orb-engine-canvas {
-  filter: blur(0.9px) saturate(0.92);
-}
-.intel-btn--passive-orb-active .intel-orb-live--engine ~ .intel-mesh-fallback {
-  opacity: 0;
-}
-
 /* ── .toolbar-frame — wrapper giving the single-pill toolbar layout a
    positioned box matching the pill. ── */
 .toolbar-frame {

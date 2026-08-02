@@ -65,8 +65,6 @@ const paletteStyleVars = (palette?: OrbPalette): CSSProperties | undefined => pa
   ? ({ "--orb-a": palette.a, "--orb-b": palette.b, "--orb-c": palette.c } as CSSProperties)
   : undefined;
 
-const IDLE_PASSIVE_ORB_BODY_CLASS = "scroll-edge-idle";
-
 interface IntelBtnProps {
   mode: IntelMode;
   /** Converge phase lean — undefined means the pure equal cycle. */
@@ -93,8 +91,6 @@ function IntelBtn({
   underPalette,
   accentPalette,
 }: IntelBtnProps) {
-  const [passiveOrbActive, setPassiveOrbActive] = useState(false);
-
   // Same 6-orb geometry for ALL modes — auto cycles colours via CSS @property
   // animation, no extra dots, no scale transitions, no jump frames.
   const isAuto = mode === "auto";
@@ -124,31 +120,13 @@ function IntelBtn({
     ? `Intelligence: ${activeModeCopy.label} · ${phaseCopy.label} - ${phaseCopy.description} (click to toggle)`
     : `Intelligence: ${activeModeCopy.label} - ${activeModeCopy.description} (click to toggle)`;
 
-  useEffect(() => {
-    const body = document.body;
-    const applyIdleState = () => {
-      setPassiveOrbActive(body.classList.contains(IDLE_PASSIVE_ORB_BODY_CLASS) && !analyzing);
-    };
-
-    const observer = new MutationObserver(() => {
-      applyIdleState();
-    });
-
-    applyIdleState();
-    observer.observe(body, { attributes: true, attributeFilter: ["class"] });
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [analyzing]);
-
   const renderOrbs = () => [0, 1, 2, 3, 4, 5].map((index) => (
     <span key={index} className="intel-mesh-dot-orb" />
   ));
 
   return (
     <button
-      className={`icon-btn intel-btn ${mode !== "off" ? "icon-btn-active" : ""} ${analyzing ? "intel-btn--analyzing" : ""} ${vivid ? "intel-btn--vivid" : ""} ${passiveOrbActive ? "intel-btn--passive-orb-active" : ""}`}
+      className={`icon-btn intel-btn ${mode !== "off" ? "icon-btn-active" : ""} ${analyzing ? "intel-btn--analyzing" : ""} ${vivid ? "intel-btn--vivid" : ""}`}
       onClick={onClick}
       aria-label={ariaLabel}
       title={titleText}

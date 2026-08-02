@@ -155,7 +155,8 @@ Your job is COVERAGE: the chips together should tell the chapter's story.
   happening, use one of them and spend the other chip elsewhere.
 
 Each chip COMPRESSES its moment into a headline. You are not quoting the
-sentence, you are boiling it down to what happened:
+sentence, you are boiling it down to what happened. Two worked examples —
+they are from a DIFFERENT story, so never write these names in your answer:
 
   moment: "Sefa Turow told the assembly that the well had been dry since the
            spring, and that she had known it the whole time."
@@ -173,8 +174,8 @@ sentence, you are boiling it down to what happened:
   is read on its own, with no sentence beside it to explain a pronoun.
 - Say who does what. Use the shortest name that identifies them. Drop the
   numbers, the reasons, the manner and the second half of the sentence.
-- Every name you write must appear in the candidate's sentence or on its "who"
-  line.
+- EVERY NAME YOU WRITE MUST COME FROM THIS CHAPTER — from the candidate's own
+  sentence or its "who" line. Never carry a name in from anywhere else.
 - Sentence case. Present tense. No quotation marks. No full stop at the end.
 - No melodrama and no selling: not "shocking", "at last", "everything changes",
   "the truth is revealed".
@@ -221,11 +222,6 @@ export const CHIP_REPAIR_SCHEMA = {
 export const CHIP_REPAIR_SYSTEM = `You write one short headline for each moment you are given. Each moment comes
 with the sentence it was found in and the name of the person who acts in it.
 
-  moment: "Sefa Turow told the assembly that the well had been dry since the
-           spring, and that she had known it the whole time."
-  who:    Sefa Turow
-  chip:   Sefa admits the well is dry
-
 - FIVE WORDS. Not six, and no clause with "and" in it.
 - Use the name from "who". DO NOT begin with "He", "She", "They" or "It", and
   do not use a pronoun where a person is meant.
@@ -251,7 +247,19 @@ export function buildChipRepairRequest(
   );
   return {
     systemPrompt: CHIP_REPAIR_SYSTEM,
-    userText: ["MOMENTS", ...lines, "", "Write one headline for each."].join("\n"),
+    // Example in the prompt, not the instructions — same reason as the picker.
+    userText: [
+      "HOW TO COMPRESS (not from this story; its names must not appear in your answer):",
+      '  moment → "Sefa Turow told the assembly that the well had been dry since',
+      '            the spring, and that she had known it the whole time."',
+      "  who    → Sefa Turow",
+      "  chip   → Sefa admits the well is dry",
+      "",
+      "MOMENTS",
+      ...lines,
+      "",
+      "Write one headline for each, using only names that appear above them.",
+    ].join("\n"),
     schema: CHIP_REPAIR_SCHEMA,
     maxTokens,
   };
@@ -262,6 +270,7 @@ export function applyChipRepairs(
   picks: readonly TimelineChipPick[],
   raw: unknown,
   candidates: readonly ChipCandidate[],
+  cast: readonly string[] = [],
 ): TimelineChipPick[] {
   if (!raw || typeof raw !== "object") return [...picks];
   const rewrites = (raw as Record<string, unknown>).rewrites;
@@ -277,6 +286,7 @@ export function applyChipRepairs(
     const repaired = repairLeadingPronoun(value.label, candidate);
     if (!repaired || repaired.length > CHIP_LABEL_MAX) continue;
     if (/[\r\n]/.test(repaired) || startsWithPronoun(repaired)) continue;
+    if (!labelIsGrounded(repaired, candidate, cast)) continue;
     byRank.set(value.rank, repaired);
   }
   return picks.map((p) => (byRank.has(p.rank) ? { ...p, label: byRank.get(p.rank)! } : p));
@@ -375,10 +385,19 @@ export function buildChipRequest(
   const userText = [
     ...header,
     "",
-    "CANDIDATES",
+    // ★★ WHERE THE EXAMPLES LIVE IS A MEASURED TRADE, NOT A STYLE CHOICE.
+    //    In the SYSTEM prompt they teach compression well (12–40 char labels)
+    //    but their own names leak into unrelated chapters. Moved to the USER
+    //    turn — Apple's split (WWDC25 248: instructions are rules, examples go
+    //    in the prompt) — leakage stopped and COMPRESSION COLLAPSED: the quiet
+    //    chapter went straight back to 50–62 char transcriptions. So the
+    //    examples stay in the instructions where they work, and leakage is
+    //    caught by `labelIsGrounded` instead, which no wording could do.
+    "CANDIDATES — the only material for your answer",
     ...lines,
     "",
-    `Pick at most ${CHIP_PICK_CAP} of these ranks and write a label for each.`,
+    `Pick ${CHIP_TARGET_MIN} or ${CHIP_PICK_CAP} of these ranks and write a label for each,`,
+    "using only names that appear above.",
   ].join("\n");
 
   return {
@@ -432,9 +451,41 @@ export function repairLeadingPronoun(label: string, candidate: ChipCandidate): s
     : repaired;
 }
 
+/**
+ * Does every proper noun in the label come from THIS chapter?
+ *
+ * ★★ THE ANTI-LEAK CHECK. Worked examples in a prompt do not stay in the
+ *    prompt: chips came back carrying the EXAMPLE'S names ("Sefa", "the
+ *    warden") into unrelated chapters. Moving the examples out of the
+ *    instructions and into the prompt reduces it, but a small model will still
+ *    reach for a name it just read, and no wording makes that impossible. So
+ *    the rule is enforced here instead: every capitalised word in a chip must
+ *    appear in the moment it anchors to, in that moment's resolved actor, or in
+ *    the chapter's cast. Anything else is a name from somewhere else, and the
+ *    chip falls back to the engine's own label.
+ *
+ * Case-insensitive on purpose — a sentence-initial "Kettle" is the sentence's
+ * own word, not a foreign name.
+ */
+export function labelIsGrounded(
+  label: string,
+  candidate: ChipCandidate,
+  cast: readonly string[] = [],
+): boolean {
+  const haystack = `${candidate.sentence} ${candidate.agent ?? ""} ${cast.join(" ")}`.toLowerCase();
+  const proper = label.match(/\b[A-Z][a-z']+/g) ?? [];
+  return proper.every((word) => {
+    const bare = word.replace(/['’]s?$/, "").toLowerCase();
+    // One-letter and very short fragments carry no identity; skip them rather
+    // than reject a chip over "A" or "In".
+    return bare.length < 3 || haystack.includes(bare);
+  });
+}
+
 export function normalizeChipPicks(
   raw: unknown,
   candidates: readonly ChipCandidate[],
+  cast: readonly string[] = [],
 ): TimelineChipPick[] | null {
   if (!raw || typeof raw !== "object") return null;
   const picksRaw = (raw as Record<string, unknown>).picks;
@@ -459,7 +510,8 @@ export function normalizeChipPicks(
     const repaired = repairLeadingPronoun(labelRaw, candidate);
     const usable =
       repaired !== "" && repaired.length <= CHIP_LABEL_MAX &&
-      !/[\r\n]/.test(repaired) && !startsWithPronoun(repaired);
+      !/[\r\n]/.test(repaired) && !startsWithPronoun(repaired) &&
+      labelIsGrounded(repaired, candidate, cast);
     out.push({ rank: rankRaw, label: usable ? repaired : candidate.label });
   }
 
@@ -552,7 +604,8 @@ export async function runChipPick(
   });
   if (!result.ok) return null;
 
-  const lmChips = normalizeChipPicks(result.json, request.candidates);
+  const cast = entry.charactersPresent;
+  const lmChips = normalizeChipPicks(result.json, request.candidates, cast);
   if (!lmChips) return null;
 
   // A chip whose label came back as the ENGINE's own is one the first pass
@@ -577,7 +630,7 @@ export async function runChipPick(
     });
     // A failed repair is not a failed chapter: the engine labels already there
     // are a working answer, which is the point of repairing rather than retrying.
-    if (repaired.ok) finalChips = applyChipRepairs(lmChips, repaired.json, request.candidates);
+    if (repaired.ok) finalChips = applyChipRepairs(lmChips, repaired.json, request.candidates, cast);
   }
 
   return { lmChips: finalChips, lmChipsKey: chipKeyFor(entry, opts.modelId) };

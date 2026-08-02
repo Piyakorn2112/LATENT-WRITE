@@ -4957,20 +4957,11 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   filter: blur(3.8px) contrast(142%) brightness(118%);
 }
 
-.intel-btn--passive-orb-active .intel-orb-live {
-  transform: scale(0.84);
-  opacity: 0.12;
-}
-
-.intel-btn--passive-orb-active .intel-mesh-fallback {
-  opacity: 0.96;
-  transform: translate(-50%, -50%) scale(0.96);
-}
-
-.intel-btn--passive-orb-active .intel-mesh-fallback-core {
-  filter: blur(4.2px) brightness(1.16) saturate(1.08);
-  animation: intelPassiveOrbRotate 6.8s linear infinite;
-}
+/* ★ NO PASSIVE-ORB STATE. The idle path used to scale the live orb to 0.84 at
+   12% opacity and swap in a blurred, slowly-rotating fallback core — a second
+   orb design nobody asked for, shown while the writer is still looking at the
+   screen. Idle is now pixel-identical to active; only an UNFOCUSED window
+   hides the orb, which is the case where nobody is looking at all. */
 
 /* Off mode: desaturate the blur layer; colours set per colour scheme */
 .intel-mesh-dot[data-mode="off"] {
@@ -5246,11 +5237,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   25%   { --orb-a: #2E52E8; --orb-b: #9070F2; --orb-c: #DA9CE0; }
   60%   { --orb-a: #2858EC; --orb-b: #6F98FF; --orb-c: #CBB2E8; }
   100%  { --orb-a: #1D3DE0; --orb-b: #6E7EFF; --orb-c: #BCC2F2; }
-}
-
-@keyframes intelPassiveOrbRotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 @keyframes intelOrbitA {
