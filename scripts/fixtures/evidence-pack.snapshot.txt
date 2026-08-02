@@ -1,0 +1,26 @@
+CLAIM
+In chapter 5, Pew says: ““Flint’s fist, I mean,” said Pew, pressing the paper into his hand.”
+Full paragraph: “Flint’s fist, I mean,” said Pew, pressing the paper into his hand.
+The question: could Pew plausibly know about Flint at this point in the story?
+
+KNOWN FACTS
+Pew is present in chapters: 1, 2, 5
+Flint is named in chapters: 4, 5
+Before this claim there is NO chapter where Pew was present while Flint came up.
+
+WHO FLINT IS
+Flint: dead pirate captain. Feared across the trade routes
+First named in chapter 4: “Flint was the bloodthirstiest buccaneer that sailed,” said Silver, and the room went quiet around the word.
+
+WHO PEW IS
+Pew: blind beggar. Messenger of the crew
+
+STORY EVENTS INVOLVING FLINT
+ch 4: Flint was the bloodthirstiest buccaneer that sailed
+
+RELATED PASSAGES
+ch 4: Silver spoke of Flint only in a whisper.
+ch 4: The crew feared the dead captain's name.
+
+PRIOR RULINGS
+Livesey knows Flint since chapter 4 (the writer confirmed this)
