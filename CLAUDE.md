@@ -231,6 +231,26 @@ scan review (`entity-review.ts`) is the second consumer.
   PICKED BY RANK from the heuristic engine's own candidates and relabeled —
   the model never invents an event; all display goes through
   selectDisplayChips (the one-selector rule)
+- `npm run test:entity-review` / `npm run test:chapter-summary` — model-free
+  gates for the scan reviewer and the summariser
+- `npm run verify:widget-help` — every widget can explain itself and says
+  nothing until asked
+
+★★ **REASON BEFORE LABEL in every grammar-constrained schema.** A grammar
+emits properties in DECLARATION ORDER, so a schema with the label first makes
+the model commit before it has written a word of evidence. Measured: the entity
+reviewer returned `object` for a name whose own reason read "clearly a person".
+Moving `reason` first fixed two failing cases at once and raised confidence
+from 0.5 to 0.8–0.9. Applies to any new task module.
+
+★★ **A catch-all class must be narrow, last, and never a default.** "entity"
+described as "a named thing" is true of every input; the model quoted the
+phrase back while mislabelling a person. Types are an ordered ladder now.
+Renaming the wire label alone did NOT fix it — the description was the bug.
+
+★ **Modes are a property of the data, not a switch.** A story-graph entry
+carrying `lmChips`/`lmSummary` renders enhanced; one without renders exactly as
+before. No placeholder, no "unavailable" chatter, nothing to configure.
 - `npm run verify:knowledge-e2e` — the whole chain in the real app (hermetic
   profile via LW_USER_DATA): backfill → candidate → sweep → verdict persisted.
   Verifies WIRING, not judgment — do not tighten it to demand a verdict value
