@@ -1,7 +1,8 @@
 # Knowledge Ledger & Local Adjudicator — execution-ready spec
 
-> Status: SPEC — no production code written yet. The only artifact that exists is
-> `scripts/probe-knowledge-ledger.ts` (measurement, commit `449575b`).
+> Status: IN BUILD. M0–M2 landed and measured (`32c3090`, `287639f`); the
+> assistant runtime landed live (`c3aa181`, ~80 tok/s on this machine).
+> Measured deviations from this spec are recorded inline under "MEASURED".
 > Written 2026-08-02. Every number in §1 was measured, not asserted.
 > Prerequisite reading: `ARCHITECTURE.md` (systems 1–4), `plans/narrative-event-engine.md` §"what a real LLM would add".
 
@@ -550,6 +551,14 @@ is a measurement.
 - **M0 — deterministic precision.** Port probe → `knowledge-ledger.ts` pure
   functions with the three class-guards. Re-measure the funnel.
   *Exit: labeled DEV precision ≥ 1-in-3, volume in band, harness green.*
+  **MEASURED (2026-08-02, `32c3090`): exit met and exceeded — 7 DEV survivors
+  = 3 adjudicator-grade + 4 untyped-pool proxy artifacts; synthetic recall
+  22/22; clean classics 0.07/ch. The 0.5 volume LOWER bound is dropped
+  (decision recorded in the harness header): precision rose enough that
+  consistent books go near-silent, and a lower bound on clean books would
+  demand false positives. Sensitivity is gated by synthetic recall instead.
+  Two matcher bugs found by reading samples: case-blind \bDon\b matched
+  "Don't"; chapter-scoped common-word counts read "Let" as a person.**
 - **M1 — ledger in the app.** Store + fact extraction wired into the
   `buildChapterEntry` effect, invalidation, chapter-id stability, first-meeting
   beat behind `debugPanel`. *Exit: facts survive reload/reorder; edit-retire
@@ -594,6 +603,14 @@ Decided:
 Open, with owners:
 - Electron 42 × node-llama-cpp utilityProcess compat — M3 spike, first task,
   main-process fallback pre-designed.
+  **MEASURED (2026-08-02, `c3aa181`): RESOLVED — utilityProcess works, 24/24
+  harness green, ~80 tok/s Metal, cancellation 4 ms, unload reclaims 1.1 GB.
+  Three findings now encoded in code: (a) macOS os.freemem() reports ~77 MB
+  free on a 16 GB machine — the memory guard reads vm_stat or it would refuse
+  every load; (b) utilityProcess.fork with cwd inside app.asar fails with NO
+  events when packaged — cwd omitted; (c) node-llama-cpp 3.19.1 has no KV
+  cache quantisation knob — the q8_0 lever in §7 does not exist yet; the
+  protocol records the request and reports applied: null honestly.**
 - CPU-tier prefill speed on Intel (secondary sources only, ±50%) — M3 measures
   on real hardware; the 1200-token CPU pack budget is the lever if slow.
 - Small-model verdict calibration (grammar guarantees shape, not judgment) —
