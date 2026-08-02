@@ -1,10 +1,11 @@
 {
-  "generatedAt": "2026-08-02T14:33:18.520Z",
+  "generatedAt": "2026-08-02T14:41:18.225Z",
   "modelId": "qwen3-1.7b-q4_k_m",
   "packVersion": 1,
   "adjudicatorPromptVersion": 1,
   "entityReviewPromptVersion": 1,
   "chipPromptVersion": 1,
+  "summaryPromptVersion": 1,
   "adjudication": [
     {
       "id": "break",
@@ -433,6 +434,78 @@
                 }
               }
             }
+          }
+        }
+      },
+      "maxTokens": 160
+    }
+  ],
+  "chapterSummaries": [
+    {
+      "id": "strong",
+      "chapterNumber": 7,
+      "chapterTitle": "The Long Count",
+      "offered": [
+        "Ferren Ash told the room that the count had been short for eleven years, and that she had signed every page of it.",
+        "Wick Odlum crossed the yard twice while the kettle boiled, and came back with nothing to say.",
+        "Marda Kelp put the office seal in the fire and held it there until the wax ran off the iron.",
+        "The clerk from the upper office refused to carry the ledger back across the yard, and said so twice.",
+        "Ferren Ash asked whether anyone had eaten yet, and nobody answered her.",
+        "Wick Odlum resigned his post before the second bell, in writing, and gave no reason for it."
+      ],
+      "cast": [
+        "Ferren Ash",
+        "Wick Odlum",
+        "Marda Kelp"
+      ],
+      "summaryKey": "104bd9d3",
+      "summaryMax": 320,
+      "systemPrompt": "You write the short summary shown beside a novel chapter on its timeline.\n\nYou are given the chapter's number and title, the moments an analysis engine\nfound in it (verbatim sentences from the chapter), who is present, and how\ntense the chapter gets. You do NOT have the chapter itself. Everything you\nwrite must come from the moments you were given.\n\nsummary: what happens in this chapter. Two sentences, about 35 words in total.\nPlain past tense. Name the people and what they actually did. If the moments\nonly support one sentence, write one.\n\nthroughline: at most 8 words naming what the chapter moves forward. Leave it\nempty if the moments do not show one.\n\nNever do these:\n- Do not invent an event, a motive, or a detail that is not in the moments.\n- Do not write a blurb. No \"in this gripping chapter\", no rhetorical questions,\n  no teasing what happens next.\n- Do not start with \"In this chapter\" or the chapter's title.\n- Do not describe the writing. Describe the story.\n\nAnswer as JSON: {\"summary\",\"throughline\"} in that order.",
+      "userText": "CHAPTER 7: The Long Count\nPRESENT: Ferren Ash, Wick Odlum, Marda Kelp\nTENSION PEAK: 84 of 100\n\nMOMENTS (in order of importance)\n1. Ferren Ash told the room that the count had been short for eleven years, and that she had signed every page of it.\n2. Wick Odlum crossed the yard twice while the kettle boiled, and came back with nothing to say.\n3. Marda Kelp put the office seal in the fire and held it there until the wax ran off the iron.\n4. The clerk from the upper office refused to carry the ledger back across the yard, and said so twice.\n5. Ferren Ash asked whether anyone had eaten yet, and nobody answered her.\n6. Wick Odlum resigned his post before the second bell, in writing, and gave no reason for it.\n\nWrite the summary from these moments only.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 420
+          },
+          "throughline": {
+            "type": "string",
+            "maxLength": 140
+          }
+        }
+      },
+      "maxTokens": 160
+    },
+    {
+      "id": "quiet",
+      "chapterNumber": 2,
+      "chapterTitle": "Ordinary Weather",
+      "offered": [
+        "Marda Kelp opened the shutters on the yard side and left them open all morning, as she always did.",
+        "Wick Odlum carried the post up from the box and sorted it into two piles on the sill.",
+        "The kettle was filled twice before anyone thought to drink from it.",
+        "Marda Kelp said the tide was running later than the book allowed for, and went back to her work.",
+        "Wick Odlum wound the clock on the landing, as he did on the first of every month."
+      ],
+      "cast": [
+        "Marda Kelp",
+        "Wick Odlum"
+      ],
+      "summaryKey": "de81ded1",
+      "summaryMax": 320,
+      "systemPrompt": "You write the short summary shown beside a novel chapter on its timeline.\n\nYou are given the chapter's number and title, the moments an analysis engine\nfound in it (verbatim sentences from the chapter), who is present, and how\ntense the chapter gets. You do NOT have the chapter itself. Everything you\nwrite must come from the moments you were given.\n\nsummary: what happens in this chapter. Two sentences, about 35 words in total.\nPlain past tense. Name the people and what they actually did. If the moments\nonly support one sentence, write one.\n\nthroughline: at most 8 words naming what the chapter moves forward. Leave it\nempty if the moments do not show one.\n\nNever do these:\n- Do not invent an event, a motive, or a detail that is not in the moments.\n- Do not write a blurb. No \"in this gripping chapter\", no rhetorical questions,\n  no teasing what happens next.\n- Do not start with \"In this chapter\" or the chapter's title.\n- Do not describe the writing. Describe the story.\n\nAnswer as JSON: {\"summary\",\"throughline\"} in that order.",
+      "userText": "CHAPTER 2: Ordinary Weather\nPRESENT: Marda Kelp, Wick Odlum\nTENSION PEAK: 28 of 100\n\nMOMENTS (in order of importance)\n1. Marda Kelp opened the shutters on the yard side and left them open all morning, as she always did.\n2. Wick Odlum carried the post up from the box and sorted it into two piles on the sill.\n3. The kettle was filled twice before anyone thought to drink from it.\n4. Marda Kelp said the tide was running later than the book allowed for, and went back to her work.\n5. Wick Odlum wound the clock on the landing, as he did on the first of every month.\n\nWrite the summary from these moments only.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 420
+          },
+          "throughline": {
+            "type": "string",
+            "maxLength": 140
           }
         }
       },

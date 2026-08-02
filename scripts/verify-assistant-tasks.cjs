@@ -403,7 +403,55 @@ async function main() {
       `got ${picks.length} pick(s): [${picks.map((p) => p.rank).join(', ')}]`);
   }
 
-  const timed = [...responses, ...chipResponses].filter((r) => r.timings);
+  // ── chapter summaries ───────────────────────────────────────────────────
+  // Prose quality is not gateable and is not gated. What IS gated: the summary
+  // is grounded in the moments it was given (it names someone who is actually
+  // in the chapter), it is one paragraph, and it is not a blurb. Every summary
+  // prints verbatim so a person can judge the writing.
+  console.log('\n[4] chapter summaries');
+  const summaryResponses = [];
+  for (const c of fixtures.chapterSummaries || []) {
+    const res = await callBridge('assistantRun', {
+      requestId: `sum-${c.id}`,
+      task: 'chapter-summary',
+      systemPrompt: c.systemPrompt,
+      userText: c.userText,
+      schema: c.schema,
+      maxTokens: c.maxTokens,
+      timeoutMs: 90_000,
+    });
+    const ok = res && res.ok && res.json && typeof res.json.summary === 'string';
+    summaryResponses.push({ id: c.id, case: c, ok, json: ok ? res.json : null, timings: res && res.timings });
+    console.log(`\n  ${c.id}  (ch.${c.chapterNumber} "${c.chapterTitle}")`);
+    console.log(`    summary: ${ok ? JSON.stringify(res.json.summary) : `NO ANSWER (${res && res.error})`}`);
+    if (ok && res.json.throughline) console.log(`    through: ${JSON.stringify(res.json.throughline)}`);
+    if (res && res.timings) {
+      console.log(`    prefill ${res.timings.prefillMs}ms · gen ${res.timings.genMs}ms · ` +
+        `${res.timings.tokens} tok · ${res.timings.tokensPerSec} tok/s`);
+    }
+  }
+
+  gate('every summary is schema-valid and non-empty',
+    summaryResponses.length > 0 && summaryResponses.every((r) => r.ok && r.json.summary.trim().length >= 12),
+    `${summaryResponses.filter((r) => r.ok).length}/${summaryResponses.length}`);
+
+  gate('summaries are one paragraph, within the cap',
+    summaryResponses.every((r) => !r.ok || (!r.json.summary.includes('\n') && r.json.summary.length <= r.case.summaryMax)),
+    `cap ${fixtures.chapterSummaries?.[0]?.summaryMax}`);
+
+  // Grounding: the model was given the cast, so a summary that names nobody
+  // from it is describing a chapter it was not shown.
+  const ungrounded = summaryResponses.filter((r) =>
+    r.ok && !r.case.cast.some((name) => r.json.summary.includes(name.split(' ')[0])));
+  gate('every summary names someone who is actually in the chapter',
+    ungrounded.length === 0,
+    ungrounded.length ? `ungrounded: ${ungrounded.map((r) => r.id).join(', ')}` : 'all grounded in the cast');
+
+  gate('no summary opens with the blurb reflex',
+    summaryResponses.every((r) => !r.ok || !/^in this chapter/i.test(r.json.summary)),
+    'no "In this chapter"');
+
+  const timed = [...responses, ...chipResponses, ...summaryResponses].filter((r) => r.timings);
   const totalTok = timed.reduce((a, r) => a + r.timings.tokens, 0);
   const totalGen = timed.reduce((a, r) => a + r.timings.genMs, 0);
   console.log(

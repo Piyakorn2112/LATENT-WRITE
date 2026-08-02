@@ -384,6 +384,19 @@ export interface ChapterGraphEntry {
    * no model id — so it resolves by rank alone and drops ranks that vanished.
    */
   lmChipsKey?: string;
+  /**
+   * What happens in this chapter, written by the local model from the same
+   * ranked events the chips come from. Present only in enhanced mode; the
+   * timeline renders exactly as before without it.
+   *
+   * Same staleness rules as `lmChips` above, and the same guard: the summary
+   * is derived from the events, so `lmSummaryKey` carries the event
+   * fingerprint and stops a summary outliving the moments it describes.
+   */
+  lmSummary?: string;
+  /** At most a clause naming what the chapter moves forward. Often absent. */
+  lmThroughline?: string;
+  lmSummaryKey?: string;
 }
 
 export interface StoryGraph {

@@ -43,6 +43,12 @@ import {
   buildChipRequest,
   chipKeyFor,
 } from "../src/lib/chip-picker";
+import {
+  buildSummaryRequest,
+  summaryKeyFor,
+  SUMMARY_MAX_CHARS,
+  SUMMARY_PROMPT_VERSION,
+} from "../src/lib/chapter-summary";
 import type { ChapterGraphEntry, MajorEvent, WorldData } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -590,6 +596,28 @@ const chipCases = chipSpecs.map((c) => {
   };
 });
 
+// ── chapter-summary cases ──────────────────────────────────────────────────
+// Built from the SAME two entries the chip cases use: chips and summary are
+// written from identical ranked moments, so sharing the fixture keeps one
+// story rather than two and lets a reader compare what each made of it.
+const summaryCases = chipSpecs.map((c) => {
+  const request = buildSummaryRequest(c.entry);
+  return {
+    id: c.id,
+    chapterNumber: c.entry.chapterNumber,
+    chapterTitle: c.entry.chapterTitle,
+    /** The verbatim sentences a summary must be grounded in. */
+    offered: request.offered.map((e) => e.sentence ?? e.label),
+    cast: c.entry.charactersPresent,
+    summaryKey: summaryKeyFor(c.entry, MODEL_ID),
+    summaryMax: SUMMARY_MAX_CHARS,
+    systemPrompt: request.systemPrompt,
+    userText: request.userText,
+    schema: request.schema,
+    maxTokens: request.maxTokens,
+  };
+});
+
 const payload = {
   generatedAt: new Date().toISOString(),
   modelId: MODEL_ID,
@@ -597,9 +625,11 @@ const payload = {
   adjudicatorPromptVersion: ADJUDICATOR_PROMPT_VERSION,
   entityReviewPromptVersion: ENTITY_REVIEW_PROMPT_VERSION,
   chipPromptVersion: CHIP_PROMPT_VERSION,
+  summaryPromptVersion: SUMMARY_PROMPT_VERSION,
   adjudication: adjudicationCases,
   entityReview: entityCases,
   timelineChips: chipCases,
+  chapterSummaries: summaryCases,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });

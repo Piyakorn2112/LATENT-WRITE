@@ -47,7 +47,7 @@ import { getCurrentProject, reopenLastProject, openProject, scanExternalProject,
 import type { ToolScanEntry } from "./lib/project-manager";
 import { ToolImportOverlay } from "./components/ToolImportOverlay";
 import type { ToolHighlight } from "./lib/tool-runner";
-import type { StoryGraph, ReviewResult } from "./types";
+import type { StoryGraph, ReviewResult, ChapterGraphEntry } from "./types";
 import { useAnalysis } from "./lib/use-analysis";
 import { emptyWorldData, isWorldDataEmpty, renameInBook, renameInText } from "./lib/world-data";
 import { CastConfirmOverlay } from "./components/CastConfirmOverlay";
@@ -85,6 +85,7 @@ import {
 } from "./lib/knowledge-ledger";
 import { runPendingAdjudications, ADJUDICATOR_TASK } from "./lib/adjudicator";
 import { chipKeyFor, runChipPick, CHIP_TASK } from "./lib/chip-picker";
+import { summaryKeyFor, runChapterSummary, SUMMARY_TASK } from "./lib/chapter-summary";
 import {
   assistantAvailable,
   assistantModelId,
@@ -1003,32 +1004,72 @@ export default function App() {
       const modelId = await assistantModelId();
       if (!modelId || !alive) return;
 
-      const target = Object.values(storyGraphRef.current.entries)
+      // One entry per tick, and within it chips before summary: chips are what
+      // the compact timeline shows, so they are what a writer sees first.
+      const entries = Object.values(storyGraphRef.current.entries)
         .filter((entry) => entry.majorEvents.length > 0)
-        .sort((a, b) => a.chapterNumber - b.chapterNumber)
-        .find((entry) => {
-          const key = chipKeyFor(entry, modelId);
-          return entry.lmChipsKey !== key && !chipSkipRef.current.has(`${entry.chapterId}|${key}`);
-        });
+        .sort((a, b) => a.chapterNumber - b.chapterNumber);
+      const stale = (entry: ChapterGraphEntry) => {
+        const chipKey = chipKeyFor(entry, modelId);
+        const sumKey = summaryKeyFor(entry, modelId);
+        const needsChips = entry.lmChipsKey !== chipKey &&
+          !chipSkipRef.current.has(`chips|${entry.chapterId}|${chipKey}`);
+        const needsSummary = entry.lmSummaryKey !== sumKey &&
+          !chipSkipRef.current.has(`sum|${entry.chapterId}|${sumKey}`);
+        return needsChips || needsSummary;
+      };
+      const target = entries.find(stale);
       if (!target) return;
-      const key = chipKeyFor(target, modelId);
 
       chipBusyRef.current = true;
       try {
-        const outcome = await runChipPick(target, { run: assistantRunJSON, modelId });
+        const chipKey = chipKeyFor(target, modelId);
+        if (target.lmChipsKey !== chipKey && !chipSkipRef.current.has(`chips|${target.chapterId}|${chipKey}`)) {
+          const outcome = await runChipPick(target, { run: assistantRunJSON, modelId });
+          if (!alive) return;
+          if (!outcome) chipSkipRef.current.add(`chips|${target.chapterId}|${chipKey}`);
+          else {
+            setStoryGraph((prev) => {
+              const current = prev.entries[target.chapterId];
+              // Recomputed against the CURRENT entry: a result raced by a
+              // rebuild is dropped rather than stamped onto new events.
+              if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
+              return {
+                ...prev,
+                entries: {
+                  ...prev.entries,
+                  [target.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
+                },
+              };
+            });
+          }
+        }
+
         if (!alive) return;
-        if (!outcome) { chipSkipRef.current.add(`${target.chapterId}|${key}`); return; }
-        setStoryGraph((prev) => {
-          const current = prev.entries[target.chapterId];
-          if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
-          return {
-            ...prev,
-            entries: {
-              ...prev.entries,
-              [target.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
-            },
-          };
-        });
+        const sumKey = summaryKeyFor(target, modelId);
+        if (target.lmSummaryKey !== sumKey && !chipSkipRef.current.has(`sum|${target.chapterId}|${sumKey}`)) {
+          const summary = await runChapterSummary(target, { run: assistantRunJSON, modelId });
+          if (!alive) return;
+          if (!summary) chipSkipRef.current.add(`sum|${target.chapterId}|${sumKey}`);
+          else {
+            setStoryGraph((prev) => {
+              const current = prev.entries[target.chapterId];
+              if (!current || summaryKeyFor(current, modelId) !== summary.lmSummaryKey) return prev;
+              return {
+                ...prev,
+                entries: {
+                  ...prev.entries,
+                  [target.chapterId]: {
+                    ...current,
+                    lmSummary: summary.lmSummary,
+                    lmThroughline: summary.lmThroughline,
+                    lmSummaryKey: summary.lmSummaryKey,
+                  },
+                },
+              };
+            });
+          }
+        }
       } finally {
         chipBusyRef.current = false;
       }
@@ -1041,7 +1082,7 @@ export default function App() {
       window.clearTimeout(timer);
       if (retryTimer !== null) window.clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", onVisible);
-      cancelAssistantWhere(({ task }) => task === CHIP_TASK);
+      cancelAssistantWhere(({ task }) => task === CHIP_TASK || task === SUMMARY_TASK);
     };
   }, [storyGraph, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 

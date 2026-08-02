@@ -1116,6 +1116,24 @@ function TimelineGraphFullImpl({
                     </p>
                   )}
 
+                  {/* ── Enhanced mode ──────────────────────────────────────
+                      The chapter in prose, written by the local model from the
+                      same ranked moments the chips come from. This block is
+                      the whole visible difference between the two modes: it
+                      exists when an entry carries a summary and is absent
+                      otherwise, with no placeholder and no "unavailable" note.
+                      Mode is a property of the DATA, never a switch. */}
+                  {inspect.entry.lmSummary && (
+                    <div className="timeline-inspector-summary">
+                      <p className="timeline-inspector-summary-text">{inspect.entry.lmSummary}</p>
+                      {inspect.entry.lmThroughline && (
+                        <p className="timeline-inspector-summary-through">
+                          {inspect.entry.lmThroughline}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
                   {inspect.entry.tensionCurve.length > 1 && (() => {
                     const W = 268, H = 36;
                     const pts = inspect.entry!.tensionCurve;

@@ -15121,3 +15121,31 @@ body.electron-window-unfocused .wc-panel::after {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* ── Timeline inspector — enhanced-mode summary ────────────────────────────
+   Present only when the local model has written one for this chapter; there
+   is no empty state, because "no summary" is the standard mode rendering and
+   must look like nothing is missing. Body face (not the UI face) because this
+   is prose about the story, the same register as the chapter brief. */
+.timeline-inspector-summary {
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+}
+.timeline-inspector-summary-text {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--panel-text-2);
+}
+.timeline-inspector-summary-through {
+  margin: 6px 0 0;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--panel-text-4);
+}
