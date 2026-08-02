@@ -269,7 +269,20 @@ export function runChapterAnalysis({
         adaptiveContext,
       )
     : [];
-  const analysis = analyzeChapter(paragraphs, speechResults, siblingStats);
+  // ★ THE LEVEL HAS TO REACH analyzeChapter. It builds `highModeAnalysis`
+  // only when told the run was a deep one, and that field is the single gate
+  // the analysis panel uses for every deep widget — shaping, structure,
+  // momentum, sensory balance, and both cross-chapter widgets. Dropping this
+  // argument left `highModeAnalysis` permanently undefined, so a correctly
+  // computed high pass rendered as a panel with the deep widgets silently
+  // missing. Nothing threw; the widgets simply never mounted.
+  const analysis = analyzeChapter(
+    paragraphs,
+    speechResults,
+    siblingStats,
+    undefined, // currentChapterIndex — the runner has no arc position to give
+    level,
+  );
 
   // Timeline events, computed off the main thread alongside everything else.
   // The name list is buildChapterEntry's exact recipe (worldData characters
