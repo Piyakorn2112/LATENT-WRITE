@@ -21,8 +21,9 @@
    deliberately frugal:
      · one quad, one draw call, ~30×30 css px canvas in the toolbar
      · powerPreference "low-power", no depth/stencil/antialias
-     · 30 fps cap; eases to 20 under body.scroll-edge-idle (idle is not
-       frozen — the ring keeps turning); fully stops on document.hidden and
+     · 30 fps cap. The IDLE path is deliberately not special-cased: the orb
+       looks and moves the same whether or not the pointer has stopped.
+       Fully stops on document.hidden and
        body.electron-window-unfocused-orb-paused
      · prefers-reduced-motion → renders exactly one frame per state change
 
@@ -50,7 +51,6 @@ const STATIC_COLORS: Record<OrbEngineLevel, OrbPalette> = {
   high:    { a: "#A02BF5", b: "#E04DFF", c: "#FFA6F0" },
 };
 
-const IDLE_BODY_CLASS = "scroll-edge-idle";
 const PAUSED_BODY_CLASS = "electron-window-unfocused-orb-paused";
 
 /** Fill `out` (6 × rgb floats). `off` eases 0 → 1 as intelligence is
@@ -375,11 +375,9 @@ export function OrbEngine({
     // ── environment state (power saving)
     const darkMq = window.matchMedia("(prefers-color-scheme: dark)");
     const motionMq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    let bodyIdle = document.body.classList.contains(IDLE_BODY_CLASS);
     let bodyPaused = document.body.classList.contains(PAUSED_BODY_CLASS);
 
     const bodyObserver = new MutationObserver(() => {
-      bodyIdle = document.body.classList.contains(IDLE_BODY_CLASS);
       bodyPaused = document.body.classList.contains(PAUSED_BODY_CLASS);
       schedule();
     });
@@ -387,13 +385,14 @@ export function OrbEngine({
 
     const drawFrame = (dt: number) => {
       const { mode: m, analyzing: busy } = propsRef.current;
-      const idle = bodyIdle && !busy;
 
       // The rig owns the transition: hand it the TARGET and it springs
       // there itself, so every amplitude — the sizing wave, the spin, the
       // throw, the ring's growth — moves on one timeline. Nothing here
       // eases, and nothing in CSS animates the working state either.
-      world.target = m === "off" ? 0.08 : busy ? 1.0 : idle ? 0.28 : 0.55;
+      // No idle branch: the orb rests at the same amplitude whether or not the
+      // pointer has stopped moving. See the frame-rate note below.
+      world.target = m === "off" ? 0.08 : busy ? 1.0 : 0.55;
       world.step(dt * propsRef.current.flowScale);
       const energy = world.energy;
       vib += (propsRef.current.vibrance - vib) * Math.min(1, dt * 2.2);
@@ -454,17 +453,19 @@ export function OrbEngine({
     const fpsCap = (): number => {
       if (lost || bodyPaused || document.hidden) return 0;
       if (motionMq.matches) return 0;
-      const { mode: m, analyzing: busy, maxFps: cap } = propsRef.current;
+      const { mode: m, maxFps: cap } = propsRef.current;
       // Throttle on what the simulation is DOING, not on a timer: a
       // settled cluster is nearly static so a few frames a second is
       // plenty, while a pop always gets the full rate. Low-fps motion
       // only chops when there is real speed behind it.
-      // Idle does NOT mean frozen. Dropping to a few frames a second read
-      // as a stalled graphic rather than a resting one, so the idle floor
-      // is a real frame rate — still a saving over the active cap, but the
-      // ring visibly keeps turning while the app sits quiet.
+      // ★ THE IDLE PATH NO LONGER CHANGES THE ORB AT ALL. It used to ease to
+      //   20fps here while CSS separately hid the orb outright — two different
+      //   ideas of "idle" in one feature. The orb now stays visible on idle
+      //   (see the .toolbar-ambient-orb rules in styles.css), so a frame-rate
+      //   drop would be the ONLY visible difference between idle and active,
+      //   which is exactly what "behave the same as normal" rules out.
+      //   Unfocused windows still hide it, and `off` mode still coasts.
       const quiet = world.activity() < 0.06;
-      if (bodyIdle && !busy) return quiet ? Math.min(cap, 20) : cap;
       if (m === "off") return quiet ? Math.min(cap, 6) : cap;
       return cap;
     };

@@ -614,30 +614,35 @@ body.scroll-edge-idle .scroll-edge-right {
    swap, and a knob cannot be mid-press while the app is idle, so the knob
    loses nothing by being excluded. Regression gate: scripts/probe-app-toggle.cjs
    drives a real toggle in the booted app and fails on a snapped slide. */
+/* ★ THE IDLE BLUR IS A HAIR STRONGER THAN THE OLD FLAT SWAP. On this path the
+   per-pixel refraction is off and a plain backdrop-blur stands in for it, so
+   these numbers are the whole illusion. Each is raised by one pixel: enough
+   that the swap reads as glass settling rather than as glass switching off,
+   and small enough to stay inside the cheap blur the path exists to buy. */
 body.scroll-edge-idle .app .liquid-glass {
   background: var(--bg-glass-strong) !important;
-  -webkit-backdrop-filter: blur(2px) !important;
-  backdrop-filter: blur(2px) !important;
+  -webkit-backdrop-filter: blur(3px) !important;
+  backdrop-filter: blur(3px) !important;
 }
 
 body.scroll-edge-idle .app .analysis-tab,
 body.scroll-edge-idle .app .analysis-action-group {
   background: var(--bg-glass-strong) !important;
-  -webkit-backdrop-filter: blur(1px) !important;
-  backdrop-filter: blur(1px) !important;
+  -webkit-backdrop-filter: blur(2px) !important;
+  backdrop-filter: blur(2px) !important;
 }
 
 body.scroll-edge-idle .app .annotation-popover,
 body.scroll-edge-idle .app .annotation-panel {
   background: var(--bg-glass-strong) !important;
-  -webkit-backdrop-filter: blur(2px) !important;
-  backdrop-filter: blur(2px) !important;
+  -webkit-backdrop-filter: blur(3px) !important;
+  backdrop-filter: blur(3px) !important;
 }
 
 body.scroll-edge-idle .app .word-count,
 body.scroll-edge-idle .app .debug-panel {
-  -webkit-backdrop-filter: blur(4px) saturate(160%) !important;
-  backdrop-filter: blur(4px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(5px) saturate(160%) !important;
+  backdrop-filter: blur(5px) saturate(160%) !important;
 }
 
 body.scroll-edge-idle .app .liquid-glass-control-knob {
@@ -5321,8 +5326,14 @@ body.electron-window-unfocused-orb-paused .intel-btn .intel-mesh-fallback-core {
    transitions back to the animated value over 0.4s. animation-play-state
    paused + will-change:auto eliminate the keyframe + compositor cost while
    hidden. */
-body.electron-window-unfocused .toolbar-ambient-orb,
-body.scroll-edge-idle .toolbar-ambient-orb {
+/* ★ IDLE IS NOT UNFOCUSED, AND THE ORB MUST NOT NOTICE IT. An UNFOCUSED window
+   is genuinely not being looked at, so hiding the orb there costs nothing.
+   Idle only means the writer stopped moving the pointer — they are still
+   looking at the screen, and a graphic that vanishes while they watch it reads
+   as a bug rather than as a saving. The orb keeps its normal appearance AND
+   its normal frame rate on the idle path; OrbEngine's idle easing was removed
+   in the same change, so the two halves cannot disagree about what idle means. */
+body.electron-window-unfocused .toolbar-ambient-orb {
   display: none;
   opacity: 0;
   animation-play-state: paused;
@@ -5333,7 +5344,7 @@ body.scroll-edge-idle .toolbar-ambient-orb {
 /* Fade-in starting point: when display goes from none → block, start at
    opacity 0 so the 0.4s transition plays (rather than snapping to full). */
 @starting-style {
-  body:not(.electron-window-unfocused):not(.scroll-edge-idle) .toolbar-ambient-orb {
+  body:not(.electron-window-unfocused) .toolbar-ambient-orb {
     opacity: 0;
   }
 }
