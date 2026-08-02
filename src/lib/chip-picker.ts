@@ -154,6 +154,21 @@ Your job is COVERAGE: the chips together should tell the chapter's story.
 - Read the whole list before choosing. If two candidates describe the same
   happening, use one of them and spend the other chip elsewhere.
 
+Each candidate carries a "draft" — a rough headline an earlier pass already
+wrote for it. The draft is usually RIGHT ABOUT WHAT HAPPENED and clumsy about
+how it reads. Your job is the wording, not the judgement:
+
+- NEVER WEAKEN THE OUTCOME. If the draft says someone FAILED, REFUSED, was
+  TOLD, or ADMITTED something, your chip says the same. "fails to reach" must
+  not become "tries to reach"; a refusal must not become an agreement; a thing
+  someone did to an object must not become the object acting.
+- CHECK THE DRAFT AGAINST THE SENTENCE FIRST. If the draft names an action the
+  sentence does not contain — the sentence says she put it in the WATER and the
+  draft says she BURNED it — the sentence wins and you rewrite from it.
+- Otherwise improve only the WORDING: make it read like a person wrote it, in
+  the fewest words that still carry the outcome. If the draft is already the
+  clearest way to say it, return it unchanged. That is a good answer.
+
 Each chip COMPRESSES its moment into a headline. You are not quoting the
 sentence, you are boiling it down to what happened. Two worked examples —
 they are from a DIFFERENT story, so never write these names in your answer:
@@ -379,7 +394,17 @@ export function buildChipRequest(
       //   one is unreadable. This is the engine acting as the model's harness:
       //   it resolved the reference already, and the prompt says to spend it.
       const who = event.agent ? `\n    who: ${event.agent}` : "";
-      return `[${rank}] ${facets.join(" · ")}${who}\n    ${sentence}`;
+      // ★★ THE ENGINE'S OWN LABEL IS SHOWN AS A DRAFT. Hiding it made the model
+      //    re-derive the verb from raw prose, and it inverted the meaning:
+      //    "put the office seal in the fire" came back as "Marda seals the
+      //    office" while the engine had already written "Marda burns the seal".
+      //    The engine knows the event TYPE, so its verb carries polarity and
+      //    outcome ("fails", "refuses", "admits") that a five-word compression
+      //    of the sentence drops. The model's job is prose, not re-derivation.
+      const draft = event.label && draftIsTrueOfSentence(event.label, sentence)
+        ? `\n    draft: ${event.label}`
+        : "";
+      return `[${rank}] ${facets.join(" · ")}${who}${draft}\n    ${sentence}`;
     });
 
   const userText = [
@@ -482,6 +507,71 @@ export function labelIsGrounded(
   });
 }
 
+/**
+ * Verbs the ENGINE infers from an event's type rather than lifting from the
+ * prose. "fails", "refuses", "admits" carry the outcome and are the reason a
+ * draft is worth showing at all, so they are exempt from the grounding check
+ * below — the sentence says "tried… and did not manage it", never "fails".
+ */
+const OUTCOME_VERBS =
+  /\b(fails?|failed|refus\w+|declin\w+|admits?|admitted|confess\w+|reveals?|revealed|resigns?|resigned|is told|was told|loses?|lost|breaks?|broke|gives? up|surrenders?)\b/i;
+
+/**
+ * The subset whose loss INVERTS the moment.
+ *
+ * ★ NARROWED AFTER IT OVER-FIRED. Guarding every outcome verb rejected honest
+ *   rewrites — "admits" → "says", "is told" → "hears" — which are the model
+ *   doing its job. Only a NEGATIVE outcome flips the meaning when it is
+ *   dropped: a failure becomes an attempt, a refusal becomes agreement. Those
+ *   are guarded; positive verbs are left to the prompt.
+ */
+const NEGATIVE_OUTCOME =
+  /\b(fails?|failed|failing|refus\w+|declin\w+|cannot|can't|loses?|lost|gives? up|gave up|surrenders?|never|unable)\b/i;
+
+const STOPWORDS = new Set([
+  "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "with",
+  "his", "her", "their", "its", "it", "is", "was", "be", "by", "from", "into",
+  "that", "this", "as", "up", "down", "out", "back", "over",
+]);
+
+/**
+ * ★★ IS THE ENGINE'S OWN DRAFT TRUE OF THE SENTENCE?
+ *
+ *    The draft is a heuristic label and it is sometimes WRONG: "Teva burns the
+ *    ledger" for a sentence in which she carries it to the WATER and lets it
+ *    go. Shown such a draft, the model copies it — correctly, by its
+ *    instructions — and an engine error becomes a shipped chip. So a draft that
+ *    names an action the sentence does not contain is not shown at all, and the
+ *    model derives that one from the prose instead.
+ *
+ *    Outcome verbs are exempt: they are the engine's inference from the event
+ *    TYPE, which is exactly the knowledge the model lacks.
+ */
+export function draftIsTrueOfSentence(draft: string, sentence: string): boolean {
+  const src = sentence.toLowerCase();
+  const words = (draft.toLowerCase().match(/\b[a-z]+\b/g) ?? [])
+    .filter((w) => w.length > 3 && !STOPWORDS.has(w));
+  return words.every((word) => {
+    if (OUTCOME_VERBS.test(word)) return true;
+    // Loose stem match: "burns"/"burned"/"burning" all reduce to "burn".
+    const stem = word.replace(/(ing|ed|es|s)$/, "");
+    return stem.length < 3 || src.includes(stem);
+  });
+}
+
+/**
+ * ★★ A CHIP MAY NOT SOFTEN THE ENGINE'S OUTCOME. Measured: told that "Ivo
+ *    fails to reach the pier", the model returned "Ivo tries to reach the
+ *    pier" — an attempt instead of a failure — and no wording of the rule
+ *    stopped it across two variants. The draft's polarity comes from the event
+ *    type and is the one thing it is most reliable about, so when the draft
+ *    states an outcome and the rewrite drops it, the rewrite loses.
+ */
+export function preservesOutcome(label: string, draft: string): boolean {
+  if (!NEGATIVE_OUTCOME.test(draft)) return true;
+  return NEGATIVE_OUTCOME.test(label) || /\b(not|never|no)\b/i.test(label);
+}
+
 export function normalizeChipPicks(
   raw: unknown,
   candidates: readonly ChipCandidate[],
@@ -511,7 +601,8 @@ export function normalizeChipPicks(
     const usable =
       repaired !== "" && repaired.length <= CHIP_LABEL_MAX &&
       !/[\r\n]/.test(repaired) && !startsWithPronoun(repaired) &&
-      labelIsGrounded(repaired, candidate, cast);
+      labelIsGrounded(repaired, candidate, cast) &&
+      preservesOutcome(repaired, candidate.label);
     out.push({ rank: rankRaw, label: usable ? repaired : candidate.label });
   }
 
