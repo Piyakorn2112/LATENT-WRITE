@@ -36,6 +36,9 @@ const draftGuardStateByContentsId = new Map();
 // ── Project filesystem + Claude Code integration ─────────────────────────
 const { registerProjectFS } = require('./project-fs.cjs');
 const { registerClaudeCode } = require('./claude-code.cjs');
+// Local-LLM assistant runtime — generic grammar-constrained JSON inference in a
+// utilityProcess. Forks lazily on the first run; nothing loads until asked.
+const { registerAssistant } = require('./assistant.cjs');
 
 // Force Display P3 with D65 white-point so colours render the way Safari
 // does on macOS (warmer, slightly less saturated). Chromium otherwise picks
@@ -639,6 +642,7 @@ ipcMain.on('draft-guard:update', (event, state) => {
 app.whenReady().then(() => {
   registerProjectFS();
   registerClaudeCode();
+  registerAssistant();
   registerWorkspaceWindow();
   buildMenu();
   createWindow();

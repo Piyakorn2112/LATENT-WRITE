@@ -45,6 +45,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('workspace:window-state', listener);
   },
 
+  // ── Local assistant runtime (generic grammar-constrained JSON inference) ──
+  assistantStatus:      (opts)  => ipcRenderer.invoke('assistant:status', opts),
+  assistantEnsureModel: (opts)  => ipcRenderer.invoke('assistant:ensure-model', opts),
+  assistantRun:         (opts)  => ipcRenderer.invoke('assistant:run', opts),
+  assistantCancel:      (opts)  => ipcRenderer.invoke('assistant:cancel', opts),
+  assistantUnload:      ()      => ipcRenderer.invoke('assistant:unload'),
+  onAssistantProgress: (cb) => {
+    const listener = (_e, data) => cb(data);
+    ipcRenderer.on('assistant:progress', listener);
+    return () => ipcRenderer.removeListener('assistant:progress', listener);
+  },
+
   // ── Tool system ──
   toolCompile:        (opts)       => ipcRenderer.invoke('tool:compile', opts),
   toolScanProject:    ()           => ipcRenderer.invoke('tool:scanProject'),

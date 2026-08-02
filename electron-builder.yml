@@ -9,6 +9,20 @@ files:
 
 asarUnpack:
   - node_modules/esbuild-wasm/**/*
+  # node-llama-cpp: asar is read-only, so llama.cpp's prebuilt binaries and
+  # dylibs must live on the real filesystem or dlopen fails at runtime.
+  # (Required set per the node-llama-cpp Electron packaging guide.)
+  #
+  # No per-platform pruning patterns are needed: the platform binaries ship as
+  # optionalDependencies gated on os/cpu, so an install on this arm64 Mac only
+  # ever materialises @node-llama-cpp/mac-arm64-metal (12 MB). Deliberately NOT
+  # using the upstream template's `${os}-${arch}` include patterns — those are
+  # JS template literals in its .ts config, and electron-builder's own macro
+  # expander has no `${os}`, so copying them into YAML throws
+  # ERR_ELECTRON_BUILDER_MACRO_NOT_DEFINED at pack time.
+  - node_modules/node-llama-cpp/bins
+  - node_modules/node-llama-cpp/llama/localBuilds
+  - node_modules/@node-llama-cpp/*
 
 extraResources:
   - from: "../novel-writing-system"

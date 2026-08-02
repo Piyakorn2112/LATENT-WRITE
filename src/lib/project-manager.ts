@@ -106,6 +106,109 @@ export interface ToolImportResult {
   results?: Array<{ dirName: string; ok: boolean; error?: string }>;
 }
 
+// ── Local assistant runtime ──────────────────────────────────────────────────
+// Generic grammar-constrained JSON inference against a local GGUF model. Any
+// feature submits { task, systemPrompt, userText, schema } and gets typed JSON
+// back; the runtime knows nothing about what the JSON means.
+
+export type AssistantState =
+  | "no-model"
+  | "downloading"
+  | "ready"
+  | "loading"
+  | "busy"
+  | "low-memory"
+  | "error";
+
+export type AssistantTier = "small";
+
+export interface AssistantStatus {
+  state: AssistantState;
+  model: {
+    id: string;
+    tier: AssistantTier;
+    label: string;
+    bytes: number;
+    path: string;
+    present: boolean;
+    source: "env" | "userData";
+  };
+  progress?: { received: number; total: number; fraction: number };
+  host: {
+    alive: boolean;
+    pid: number | null;
+    loaded: {
+      modelPath: string;
+      contextSize: number;
+      gpu: string;
+      gpuLayers: number;
+      loadMs: number;
+      kvCacheTypeRequested?: string | null;
+      kvCacheTypeApplied?: string | null;
+    } | null;
+  };
+  lowMemory?: { needBytes: number; availableBytes: number };
+  error?: string;
+}
+
+export interface AssistantProgress {
+  phase: "download";
+  tier: AssistantTier;
+  modelId: string;
+  received: number;
+  total: number;
+  fraction: number;
+  state: "downloading" | "ready" | "error";
+  error?: string;
+}
+
+export interface AssistantRunRequest {
+  requestId?: string;
+  /** Opaque label echoed back — for the caller's own logging/metrics. */
+  task?: string;
+  systemPrompt: string;
+  userText: string;
+  /** JSON Schema compiled to a GBNF grammar; guarantees the shape of `json`. */
+  schema: Record<string, unknown>;
+  maxTokens?: number;
+  temperature?: number;
+  /** Append "/no_think" to the system prompt (Qwen3). Defaults true. */
+  noThink?: boolean;
+  tier?: AssistantTier;
+  contextSize?: number;
+  timeoutMs?: number;
+}
+
+export interface AssistantTimings {
+  prefillMs: number;
+  genMs: number;
+  totalMs: number;
+  tokens: number;
+  tokensPerSec: number;
+}
+
+export interface AssistantRunResult<T = unknown> {
+  ok: boolean;
+  requestId: string;
+  json?: T;
+  raw?: string;
+  error?: string;
+  detail?: unknown;
+  cancelled?: boolean;
+  stopReason?: "abort" | "maxTokens" | "eogToken" | "stopGenerationTrigger" | "functionCalls";
+  timings?: AssistantTimings | null;
+  task?: string | null;
+}
+
+export interface AssistantEnsureModelResult {
+  ok: boolean;
+  path?: string;
+  bytes?: number;
+  sha256?: string;
+  source?: "env" | "cache" | "download";
+  error?: string;
+}
+
 // ── Electron API type augmentation ───────────────────────────────────────────
 
 interface ElectronAPI {
@@ -167,6 +270,13 @@ interface ElectronAPI {
   workspaceFocusWindow: () => Promise<{ ok: boolean }>;
   workspaceIsWindowOpen: () => Promise<boolean>;
   onWorkspaceWindowState: (cb: (data: { open: boolean }) => void) => () => void;
+  // Local assistant runtime
+  assistantStatus: (opts?: { tier?: AssistantTier }) => Promise<AssistantStatus>;
+  assistantEnsureModel: (opts?: { tier?: AssistantTier }) => Promise<AssistantEnsureModelResult>;
+  assistantRun: <T = unknown>(opts: AssistantRunRequest) => Promise<AssistantRunResult<T>>;
+  assistantCancel: (opts: { requestId?: string }) => Promise<{ ok: boolean; requestId?: string; error?: string }>;
+  assistantUnload: () => Promise<{ ok: boolean; pid?: number | null }>;
+  onAssistantProgress: (cb: (data: AssistantProgress) => void) => () => void;
   // Tool system
   toolCompile: (opts: { code: string; format: "ts" | "tsx" }) => Promise<{ ok: boolean; code?: string; error?: string }>;
   toolScanProject: () => Promise<ToolScanResult>;
