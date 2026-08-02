@@ -3,7 +3,18 @@ import { isDesktopApp, saveProjectState, loadProjectState } from "./project-mana
 export interface WidgetMeta {
   id: string;
   label: string;
+  /** Short label for the reorder list. */
   description: string;
+  /**
+   * What the card SHOWS and HOW TO READ IT, in the writer's language.
+   *
+   * ★ This is the answer to "I don't know what this widget is telling me".
+   *   Two sentences at most: sentence one names the quantity on screen,
+   *   sentence two says what a reading of it means. No feature-marketing, no
+   *   restating the title. Widgets render it behind a "?" so a writer who
+   *   already knows never pays for it.
+   */
+  help?: string;
 }
 
 export interface WidgetConfigEntry {
@@ -40,19 +51,71 @@ interface PersistedWidgetConfig {
  * style → per-character).
  */
 export const WIDGET_REGISTRY: WidgetMeta[] = [
-  { id: "diagnostics",     label: "Diagnostics",       description: "Writer diagnostics and warnings" },
-  { id: "tension",         label: "Tension",           description: "Scene tension arc, beat structure, momentum, and cliffhanger" },
-  { id: "cast",            label: "Cast",              description: "Speaker frequency and presence" },
-  { id: "continuity",      label: "Continuity",        description: "Cross-chapter continuity signals" },
-  { id: "cross-arc",       label: "Cross Arc",         description: "Neighbouring chapters' tension arcs and cast shifts" },
-  { id: "role",            label: "Role",              description: "Narrative role distribution" },
-  { id: "shaping",         label: "Shaping",           description: "Narrative shaping analysis" },
-  { id: "prose-profile",   label: "Prose Profile",     description: "POV, tense, and prose style" },
-  { id: "voice",           label: "Voice",             description: "Dialogue voice, tag patterns, and sensory channels" },
-  { id: "rhythm",          label: "Rhythm",            description: "Sentence rhythm and cadence" },
-  { id: "repetition",      label: "Repetition",        description: "Phrase and word echo finder" },
-  { id: "style-watch",     label: "Style Watch",       description: "Style pattern detection" },
-  { id: "character-voice", label: "Character Voice",   description: "Per-character voice profiles" },
+  {
+    id: "diagnostics", label: "Diagnostics",
+    description: "Writer diagnostics and warnings",
+    help: "Specific problems found in this chapter, such as unclear attribution or a stalled opening. Each line names the thing to go and look at.",
+  },
+  {
+    id: "tension", label: "Tension",
+    description: "Scene tension arc, beat structure, momentum, and cliffhanger",
+    help: "How much pressure each paragraph carries, from the first to the last. The peak marks where the chapter turns, and a flat line means nothing is escalating.",
+  },
+  {
+    id: "cast", label: "Cast",
+    description: "Speaker frequency and presence",
+    help: "Who speaks and how much of the dialogue each character holds. One dominant slice means a single voice is carrying the scene.",
+  },
+  {
+    id: "continuity", label: "Continuity",
+    description: "Cross-chapter continuity signals",
+    help: "Things that may contradict earlier chapters, including timeline slips, place and time hand-offs, objects introduced and never used again, and knowledge a character could not have yet.",
+  },
+  {
+    id: "cross-arc", label: "Cross Arc",
+    description: "Neighbouring chapters' tension arcs and cast shifts",
+    help: "This chapter's tension shape beside the chapters before and after it, with who left the story and who arrived. Shows whether it varies the rhythm or repeats it.",
+  },
+  {
+    id: "role", label: "Role",
+    description: "Narrative role distribution",
+    help: "The job this chapter does in the book, such as buildup, breather or climax, and how its length, tension and dialogue compare with your average chapter.",
+  },
+  {
+    id: "shaping", label: "Shaping",
+    description: "Narrative shaping analysis",
+    help: "Whether the chapter delivers the effect its structure promises. Over-structured means the scaffolding is doing more work than the prose is.",
+  },
+  {
+    id: "prose-profile", label: "Prose Profile",
+    description: "POV, tense, and prose style",
+    help: "Point of view and tense as the text actually reads, not as intended, with reading grade, sentence variety, and how much you show against how much you tell.",
+  },
+  {
+    id: "voice", label: "Voice",
+    description: "Dialogue voice, tag patterns, and sensory channels",
+    help: "The dominant mode of the writing, whether sensory, action or dialogue, which senses you write through most, and the register the prose sits in.",
+  },
+  {
+    id: "rhythm", label: "Rhythm",
+    description: "Sentence rhythm and cadence",
+    help: "Every sentence in the chapter as one bar, in the order you wrote them. Bars of similar height read monotonous, mixed heights read varied.",
+  },
+  {
+    id: "repetition", label: "Repetition",
+    description: "Phrase and word echo finder",
+    help: "Exact phrases used more than once, with where each one first appears. Useful for catching echoes you did not intend.",
+  },
+  {
+    id: "style-watch", label: "Style Watch",
+    description: "Style pattern detection",
+    help: "Habits worth a second look, counting filter words, passive voice, adverbs and clichés, plus sentence openers you repeat.",
+  },
+  {
+    id: "character-voice", label: "Character Voice",
+    description: "Per-character voice profiles",
+    help: "How each character's dialogue differs, by average line length and how often they speak. Also flags pronouns that do not match a character's profile.",
+  },
 ];
 
 /* The "-v1" here is the STORAGE KEY's own generation, not the schema version —

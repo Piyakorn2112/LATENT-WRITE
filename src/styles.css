@@ -1939,7 +1939,11 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   align-items: flex-start;
   position: relative;
   margin-bottom: 12px;
-  z-index: 2;
+  /* Above .widget-hero-area, which is also z-index 2 and later in the DOM, so
+     it wins every tie. The corner strip carries the card's labels and its "?"
+     control, and a control the card's own content can paint over is a control
+     the writer cannot click. */
+  z-index: 3;
 }
 
 .widget-corner-label {

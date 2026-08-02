@@ -44,6 +44,7 @@
     "test:chip-picker": "tsx scripts/test-chip-picker.ts",
     "verify:assistant-tasks": "electron scripts/verify-assistant-tasks.cjs",
     "verify:knowledge-e2e": "node scripts/verify-knowledge-e2e.mjs",
+    "verify:widget-help": "node scripts/verify-widget-help.mjs",
     "audit:ood-events": "tsx scripts/ood-event-audit.ts",
     "print:chapter": "tsx scripts/print-chapter.ts",
     "test:narrative-lm": "tsx scripts/test-narrative-lm.ts",

@@ -36,10 +36,12 @@ import {
   type WidgetConfig,
   type WidgetConfigEntry,
   type WidgetMeta,
+  WIDGET_REGISTRY,
   loadWidgetConfig,
   loadWidgetConfigFromProject,
   saveWidgetConfig,
 } from "../lib/widget-config";
+import { WidgetHelpContext } from "./widgets/WidgetCard";
 import { isDesktopApp } from "../lib/project-manager";
 import type { AssistantStatus } from "../lib/project-manager";
 import type { KnowledgeCandidate, KnowledgeLedgerStore } from "../lib/knowledge-store";
@@ -118,7 +120,10 @@ interface SettingsProps {
 
 const FONT_OPTIONS: Typography["fontFamily"][] = ["georgia", "iowan", "system", "sf-pro", "menlo"];
 
-const ASSISTANT_DESC = "Checks who could know what, using a small model that runs entirely on this Mac.";
+// The row names what the model DOES across the app, not the first task that
+// happened to need it: it sharpens the entity scan, picks and writes the
+// timeline's chips and chapter summaries, and checks who could know what.
+const ASSISTANT_DESC = "Sharper entity scanning, timeline chips and continuity checks, using a small model that runs entirely on this Mac.";
 
 /** Bytes → the honest figure the settings copy promises ("1.1 GB"). */
 function gb(bytes: number): string {
@@ -149,9 +154,11 @@ function assistantStatusLine(status: AssistantStatus | null, enabled: boolean): 
 }
 
 /**
- * "Continuity assistant" — the one opt-in for the local model. Desktop only:
- * the browser build has no runtime to opt into, so the row does not exist
- * there rather than existing and refusing.
+ * "Local enhancements" — the one opt-in for the local model, which now serves
+ * several engines (entity review, timeline chips, chapter summaries,
+ * continuity adjudication), so the row is named for the capability rather than
+ * for any one task. Desktop only: the browser build has no runtime to opt into,
+ * so the row does not exist there rather than existing and refusing.
  */
 function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSetPrefs: (next: Preferences) => void }) {
   const enabled = !!prefs.assistant?.enabled;
@@ -197,7 +204,7 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
   return (
     <div className="settings-toggle-row">
       <div className="settings-toggle-row-text">
-        <span className="settings-toggle-row-title">Continuity assistant</span>
+        <span className="settings-toggle-row-title">Local enhancements</span>
         <span className="settings-toggle-row-desc">
           {busy && !status ? ASSISTANT_DESC : assistantStatusLine(status, enabled)}
         </span>
@@ -205,7 +212,7 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
       <GlassToggle
         checked={enabled}
         onChange={handleToggle}
-        ariaLabel="Toggle continuity assistant"
+        ariaLabel="Toggle local enhancements"
       />
     </div>
   );
@@ -690,9 +697,14 @@ function WidgetSet({
         const slot = resolveWidgetSlot(entry.id, slotProps);
         if (!slot) return null;
         const order = staggerIndex++;
+        // The card chassis reads this to offer its "?" — copy lives once in
+        // the registry, beside the widget's identity rather than its maths.
+        const help = WIDGET_REGISTRY.find((meta) => meta.id === entry.id)?.help;
         return (
           <AnimatedWidget key={entry.id} order={order} show={slot.show}>
-            {slot.element}
+            <WidgetHelpContext.Provider value={help}>
+              {slot.element}
+            </WidgetHelpContext.Provider>
           </AnimatedWidget>
         );
       })}
