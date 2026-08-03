@@ -35,7 +35,10 @@ import {
   type SweepAnswer,
 } from "../src/lib/assist-sweep";
 import { CHEKHOV_TASK, chekhovKeyFor } from "../src/lib/chekhov-review";
-import { findChekhovCandidates } from "../src/lib/continuity";
+import {
+  concretenessOf, detectHandoff, findChekhovCandidates, findUnintroducedArrivals,
+} from "../src/lib/continuity";
+import type { Chapter, WorldData } from "../src/types";
 import { SCENE_TASK, offeredLabels, sceneKeyFor } from "../src/lib/scene-review";
 import {
   chapterReviews,
@@ -183,6 +186,82 @@ async function main() {
   gate(generated.every((c) => c.sentence.trim() !== ""),
     "…and every candidate carries the sentence that introduces it",
     "a phrase with no sentence is an invitation to invent");
+
+  // ── the engine signals the sweep is built on ────────────────────────────
+  console.log("\n[continuity] engine signals\n");
+
+  // ★★ THE SIGNAL THAT COULD NEVER FIRE. findOutOfOrderMentions asked whether a
+  //    character's FIRST mention was in a LATER chapter than one that mentions
+  //    them — computing "first" over every chapter including this one, so it
+  //    was always ≤ this one. Measured 0.00 hits per chapter over 61 DEV
+  //    chapters while shipping as one of three continuity signals.
+  const ch = (n: number, content: string): Chapter =>
+    ({ id: `c${n}`, number: n, title: `Ch ${n}`, content } as Chapter);
+  const CAST = { characters: [
+    { name: "Teva", aliases: [], role: "", description: "" },
+    { name: "Rucastle", aliases: [], role: "", description: "" },
+  ], places: [], factions: [], entities: [] } as unknown as WorldData;
+  const BOOK = [
+    ch(1, "Teva opened the yard at six as she always did, and the river was loud under it."),
+    ch(2, "Teva counted the crates again and the number did not change by even one."),
+    ch(3, "Teva went down to the gate. “You are late,” said Rucastle, who had been waiting."),
+    ch(4, "Teva did not sleep that night and the register stayed shut on the desk."),
+    ch(5, "Teva walked the length of the quay until it got dark and the tide turned over."),
+  ];
+  const arrivals = (i: number) => findUnintroducedArrivals(BOOK, CAST, i).map((h) => h.character);
+  gate(arrivals(2).join(",") === "Rucastle",
+    "★★ a character who SPEAKS with no earlier mention is found",
+    `ch3 → [${arrivals(2).join(", ") || "none"}]`);
+  gate(arrivals(0).length === 0,
+    "…the opening of a book reports nobody", "every character arrives in chapter one");
+  gate(arrivals(3).length === 0 && arrivals(4).length === 0,
+    "…and a character already set up is never reported again",
+    "Teva was named in chapter one");
+  gate(findUnintroducedArrivals(BOOK, undefined, 2).length === 0,
+    "…and no cast means no claim", "it reads worldData, which can be empty");
+
+  // ★ CONCRETENESS RANKS, IT NEVER DELETES. Only 16% of emitted phrases are
+  //   ever handled by anybody (1174 phrases, six DEV books), so a hard filter
+  //   would empty the widget.
+  const PROP = "She put the sealed letter under the ledger and said nothing about it to anyone.";
+  const ABSTRACT = "He spoke with extreme plainness about the whole business.";
+  gate(concretenessOf("sealed letter", PROP, PROP.indexOf("sealed letter")) >
+       concretenessOf("extreme plainness", ABSTRACT, ABSTRACT.indexOf("extreme plainness")),
+    "a handled object outranks an abstraction",
+    "concreteness orders the list the writer reads");
+
+  // ★★ AND HERE IS WHAT THE PROXY CANNOT DO, RECORDED RATHER THAN HIDDEN.
+  //    "hearty assent" scores as high as a real prop: "assent" ends in -ent,
+  //    which the abstract-suffix list does not cover (adding it would catch
+  //    "agent", "parent", "student"), and "gave" counts as handling because
+  //    giving assent borrows a handling verb. A bigram regex cannot tell an
+  //    abstraction from an object without a lexicon, which is exactly why the
+  //    model now has a `not-a-thing` verdict and why concreteness only RANKS.
+  //    If this gate ever starts passing, the proxy got better and the note
+  //    should be re-measured, not deleted.
+  const ASSENT = "She gave her hearty assent to the plan and it was settled.";
+  gate(concretenessOf("hearty assent", ASSENT, ASSENT.indexOf("hearty assent")) >= 0.9,
+    "★★ …and the proxy still scores 'hearty assent' as a thing (known gap)",
+    "the model's not-a-thing verdict is what covers this");
+  gate(concretenessOf("wit flowed", "The wit flowed freely at that table.", 4) <
+       concretenessOf("brass key", PROP, 0),
+    "…and a verb-headed phrase ranks below a noun-headed one", "\"wit flowed\" is not a thing");
+
+  // ★★ THE HAND-OFF NEEDED A TIME WORD ON BOTH SIDES, so it fired 0.04 times
+  //    per chapter over 55 DEV boundaries — the third of three signals that was
+  //    effectively dead. The common real case is a chapter that ends without
+  //    naming a time and opens with one.
+  const HANDOFF_BOOK = [
+    ch(1, "They worked until the counting was done and nobody said anything more about it."),
+    ch(2, "The next morning Teva was at the gate before the foreman, and she had not slept."),
+  ];
+  gate(detectHandoff(HANDOFF_BOOK, 1, undefined)?.drift === "time",
+    "★★ a chapter that OPENS with elapsed time is a hand-off on its own",
+    "the previous chapter naming no time is the common case, not an exemption");
+  gate(detectHandoff(
+    [ch(1, "They worked until it was done."), ch(2, "Teva was at the gate before the foreman.")],
+    1, undefined) === null,
+    "…and a boundary that announces nothing still reports nothing", "silence is the default");
 
   // ── the sweep ───────────────────────────────────────────────────────────
   console.log("\n[assist-sweep] order, budget, cancellation\n");

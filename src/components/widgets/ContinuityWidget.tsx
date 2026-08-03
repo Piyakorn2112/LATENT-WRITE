@@ -44,10 +44,10 @@ interface Props {
  *      chekhov counts, severity-tinted. The chapter's overall
  *      continuity health reads in one scan, no scrolling required.
  *
- *   2. TIMELINE SLIPS — "introduced later, appearing now" characters
- *      get a list of warning chips with chapter-pin badges.
- *      Replaces the previous bar-row treatment which encoded no
- *      meaningful magnitude (just a constant red bar).
+ *   2. NO SETUP — characters who SPEAK in this chapter without being
+ *      named anywhere earlier in the book. Replaces an "introduced
+ *      later" check that could never fire (see findUnintroducedArrivals
+ *      in continuity.ts for the measurement).
  *
  *   3. HAND-OFF — visual flow: prev-chapter card → arrow → this-chapter
  *      card. Each card shows place + time icon + value. Drift dimension
@@ -121,7 +121,7 @@ function ContinuityWidgetImpl({
                                   TIMELINE_COLOR;
 
   const headline =
-    summary.outOfOrder.length > 0 ? "TIMELINE SLIP" :
+    summary.outOfOrder.length > 0 ? "NO SETUP" :
     summary.handoff             ? "HAND-OFF" :
     summary.chekhov.length > 0  ? "CHEKHOV" :
                                   "KNOWLEDGE";
@@ -131,7 +131,7 @@ function ContinuityWidgetImpl({
   if (summary.outOfOrder.length > 0) {
     strip.push({
       key: "timeline", count: summary.outOfOrder.length,
-      color: TIMELINE_COLOR, label: "timeline",
+      color: TIMELINE_COLOR, label: "no setup",
       icon: AlertTriangle,
     });
   }
@@ -185,7 +185,7 @@ function ContinuityWidgetImpl({
           <div className="wg-cont-block">
             <div className="wg-cont-block-head">
               <AlertTriangle size={10} strokeWidth={2.4} style={{ color: TIMELINE_COLOR }} />
-              <span style={{ color: TIMELINE_COLOR }}>Introduced later in the book</span>
+              <span style={{ color: TIMELINE_COLOR }}>Arrives with no setup</span>
             </div>
             <div className="wg-cont-slips">
               {summary.outOfOrder.slice(0, 5).map((h) => (
@@ -196,14 +196,14 @@ function ContinuityWidgetImpl({
                   >
                     {h.character}
                   </span>
-                  <span className="wg-cont-slip-pin">ch {h.firstChapter}</span>
+                  <span className="wg-cont-slip-pin">speaks here</span>
                 </span>
               ))}
             </div>
             <div className="wg-action-line">
               {summary.outOfOrder.length === 1
-                ? `First "official" appearance is in chapter ${summary.outOfOrder[0].firstChapter}. Verify this isn't a flashback that needs marking.`
-                : `${summary.outOfOrder.length} characters here are introduced later in the book — confirm intentional.`}
+                ? `${summary.outOfOrder[0].character} speaks here and is never named earlier in the book. Confirm the reader has met them.`
+                : `${summary.outOfOrder.length} characters speak here without being named anywhere earlier. Confirm the reader has met them.`}
             </div>
           </div>
         )}

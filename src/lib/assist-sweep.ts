@@ -172,6 +172,9 @@ export function chekhovCandidatesFrom(
       phrase: candidate.phrase,
       mentions: candidate.mentions,
       sentence: candidate.sentence,
+      // Carried through, or selectChekhovCandidates re-sorts by mentions and
+      // the engine's ordering is lost between here and the model.
+      concreteness: candidate.concreteness,
       chapterNumber,
       chaptersSince,
     }));

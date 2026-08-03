@@ -7,6 +7,19 @@
  * chapters (scripts/probe-assist-funnels.ts). That is a list a writer stops
  * opening, not a finding.
  *
+ * ★★ "not-a-thing" IS THE MODEL DOING WHAT THE REGEX CANNOT. An adjective+noun
+ *    bigram extractor has no concept of an object, and measured over 1174
+ *    phrases from six DEV books it emits "hearty assent", "modern languages",
+ *    "complete victory". continuity.ts now RANKS by a concreteness proxy, which
+ *    moves real props to the top but cannot delete the rest without throwing
+ *    away real ones too (only 16% of phrases are ever handled by anybody). So
+ *    the last word on thing-hood belongs where the actual reading happens.
+ *
+ *    ★ IT IS FIRST ON THE LADDER, NOT A CATCH-ALL. It is tested before promise
+ *      and furniture because a non-object cannot be either, and it is described
+ *      concretely ("no physical object anybody could pick up") rather than as a
+ *      residue — the tautological-catch-all mistake entity-review made.
+ *
  * ★★ THE HONEST MAJORITY ANSWER IS "FURNITURE", AND THE PROMPT SAYS SO. Most
  *    specific nouns in good prose are scenery: a room is described with real
  *    things and they are never mentioned again because they were never
@@ -40,17 +53,18 @@ export const CHEKHOV_TASK = "chekhov-review";
  *   until their chapter is edited. A version bump costs one re-ask per phrase
  *   and is the only thing that clears them.
  */
-export const CHEKHOV_PROMPT_VERSION = 2;
+export const CHEKHOV_PROMPT_VERSION = 3;
 
 /** Per-chapter budget. Two questions, ranked; the rest of the list is silent. */
 export const CHEKHOV_CAP = 2;
 /** A promise below this surfaces nothing. */
 export const CHEKHOV_MIN_CONFIDENCE = 0.7;
 
-export type ChekhovVerdict = "promise" | "furniture" | "unsure";
+export type ChekhovVerdict = "promise" | "furniture" | "not-a-thing" | "unsure";
 
 /** Wire order is the schema's declaration order; see the ★ on the enum. */
-export const CHEKHOV_VERDICTS: readonly ChekhovVerdict[] = ["promise", "furniture", "unsure"];
+export const CHEKHOV_VERDICTS: readonly ChekhovVerdict[] =
+  ["promise", "furniture", "not-a-thing", "unsure"];
 
 const SENTENCE_MAX = 320;
 const REASON_MAX = 120;
@@ -72,19 +86,31 @@ export const CHEKHOV_SCHEMA = {
   type: "object",
   properties: {
     reason: { type: "string", maxLength: REASON_MAX },
-    verdict: { enum: ["promise", "furniture", "unsure"] },
+    verdict: { enum: ["promise", "furniture", "not-a-thing", "unsure"] },
     confidence: { type: "number" },
   },
 } as const;
 
-export const CHEKHOV_SYSTEM = `A tool has flagged a thing that a novel names once and never mentions again.
+export const CHEKHOV_SYSTEM = `A tool has flagged a phrase that a novel uses once and never uses again.
 You say whether the story PROMISED anything with it.
 
 You are given the phrase, the sentence that introduces it, the chapter it
 appeared in, and how many chapters have passed since.
 
-Most of these are furniture, and furniture is the answer you should expect to
-give. A novel describes a room with real things in it — a chipped bowl, a
+Decide in this order and stop at the first that fits:
+
+1. IS IT A THING AT ALL? The tool is a pattern-matcher and it has no idea what
+   a thing is. It flags "hearty assent", "modern languages", "complete victory",
+   "next generation" — phrases that name no physical object anybody could pick
+   up, hide, or point at. If you cannot picture one solid object, answer
+   "not-a-thing" and stop. This is not a failure; it is the tool being wrong,
+   and saying so is the most useful answer you can give.
+
+2. Otherwise it IS an object, and the question is whether the sentence made the
+   story owe the reader something about it. See below.
+
+Most real objects are furniture, and furniture is the answer you should expect
+to give for them. A novel describes a room with real things in it — a chipped bowl, a
 folded coat, a lamp with a cracked shade — and never mentions them again
 because they were never promises. They were the room. Saying "furniture" is
 doing the job, not giving up on it.
@@ -101,12 +127,13 @@ Being vivid is not a promise. Being specific is not a promise. Being described
 at length is not a promise. If the sentence only puts the thing in the world,
 it is furniture.
 
-Answer "unsure" when the sentence genuinely could be read either way. It costs
-nothing and it is better than a guess.
+Answer "unsure" when the phrase is an object and the sentence genuinely could
+be read either way. It costs nothing and it is better than a guess.
 
 Answer as JSON: {"reason","verdict","confidence"} in that order.
-reason: FIRST, one clause of at most 15 words quoting what the sentence does.
-verdict: promise, furniture, or unsure.
+reason: FIRST, one clause of at most 15 words saying what the sentence DOES with
+  it. Do not copy the sentence back.
+verdict: not-a-thing, promise, furniture, or unsure.
 confidence: a number from 0 to 1, how much the sentence shows. Never above 1.`;
 
 // ── input & selection ─────────────────────────────────────────────────────
@@ -122,15 +149,28 @@ export interface ChekhovReviewCandidate {
   chapterNumber: number;
   /** Chapters between its introduction and where the writer is now. */
   chaptersSince: number;
+  /**
+   * `concretenessOf` from continuity.ts, 0…1. Ranking only.
+   *
+   * ★★ WITHOUT THIS THE ENGINE'S ORDERING WAS SILENTLY THROWN AWAY.
+   *    findChekhovCandidates now sorts real objects to the top, and this
+   *    function then re-sorted by MENTIONS — undoing it before the model saw
+   *    anything, and handing the two questions a chapter to whatever repeats
+   *    most. Junk repeats more than props do; that is exactly how "rather than"
+   *    outranked every object in the first place.
+   */
+  concreteness?: number;
 }
 
 /**
  * Rank the chapter's candidates and take the budget.
  *
- * ★ MENTIONS FIRST, THEN EARLIEST INTRODUCTION. A phrase the chapter returns to
- *   twice is a thing the prose is already weighting; among equals, the one
- *   introduced earliest has had the longest to pay off and never did, which is
- *   what makes an unpaid promise worth naming at all.
+ * ★ CONCRETENESS FIRST, THEN MENTIONS, THEN EARLIEST INTRODUCTION. A promise is
+ *   a THING, so the budget goes to whatever most reads as one. Among equally
+ *   concrete phrases, one the chapter returns to twice is a thing the prose is
+ *   already weighting; among those, the earliest introduced has had the longest
+ *   to pay off and never did, which is what makes an unpaid promise worth
+ *   naming at all.
  *
  * A candidate with no introducing sentence is dropped rather than asked about:
  * the whole answer is grounded in that sentence, and without one the question
@@ -148,6 +188,7 @@ export function selectChekhovCandidates(
     )
     .sort(
       (a, b) =>
+        (b.candidate.concreteness ?? 0) - (a.candidate.concreteness ?? 0) ||
         b.candidate.mentions - a.candidate.mentions ||
         a.candidate.chapterNumber - b.candidate.chapterNumber ||
         a.index - b.index,

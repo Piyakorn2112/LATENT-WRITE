@@ -526,14 +526,38 @@ async function main() {
     const shapeOk = !!json && typeof json.verdict === 'string' &&
       typeof json.reason === 'string' && typeof json.confidence === 'number' &&
       json.confidence >= 0 && json.confidence <= 1;
-    const surfaced = shapeOk && json.verdict === 'promise' && json.confidence >= c.minConfidence;
-    chekhovOut.push({ c, res, json, shapeOk, surfaced });
+    chekhovOut.push({ c, res, json, shapeOk });
 
     console.log(`\n  ${c.id}  ("${c.phrase}", expect ${c.expectPromise ? 'promise' : 'NOT a promise'})`);
     console.log(`    sentence: ${c.sentence}`);
     console.log(`    response: ${JSON.stringify(json ?? (res && res.error))}${capNote(json, c.schema)}`);
-    console.log(`    surfaced: ${surfaced ? 'YES — the writer sees this marked' : 'no — nothing renders'}`);
     console.log(`    ${timingLine(res && res.timings)}`);
+  }
+
+  // ★★ GATE THE SHIPPED PATH, NOT THE RAW JSON. What a writer sees is decided
+  //    by normalizeChekhov + isSurfacedChekhov, which reject a "reason" that
+  //    merely restates the sentence — and the model DOES that, confidently.
+  //    Reimplementing `surfaced` here as verdict+confidence measured something
+  //    the product does not do, and failed a control the product handles
+  //    correctly. Electron cannot import TypeScript, so the real predicate is
+  //    read out through tsx, the same rule the fixture emitter follows.
+  {
+    const payload = chekhovOut.map((r) => ({ json: r.json, sentence: r.c.sentence }));
+    const out = execFileSync(NODE, [TSX, '-e',
+      'import {normalizeChekhov, isSurfacedChekhov} from "./src/lib/chekhov-review";' +
+      'const rows = JSON.parse(process.argv[process.argv.length-1]);' +
+      'console.log(JSON.stringify(rows.map((r)=>{const a=normalizeChekhov(r.json, r.sentence);' +
+      'return {verdict: a ? a.verdict : null, surfaced: isSurfacedChekhov(a)};})))',
+      JSON.stringify(payload),
+    ], { cwd: ROOT, encoding: 'utf8' });
+    const decided = JSON.parse(out.trim().split('\n').pop());
+    chekhovOut.forEach((r, i) => {
+      r.surfaced = decided[i].surfaced;
+      r.applied = decided[i].verdict;
+      console.log(`  ${r.c.id.padEnd(20)} raw ${(r.json ? r.json.verdict : 'none').padEnd(12)}` +
+        ` → shipped ${String(r.applied).padEnd(12)}` +
+        ` ${r.surfaced ? 'SURFACES to the writer' : 'renders nothing'}`);
+    });
   }
 
   console.log('\n[6] review gates');
@@ -574,7 +598,7 @@ async function main() {
   // ★ The same discrimination canary the adjudicator has, for the same reason:
   //   without it, "furniture" for every phrase passes the control gate while
   //   judging nothing at all.
-  const chekhovVerdicts = chekhovOut.map((r) => (r.json ? r.json.verdict : 'none'));
+  const chekhovVerdicts = chekhovOut.map((r) => String(r.applied));
   gate('chekhov: the model discriminates (not one verdict for every phrase)',
     new Set(chekhovVerdicts).size > 1,
     `every phrase answered "${chekhovVerdicts[0]}"`);

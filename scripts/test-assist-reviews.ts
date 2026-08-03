@@ -386,9 +386,21 @@ console.log("\n── 6. chekhov: the request ───────────�
     "most definite-article noun phrases are scenery");
   gate(req.systemPrompt.indexOf('"reason"') < req.systemPrompt.indexOf('"verdict"'),
     "the prompt asks for the reason FIRST", "grammar order = declaration order");
-  const enumOrder = (req.schema.properties.verdict.enum as readonly string[]).join(",");
-  gate(enumOrder === "promise,furniture,unsure",
+  const verdictEnum = req.schema.properties.verdict.enum as readonly string[];
+  const enumOrder = verdictEnum.join(",");
+  // ★ ASSERT THE PROPERTY, NOT THE LIST. This gate hardcoded the exact string
+  //   and so failed the moment a verdict was legitimately ADDED, reporting a
+  //   contract violation where there was none. What it is actually protecting
+  //   is that the abstention sits last.
+  gate(verdictEnum[verdictEnum.length - 1] === "unsure",
     "the abstention is LAST in the enum", enumOrder);
+  gate(verdictEnum.indexOf("not-a-thing") > 0 &&
+    verdictEnum.indexOf("not-a-thing") < verdictEnum.indexOf("unsure"),
+    "…and 'not-a-thing' is a real class before it, never the residue", enumOrder);
+  gate(/pick up|physical object/i.test(req.systemPrompt) &&
+    req.systemPrompt.indexOf("not-a-thing") < req.systemPrompt.indexOf("furniture is the answer"),
+    "the thing-hood test is FIRST on the ladder and concretely described",
+    "a non-object cannot be a promise or furniture");
 
   const older = buildChekhovRequest({ ...CHEKHOV_CANDIDATES[1], chaptersSince: 2 });
   gate(older.userText !== req.userText,

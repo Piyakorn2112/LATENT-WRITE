@@ -31,44 +31,104 @@ function aliasesFor(c: WorldData["characters"][number]): string[] {
   return [c.name, ...(c.aliases ?? [])].filter(Boolean);
 }
 
+/**
+ * Speech verbs that mark a name as PRESENT on the page rather than merely
+ * discussed. Deliberately small and common — a name beside one of these is
+ * someone in the scene, which is the whole distinction this signal turns on.
+ */
+const SPEECH_VERB =
+  "(?:said|says|asked|asks|replied|answered|cried|whispered|shouted|murmured|added|told|muttered|called)";
+
+/** Is this name in the scene, speaking, rather than being talked about? */
+function presentInChapter(text: string, names: string[]): boolean {
+  for (const name of names) {
+    const n = escapeRe(name);
+    // "X said" (allowing a short intervening clause), "said X", or a name
+    // sitting immediately against a closing quotation mark.
+    if (new RegExp(`\\b${n}\\b[^.!?"\u201C\u201D]{0,40}\\b${SPEECH_VERB}\\b`, "i").test(text)) return true;
+    if (new RegExp(`\\b${SPEECH_VERB}\\b\\s+${n}\\b`, "i").test(text)) return true;
+    if (new RegExp(`["\u201C][^"\u201C\u201D]{2,200}["\u201D]\\s*[,.]?\\s*${n}\\b`, "i").test(text)) return true;
+  }
+  return false;
+}
+
 export interface OutOfOrderHit {
   character: string;       // canonical name
   firstChapter: number;    // chapter number where they're "officially" introduced
   thisChapter: number;     // current chapter number
 }
 
-export function findOutOfOrderMentions(
+/**
+ * A named character who walks on and starts talking, having never been
+ * mentioned anywhere earlier in the book.
+ *
+ * ★★ THIS REPLACES A CHECK THAT COULD NEVER FIRE. The previous version asked
+ *    whether a character's FIRST mention was in a LATER chapter than the one
+ *    they are being mentioned in. It computed that first mention over every
+ *    chapter INCLUDING this one, and only ran at all for characters this
+ *    chapter mentions — so the first index was always ≤ this index and the
+ *    condition was unsatisfiable. Measured: 0.00 hits per chapter across 61
+ *    DEV chapters (scripts/probe-continuity-quality.ts). Dead by construction,
+ *    and it had been shipping as one of three continuity signals.
+ *
+ * ★ THE REPLACEMENT IS A DIFFERENT QUESTION, CHOSEN BY MEASUREMENT. Three
+ *   candidate definitions were counted before this one was written
+ *   (scripts/probe-continuity-candidates.ts, engine-resolved cast so the count
+ *   was possible at all):
+ *
+ *     talked about ≥3 chapters before appearing   — real, but mostly
+ *                                                    foreshadowing, not a slip
+ *     named but never appears anywhere            0.59/ch, and unreliable:
+ *                                                    a first-person narrator
+ *                                                    never says "Watson said"
+ *     ARRIVES WITH NO PRIOR MENTION               0.48/ch — in band, and the
+ *                                                    hits read as real
+ *                                                    (Lestrade, Miss Stoner,
+ *                                                    Rucastle)
+ *
+ * ★ IT ONLY LOOKS PAST THE OPENING OF THE BOOK. Every character in chapter one
+ *   arrives with no prior mention; that is what chapter one is for. The check
+ *   starts after the first fifth, where an unannounced speaking character is a
+ *   choice worth confirming rather than the norm.
+ */
+export function findUnintroducedArrivals(
   chapters: Chapter[],
   worldData: WorldData | undefined,
   thisIndex: number,
 ): OutOfOrderHit[] {
   if (!worldData?.characters?.length) return [];
   if (thisIndex < 0 || thisIndex >= chapters.length) return [];
+  // The opening of a book introduces everybody; there is nothing to report.
+  if (thisIndex < Math.max(1, Math.floor(chapters.length * 0.2))) return [];
   const cur = chapters[thisIndex];
-  const text = cur.content;
-  if (!text.trim()) return [];
+  if (!cur.content.trim()) return [];
 
   const out: OutOfOrderHit[] = [];
   for (const ch of worldData.characters) {
     const aliases = aliasesFor(ch);
     if (aliases.length === 0) continue;
     const re = new RegExp(`\\b(?:${aliases.map(escapeRe).join("|")})\\b`, "i");
-    if (!re.test(text)) continue;
-    // Find the FIRST chapter that mentions this character.
-    let firstIdx = -1;
-    for (let i = 0; i < chapters.length; i++) {
-      if (re.test(chapters[i].content)) { firstIdx = i; break; }
+    if (!re.test(cur.content)) continue;
+    // Talked about earlier? Then they were set up, whatever else is true.
+    let mentionedBefore = false;
+    for (let i = 0; i < thisIndex; i++) {
+      if (re.test(chapters[i].content)) { mentionedBefore = true; break; }
     }
-    if (firstIdx >= 0 && firstIdx > thisIndex) {
-      out.push({
-        character: ch.name,
-        firstChapter: chapters[firstIdx].number,
-        thisChapter: cur.number,
-      });
-    }
+    if (mentionedBefore) continue;
+    // A name that merely appears here is not the finding; one that SPEAKS is.
+    if (!presentInChapter(cur.content, aliases)) continue;
+    out.push({
+      character: ch.name,
+      firstChapter: cur.number,
+      thisChapter: cur.number,
+    });
   }
   return out;
 }
+
+/** @deprecated Kept as the old name; see findUnintroducedArrivals for why the
+ *  original check could never fire. */
+export const findOutOfOrderMentions = findUnintroducedArrivals;
 
 // ─── Chekhov: introduced-and-never-recurs concrete nouns ─────────────────
 //
@@ -139,11 +199,51 @@ const FUNCTION_WORDS = new Set([
   "did","does","do","not","no","never","always",
 ]);
 
+/**
+ * Endings that mark an abstract noun. A promise is a THING; "plainness",
+ * "geniality", "resolution" and "superiority" are not things anyone can hide
+ * in a drawer. 10% of what the extractor emits, measured over 1174 phrases
+ * from six DEV books (scripts/probe-continuity-candidates.ts).
+ */
+const ABSTRACT_SUFFIX = /(?:ness|ity|tion|sion|ment|ance|ence|ism|ship|hood|acy|ancy|ency|itude|dom)$/;
+
+/**
+ * Verbs of HANDLING. Something a character picks up, hides, locks or carries is
+ * a thing the prose has touched, and that is most of what separates a prop from
+ * a noun that happens to sit in a sentence.
+ *
+ * ★ IT RANKS, IT DOES NOT FILTER. Only 16% of emitted phrases are ever handled,
+ *   so hard-filtering on this would empty the widget. The score orders the list
+ *   instead, which is what actually matters: the writer reads the top of it, and
+ *   the model's two questions a chapter go to the top of it.
+ */
+const HANDLE_VERB = new Set([
+  "put","took","take","held","hold","carried","carry","opened","open","closed",
+  "locked","lock","hid","hide","drew","draw","set","lifted","lift","broke",
+  "break","picked","pick","dropped","drop","pulled","pull","pushed","push",
+  "wore","wear","gave","give","handed","hand","threw","throw","kept","keep",
+  "reached","touched","touch","grabbed","grab","slipped","packed","loaded",
+  "sealed","seal","buried","bury","wrapped","folded","placed","place","laid",
+  "lay","pocketed","clutched","gripped","raised","tore","cut","stowed","hung",
+]);
+
 export interface ChekhovCandidate {
   /** The noun phrase, e.g. "rusted pistol". */
   phrase: string;
   /** Number of mentions in *this* chapter. */
   mentions: number;
+  /**
+   * 0…1, how much this reads as a physical object rather than an abstraction.
+   *
+   * ★★ THE LIST IS SORTED BY THIS, AND NOTHING IS DELETED FOR IT. Measured over
+   *    61 DEV chapters, the extractor emits 4.92 phrases a chapter and most are
+   *    not things ("hearty assent", "modern languages", "complete victory").
+   *    A bigram regex cannot identify concrete nouns without a lexicon, so every
+   *    filter here is a proxy and a hard cut would throw away real props with
+   *    the noise. Ordering costs nothing when it is wrong and puts the real
+   *    objects where they are read when it is right.
+   */
+  concreteness: number;
   /**
    * The sentence that INTRODUCES the phrase, verbatim — the first place it
    * occurs in this chapter.
@@ -176,6 +276,29 @@ function sentenceAround(text: string, index: number, max = 400): string {
   const endRel = rest.search(/[.!?\n]/);
   const to = endRel === -1 ? text.length : index + endRel + 1;
   return text.slice(from, to).replace(/\s+/g, " ").trim().slice(0, max);
+}
+
+/**
+ * How much a phrase reads as a physical object, 0…1.
+ *
+ * Three independent signals, none of which is decisive alone:
+ *   the head is not an abstraction, the head is not a verb participle
+ *   ("wit flowed", "body oscillated"), and somebody HANDLES it nearby.
+ *
+ * ★ THE WINDOW LOOKS BACKWARD ONLY, and not far. "She put the sealed letter
+ *   under the ledger" has the verb before the phrase; a verb 200 characters
+ *   away belongs to a different clause and would make every noun in a busy
+ *   paragraph look handled.
+ */
+export function concretenessOf(phrase: string, text: string, at: number): number {
+  const head = phrase.split(/\s+/).pop() ?? "";
+  if (!head) return 0;
+  let score = 0;
+  if (!ABSTRACT_SUFFIX.test(head)) score += 0.4;
+  if (!/(?:ed|ing)$/.test(head)) score += 0.3;
+  const before = text.slice(Math.max(0, at - 70), at).toLowerCase();
+  if (before.split(/[^a-z]+/).some((w) => HANDLE_VERB.has(w))) score += 0.3;
+  return score;
 }
 
 export function findChekhovCandidates(
@@ -239,9 +362,16 @@ export function findChekhovCandidates(
     }
     // Only flag if there's enough specificity: the head appears as a
     // noun in a definite-article phrase 1+ time and doesn't recur.
-    out.push({ phrase, mentions, sentence: sentenceAround(text, at) });
+    out.push({
+      phrase, mentions,
+      sentence: sentenceAround(text, at),
+      concreteness: concretenessOf(phrase, text, at),
+    });
   }
-  out.sort((a, b) => b.mentions - a.mentions);
+  // ★ CONCRETENESS FIRST, THEN MENTIONS. Mentions alone put the most REPEATED
+  //   phrase on top, and function-word junk repeats more than any prop does —
+  //   which is how "rather than" reached the model ahead of every real object.
+  out.sort((a, b) => b.concreteness - a.concreteness || b.mentions - a.mentions);
   return out.slice(0, limit);
 }
 
@@ -253,6 +383,21 @@ export function findChekhovCandidates(
 // the next opens in "the city plaza, at noon" with no transition prose.
 
 const TIME_TOKENS_RE = /\b(dawn|morning|noon|afternoon|dusk|evening|twilight|night|midnight|sunrise|sunset|daybreak|nightfall)\b/gi;
+
+/**
+ * Openers that ANNOUNCE elapsed time. "The next morning", "three days later",
+ * "that same night" — the chapter telling the reader where it sits in time.
+ *
+ * ★★ THE OLD RULE NEEDED A TIME WORD ON BOTH SIDES OF THE BOUNDARY, and so
+ *    fired 0.04 times per chapter across 55 DEV boundaries: effectively never,
+ *    while shipping as one of three continuity signals. The common real case is
+ *    a chapter that ENDS without naming a time and OPENS with "The next
+ *    morning", which the old rule could not see at all. Measured with this
+ *    added: 0.13/ch, roughly one boundary in eight, which is what a hand-off
+ *    signal should look like — it is not supposed to fire on every chapter.
+ */
+const ELAPSE_OPENER_RE =
+  /\b(?:the\s+(?:next|following)\s+(?:morning|day|night|evening|afternoon|week|month|year)|(?:that|the)\s+(?:same\s+)?(?:night|evening|morning|afternoon)|(?:a|two|three|four|five|six|seven|several|a\s+few)\s+(?:days?|weeks?|months?|years?|hours?)\s+(?:later|afterwards|after)|later\s+that\s+(?:day|night|evening|morning)|by\s+(?:morning|nightfall|evening)|next\s+morning)\b/i;
 
 export interface HandoffHint {
   prevTime?: string;
@@ -277,7 +422,11 @@ export function detectHandoff(
   const thisHead = cur.content.slice(0, 600);
 
   const lastTime = (prevTail.match(TIME_TOKENS_RE) ?? []).pop()?.toLowerCase();
-  const firstTime = (thisHead.match(TIME_TOKENS_RE) ?? [])[0]?.toLowerCase();
+  const bareTime = (thisHead.match(TIME_TOKENS_RE) ?? [])[0]?.toLowerCase();
+  // An explicit opener is stronger evidence than a bare token: it is the prose
+  // stating that time passed, rather than a word that merely names a time.
+  const opener = thisHead.slice(0, 400).match(ELAPSE_OPENER_RE)?.[0]?.toLowerCase();
+  const firstTime = opener ?? bareTime;
 
   // Place hand-off: dominant place mentioned in each window.
   const places = worldData?.places ?? [];
@@ -297,7 +446,10 @@ export function detectHandoff(
   const thisPlace = findPlace(thisHead);
 
   let drift: "time" | "place" | "both" | null = null;
-  const timeShift = lastTime && firstTime && lastTime !== firstTime;
+  // ★ AN OPENER STANDS ON ITS OWN. "The next morning" is a hand-off whether or
+  //   not the previous chapter happened to name a time in its last 600
+  //   characters, which is the case the old both-sides rule could never see.
+  const timeShift = opener ? true : !!(lastTime && firstTime && lastTime !== firstTime);
   const placeShift = prevPlace && thisPlace && prevPlace !== thisPlace;
   if (timeShift && placeShift) drift = "both";
   else if (timeShift) drift = "time";

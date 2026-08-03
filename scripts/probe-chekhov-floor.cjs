@@ -47,6 +47,17 @@ const CASES = [
     sentence: 'There was a folded coat over the back of the chair and a pair of boots underneath it, drying.' },
   { id: 'lamp', expect: 'furniture', phrase: 'cracked shade',
     sentence: 'The lamp had a cracked shade that threw the light unevenly across the ceiling of the little room.' },
+  // ── NOT THINGS AT ALL. The extractor emits these constantly; the model is
+  //    the only layer that can say so. ★ ALSO A REACHABILITY TEST: a grammar
+  //    enum label can be UNREACHABLE for a small model (measured before, on
+  //    "break" in the adjudicator, across 7 prompt variants). If none of these
+  //    three comes back "not-a-thing", the label is decorative.
+  { id: 'assent', expect: 'not-a-thing', phrase: 'hearty assent',
+    sentence: 'She gave her hearty assent to the plan and the matter was considered settled.' },
+  { id: 'languages', expect: 'not-a-thing', phrase: 'modern languages',
+    sentence: 'He had a good deal to say about modern languages and the teaching of them.' },
+  { id: 'victory', expect: 'not-a-thing', phrase: 'complete victory',
+    sentence: 'It was a complete victory, and she allowed herself to feel it for a moment.' },
   // ── genuinely arguable: no expected answer ──────────────────────────────
   { id: 'drawer', expect: null, phrase: 'locked drawer',
     sentence: 'The yard kept its register in a locked drawer, and Teva had the only key that turned it.' },
