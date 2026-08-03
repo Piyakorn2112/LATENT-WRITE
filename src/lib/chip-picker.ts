@@ -55,7 +55,7 @@ export const CHIP_PICK_CAP = 4;
  *    engine's own ranking when it under-delivers: the count can no longer
  *    collapse, and the engine is the harness that catches the model's misses.
  */
-export const CHIP_TARGET_MIN = 3;
+export const CHIP_TARGET_MIN = 4;
 
 /**
  * Hard ceiling for a label, enforced mechanically.
@@ -572,10 +572,51 @@ export function preservesOutcome(label: string, draft: string): boolean {
   return NEGATIVE_OUTCOME.test(label) || /\b(not|never|no)\b/i.test(label);
 }
 
+const TRAILING_FUNCTION_WORD = /\s+(?:the|a|an|to|of|in|on|at|for|with|and|or|its|his|her|their|down|up|back|over|into)$/i;
+
+/**
+ * Cut a too-long label at a word boundary, then shed any function word left
+ * dangling at the end ("…down to the" → "…down").
+ *
+ * ★★ WHY THIS EXISTS: falling back to the engine label is only right when that
+ *    label is TRUE. Measured — the model wrote "Teva carries the ledger down to
+ *    the water" (41 chars, correct) and the length rule sent it back to the
+ *    engine label "Teva burns the ledger", which the sentence contradicts: she
+ *    put it in the WATER. A rule about LENGTH had quietly become a rule about
+ *    MEANING. A correct-but-long label is now trimmed rather than surrendered
+ *    to one already known to be wrong.
+ */
+const DANGLING_TAIL = /\b(?:was|were|is|are|be|been|being|had|has|have|did|does|do|and|but|that|which|who|when|while|than|as|so|if)$/i;
+
+/**
+ * Does a trimmed label end mid-clause? A chip ending on a verb or auxiliary
+ * ("…the sluice was", "…the bank and finds") reads worse than a shorter true
+ * label, so the caller surrenders to the engine draft instead. Verb-ish
+ * endings are approximated by inflection, which is all a chip needs.
+ */
+export function endsMidClause(label: string): boolean {
+  const last = label.trim().split(/\s+/).pop() ?? "";
+  return DANGLING_TAIL.test(last) || (last.length > 3 && /(?:s|ed|ing)$/i.test(last));
+}
+
+export function trimToLength(label: string, max: number): string {
+  if (label.length <= max) return label;
+  let cut = label.slice(0, max + 1);
+  const lastSpace = cut.lastIndexOf(" ");
+  cut = lastSpace > 0 ? cut.slice(0, lastSpace) : cut.slice(0, max);
+  let prev = "";
+  while (prev !== cut) { prev = cut; cut = cut.replace(TRAILING_FUNCTION_WORD, ""); }
+  return cut.trim();
+}
+
 export function normalizeChipPicks(
   raw: unknown,
   candidates: readonly ChipCandidate[],
   cast: readonly string[] = [],
+  /** Ranks whose label was REJECTED and fell back to the engine label. Only
+   *  these are worth a repair call: a model that returns the draft unchanged
+   *  is doing what the prompt asks, and re-asking wastes a whole inference. */
+  outFallbacks?: Set<number>,
 ): TimelineChipPick[] | null {
   if (!raw || typeof raw !== "object") return null;
   const picksRaw = (raw as Record<string, unknown>).picks;
@@ -598,12 +639,24 @@ export function normalizeChipPicks(
 
     const labelRaw = typeof value.label === "string" ? value.label.trim() : "";
     const repaired = repairLeadingPronoun(labelRaw, candidate);
-    const usable =
-      repaired !== "" && repaired.length <= CHIP_LABEL_MAX &&
-      !/[\r\n]/.test(repaired) && !startsWithPronoun(repaired) &&
+    // Everything except length. Length is recoverable by trimming; a pronoun,
+    // a foreign name or a softened outcome is not.
+    const sound =
+      repaired !== "" && !/[\r\n]/.test(repaired) && !startsWithPronoun(repaired) &&
       labelIsGrounded(repaired, candidate, cast) &&
       preservesOutcome(repaired, candidate.label);
-    out.push({ rank: rankRaw, label: usable ? repaired : candidate.label });
+    // Surrender to the engine label ONLY if that label is true of the sentence.
+    const draftUsable = draftIsTrueOfSentence(candidate.label, candidate.sentence);
+    // A too-long label survives only if the engine draft is untrue AND the
+    // trim still lands on a clean word. Otherwise the draft wins.
+    const trimmed = trimToLength(repaired, CHIP_LABEL_MAX);
+    const trimUsable = !draftUsable && !endsMidClause(trimmed);
+    const usable = sound && (repaired.length <= CHIP_LABEL_MAX || trimUsable);
+    if (!usable) outFallbacks?.add(rankRaw);
+    out.push({
+      rank: rankRaw,
+      label: usable ? trimmed : candidate.label,
+    });
   }
 
   // ★★ BACKFILL FROM THE ENGINE. The model decides what the chips SAY; it does
@@ -696,7 +749,8 @@ export async function runChipPick(
   if (!result.ok) return null;
 
   const cast = entry.charactersPresent;
-  const lmChips = normalizeChipPicks(result.json, request.candidates, cast);
+  const fallbacks = new Set<number>();
+  const lmChips = normalizeChipPicks(result.json, request.candidates, cast, fallbacks);
   if (!lmChips) return null;
 
   // A chip whose label came back as the ENGINE's own is one the first pass
@@ -705,7 +759,7 @@ export async function runChipPick(
   const needing = lmChips
     .map((pick) => request.candidates.find((c) => c.rank === pick.rank))
     .filter((c): c is ChipCandidate => !!c)
-    .filter((c) => lmChips.some((p) => p.rank === c.rank && p.label === c.label));
+    .filter((c) => fallbacks.has(c.rank));
 
   let finalChips = lmChips;
   if (needing.length > 0) {

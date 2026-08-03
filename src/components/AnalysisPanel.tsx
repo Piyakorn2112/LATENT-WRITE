@@ -885,6 +885,22 @@ export function AnalysisPanel({
     [displayed, prevResult, worldData],
   );
 
+  /**
+   * The model's summary for THIS chapter, when one exists.
+   *
+   * ★ READ FROM THE STORY GRAPH, NOT RE-REQUESTED. The App effect already
+   *   writes a summary per chapter for the timeline; the panel is a second
+   *   reader of the same field, so opening it costs no inference and cannot
+   *   race the scheduler. It is dropped the moment the chapter's events change
+   *   (staleness by reconstruction), so a stale summary cannot outlive the
+   *   text it describes.
+   */
+  const lmBrief = useMemo(() => {
+    const entry = chapterId ? storyGraph?.entries[chapterId] : undefined;
+    if (!entry?.lmSummary) return null;
+    return { summary: entry.lmSummary, throughline: entry.lmThroughline };
+  }, [chapterId, storyGraph]);
+
   useLayoutEffect(() => {
     onOpenChange?.(isOpen);
   }, [isOpen, onOpenChange]);
@@ -1082,8 +1098,20 @@ export function AnalysisPanel({
                   {/* The lead line: what happens. Built from the detected events,
                       so it varies with the prose. The version this replaces chose
                       one of six templated sentences and gave a third of all
-                      chapters the same one. */}
-                  <p className="chapter-observation-text">{brief.headline}</p>
+                      chapters the same one.
+
+                      ★ ENHANCED MODE REPLACES THIS LINE, NOT THE SECTION. When
+                      the local model has written a summary for this chapter it
+                      says the same thing in prose a person would use, from the
+                      same ranked moments the heuristic headline is assembled
+                      from — so it belongs in the same slot rather than beside
+                      it. Everything under it (the anchored lines, the jumpable
+                      chips) is unchanged and still deterministic. Without a
+                      summary this is byte-identical to before. */}
+                  <p className="chapter-observation-text">{lmBrief?.summary ?? brief.headline}</p>
+                  {lmBrief?.throughline && (
+                    <p className="chapter-observation-setting">{lmBrief.throughline}</p>
+                  )}
 
                   {/* Event chips. Each carries its own paragraph, so each is
                       individually jumpable — the source clause is the title, which
