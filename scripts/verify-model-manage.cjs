@@ -31,14 +31,47 @@ async function main() {
     pinned.includes(entry.repo) && pinned.includes(entry.revision),
     pinned.slice(0, 78));
 
-  assistant.setCustomSource({ url: 'https://mirror.example/Qwen3-1.7B-Q4_K_M.gguf' });
-  gate('a custom source replaces it entirely',
-    assistant.resolvedModelUrl(entry) === 'https://mirror.example/Qwen3-1.7B-Q4_K_M.gguf',
-    assistant.resolvedModelUrl(entry));
+  // ★ A DIFFERENT MODEL, NOT A DIFFERENT URL. The custom entry must carry its
+  //   own context window and chat-template flag, or a 4B model would be loaded
+  //   with the 1.7B's settings and told '/no_think', which Granite reads as prose.
+  assistant.setCustomModel({
+    url: 'https://mirror.example/granite-4.0-micro-Q4_K_M.gguf',
+    label: 'Granite 4.0 Micro', contextSize: 8192, noThink: false,
+  });
+  const custom = assistant.activeEntry();
+  gate('a custom model replaces the URL', assistant.resolvedModelUrl(custom).startsWith('https://mirror.example/'), custom.url);
+  gate('…and carries its own context size', custom.contextSize === 8192, String(custom.contextSize));
+  gate('…and its own chat-template flag', custom.noThink === false, 'noThink=false');
+  gate('…and has no inherited sha256 to check against', !custom.sha256, 'unpinned, validated by GGUF + load');
 
-  assistant.setCustomSource(null);
+  // ★ IT MUST NOT OVERWRITE THE PINNED DOWNLOAD. Swapping models is reversible
+  //   only if each keeps its own file.
+  gate('…and gets its own filename',
+    assistant.customFileName('https://mirror.example/granite-4.0-micro-Q4_K_M.gguf') !== entry.file,
+    assistant.customFileName('https://mirror.example/granite-4.0-micro-Q4_K_M.gguf'));
+  gate('a URL with no filename still yields a stable name',
+    /^custom-[0-9a-f]{12}\.gguf$/.test(assistant.customFileName('https://x.example/download?id=7')),
+    assistant.customFileName('https://x.example/download?id=7'));
+
+  assistant.setCustomModel(null);
   gate('clearing restores the pinned revision',
-    assistant.resolvedModelUrl(entry) === pinned, 'back to default');
+    assistant.resolvedModelUrl(assistant.activeEntry()) === pinned, 'back to default');
+
+  gate('presets are offered, default first and built in',
+    assistant.MODEL_PRESETS.length >= 2 && assistant.MODEL_PRESETS[0].builtin === true,
+    assistant.MODEL_PRESETS.map((p) => p.label).join(' · '));
+
+  // ── robustness: what a wrong URL actually returns ──────────────────────
+  console.log('\n[model-manage] robustness');
+  const tmpDir = assistant.modelsDir();
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const htmlPath = path.join(tmpDir, 'not-a-model.gguf');
+  fs.writeFileSync(htmlPath, '<!DOCTYPE html><title>404 Not Found</title>');
+  gate('★ an HTML error page is not mistaken for a model', !assistant.isGgufFile(htmlPath), 'GGUF magic rejects it');
+  const ggufPath = path.join(tmpDir, 'looks-real.gguf');
+  fs.writeFileSync(ggufPath, Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(2048, 3)]));
+  gate('a real GGUF header passes', assistant.isGgufFile(ggufPath), 'magic bytes match');
+  fs.rmSync(htmlPath, { force: true }); fs.rmSync(ggufPath, { force: true });
 
   // ── deletion, on a decoy file in this run's own userData ────────────────
   console.log('\n[model-manage] deletion');
@@ -46,7 +79,7 @@ async function main() {
   fs.mkdirSync(dir, { recursive: true });
   const modelPath = path.join(dir, entry.file);
   // A stand-in of the right NAME; deletion must not care what is inside.
-  fs.writeFileSync(modelPath, Buffer.alloc(4096, 7));
+  fs.writeFileSync(modelPath, Buffer.concat([Buffer.from('GGUF'), Buffer.alloc(4092, 7)]));
   fs.writeFileSync(`${modelPath}.sha256`, 'deadbeef  decoy\n');
   fs.writeFileSync(`${modelPath}.verified`, '4096:1\n');
 

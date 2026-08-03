@@ -43,7 +43,7 @@ import {
 } from "../lib/widget-config";
 import { WidgetHelpContext } from "./widgets/WidgetCard";
 import { isDesktopApp } from "../lib/project-manager";
-import type { AssistantStatus } from "../lib/project-manager";
+import type { AssistantStatus, AssistantPreset } from "../lib/project-manager";
 import type { KnowledgeCandidate, KnowledgeLedgerStore } from "../lib/knowledge-store";
 import { activateCode, clearLicense, type Tier } from "../lib/license";
 import { ProBadge, LockedHint } from "./ProBadge";
@@ -166,6 +166,14 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sourceDraft, setSourceDraft] = useState(prefs.assistant?.sourceUrl ?? "");
+  const [presets, setPresets] = useState<AssistantPreset[]>([]);
+
+  useEffect(() => {
+    if (!menuOpen || presets.length) return;
+    void window.electronAPI?.assistantPresets?.()
+      .then((r) => setPresets(r?.presets ?? []))
+      .catch(() => {});
+  }, [menuOpen, presets.length]);
 
   // A source saved on a previous launch has to reach the runtime before the
   // first download, and the runtime holds it in memory only.
@@ -282,8 +290,42 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
 
       {menuOpen && (
         <div className="assistant-options">
+          <span className="assistant-options-label">Model</span>
+          {/* ★ THE DEFAULT STAYS ONE CLICK AWAY. Customisation that cannot be
+              undone by pointing at a thing is a trap, so the tuned model is the
+              first row and choosing it clears the custom entry outright. */}
+          <div className="assistant-presets">
+            {presets.map((preset) => {
+              const active = preset.builtin ? !sourceDraft : sourceDraft === preset.url;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  className="assistant-preset"
+                  data-active={active || undefined}
+                  onClick={() => {
+                    const url = preset.url ?? "";
+                    setSourceDraft(url);
+                    onSetPrefs({
+                      ...prefs,
+                      assistant: { ...(prefs.assistant ?? { enabled }), sourceUrl: url || undefined },
+                    });
+                    void window.electronAPI?.assistantSetSource?.(
+                      preset.builtin || !preset.url ? null : {
+                        id: preset.id, label: preset.label, url: preset.url,
+                        contextSize: preset.contextSize, noThink: preset.noThink,
+                      },
+                    ).catch(() => {});
+                  }}
+                >
+                  <span className="assistant-preset-name">{preset.label}</span>
+                  {preset.note && <span className="assistant-preset-note">{preset.note}</span>}
+                </button>
+              );
+            })}
+          </div>
           <label className="assistant-options-label" htmlFor="assistant-source">
-            Model source
+            Or a direct URL
           </label>
           <input
             id="assistant-source"

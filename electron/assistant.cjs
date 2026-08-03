@@ -122,16 +122,95 @@ function modelBaseUrl() {
  *   file matching the registry's sha256 unless the caller passes an explicit
  *   `expectSha`, so a typo'd host cannot quietly install something else.
  */
-let _customSource = null;   // { url, expectSha? }
+let _customModel = null;
 
-function setCustomSource(next) {
-  _customSource = next && next.url ? { url: String(next.url), expectSha: next.expectSha || null } : null;
-  return _customSource;
+/** Alternates worth offering as one click. Only the DEFAULT is hash-pinned. */
+const MODEL_PRESETS = [
+  {
+    id: 'qwen3-1.7b-q4_k_m', label: 'Qwen3 1.7B  ·  recommended',
+    note: '1.1 GB · fastest, the tuned default', builtin: true,
+    contextSize: 4096, noThink: true,
+  },
+  {
+    id: 'qwen3-4b-2507-q4_k_m', label: 'Qwen3 4B (2507)',
+    note: '2.5 GB · better judgement, needs ~12 GB RAM',
+    url: 'https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen_Qwen3-4B-Instruct-2507-Q4_K_M.gguf',
+    contextSize: 4096, noThink: true,
+  },
+  {
+    id: 'granite-4.0-micro-q4_k_m', label: 'Granite 4.0 Micro',
+    note: '2.1 GB · strong structured output',
+    url: 'https://huggingface.co/unsloth/granite-4.0-micro-GGUF/resolve/main/granite-4.0-micro-Q4_K_M.gguf',
+    contextSize: 4096, noThink: false,
+  },
+];
+
+/** A filename that cannot collide with the pinned model or with another custom
+ *  one: the URL's own basename when it looks like a GGUF, else a hash of it. */
+function customFileName(url) {
+  const base = (() => {
+    try { return path.basename(new URL(url).pathname); } catch { return ''; }
+  })();
+  if (/^[\w.\-]+\.gguf$/i.test(base)) return base;
+  return `custom-${crypto.createHash('sha1').update(url).digest('hex').slice(0, 12)}.gguf`;
+}
+
+/**
+ * Point the runtime at a model the writer chose.
+ *
+ * ★★ A DIFFERENT MODEL IS NOT A DIFFERENT URL. It has its own size, its own
+ *    hash, its own context window and its own chat template — so a custom entry
+ *    carries all of them, gets its OWN filename (swapping models must not
+ *    overwrite the pinned download), and is allowed to have `bytes` and
+ *    `sha256` unknown: those come from the server and are checked against what
+ *    it actually sent.
+ *
+ * ★ WHAT REPLACES THE PINNED HASH. The default is verified against a published
+ *   sha256. A custom model has none, so it is validated by GGUF magic bytes
+ *   plus the fact that llama.cpp can load it — which is the property that
+ *   actually matters and which a hash only stands in for.
+ */
+function setCustomModel(next) {
+  if (!next || !next.url) { _customModel = null; return null; }
+  const url = String(next.url).trim();
+  _customModel = {
+    id: next.id || 'custom',
+    label: next.label || 'Custom model',
+    url,
+    file: customFileName(url),
+    bytes: Number(next.bytes) > 0 ? Number(next.bytes) : null,
+    sha256: next.sha256 || null,
+    contextSize: Number(next.contextSize) > 0 ? Number(next.contextSize) : 4096,
+    noThink: next.noThink !== false,
+  };
+  return _customModel;
+}
+
+/** The model actually in play: the writer's, or the pinned default. */
+function activeEntry(tier) {
+  if (_customModel) {
+    return { ...MODEL_REGISTRY[DEFAULT_TIER], ..._customModel, tier: 'custom', custom: true };
+  }
+  return MODEL_REGISTRY[tier || DEFAULT_TIER] || MODEL_REGISTRY[DEFAULT_TIER];
 }
 
 function resolvedModelUrl(entry) {
-  if (_customSource) return _customSource.url;
-  return `${modelBaseUrl()}/${entry.repo}/resolve/${entry.revision}/${entry.file}`;
+  if (entry && entry.custom) return entry.url;
+  const e = entry || MODEL_REGISTRY[DEFAULT_TIER];
+  return `${modelBaseUrl()}/${e.repo}/resolve/${e.revision}/${e.file}`;
+}
+
+/** Cheap structural check: the first four bytes of every GGUF say so. Catches
+ *  an HTML error page or a redirect saved as a model, which is what a wrong
+ *  URL actually produces. */
+function isGgufFile(file) {
+  try {
+    const fd = fs.openSync(file, 'r');
+    const buf = Buffer.alloc(4);
+    fs.readSync(fd, buf, 0, 4, 0);
+    fs.closeSync(fd);
+    return buf.toString('ascii') === 'GGUF';
+  } catch { return false; }
 }
 
 function registryEntry(tier) {
@@ -148,7 +227,7 @@ function envModelPath() {
 }
 
 function modelPathFor(tier) {
-  return envModelPath() || path.join(modelsDir(), registryEntry(tier).file);
+  return envModelPath() || path.join(modelsDir(), activeEntry(tier).file);
 }
 
 function modelFilePresent(tier) {
@@ -157,7 +236,12 @@ function modelFilePresent(tier) {
     const st = fs.statSync(p);
     if (!st.isFile()) return false;
     // A file that exists but is short is a torn download, not a model.
-    if (!envModelPath() && st.size !== registryEntry(tier).bytes) return false;
+    const e = activeEntry(tier);
+    // A pinned model must match its published size exactly. A custom one has no
+    // published size, so "not empty and structurally a GGUF" is the bar.
+    if (envModelPath()) return true;
+    if (e.bytes && st.size !== e.bytes) return false;
+    if (!e.bytes && (st.size < 1024 || !isGgufFile(p))) return false;
     return true;
   } catch { return false; }
 }
@@ -212,7 +296,7 @@ function currentState(tier) {
 }
 
 function assistantStatus({ tier } = {}) {
-  const entry = registryEntry(tier);
+  const entry = activeEntry(tier);
   const p = modelPathFor(tier);
   return {
     state: currentState(tier),
@@ -275,7 +359,7 @@ function sha256File(file) {
  * writes `<file>.sha256` beside it.
  */
 async function ensureModel({ tier = DEFAULT_TIER } = {}) {
-  const entry = registryEntry(tier);
+  const entry = activeEntry(tier);
   const envPath = envModelPath();
   if (envPath) {
     return { ok: true, path: envPath, bytes: fs.statSync(envPath).size, source: 'env' };
@@ -298,13 +382,13 @@ async function ensureModel({ tier = DEFAULT_TIER } = {}) {
   const partPath = `${dest}.part`;
   fs.mkdirSync(dir, { recursive: true });
 
-  const record = { tier, received: 0, total: entry.bytes, promise: null };
+  const record = { tier, received: 0, total: entry.bytes || 0, promise: null };
   _download = record;
 
   record.promise = (async () => {
     let existing = 0;
     try { existing = fs.statSync(partPath).size; } catch { /* none */ }
-    if (existing > entry.bytes) { fs.rmSync(partPath, { force: true }); existing = 0; }
+    if (entry.bytes && existing > entry.bytes) { fs.rmSync(partPath, { force: true }); existing = 0; }
     record.received = existing;
 
     const url = resolvedModelUrl(entry);
@@ -312,10 +396,17 @@ async function ensureModel({ tier = DEFAULT_TIER } = {}) {
     if (existing > 0) headers.Range = `bytes=${existing}-`;
 
     emitProgress({ phase: 'download', tier, modelId: entry.id, received: existing,
-                   total: entry.bytes, fraction: existing / entry.bytes, state: 'downloading' },
+                   total: record.total, fraction: record.total ? existing / record.total : 0,
+                   state: 'downloading' },
                  { force: true });
 
     const res = await httpsGetFollowing(url, headers);
+    // A model whose size we were not told: learn it from the response, so the
+    // progress bar is honest instead of pretending to know the denominator.
+    if (!record.total) {
+      const len = Number(res.headers['content-length']);
+      if (Number.isFinite(len) && len > 0) record.total = existing + len;
+    }
     const code = res.statusCode || 0;
     if (existing > 0 && code === 200) {
       // Server ignored the Range header — start over rather than corrupt.
@@ -326,13 +417,20 @@ async function ensureModel({ tier = DEFAULT_TIER } = {}) {
       throw new Error(`download failed: HTTP ${code}`);
     }
 
+    // ★ HASH WHILE THE BYTES GO PAST. Hashing afterwards re-reads the whole
+    //   file — 2.4s for 1.1 GB — for data that was already in hand. Only valid
+    //   for a download that started at zero; a RESUMED one never saw the first
+    //   half, so it falls back to a full read below.
+    const streamHash = existing === 0 ? crypto.createHash('sha256') : null;
     await new Promise((resolve, reject) => {
       const out = fs.createWriteStream(partPath, { flags: existing > 0 ? 'a' : 'w' });
       res.on('data', (chunk) => {
         record.received += chunk.length;
+        if (streamHash) streamHash.update(chunk);
         emitProgress({ phase: 'download', tier, modelId: entry.id,
-                       received: record.received, total: entry.bytes,
-                       fraction: record.received / entry.bytes, state: 'downloading' });
+                       received: record.received, total: record.total,
+                       fraction: record.total ? record.received / record.total : 0,
+                       state: 'downloading' });
       });
       res.on('error', reject);
       out.on('error', reject);
@@ -341,9 +439,21 @@ async function ensureModel({ tier = DEFAULT_TIER } = {}) {
     });
 
     const got = fs.statSync(partPath).size;
-    if (got !== entry.bytes) throw new Error(`size mismatch: ${got} != ${entry.bytes}`);
+    if (entry.bytes && got !== entry.bytes) {
+      throw new Error(`size mismatch: ${got} != ${entry.bytes}`);
+    }
+    if (record.total && got !== record.total) {
+      throw new Error(`truncated: ${got} of ${record.total}`);
+    }
+    // ★ WHAT A WRONG URL ACTUALLY RETURNS is an HTML page, and it would sit in
+    //   the models folder looking like a model until llama.cpp failed on it
+    //   with something unreadable. Four bytes settle it here instead.
+    if (!isGgufFile(partPath)) {
+      fs.rmSync(partPath, { force: true });
+      throw new Error('not a GGUF file — check the URL points at the model itself');
+    }
 
-    const digest = await sha256File(partPath);
+    const digest = streamHash ? streamHash.digest('hex') : await sha256File(partPath);
     if (entry.sha256 && digest !== entry.sha256) {
       fs.rmSync(partPath, { force: true });
       throw new Error(`sha256 mismatch: ${digest}`);
@@ -572,7 +682,7 @@ async function ensureHost() {
 
 /** Fork (if needed), guard memory, then load the model in the host. */
 async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
-  const entry = registryEntry(tier);
+  const entry = activeEntry(tier);
   const modelPath = modelPathFor(tier);
   const wantContext = Number(contextSize) || entry.contextSize;
 
@@ -726,9 +836,10 @@ function registerAssistant() {
   ipcMain.handle('assistant:cancel', (_e, opts) => cancel(opts || {}));
   ipcMain.handle('assistant:delete-model', async (_e, opts) => deleteModel(opts || {}));
   ipcMain.handle('assistant:set-source', async (_e, opts) => {
-    const next = setCustomSource(opts || null);
+    const next = setCustomModel(opts || null);
     return { ok: true, source: next };
   });
+  ipcMain.handle('assistant:presets', async () => ({ ok: true, presets: MODEL_PRESETS }));
   ipcMain.handle('assistant:unload', () => unload());
 
   app.on('before-quit', () => killHost('app-quit'));
@@ -738,8 +849,12 @@ function registerAssistant() {
 module.exports = {
   registerAssistant,
   deleteModel,
-  setCustomSource,
+  setCustomModel,
+  activeEntry,
   resolvedModelUrl,
+  isGgufFile,
+  customFileName,
+  MODEL_PRESETS,
   // Exported so harnesses drive the same code the IPC handlers call.
   assistantStatus,
   ensureModel,

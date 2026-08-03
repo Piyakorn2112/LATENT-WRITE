@@ -51,6 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   assistantRun:         (opts)  => ipcRenderer.invoke('assistant:run', opts),
   assistantCancel:      (opts)  => ipcRenderer.invoke('assistant:cancel', opts),
   assistantDeleteModel: (opts) => ipcRenderer.invoke('assistant:delete-model', opts),
+  assistantPresets: () => ipcRenderer.invoke("assistant:presets"),
   assistantSetSource: (opts) => ipcRenderer.invoke('assistant:set-source', opts),
   assistantUnload:      ()      => ipcRenderer.invoke('assistant:unload'),
   onAssistantProgress: (cb) => {

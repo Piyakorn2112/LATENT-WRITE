@@ -211,6 +211,26 @@ export interface AssistantEnsureModelResult {
 
 // ── Electron API type augmentation ───────────────────────────────────────────
 
+/** A model the writer can pick, or type in themselves. */
+export interface AssistantModelChoice {
+  id?: string;
+  label?: string;
+  url: string;
+  /** Absent for anything but the pinned default; validated by GGUF + load. */
+  sha256?: string;
+  contextSize?: number;
+  /** False for model families that do not use the Qwen3 /no_think token. */
+  noThink?: boolean;
+}
+
+export interface AssistantPreset extends Partial<AssistantModelChoice> {
+  id: string;
+  label: string;
+  note?: string;
+  /** The bundled default: no URL, already pinned in the registry. */
+  builtin?: boolean;
+}
+
 interface ElectronAPI {
   isElectron: boolean;
   // Original APIs (PDF, menu, review, LM)
@@ -277,8 +297,10 @@ interface ElectronAPI {
   assistantCancel: (opts: { requestId?: string }) => Promise<{ ok: boolean; requestId?: string; error?: string }>;
   /** Remove the downloaded weights and their sidecars. Kills the host first. */
   assistantDeleteModel: (opts?: { tier?: AssistantTier }) => Promise<{ ok: boolean; freedBytes?: number; removed?: string[]; error?: string }>;
-  /** Point the downloader at a writer-supplied URL. null clears it. */
-  assistantSetSource: (opts: { url: string; expectSha?: string } | null) => Promise<{ ok: boolean; source: { url: string; expectSha: string | null } | null }>;
+  /** Models offered as one click. The first is the tuned, hash-pinned default. */
+  assistantPresets: () => Promise<{ ok: boolean; presets: AssistantPreset[] }>;
+  /** Point the runtime at a writer-chosen model. null restores the default. */
+  assistantSetSource: (opts: AssistantModelChoice | null) => Promise<{ ok: boolean; source: unknown }>;
   assistantUnload: () => Promise<{ ok: boolean; pid?: number | null }>;
   onAssistantProgress: (cb: (data: AssistantProgress) => void) => () => void;
   // Tool system
