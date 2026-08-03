@@ -619,9 +619,9 @@ const CANDIDATES: Candidate[] = [
 
 /** Absolute evidence a winner must carry: the gate plus real graded support.
  *  With GATE_BASE = 1 this means "passing the gate alone is not enough". */
-const FLOOR = 1.2;
+export const FLOOR = 1.2;
 /** How far clear of the runner-up the winner must be. */
-const MARGIN = 0.08;
+export const MARGIN = 0.08;
 
 /**
  * Classify one scene. Returns null when the evidence does not support any
@@ -669,6 +669,36 @@ export function classifyScene(input: SceneFunctionInput): SceneFunction | null {
     confidence: Math.min(1, (winner.s - runnerUp) / 0.8),
     mode: winner.c.mode,
   };
+}
+
+/**
+ * The candidates that CLEARED THEIR GATE, best first — including for the runs
+ * where `classifyScene` then abstained.
+ *
+ * ★ WHY THIS IS SEPARATE FROM classifyScene. The classifier answers with a
+ *   label or with silence, and the silence is deliberate: 64% of scenes abstain
+ *   (measured over 73 DEV chapters), because most scenes have no function worth
+ *   naming. That makes its silence useless as a queue on its own — but the
+ *   SHAPE of a silence is not. A scene that gated nothing in has nothing to
+ *   discuss; one whose winner missed FLOOR by a hair, or lost MARGIN to a
+ *   near-tie, is a real question. This exposes exactly that distinction and
+ *   decides nothing itself.
+ *
+ * ★ IT DOES NOT CHANGE classifyScene, and must not. The accuracy gates in
+ *   scripts/test-scene-labels.ts measure the ENGINE; if a model verdict ever
+ *   reaches them, whoever tunes this file next is tuning against the model
+ *   instead of against prose.
+ */
+export function sceneCandidateScores(
+  input: SceneFunctionInput,
+): Array<{ label: string; score: number; mode: SceneMode }> {
+  if (input.paragraphs.length === 0) return [];
+  const f = extract(input);
+  if (f.words < 45) return [];
+  return CANDIDATES
+    .filter((c) => c.gate(f))
+    .map((c) => ({ label: c.label, score: GATE_BASE + c.score(f), mode: c.mode }))
+    .sort((a, b) => b.score - a.score);
 }
 
 /** Exposed for the accuracy harness only. */

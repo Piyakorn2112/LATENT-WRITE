@@ -42,6 +42,8 @@
     "test:knowledge-ledger": "tsx scripts/test-knowledge-ledger.ts",
     "test:evidence-pack": "tsx scripts/test-evidence-pack.ts",
     "test:chip-picker": "tsx scripts/test-chip-picker.ts",
+    "test:assist-reviews": "tsx scripts/test-assist-reviews.ts",
+    "probe:assist-funnels": "tsx scripts/probe-assist-funnels.ts",
     "probe:chip-quality": "electron scripts/probe-chip-quality.cjs",
     "bench:assistant": "electron scripts/bench-assistant.cjs",
     "test:entity-review": "tsx scripts/test-entity-review.ts",
