@@ -108,6 +108,32 @@ function modelBaseUrl() {
   return process.env.ASSISTANT_MODEL_BASE_URL || 'https://huggingface.co';
 }
 
+/**
+ * A source the writer supplied themselves, replacing the registry's URL.
+ *
+ * ★★ THE ESCAPE HATCH FOR A DEAD SOURCE. The registry pins one repo at one
+ *    revision, which is right until that repo moves, rate-limits, or is blocked
+ *    on someone's network — and then a feature that works entirely offline is
+ *    bricked by a URL. A direct link to the same GGUF (a mirror, a LAN host, a
+ *    file:// path) is enough to recover, so it lives in settings rather than in
+ *    a support email.
+ *
+ * ★ THE CHECKSUM IS NOT WAIVED BY DEFAULT. A custom URL still has to deliver a
+ *   file matching the registry's sha256 unless the caller passes an explicit
+ *   `expectSha`, so a typo'd host cannot quietly install something else.
+ */
+let _customSource = null;   // { url, expectSha? }
+
+function setCustomSource(next) {
+  _customSource = next && next.url ? { url: String(next.url), expectSha: next.expectSha || null } : null;
+  return _customSource;
+}
+
+function resolvedModelUrl(entry) {
+  if (_customSource) return _customSource.url;
+  return `${modelBaseUrl()}/${entry.repo}/resolve/${entry.revision}/${entry.file}`;
+}
+
 function registryEntry(tier) {
   return MODEL_REGISTRY[tier || DEFAULT_TIER] || MODEL_REGISTRY[DEFAULT_TIER];
 }
@@ -281,7 +307,7 @@ async function ensureModel({ tier = DEFAULT_TIER } = {}) {
     if (existing > entry.bytes) { fs.rmSync(partPath, { force: true }); existing = 0; }
     record.received = existing;
 
-    const url = `${modelBaseUrl()}/${entry.repo}/resolve/${entry.revision}/${entry.file}`;
+    const url = resolvedModelUrl(entry);
     const headers = { 'user-agent': 'latent-write-assistant/1' };
     if (existing > 0) headers.Range = `bytes=${existing}-`;
 
@@ -403,6 +429,37 @@ async function verifyModelFile(modelPath) {
   _verifiedPaths.set(modelPath, stamp);
   try { fs.writeFileSync(verifiedStampPath(modelPath), stamp, "utf8"); } catch { /* best effort */ }
   return { ok: true, sha256: digest, ms };
+}
+
+/**
+ * Remove the downloaded weights and every file derived from them.
+ *
+ * ★ THE HOST DIES FIRST. Deleting a file the utility process still has mmap'd
+ *   leaves it resident until that process exits, so the writer would free 1.1GB
+ *   of disk and none of the memory. Unload, then unlink.
+ *
+ * The sidecars go too: a .sha256 or .verified stamp outliving its model would
+ * validate the NEXT download by accident.
+ */
+async function deleteModel({ tier = DEFAULT_TIER } = {}) {
+  if (envModelPath()) return { ok: false, error: 'env-pinned' };
+  killHost('delete-model');
+  const modelPath = modelPathFor(tier);
+  const targets = [modelPath, `${modelPath}.sha256`, `${modelPath}.verified`, `${modelPath}.part`];
+  let freedBytes = 0;
+  const removed = [];
+  for (const target of targets) {
+    try {
+      const st = fs.statSync(target);
+      fs.unlinkSync(target);
+      freedBytes += st.size;
+      removed.push(path.basename(target));
+    } catch { /* absent is the desired end state */ }
+  }
+  _verifiedPaths.delete(modelPath);
+  _fatal = null;
+  _lowMemory = null;
+  return { ok: true, freedBytes, removed };
 }
 
 // ── host process lifecycle ──────────────────────────────────────────────────
@@ -667,6 +724,11 @@ function registerAssistant() {
   ipcMain.handle('assistant:ensure-model', (_e, opts) => ensureModel(opts || {}));
   ipcMain.handle('assistant:run', (_e, opts) => run(opts || {}));
   ipcMain.handle('assistant:cancel', (_e, opts) => cancel(opts || {}));
+  ipcMain.handle('assistant:delete-model', async (_e, opts) => deleteModel(opts || {}));
+  ipcMain.handle('assistant:set-source', async (_e, opts) => {
+    const next = setCustomSource(opts || null);
+    return { ok: true, source: next };
+  });
   ipcMain.handle('assistant:unload', () => unload());
 
   app.on('before-quit', () => killHost('app-quit'));
@@ -675,6 +737,9 @@ function registerAssistant() {
 
 module.exports = {
   registerAssistant,
+  deleteModel,
+  setCustomSource,
+  resolvedModelUrl,
   // Exported so harnesses drive the same code the IPC handlers call.
   assistantStatus,
   ensureModel,

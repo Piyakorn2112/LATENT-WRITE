@@ -50,6 +50,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   assistantEnsureModel: (opts)  => ipcRenderer.invoke('assistant:ensure-model', opts),
   assistantRun:         (opts)  => ipcRenderer.invoke('assistant:run', opts),
   assistantCancel:      (opts)  => ipcRenderer.invoke('assistant:cancel', opts),
+  assistantDeleteModel: (opts) => ipcRenderer.invoke('assistant:delete-model', opts),
+  assistantSetSource: (opts) => ipcRenderer.invoke('assistant:set-source', opts),
   assistantUnload:      ()      => ipcRenderer.invoke('assistant:unload'),
   onAssistantProgress: (cb) => {
     const listener = (_e, data) => cb(data);

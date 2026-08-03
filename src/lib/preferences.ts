@@ -41,6 +41,8 @@ export interface Preferences {
   assistant?: {
     enabled: boolean;
     tier?: "auto" | "small";
+    /** A writer-supplied model URL, used when the pinned source is unreachable. */
+    sourceUrl?: string;
   };
 }
 

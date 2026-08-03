@@ -275,6 +275,10 @@ interface ElectronAPI {
   assistantEnsureModel: (opts?: { tier?: AssistantTier }) => Promise<AssistantEnsureModelResult>;
   assistantRun: <T = unknown>(opts: AssistantRunRequest) => Promise<AssistantRunResult<T>>;
   assistantCancel: (opts: { requestId?: string }) => Promise<{ ok: boolean; requestId?: string; error?: string }>;
+  /** Remove the downloaded weights and their sidecars. Kills the host first. */
+  assistantDeleteModel: (opts?: { tier?: AssistantTier }) => Promise<{ ok: boolean; freedBytes?: number; removed?: string[]; error?: string }>;
+  /** Point the downloader at a writer-supplied URL. null clears it. */
+  assistantSetSource: (opts: { url: string; expectSha?: string } | null) => Promise<{ ok: boolean; source: { url: string; expectSha: string | null } | null }>;
   assistantUnload: () => Promise<{ ok: boolean; pid?: number | null }>;
   onAssistantProgress: (cb: (data: AssistantProgress) => void) => () => void;
   // Tool system

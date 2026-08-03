@@ -164,6 +164,16 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
   const enabled = !!prefs.assistant?.enabled;
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [sourceDraft, setSourceDraft] = useState(prefs.assistant?.sourceUrl ?? "");
+
+  // A source saved on a previous launch has to reach the runtime before the
+  // first download, and the runtime holds it in memory only.
+  useEffect(() => {
+    const url = prefs.assistant?.sourceUrl;
+    if (!url) return;
+    void window.electronAPI?.assistantSetSource?.({ url }).catch(() => {});
+  }, [prefs.assistant?.sourceUrl]);
 
   // Status is read when this panel mounts, and refreshed by the runtime's own
   // download events while it is open. No interval, and nothing running when
@@ -201,20 +211,108 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
       .finally(() => setBusy(false));
   };
 
+  const downloading = status?.state === "downloading";
+  const fraction = status?.progress?.fraction ?? 0;
+  const modelPresent = !!status?.model?.present;
+
+  const handleDelete = () => {
+    const api = window.electronAPI;
+    if (!api?.assistantDeleteModel) return;
+    setBusy(true);
+    void api.assistantDeleteModel()
+      .catch(() => undefined)
+      .then(() => api.assistantStatus())
+      .then((s) => setStatus(s ?? null))
+      .catch(() => {})
+      .finally(() => { setBusy(false); setMenuOpen(false); });
+  };
+
+  const handleSaveSource = () => {
+    const api = window.electronAPI;
+    const url = sourceDraft.trim();
+    const next = url === "" ? undefined : url;
+    onSetPrefs({ ...prefs, assistant: { ...(prefs.assistant ?? { enabled }), sourceUrl: next } });
+    void api?.assistantSetSource?.(next ? { url: next } : null).catch(() => {});
+    setMenuOpen(false);
+  };
+
   return (
-    <div className="settings-toggle-row">
-      <div className="settings-toggle-row-text">
-        <span className="settings-toggle-row-title">Local enhancements</span>
-        <span className="settings-toggle-row-desc">
-          {busy && !status ? ASSISTANT_DESC : assistantStatusLine(status, enabled)}
-        </span>
+    <>
+      <div className="settings-toggle-row">
+        <div className="settings-toggle-row-text">
+          <span className="settings-toggle-row-title">Local enhancements</span>
+          <span className="settings-toggle-row-desc">
+            {busy && !status ? ASSISTANT_DESC : assistantStatusLine(status, enabled)}
+          </span>
+          {/* ★ THE BAR ONLY EXISTS WHILE THERE IS PROGRESS TO REPORT. A download
+              is the one thing here with a real end, so it gets the one control
+              that implies one; the status line above already carries the words.
+              Same fill token as the slider and the toggle, so "how far along"
+              reads in the same blue as every other value in the panel. */}
+          {downloading && (
+            <div
+              className="assistant-progress"
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(fraction * 100)}
+              aria-label="Downloading the assistant model"
+            >
+              <div className="assistant-progress-fill" style={{ width: `${Math.max(2, fraction * 100)}%` }} />
+            </div>
+          )}
+        </div>
+        {/* The second layer, behind a dots affordance: everything here is for
+            the day the pinned source stops working, which is not most days. */}
+        <button
+          type="button"
+          className="assistant-more"
+          aria-label={menuOpen ? "Hide model options" : "Model options"}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ⋯
+        </button>
+        <GlassToggle
+          checked={enabled}
+          onChange={handleToggle}
+          ariaLabel="Toggle local enhancements"
+        />
       </div>
-      <GlassToggle
-        checked={enabled}
-        onChange={handleToggle}
-        ariaLabel="Toggle local enhancements"
-      />
-    </div>
+
+      {menuOpen && (
+        <div className="assistant-options">
+          <label className="assistant-options-label" htmlFor="assistant-source">
+            Model source
+          </label>
+          <input
+            id="assistant-source"
+            className="settings-code-input"
+            type="url"
+            spellCheck={false}
+            placeholder="https://…/model.gguf — leave empty for the default"
+            value={sourceDraft}
+            onChange={(e) => setSourceDraft(e.currentTarget.value)}
+            onBlur={handleSaveSource}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSaveSource(); }}
+          />
+          <p className="assistant-options-hint">
+            A direct link to the same GGUF file. Use this if the default source is
+            unreachable; the download is still checked against the expected file.
+          </p>
+          <button
+            type="button"
+            className="assistant-options-danger"
+            disabled={!modelPresent || busy}
+            onClick={handleDelete}
+          >
+            {modelPresent
+              ? `Delete downloaded model${status?.model?.bytes ? ` (${gb(status.model.bytes)})` : ""}`
+              : "No model downloaded"}
+          </button>
+        </div>
+      )}
+    </>
   );
 }
 

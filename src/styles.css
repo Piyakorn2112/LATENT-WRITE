@@ -15146,3 +15146,91 @@ body.electron-window-unfocused .wc-panel::after {
   text-transform: uppercase;
   color: var(--panel-text-4);
 }
+
+/* ── Assistant model management ────────────────────────────────────────────
+   The download is the one thing in settings with a real end, so it gets the
+   one control that implies one. The fill is --control-value-fill, the same
+   token the slider fill and the "on" toggle use: "how far along" reads in the
+   same blue as every other value in the panel, and the track stays neutral so
+   the fill has something to read against. */
+.assistant-progress {
+  margin-top: 7px;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+}
+@media (prefers-color-scheme: dark) {
+  .assistant-progress { background: rgba(255, 255, 255, 0.18); }
+}
+.assistant-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--control-value-fill);
+  /* Eased, not linear: a resumed download jumps, and an instant snap reads as
+     a glitch rather than as progress. */
+  transition: width 0.28s cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+/* The second layer's affordance. Quiet by default — this is for the day the
+   pinned source breaks, not for every day. */
+.assistant-more {
+  appearance: none;
+  background: none;
+  border: none;
+  padding: 0 6px;
+  margin-right: 2px;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 6px;
+  align-self: center;
+}
+.assistant-more:hover { color: var(--text); }
+.assistant-more[aria-expanded="true"] { color: var(--accent); }
+
+.assistant-options {
+  padding: 2px 2px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistant-options-label {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.assistant-options-hint {
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+/* Destructive, so it is stated in words and never in an icon; it also refuses
+   to look available when there is nothing to delete. */
+.assistant-options-danger {
+  appearance: none;
+  align-self: flex-start;
+  background: none;
+  border: 1px solid var(--divider-line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.assistant-options-danger:hover:not(:disabled) {
+  color: #f43f5e;
+  border-color: color-mix(in srgb, #f43f5e 45%, transparent);
+}
+.assistant-options-danger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
