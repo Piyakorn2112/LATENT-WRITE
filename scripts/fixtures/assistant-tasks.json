@@ -1,10 +1,12 @@
 {
-  "generatedAt": "2026-08-03T13:40:22.417Z",
+  "generatedAt": "2026-08-03T17:17:52.853Z",
   "modelId": "qwen3-1.7b-q4_k_m",
   "packVersion": 1,
   "adjudicatorPromptVersion": 1,
   "entityReviewPromptVersion": 1,
   "chipPromptVersion": 2,
+  "scenePromptVersion": 1,
+  "chekhovPromptVersion": 1,
   "summaryPromptVersion": 1,
   "adjudication": [
     {
@@ -734,6 +736,132 @@
         }
       },
       "maxTokens": 160
+    }
+  ],
+  "sceneReview": [
+    {
+      "id": "pursues",
+      "expectLabel": "pursuit",
+      "noneLabel": "none",
+      "minConfidence": 0.7,
+      "offered": [
+        "pursuit",
+        "reflection"
+      ],
+      "tension": "rising",
+      "key": "c5033a64",
+      "systemPrompt": "You are shown one scene from a novel and two or three words that an analysis\nengine nearly chose to describe what the scene is DOING. It found real evidence\nfor each of them and could not separate them. Your job is to say which one fits,\nor that none of them do.\n\nYou are given the scene's prose, how tense it reads, and the shortlist with the\nengine's own scores. Choose only from that shortlist.\n\nWhat the words mean — they name a scene's FUNCTION, never its mood:\n- the scene is a character pursuing something against resistance, or\n- the scene is a character absorbing what just happened and deciding, or\n- the scene is establishing a place, a practice, or a silence.\n\nRead the scene and ask what it is FOR. A word that only describes how loud or\nhow quiet the scene is has told the writer nothing they cannot already see.\n\nAnswer \"none\" when no word on the shortlist is clearly right, when two of\nthem fit equally, or when the scene is doing several things at once. Silence is\na good answer here and it costs nothing — the scene simply keeps no label,\nwhich is what it has now.\n\nAnswer as JSON: {\"reason\",\"label\",\"confidence\"} in that order.\nreason: FIRST, one clause of at most 15 words naming what the scene does.\nlabel: one word from the shortlist, copied exactly, or \"none\".\nconfidence: a number from 0 to 1, how much the scene shows. Never above 1.",
+      "userText": "SCENE 0 · tension reads rising\n\nTHE SCENE\n  She went to the harbour office first, and the clerk there told her the register had gone up to the customs house on Tuesday and had not come back.\n  At the customs house they said it had gone to the port captain. At the port captain's they said it had gone back to the harbour office, and the man who said it did not look up from his desk while he said it.\n  She walked the length of the quay again in the rain, and at the harbour office the same clerk told her the same thing in the same words, as if she had not been there an hour before.\n  So she waited by the door until it got dark, and when the clerk came out she followed him as far as the bridge and asked him again there, where there was nobody to hear him answer.\n\nTHE SHORTLIST — the readings the engine could not separate\n  - pursuit   (score 1.16)\n  - reflection   (score 1.11)\n  - none   (say this whenever no word above is clearly right)\n\nWhich one is this scene doing?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      },
+      "maxTokens": 128
+    },
+    {
+      "id": "control-neither-fits",
+      "expectLabel": null,
+      "noneLabel": "none",
+      "minConfidence": 0.7,
+      "offered": [
+        "arrival",
+        "confrontation"
+      ],
+      "tension": "calm",
+      "key": "74e53961",
+      "systemPrompt": "You are shown one scene from a novel and two or three words that an analysis\nengine nearly chose to describe what the scene is DOING. It found real evidence\nfor each of them and could not separate them. Your job is to say which one fits,\nor that none of them do.\n\nYou are given the scene's prose, how tense it reads, and the shortlist with the\nengine's own scores. Choose only from that shortlist.\n\nWhat the words mean — they name a scene's FUNCTION, never its mood:\n- the scene is a character pursuing something against resistance, or\n- the scene is a character absorbing what just happened and deciding, or\n- the scene is establishing a place, a practice, or a silence.\n\nRead the scene and ask what it is FOR. A word that only describes how loud or\nhow quiet the scene is has told the writer nothing they cannot already see.\n\nAnswer \"none\" when no word on the shortlist is clearly right, when two of\nthem fit equally, or when the scene is doing several things at once. Silence is\na good answer here and it costs nothing — the scene simply keeps no label,\nwhich is what it has now.\n\nAnswer as JSON: {\"reason\",\"label\",\"confidence\"} in that order.\nreason: FIRST, one clause of at most 15 words naming what the scene does.\nlabel: one word from the shortlist, copied exactly, or \"none\".\nconfidence: a number from 0 to 1, how much the scene shows. Never above 1.",
+      "userText": "SCENE 1 · tension reads calm\n\nTHE SCENE\n  They made the soup out of what was in the house, which was less than it had been but was still enough, and it took most of the afternoon because neither of them was in any hurry about it.\n  He cut the leeks badly and she did not say anything about it. She over-salted the pot and he did not say anything about that either, and they ate it at the small table with the window open.\n  Afterwards he washed and she dried, and they talked about the price of coal and about a dog on the lane that had started following the postman, and about nothing else at all.\n  It got dark while they were still sitting there. Neither of them got up to do anything about the lamp for a long while.\n\nTHE SHORTLIST — the readings the engine could not separate\n  - arrival   (score 1.15)\n  - confrontation   (score 1.10)\n  - none   (say this whenever no word above is clearly right)\n\nWhich one is this scene doing?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      },
+      "maxTokens": 128
+    }
+  ],
+  "chekhovReview": [
+    {
+      "id": "promise",
+      "expectPromise": true,
+      "minConfidence": 0.7,
+      "phrase": "sealed letter",
+      "sentence": "She put the sealed letter under the ledger where nobody would look for it, and told no one it had come.",
+      "key": "7fceea9a",
+      "systemPrompt": "A tool has flagged a thing that a novel names once and never mentions again.\nYou say whether the story PROMISED anything with it.\n\nYou are given the phrase, the sentence that introduces it, the chapter it\nappeared in, and how many chapters have passed since.\n\nMost of these are furniture, and furniture is the answer you should expect to\ngive. A novel describes a room with real things in it — a chipped bowl, a\nfolded coat, a lamp with a cracked shade — and never mentions them again\nbecause they were never promises. They were the room. Saying \"furniture\" is\ndoing the job, not giving up on it.\n\nA thing is a \"promise\" only when the sentence makes the story owe the reader\nsomething about it. That means one of:\n- someone hides it, locks it away, is warned about it, or is told not to touch it\n- it is loaded, sharpened, poisoned, sealed, addressed to someone, or otherwise\n  made ready for a use that has not happened yet\n- the prose stops to tell you it matters — someone stares at it, keeps it,\n  cannot stop thinking about it, or is changed by seeing it\n\nBeing vivid is not a promise. Being specific is not a promise. Being described\nat length is not a promise. If the sentence only puts the thing in the world,\nit is furniture.\n\nAnswer \"unsure\" when the sentence genuinely could be read either way. It costs\nnothing and it is better than a guess.\n\nAnswer as JSON: {\"reason\",\"verdict\",\"confidence\"} in that order.\nreason: FIRST, one clause of at most 15 words quoting what the sentence does.\nverdict: promise, furniture, or unsure.\nconfidence: a number from 0 to 1, how much the sentence shows. Never above 1.",
+      "userText": "THE THING: sealed letter\nINTRODUCED IN: chapter 4\nMENTIONED: 2 times in that chapter, never again\nCHAPTERS SINCE: 6\n\nTHE SENTENCE THAT INTRODUCES IT\n  She put the sealed letter under the ledger where nobody would look for it, and told no one it had come.\n\nDoes that sentence promise the reader something about this thing?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "verdict": {
+            "enum": [
+              "promise",
+              "furniture",
+              "unsure"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      },
+      "maxTokens": 128
+    },
+    {
+      "id": "control-furniture",
+      "expectPromise": false,
+      "minConfidence": 0.7,
+      "phrase": "chipped bowl",
+      "sentence": "A chipped bowl sat on the sill where the afternoon light got at it, throwing a thin ring of white onto the wall behind.",
+      "key": "e1678edd",
+      "systemPrompt": "A tool has flagged a thing that a novel names once and never mentions again.\nYou say whether the story PROMISED anything with it.\n\nYou are given the phrase, the sentence that introduces it, the chapter it\nappeared in, and how many chapters have passed since.\n\nMost of these are furniture, and furniture is the answer you should expect to\ngive. A novel describes a room with real things in it — a chipped bowl, a\nfolded coat, a lamp with a cracked shade — and never mentions them again\nbecause they were never promises. They were the room. Saying \"furniture\" is\ndoing the job, not giving up on it.\n\nA thing is a \"promise\" only when the sentence makes the story owe the reader\nsomething about it. That means one of:\n- someone hides it, locks it away, is warned about it, or is told not to touch it\n- it is loaded, sharpened, poisoned, sealed, addressed to someone, or otherwise\n  made ready for a use that has not happened yet\n- the prose stops to tell you it matters — someone stares at it, keeps it,\n  cannot stop thinking about it, or is changed by seeing it\n\nBeing vivid is not a promise. Being specific is not a promise. Being described\nat length is not a promise. If the sentence only puts the thing in the world,\nit is furniture.\n\nAnswer \"unsure\" when the sentence genuinely could be read either way. It costs\nnothing and it is better than a guess.\n\nAnswer as JSON: {\"reason\",\"verdict\",\"confidence\"} in that order.\nreason: FIRST, one clause of at most 15 words quoting what the sentence does.\nverdict: promise, furniture, or unsure.\nconfidence: a number from 0 to 1, how much the sentence shows. Never above 1.",
+      "userText": "THE THING: chipped bowl\nINTRODUCED IN: chapter 4\nMENTIONED: 1 time in that chapter, never again\nCHAPTERS SINCE: 6\n\nTHE SENTENCE THAT INTRODUCES IT\n  A chipped bowl sat on the sill where the afternoon light got at it, throwing a thin ring of white onto the wall behind.\n\nDoes that sentence promise the reader something about this thing?",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "verdict": {
+            "enum": [
+              "promise",
+              "furniture",
+              "unsure"
+            ]
+          },
+          "confidence": {
+            "type": "number"
+          }
+        }
+      },
+      "maxTokens": 128
     }
   ]
 }

@@ -7,19 +7,17 @@
  * Storage mirrors knowledge-store.ts exactly: desktop → one JSON file via
  * project state; browser → localStorage.
  *
- * ★★ THE MODEL'S ATTRIBUTION ANSWER IS A SUGGESTION, NOT A CORRECTION, AND
- *    THAT IS A DELIBERATE DEPARTURE FROM THE SPEC I WROTE. §3.1 said the
- *    verdict lands "AnnotationCorrection-shaped, via the existing adaptive
- *    path". Reading that path settles the question against it: a correction
- *    written there goes into the writer's exported annotation corpus AND runs
- *    `applyOnlineAdaptiveUpdate`, which trains the ranker immediately. Feeding
- *    the ranker its own engine's uncertain spans, relabelled by a model, on a
- *    floor that is the MODEL'S SELF-REPORTED confidence and not a calibrated
- *    one, is a self-training loop with no human in it — and it would quietly
- *    mix model guesses into the corpus the writer exports as ground truth.
- *    So the answer is offered in the annotation popover and reaches
- *    `correctedLabel` only when the writer confirms it. The model pays the
- *    cost of the decision; it does not get to make it.
+ * ★★ THERE IS NO ATTRIBUTION HERE, AND ITS ABSENCE IS THE MEASUREMENT. The
+ *    spec's third task wrote a speaker back into the app. Two objections
+ *    settled it, in order. The design one: the path it was to write through
+ *    feeds the writer's EXPORTED annotation corpus and runs
+ *    `applyOnlineAdaptiveUpdate`, so an auto-applied verdict is a self-training
+ *    loop with no human in it, gated on a model's self-reported confidence.
+ *    That was answerable — offer it in the popover, let the writer confirm. The
+ *    measurement was not: scripts/probe-attribution-anchor.cjs scored the real
+ *    model 3-of-5 WRONG AND CONFIDENT on prose that answers unambiguously. A
+ *    suggestion wrong three times in five, carrying a fluent reason, costs the
+ *    writer more attention than it saves. See assist-sweep.ts.
  *
  * ★ ONE STORE, KEYED BY THE TASKS' OWN CACHE KEYS. `asked` is membership, not
  *   payload: a question whose answer was unusable (abstention, sub-floor,
@@ -42,26 +40,6 @@ import type { ChekhovVerdict } from "./chekhov-review";
 const KEY = "glass-editor:assist-reviews-v1";
 
 // ── Answers ───────────────────────────────────────────────────────────────
-
-export interface AttributionSuggestion {
-  paragraphIndex: number;
-  spanIndex: number;
-  /**
-   * The span text as judged.
-   *
-   * ★ THE ONLY THING THAT PINS THIS ANSWER TO A LINE. Index alone does not: a
-   *   writer can rewrite one line of dialogue without changing the chapter's
-   *   length, which leaves the content hash identical and the paragraph and
-   *   span indices valid, and the stale suggestion would then be offered
-   *   against prose it never read.
-   */
-  quote: string;
-  /** What the engine had. Lets a consumer tell a confirmation from an overturn. */
-  previousSpeaker: string;
-  speaker: string;
-  confidence: number;
-  reason: string;
-}
 
 export interface SceneLabelSuggestion {
   /** Index of the scene within the chapter, in reading order. */
@@ -92,12 +70,11 @@ export interface ChapterReviews {
   /** The model that answered. A swap invalidates the lot. */
   modelId: string;
   updated: number;
-  attribution: Record<string, AttributionSuggestion>;
   scenes: Record<string, SceneLabelSuggestion>;
   chekhov: Record<string, ChekhovVerdictRecord>;
   /**
    * Every cache key asked, answered or not. Capped by construction: three
-   * attribution + three scene + two Chekhov questions per chapter per hash.
+   * scene + two Chekhov questions per chapter per hash.
    */
   asked: string[];
 }
@@ -107,7 +84,7 @@ export interface AssistReviewStore {
   chapters: Record<string, ChapterReviews>;
 }
 
-export type ReviewKind = "attribution" | "scene" | "chekhov";
+export type ReviewKind = "scene" | "chekhov";
 
 // ── Storage (annotation-store contract) ───────────────────────────────────
 
@@ -151,7 +128,7 @@ function emptyChapter(chapterId: string, contentHash: string, modelId: string): 
   return {
     chapterId, contentHash, modelId,
     updated: 0,
-    attribution: {}, scenes: {}, chekhov: {}, asked: [],
+    scenes: {}, chekhov: {}, asked: [],
   };
 }
 
@@ -184,7 +161,6 @@ export function alreadyAsked(entry: ChapterReviews, key: string): boolean {
 // ── Writing ───────────────────────────────────────────────────────────────
 
 type Answer =
-  | { kind: "attribution"; value: AttributionSuggestion }
   | { kind: "scene"; value: SceneLabelSuggestion }
   | { kind: "chekhov"; value: ChekhovVerdictRecord };
 
@@ -213,7 +189,6 @@ export function recordReviewAnswer(
     updated: now,
     asked: base.asked.includes(key) ? base.asked : [...base.asked, key],
   };
-  if (answer?.kind === "attribution") entry.attribution = { ...entry.attribution, [key]: answer.value };
   if (answer?.kind === "scene") entry.scenes = { ...entry.scenes, [key]: answer.value };
   if (answer?.kind === "chekhov") entry.chekhov = { ...entry.chekhov, [key]: answer.value };
   return { ...store, chapters: { ...store.chapters, [chapterId]: entry } };
@@ -239,46 +214,6 @@ export function pruneReviewStore(
 //   The same rule the knowledge ledger earned: what the widget shows and what
 //   the harness measures have to be the same function, or a gate proves
 //   something the writer never sees.
-
-/**
- * ★★ THE SAME LINE HAS TWO SPELLINGS IN THIS CODEBASE, AND COMPARING THEM RAW
- *    MATCHES NEVER. The engine's prediction trace records a quote's CONTENT
- *    (`text.slice(pair.start + 1, pair.end)` in speech-detect) — no quote marks.
- *    The editor's annotation target records the whole SEGMENT
- *    (`para.slice(seg.start, seg.end)` in HighlightLayer) — marks included. A
- *    suggestion is stored under the first spelling and looked up under the
- *    second, so a `===` guard here is not a strict check, it is an off switch:
- *    every suggestion silently resolves to null and the feature renders nothing
- *    with no error anywhere. Both sides go through this.
- */
-const QUOTE_EDGES = /^[\s"'“”‘’«»—-]+|[\s"'“”‘’«»]+$/g;
-export function normalizeSpanText(text: string): string {
-  return text.replace(/\s+/g, " ").replace(QUOTE_EDGES, "").trim();
-}
-
-/**
- * The suggestion for one span, or null.
- *
- * Null whenever the live span text is not the text that was judged — see the
- * ★ on `AttributionSuggestion.quote` — and whenever the model merely agreed
- * with the engine, which is not something to show anyone.
- */
-export function attributionSuggestionFor(
-  entry: ChapterReviews,
-  paragraphIndex: number,
-  spanIndex: number,
-  liveQuote: string,
-): AttributionSuggestion | null {
-  const live = normalizeSpanText(liveQuote);
-  for (const value of Object.values(entry.attribution)) {
-    if (value.paragraphIndex !== paragraphIndex || value.spanIndex !== spanIndex) continue;
-    if (normalizeSpanText(value.quote) !== live) return null;
-    // A confirmation is not a finding. The engine already says this name.
-    if (value.speaker.trim().toLowerCase() === value.previousSpeaker.trim().toLowerCase()) return null;
-    return value;
-  }
-  return null;
-}
 
 /**
  * Model-sourced scene labels, keyed by the paragraph the scene starts at.

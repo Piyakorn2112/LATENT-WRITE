@@ -1,10 +1,43 @@
 /**
  * attribution-review.ts — the tie-break task: who actually says this line?
  *
- * The FIFTH consumer of the assistant runtime, and the first whose answer
- * writes back into something the rest of the app reads. The queue is the
- * ENGINE'S OWN UNCERTAINTY: spans where a speaker was chosen but the posterior
- * landed between PRONOUN_MIN_POSTERIOR (0.25) and ATTESTED_FLOOR (0.78).
+ * ★★ BUILT, MEASURED, AND NOT WIRED. Nothing calls this module. It is kept
+ *    because the app now loads any GGUF and a stronger model may well do the
+ *    job, and because the measurement below is worth more than the code.
+ *
+ *    scripts/probe-attribution-anchor.cjs, Qwen3-1.7B, five cases whose answer
+ *    the prose fixes unambiguously (three where the engine guessed wrong, two
+ *    where it guessed right, so "always overturn" scores no better than "always
+ *    agree"). Four presentations of the offered names × two prompt versions:
+ *
+ *      variant                        right  declined  WRONG-APPLIED
+ *      incumbent first + annotated        1         0              4
+ *      incumbent first, plain             1         1              3
+ *      incumbent last + annotated         1         0              4
+ *      alphabetical, unmarked             1         1              3
+ *
+ *    The first hypothesis was ANCHORING — the engine's guess is printed first
+ *    AND annotated as the current answer. It is falsified: removing both
+ *    changes nothing, and the same case is right and the same cases wrong in
+ *    all four. What the reasons show instead is a model asserting evidence that
+ *    is not there ("the line directly names the speaker" for lines naming
+ *    nobody) and inverting the reply direction — naming whoever a line ANSWERS
+ *    rather than whoever speaks it. Rewriting rules 2 and 3 to state the
+ *    direction twice (PROMPT_VERSION 2) did not move it.
+ *
+ *    Every wrong answer arrived at 0.8-1.0 confidence, so ATTRIBUTION_MIN_
+ *    CONFIDENCE cannot filter them: there is no threshold that separates the
+ *    right answers from the wrong ones. The engine's own posterior is better
+ *    than this, which makes the task net-negative at 1.7B.
+ *
+ *    ★ TO WIRE IT BACK: run the probe against the candidate model. Wire it only
+ *      if WRONG-APPLIED is 0 across all five cases — not if `right` merely
+ *      improves. A confident wrong speaker is the failure that costs something;
+ *      a declined answer costs nothing, because the engine keeps its own.
+ *
+ * The queue is the ENGINE'S OWN UNCERTAINTY: spans where a speaker was chosen
+ * but the posterior landed between PRONOUN_MIN_POSTERIOR (0.25) and
+ * ATTESTED_FLOOR (0.78).
  *
  * ★★ RANK AND CAP, DO NOT SWEEP. Measured over 73 DEV chapters
  *    (scripts/probe-assist-funnels.ts): 43.62 such spans PER CHAPTER. At ~600ms
@@ -29,7 +62,7 @@ import type { AssistantJSONRunner } from "./assistant-client";
 
 export const ATTRIBUTION_TASK = "attribution-review";
 /** Bump on ANY change to the prompt text or the schema. Invalidates stored answers. */
-export const ATTRIBUTION_PROMPT_VERSION = 1;
+export const ATTRIBUTION_PROMPT_VERSION = 2;
 
 /** Per-chapter budget. See the ★★ above for the measurement behind it. */
 export const ATTRIBUTION_CAP = 3;
@@ -111,19 +144,25 @@ never name anyone else, and you may never invent a name.
 Decide in this order and stop at the first that fits:
 1. The line, or the prose around it, NAMES the speaker — "said X", "X asked",
    "X set the cup down and said". A named attribution beats everything below it.
-2. The line answers something the previous speaker said, or addresses them by
-   name. A reply belongs to the person who was spoken TO, not to the asker.
-3. DIALOGUE ALTERNATES. With nothing else to go on, a line between two speakers
-   belongs to whoever did NOT speak the line before it.
+2. The line REPLIES to the line before it — it answers a question, contradicts
+   a claim, or picks up its words. A reply is spoken by the OTHER person.
+   NEVER answer with the name of whoever spoke the line being replied to.
+3. DIALOGUE ALTERNATES. With nothing else to go on, the line belongs to whoever
+   did NOT speak the line before it. If the last line was X, this line is not X.
 4. Nothing above fits, or two names fit equally well — answer "unsure". That is
    a real answer, it costs you nothing, and it is better than a coin flip.
+
+Rules 2 and 3 both say the same thing about direction, because getting it
+backwards is the easy mistake: naming the person a line ANSWERS is naming the
+wrong speaker.
 
 Judge only from the evidence in front of you. A name being familiar is not
 evidence. The current answer shown to you is an earlier guess, not evidence.
 PREFER a low confidence over a guess.
 
 Answer as JSON: {"reason","speaker","confidence"} in that order.
-reason: FIRST, one clause of at most 15 words naming the evidence you used.
+reason: FIRST, one clause of at most 15 words saying what makes it that person.
+  Do NOT quote the line back, and do NOT repeat the headings above.
 speaker: a name copied EXACTLY from the list, or "unsure".
 confidence: a number from 0 to 1, how much the evidence shows. Never above 1.`;
 

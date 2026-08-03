@@ -5,20 +5,22 @@
  * what joins them to the app, which is where the defects that actually reach a
  * writer live:
  *
- *   1. ORDER & BUDGET   attribution → scene → Chekhov, caps held, and a
- *                       cancellation between items stops the rest.
+ *   1. ORDER & BUDGET   scene before Chekhov, caps held, and a cancellation
+ *                       between items stops the rest.
  *   2. KEY AGREEMENT    the key the sweep checks `isAsked` against is the SAME
  *                       key the task module stamps on its result. If these ever
  *                       diverge, every answer is stored under a key nothing
  *                       looks up and every question is asked forever.
  *   3. ADAPTERS         scene numbering matches the engine's own grouping, the
- *                       prev-scene carry is threaded, a scene the engine
- *                       labelled is never a question, and attribution spans are
- *                       indexed the way the annotation path resolves them.
- *   4. STALENESS        an edit, a model swap, or a length-preserving rewrite
- *                       of the judged line all stop a stored answer surfacing.
- *   5. SILENCE          a "furniture" verdict is stored and shows nothing; a
- *                       model that merely agrees with the engine shows nothing.
+ *                       prev-scene carry is threaded, and a scene the engine
+ *                       labelled is never a question.
+ *   4. STALENESS        an edit, a model swap, or a re-tuned engine shortlist
+ *                       all stop a stored answer surfacing.
+ *   5. SILENCE          a "furniture" verdict is stored and shows nothing.
+ *
+ * ★ ATTRIBUTION IS NOT HERE. It was wired, then measured out by
+ *   scripts/probe-attribution-anchor.cjs; src/lib/attribution-review.ts keeps
+ *   the module, its own gates, and the number that withdrew it.
  *
  * ★ EVERY NAME IS FABRICATED, for the same reason as the sibling harness: a
  *   gate that passed on a remembered world would measure the model's memory.
@@ -26,22 +28,15 @@
  *   /opt/homebrew/bin/node node_modules/tsx/dist/cli.mjs scripts/test-assist-sweep.ts
  */
 import {
-  attributionInputFrom,
   chekhovCandidatesFrom,
   runAssistSweep,
   sceneCandidatesFrom,
   sceneStartParagraphs,
   type SweepAnswer,
 } from "../src/lib/assist-sweep";
-import {
-  ATTRIBUTION_TASK,
-  attributionKeyFor,
-  offeredSpeakers,
-} from "../src/lib/attribution-review";
 import { CHEKHOV_TASK, chekhovKeyFor } from "../src/lib/chekhov-review";
 import { SCENE_TASK, offeredLabels, sceneKeyFor } from "../src/lib/scene-review";
 import {
-  attributionSuggestionFor,
   chapterReviews,
   confirmedPromises,
   emptyReviewStore,
@@ -52,7 +47,6 @@ import {
 import type { AssistantJSONRequest, AssistantJSONRunner } from "../src/lib/assistant-client";
 import type { ChapterParaResult } from "../src/lib/speech-detect";
 import type { SceneReviewCandidate } from "../src/lib/scene-review";
-import type { AdaptivePredictionTrace } from "../src/types";
 
 let failures = 0;
 const gate = (ok: boolean, label: string, detail: string) => {
@@ -68,12 +62,6 @@ const CHAPTER_ID = "ch-7";
 function taskRunner(seen: AssistantJSONRequest[]): AssistantJSONRunner {
   return (async (req: AssistantJSONRequest) => {
     seen.push(req);
-    if (req.task === ATTRIBUTION_TASK) {
-      return {
-        ok: true, modelId: MODEL, timings: null,
-        json: { reason: "she answers what Ferren asked", speaker: "Ferren Ash", confidence: 0.88 },
-      };
-    }
     if (req.task === SCENE_TASK) {
       return {
         ok: true, modelId: MODEL, timings: null,
@@ -96,37 +84,6 @@ const PARAGRAPHS = [
   "Ferren Ash turned a page without looking up from it.",
   "“I signed for what came off the barge.”",
   "“That is not the same thing and you know it.”",
-];
-
-/** Two ties in the unsure band, one attested span that must never be selected. */
-const PREDICTIONS: AdaptivePredictionTrace[] = [
-  {
-    task: "speech", paragraphIndex: 2, spanIndex: 0,
-    spanText: "You signed for the second load,",
-    contextBefore: "", contextAfter: " she said.",
-    candidates: [{ label: "Marda Kelp", source: "rule", baseScore: 92, learnedAdjustment: 0, finalScore: 92, features: {} }],
-    predictedLabel: "Marda Kelp", confidence: 0.92, needsReview: false, ambiguityGap: 92, source: "rule",
-  },
-  {
-    task: "speech", paragraphIndex: 4, spanIndex: 0,
-    spanText: "I signed for what came off the barge.",
-    contextBefore: "turned a page", contextAfter: "",
-    candidates: [
-      { label: "Marda Kelp", source: "pronoun-bayes", baseScore: 51, learnedAdjustment: 0, finalScore: 51, features: {} },
-      { label: "Ferren Ash", source: "pronoun-bayes", baseScore: 49, learnedAdjustment: 0, finalScore: 49, features: {} },
-    ],
-    predictedLabel: "Marda Kelp", confidence: 0.51, needsReview: true, ambiguityGap: 2, source: "pronoun-bayes",
-  },
-  {
-    task: "speech", paragraphIndex: 5, spanIndex: 0,
-    spanText: "That is not the same thing and you know it.",
-    contextBefore: "", contextAfter: "",
-    candidates: [
-      { label: "Ferren Ash", source: "pronoun-bayes", baseScore: 40, learnedAdjustment: 0, finalScore: 40, features: {} },
-      { label: "Marda Kelp", source: "pronoun-bayes", baseScore: 38, learnedAdjustment: 0, finalScore: 38, features: {} },
-    ],
-    predictedLabel: "Ferren Ash", confidence: 0.27, needsReview: true, ambiguityGap: 2, source: "pronoun-bayes",
-  },
 ];
 
 const meta = (over: Partial<ChapterParaResult["meta"]> = {}): ChapterParaResult["meta"] => ({
@@ -176,17 +133,6 @@ async function main() {
     "★ a scene the engine already labelled is never asked about",
     `asked about scene(s) [${built.map((c) => c.sceneIndex).join(",") || "none"}], engine labelled scene 1`);
 
-  // ── attribution indexing ────────────────────────────────────────────────
-  const attribution = attributionInputFrom(CHAPTER_ID, HASH, PARAGRAPHS, PREDICTIONS);
-  gate(attribution.spans.length === 3, "every speech span is carried, not just the ties",
-    `${attribution.spans.length} spans — share is computed over the whole chapter`);
-  gate(attribution.spans[1].paragraphIndex === 4 && attribution.spans[1].spanIndex === 0 &&
-       attribution.spans[1].quote === "I signed for what came off the barge.",
-    "★ spans keep the (paragraphIndex, spanIndex) the annotation path resolves by",
-    "built from speechPredictions, not from segments");
-  gate(JSON.stringify(attribution.spans[1].candidates) === JSON.stringify(["Marda Kelp", "Ferren Ash"]),
-    "…and carry the engine's own ranking as the option set", "best first");
-
   // ── the sweep ───────────────────────────────────────────────────────────
   console.log("\n[assist-sweep] order, budget, cancellation\n");
 
@@ -215,7 +161,7 @@ async function main() {
   const seen: AssistantJSONRequest[] = [];
   const answers: Array<{ key: string; answer: SweepAnswer | null }> = [];
   const stats = await runAssistSweep(
-    { chapterId: CHAPTER_ID, chapterContentHash: HASH, attribution, scenes: SCENES, chekhov: CHEKHOV },
+    { chapterId: CHAPTER_ID, chapterContentHash: HASH, scenes: SCENES, chekhov: CHEKHOV },
     {
       run: taskRunner(seen), modelId: MODEL,
       isAsked: () => false,
@@ -224,26 +170,18 @@ async function main() {
   );
 
   const order = seen.map((r) => r.task);
-  const firstScene = order.indexOf(SCENE_TASK);
+  const lastScene = order.lastIndexOf(SCENE_TASK);
   const firstChekhov = order.indexOf(CHEKHOV_TASK);
-  const lastAttribution = order.lastIndexOf(ATTRIBUTION_TASK);
-  gate(lastAttribution < firstScene && firstScene < firstChekhov,
-    "★ the order is the priority: attribution → scene → Chekhov",
+  gate(lastScene >= 0 && firstChekhov > lastScene,
+    "★ the order is the priority: scene → Chekhov",
     order.map((t) => t.replace("-review", "")).join(" → "));
-  gate(order.filter((t) => t === ATTRIBUTION_TASK).length === 2,
-    "attribution asks only about spans in the unsure band",
-    "the 0.92 span is attested and is not a tie-break");
-  gate(stats.asked === 6 && stats.answered === 6,
+  gate(stats.asked === 4 && stats.answered === 4,
     "every question inside the budget was asked and answered", JSON.stringify(stats));
 
   // ★ KEY AGREEMENT. The sweep's key must equal the module's own.
-  const tie = attribution.spans[1];
-  const expected = attributionKeyFor(HASH, 4, 0, MODEL, offeredSpeakers(tie, attribution));
-  gate(answers.some((a) => a.key === expected),
+  gate(answers.some((a) => a.key === sceneKeyFor(HASH, 0, MODEL, offeredLabels(SCENES[0]))),
     "★ the key the sweep checks is the key the module stamps",
     "diverge and every answer is stored where nothing looks it up");
-  gate(answers.some((a) => a.key === sceneKeyFor(HASH, 0, MODEL, offeredLabels(SCENES[0]))),
-    "…the same for a scene answer", "offered set folded in");
   gate(answers.some((a) => a.key === chekhovKeyFor(HASH, "chipped bowl", MODEL)),
     "…and for a Chekhov verdict", "phrase folded in");
 
@@ -255,7 +193,7 @@ async function main() {
   }));
   const capSeen: AssistantJSONRequest[] = [];
   await runAssistSweep(
-    { chapterId: CHAPTER_ID, chapterContentHash: HASH, attribution, scenes: many, chekhov: CHEKHOV },
+    { chapterId: CHAPTER_ID, chapterContentHash: HASH, scenes: many, chekhov: CHEKHOV },
     { run: taskRunner(capSeen), modelId: MODEL, isAsked: () => false, onAnswer: () => {} },
   );
   gate(capSeen.filter((r) => r.task === SCENE_TASK).length === 3,
@@ -265,21 +203,21 @@ async function main() {
   const askedKeys = new Set(answers.map((a) => a.key));
   const repeatSeen: AssistantJSONRequest[] = [];
   const repeat = await runAssistSweep(
-    { chapterId: CHAPTER_ID, chapterContentHash: HASH, attribution, scenes: SCENES, chekhov: CHEKHOV },
+    { chapterId: CHAPTER_ID, chapterContentHash: HASH, scenes: SCENES, chekhov: CHEKHOV },
     {
       run: taskRunner(repeatSeen), modelId: MODEL,
       isAsked: (key) => askedKeys.has(key),
       onAnswer: () => {},
     },
   );
-  gate(repeatSeen.length === 0 && repeat.skipped === 6,
+  gate(repeatSeen.length === 0 && repeat.skipped === 4,
     "★ a settled chapter asks nothing at all", `${repeat.skipped} skipped, 0 sent`);
 
   // Cancellation.
   let calls = 0;
   const cancelSeen: AssistantJSONRequest[] = [];
   const cancelled = await runAssistSweep(
-    { chapterId: CHAPTER_ID, chapterContentHash: HASH, attribution, scenes: SCENES, chekhov: CHEKHOV },
+    { chapterId: CHAPTER_ID, chapterContentHash: HASH, scenes: SCENES, chekhov: CHEKHOV },
     {
       run: taskRunner(cancelSeen), modelId: MODEL,
       isAsked: () => false, onAnswer: () => { calls++; },
@@ -298,26 +236,8 @@ async function main() {
     store = recordReviewAnswer(store, CHAPTER_ID, HASH, MODEL, key, answer, 1000);
   }
   const entry = chapterReviews(store, CHAPTER_ID, HASH, MODEL);
-  gate(entry.asked.length === 6, "every question asked is recorded, answered or not",
-    `${entry.asked.length} asked · ${Object.keys(entry.attribution).length} attribution · ${Object.keys(entry.scenes).length} scene · ${Object.keys(entry.chekhov).length} chekhov`);
-
-  const live = attributionSuggestionFor(entry, 4, 0, "I signed for what came off the barge.");
-  gate(live?.speaker === "Ferren Ash" && live?.previousSpeaker === "Marda Kelp",
-    "the suggestion reaches the span it was judged on", `${live?.previousSpeaker} → ${live?.speaker}`);
-
-  // ★★ The two spellings of one line. The engine stores a quote's CONTENT; the
-  //    editor asks with the whole SEGMENT, marks included. A raw === here is an
-  //    off switch for the entire feature, and it fails silently.
-  const asTheEditorAsks = "“I signed for what came off the barge.”";
-  gate(attributionSuggestionFor(entry, 4, 0, asTheEditorAsks)?.speaker === "Ferren Ash",
-    "★★ the editor's spelling of the span finds the engine's",
-    "quote marks included vs stripped — same line");
-
-  gate(attributionSuggestionFor(entry, 4, 0, "I signed for what came off the truck.") === null,
-    "★★ a length-preserving rewrite of the judged line kills the suggestion",
-    "index and content hash both survive that edit — the quote does not");
-  gate(attributionSuggestionFor(entry, 2, 0, PARAGRAPHS[2]) === null,
-    "a span the model agreed with shows nothing", "a confirmation is not a finding");
+  gate(entry.asked.length === 4, "every question asked is recorded, answered or not",
+    `${entry.asked.length} asked · ${Object.keys(entry.scenes).length} scene · ${Object.keys(entry.chekhov).length} chekhov`);
 
   const staleModel = chapterReviews(store, CHAPTER_ID, HASH, "some-other-model");
   gate(staleModel.asked.length === 0,

@@ -1,43 +1,45 @@
 /**
- * assist-sweep.ts — one sweep, three tasks, a fixed order and a hard budget.
+ * assist-sweep.ts — one sweep, a fixed order and a hard budget.
  *
  * The wave-2 spec (plans/assistant-adjudication-wave-2.md §4) asks for ONE
- * background pass rather than three competing ones, because three schedulers
- * against a single-slot inference host is three queues fighting for the same
- * lock. This module is that pass, plus the adapters that turn a live chapter
- * analysis into the candidates each task module expects.
+ * background pass rather than several competing ones, because two schedulers
+ * against a single-slot inference host are two queues fighting for one lock.
+ * This module is that pass, plus the adapters that turn a live chapter analysis
+ * into the candidates each task module expects.
  *
- * ★★ THE ORDER IS THE PRIORITY: attribution → scene → Chekhov. Attribution
- *    feeds everything downstream — cast, voice, timeline, character arcs all
- *    read `speaker` — so a wrong speaker poisons widgets that scene labels and
- *    Chekhov verdicts never touch. If the budget runs out, it runs out on the
- *    cheapest question, not the most consequential one.
+ * ★★ ATTRIBUTION WAS THE FIRST STAGE AND IS MEASURED OUT. The spec ordered
+ *    this sweep attribution → scene → Chekhov, because a wrong speaker poisons
+ *    every widget downstream. It was built, wired, and then measured against
+ *    the real model by scripts/probe-attribution-anchor.cjs: on five cases the
+ *    prose answers unambiguously, the best of four prompt presentations scored
+ *    1 right, 1 declined, 3 WRONG AND APPLIED — every wrong answer above the
+ *    0.7 floor, at 0.8-1.0 confidence, so no threshold separates them. Stable
+ *    across two prompt versions and four presentations (32 judgements), and the
+ *    failures do not move with presentation at all: Qwen3-1.7B asserts "the
+ *    line directly names the speaker" for lines that name nobody, and breaks
+ *    the alternation rule it was just given.
  *
- * ★★ RANK AND CAP, DO NOT SWEEP. Eight questions per chapter, ~5s of idle
- *    work, bounded whatever the prose does. Measured over 73 DEV chapters, an
- *    uncapped attribution pass alone would be 43.62 questions per chapter —
- *    26 seconds of continuous inference for a queue an edit invalidates before
- *    it drains. See scripts/probe-assist-funnels.ts, which is the measurement
- *    the caps come from and the way to check they still fit.
+ *    The engine's own posterior is better than that. attribution-review.ts is
+ *    kept, tested and unwired; its header states what would have to measure
+ *    true to wire it back.
+ *
+ * ★★ RANK AND CAP, DO NOT SWEEP. Five questions per chapter, ~3s of idle work,
+ *    bounded whatever the prose does. Measured over 73 DEV chapters, an
+ *    uncapped scene pass alone would be 16.64 questions per chapter for a queue
+ *    an edit invalidates before it drains. See scripts/probe-assist-funnels.ts,
+ *    which is the measurement the caps come from and the way to check they fit.
  *
  * ★ THE SWEEP IS SCOPED TO THE CHAPTER THE WRITER IS IN, WHICH NARROWS THE
  *   SPEC. §4 says it "moves to the next chapter only when the current one is
- *   settled". Two of the three tasks need a full chapter analysis — scene
- *   near-misses come from grouped scenes, attribution ties from the engine's
- *   own posteriors — and that analysis exists for the ACTIVE chapter only.
+ *   settled". Scene near-misses need a full chapter analysis — they come from
+ *   the engine's own scene grouping — and that exists for the ACTIVE chapter
+ *   only.
  *   Sweeping the book would mean re-analysing every chapter in the worker
  *   first, which is what the ledger backfill already does at one chapter per
  *   idle tick for a much cheaper payload. Scoping to the visited chapter puts
  *   the work exactly where the writer can see its result, and costs nothing
  *   for a book they are not reading.
  */
-import {
-  ATTRIBUTION_CAP,
-  attributionKeyFor,
-  offeredSpeakers,
-  runAttributionReview,
-  selectAttributionCandidates,
-} from "./attribution-review";
 import {
   CHEKHOV_CAP,
   chekhovKeyFor,
@@ -52,19 +54,13 @@ import {
   selectSceneCandidates,
 } from "./scene-review";
 import { sceneCandidateScores } from "./scene-function";
-import type { AttributionReviewInput, AttributionSpan } from "./attribution-review";
 import type { ChekhovReviewCandidate } from "./chekhov-review";
 import type { SceneReviewCandidate } from "./scene-review";
 import type { ChekhovCandidate } from "./continuity";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { ChapterParaResult } from "./speech-detect";
 import type { Tension } from "./scene-function";
-import type { AdaptivePredictionTrace } from "../types";
-import type {
-  AttributionSuggestion,
-  ChekhovVerdictRecord,
-  SceneLabelSuggestion,
-} from "./review-store";
+import type { ChekhovVerdictRecord, SceneLabelSuggestion } from "./review-store";
 
 // ── Adapters ──────────────────────────────────────────────────────────────
 
@@ -87,41 +83,6 @@ export function sceneStartParagraphs(
   // A chapter too short to group has no marked start but is still one scene.
   if (starts.length === 0 && speechResults.length > 0) starts.push(0);
   return starts;
-}
-
-/**
- * Every speech span of the chapter, in reading order, from the ENGINE'S OWN
- * prediction traces.
- *
- * ★ BUILT FROM `speechPredictions`, NOT FROM THE SEGMENTS, AND THAT IS LOAD-
- *   BEARING. The annotation path resolves a span by
- *   `(paragraphIndex, spanIndex)` against exactly this array
- *   (App.handleAnnotationConfirm), so a suggestion built off a different index
- *   space would attach to the wrong line — silently, and only for paragraphs
- *   whose segment order differs from their prediction order. The traces also
- *   already carry the engine's ranked candidates, which is the option set the
- *   model is allowed to choose between.
- */
-export function attributionInputFrom(
-  chapterId: string,
-  chapterContentHash: string,
-  paragraphs: readonly string[],
-  speechPredictions: readonly AdaptivePredictionTrace[],
-): AttributionReviewInput {
-  const spans: AttributionSpan[] = speechPredictions
-    .filter((prediction) => prediction.task === "speech")
-    .map((prediction) => ({
-      paragraphIndex: prediction.paragraphIndex,
-      spanIndex: prediction.spanIndex,
-      quote: prediction.spanText,
-      speaker: prediction.predictedLabel ?? "",
-      confidence: prediction.confidence,
-      candidates: prediction.candidates
-        .map((candidate) => candidate.label)
-        .filter((label): label is string => !!label),
-    }))
-    .sort((a, b) => a.paragraphIndex - b.paragraphIndex || a.spanIndex - b.spanIndex);
-  return { chapterId, chapterContentHash, paragraphs, spans };
 }
 
 /**
@@ -204,14 +165,12 @@ export function chekhovCandidatesFrom(
 // ── The sweep ─────────────────────────────────────────────────────────────
 
 export type SweepAnswer =
-  | { kind: "attribution"; value: AttributionSuggestion }
   | { kind: "scene"; value: SceneLabelSuggestion }
   | { kind: "chekhov"; value: ChekhovVerdictRecord };
 
 export interface AssistSweepInput {
   chapterId: string;
   chapterContentHash: string;
-  attribution: AttributionReviewInput;
   scenes: readonly SceneReviewCandidate[];
   chekhov: readonly ChekhovReviewCandidate[];
 }
@@ -229,7 +188,7 @@ export interface AssistSweepOptions {
   onAnswer: (key: string, answer: SweepAnswer | null) => void;
   isCancelled?: () => boolean;
   /** Test seam. Production leaves these at the module caps. */
-  caps?: { attribution?: number; scene?: number; chekhov?: number };
+  caps?: { scene?: number; chekhov?: number };
 }
 
 export interface AssistSweepStats {
@@ -241,11 +200,11 @@ export interface AssistSweepStats {
 }
 
 /**
- * Spend the chapter's budget, in priority order, and stop.
+ * Spend the chapter's budget, scene questions before Chekhov, and stop.
  *
  * Selection happens per task BEFORE any inference, so the cap is a cap on
  * QUESTIONS ASKED rather than on answers kept: a chapter whose three top
- * attribution ties were all answered last time asks nothing and moves on,
+ * scene near-misses were all answered last time asks nothing and moves on,
  * instead of walking down the ranking to find three unasked ones. That is
  * deliberate — the ranking says these are the three worth asking, and
  * "everything worth asking has been asked" is the settled state the spec wants
@@ -258,42 +217,10 @@ export async function runAssistSweep(
   const stats: AssistSweepStats = { asked: 0, answered: 0, skipped: 0, cancelled: false };
   const cancelled = () => opts.isCancelled?.() === true;
   const caps = {
-    attribution: opts.caps?.attribution ?? ATTRIBUTION_CAP,
     scene: opts.caps?.scene ?? SCENE_CAP,
     chekhov: opts.caps?.chekhov ?? CHEKHOV_CAP,
   };
 
-  // ── 1 · attribution ─────────────────────────────────────────────────────
-  for (const span of selectAttributionCandidates(input.attribution, caps.attribution)) {
-    if (cancelled()) { stats.cancelled = true; return stats; }
-    const offered = offeredSpeakers(span, input.attribution);
-    const key = attributionKeyFor(
-      input.chapterContentHash, span.paragraphIndex, span.spanIndex, opts.modelId, offered,
-    );
-    if (opts.isAsked(key)) { stats.skipped++; continue; }
-    stats.asked++;
-    const result = await runAttributionReview(span, input.attribution, {
-      run: opts.run,
-      modelId: opts.modelId,
-    });
-    if (cancelled()) { stats.cancelled = true; return stats; }
-    if (!result) { opts.onAnswer(key, null); continue; }
-    stats.answered++;
-    opts.onAnswer(key, {
-      kind: "attribution",
-      value: {
-        paragraphIndex: result.paragraphIndex,
-        spanIndex: result.spanIndex,
-        quote: span.quote,
-        previousSpeaker: result.previousSpeaker,
-        speaker: result.speaker,
-        confidence: result.confidence,
-        reason: result.reason,
-      },
-    });
-  }
-
-  // ── 2 · scene function ──────────────────────────────────────────────────
   for (const scene of selectSceneCandidates(input.scenes, caps.scene)) {
     if (cancelled()) { stats.cancelled = true; return stats; }
     const offered = offeredLabels(scene);
@@ -321,7 +248,7 @@ export async function runAssistSweep(
     });
   }
 
-  // ── 3 · Chekhov ─────────────────────────────────────────────────────────
+  // ── 2 · Chekhov ─────────────────────────────────────────────────────────
   for (const candidate of selectChekhovCandidates(input.chekhov, caps.chekhov)) {
     if (cancelled()) { stats.cancelled = true; return stats; }
     const key = chekhovKeyFor(input.chapterContentHash, candidate.phrase, opts.modelId);

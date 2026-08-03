@@ -462,6 +462,123 @@ async function main() {
   gate('no chip leads with a pronoun', pronounChips.length === 0,
     pronounChips.length ? pronounChips.join(' · ') : 'every chip names its actor');
 
+
+  // ── [5] the wave-2 review tasks ────────────────────────────────────────
+  //
+  // ★★ EVERY TASK HERE HAS A CONTROL, AND THE CONTROL IS THE POINT. "Gets the
+  //    easy one right" is passed just as well by a model that answers the same
+  //    thing to everything — the blindness gate 7 exists to catch upstairs. So
+  //    each task gets one case the evidence answers and one it does not, and
+  //    the second gate is that the model DECLINES the second. Declining is the
+  //    product promise: a wrong scene label sits above the prose permanently,
+  //    and a wrong promise sends a writer off to pay off a curtain.
+  //
+  // ★ THE SPEC'S THIRD TASK IS ABSENT ON PURPOSE. Attribution was built, gated
+  //   here, and FAILED — then measured properly by
+  //   scripts/probe-attribution-anchor.cjs and withdrawn from the sweep. See
+  //   the ★★ at the top of attribution-review.ts.
+  //
+  // ★ THE FLOOR IS READ FROM THE FIXTURE, which reads it from the module. A
+  //   confident-enough answer and a confident-WRONG answer are the same event
+  //   to the app, so the gates below apply the same floor the app applies
+  //   rather than judging the raw JSON.
+  console.log('\n[5] review tasks — scene function, Chekhov');
+
+  const reviewRun = (kind, task, c, extra) => callBridge('assistantRun', {
+    requestId: `${kind}-${c.id}`,
+    task,
+    systemPrompt: c.systemPrompt,
+    userText: c.userText,
+    schema: c.schema,
+    maxTokens: c.maxTokens,
+    timeoutMs: 60_000,
+    ...extra,
+  });
+
+  // ── scene function ──────────────────────────────────────────────────────
+  const sceneOut = [];
+  for (const c of fixtures.sceneReview || []) {
+    const res = await reviewRun('scene', 'scene-review', c);
+    const json = res && res.ok ? res.json : null;
+    const shapeOk = !!json && typeof json.label === 'string' &&
+      typeof json.reason === 'string' && typeof json.confidence === 'number' &&
+      json.confidence >= 0 && json.confidence <= 1;
+    const said = shapeOk ? String(json.label).trim() : '';
+    const applied = shapeOk && said.toLowerCase() !== c.noneLabel &&
+      c.offered.some((l) => l.toLowerCase() === said.toLowerCase()) &&
+      json.confidence >= c.minConfidence
+      ? c.offered.find((l) => l.toLowerCase() === said.toLowerCase())
+      : null;
+    sceneOut.push({ c, res, json, shapeOk, applied });
+
+    console.log(`\n  ${c.id}  (tension ${c.tension}, expect ${c.expectLabel ?? 'NO label'})`);
+    console.log(`    shortlist: [${c.offered.join(', ')}] + "${c.noneLabel}"`);
+    console.log(`    response:  ${JSON.stringify(json ?? (res && res.error))}${capNote(json, c.schema)}`);
+    console.log(`    applied:   ${applied === null ? 'nothing — the scene stays unlabelled' : `"${applied}"`}`);
+    console.log(`    ${timingLine(res && res.timings)}`);
+  }
+
+  // ── Chekhov ─────────────────────────────────────────────────────────────
+  const chekhovOut = [];
+  for (const c of fixtures.chekhovReview || []) {
+    const res = await reviewRun('chk', 'chekhov-review', c);
+    const json = res && res.ok ? res.json : null;
+    const shapeOk = !!json && typeof json.verdict === 'string' &&
+      typeof json.reason === 'string' && typeof json.confidence === 'number' &&
+      json.confidence >= 0 && json.confidence <= 1;
+    const surfaced = shapeOk && json.verdict === 'promise' && json.confidence >= c.minConfidence;
+    chekhovOut.push({ c, res, json, shapeOk, surfaced });
+
+    console.log(`\n  ${c.id}  ("${c.phrase}", expect ${c.expectPromise ? 'promise' : 'NOT a promise'})`);
+    console.log(`    sentence: ${c.sentence}`);
+    console.log(`    response: ${JSON.stringify(json ?? (res && res.error))}${capNote(json, c.schema)}`);
+    console.log(`    surfaced: ${surfaced ? 'YES — the writer sees this marked' : 'no — nothing renders'}`);
+    console.log(`    ${timingLine(res && res.timings)}`);
+  }
+
+  console.log('\n[6] review gates');
+
+  const reviewAll = [...sceneOut, ...chekhovOut];
+  const badShape = reviewAll.filter((r) => !r.shapeOk);
+  gate(`all ${reviewAll.length} review responses are schema-valid and in range`,
+    badShape.length === 0,
+    badShape.map((r) => `${r.c.id}: ${(r.res && r.res.error) || JSON.stringify(r.json)}`).join(' | '));
+
+  const blankReason = reviewAll.filter((r) => !r.json || String(r.json.reason || '').trim() === '');
+  gate('every review answer carries a non-empty reason', blankReason.length === 0,
+    blankReason.map((r) => r.c.id).join(', '));
+
+  for (const r of sceneOut) {
+    if (r.c.expectLabel) {
+      gate(`scene/${r.c.id}: the scene the prose answers → "${r.c.expectLabel}"`,
+        r.applied === r.c.expectLabel, `applied ${r.applied === null ? 'nothing' : `"${r.applied}"`}`);
+    } else {
+      gate(`scene/${r.c.id}: ★ a shortlist that fits nothing gets no label`,
+        r.applied === null,
+        `applied "${r.applied}" at confidence ${r.json && r.json.confidence}`);
+    }
+  }
+
+  for (const r of chekhovOut) {
+    if (r.c.expectPromise) {
+      gate(`chekhov/${r.c.id}: hidden and told no one → surfaced as a promise`,
+        r.surfaced === true,
+        `verdict ${r.json && r.json.verdict} @ ${r.json && r.json.confidence}`);
+    } else {
+      gate(`chekhov/${r.c.id}: ★ vivid scenery is not a promise`,
+        r.surfaced === false,
+        `verdict ${r.json && r.json.verdict} @ ${r.json && r.json.confidence}`);
+    }
+  }
+
+  // ★ The same discrimination canary the adjudicator has, for the same reason:
+  //   without it, "furniture" for every phrase passes the control gate while
+  //   judging nothing at all.
+  const chekhovVerdicts = chekhovOut.map((r) => (r.json ? r.json.verdict : 'none'));
+  gate('chekhov: the model discriminates (not one verdict for every phrase)',
+    new Set(chekhovVerdicts).size > 1,
+    `every phrase answered "${chekhovVerdicts[0]}"`);
+
   // ── KV prefix reuse must not leak between requests ──────────────────────
   // ★★ THE PRICE OF THE 8x PREFILL WIN. The host no longer clears the context
   //    sequence between requests, so the KV cache carries the previous
@@ -493,7 +610,8 @@ async function main() {
         : `A₁ ${JSON.stringify(first && first.json)} vs A₂ ${JSON.stringify(second && second.json)}`);
   }
 
-  const timed = [...responses, ...chipResponses, ...summaryResponses].filter((r) => r.timings);
+  const reviewTimed = reviewAll.map((r) => r.res).filter((r) => r && r.timings);
+  const timed = [...responses, ...chipResponses, ...summaryResponses, ...reviewTimed].filter((r) => r.timings);
   const totalTok = timed.reduce((a, r) => a + r.timings.tokens, 0);
   const totalGen = timed.reduce((a, r) => a + r.timings.genMs, 0);
   console.log(

@@ -49,6 +49,24 @@ import {
   SUMMARY_MAX_CHARS,
   SUMMARY_PROMPT_VERSION,
 } from "../src/lib/chapter-summary";
+import {
+  CHEKHOV_MIN_CONFIDENCE,
+  CHEKHOV_PROMPT_VERSION,
+  buildChekhovRequest,
+  chekhovKeyFor,
+  selectChekhovCandidates,
+} from "../src/lib/chekhov-review";
+import type { ChekhovReviewCandidate } from "../src/lib/chekhov-review";
+import {
+  SCENE_MIN_CONFIDENCE,
+  SCENE_NONE,
+  SCENE_PROMPT_VERSION,
+  buildSceneRequest,
+  offeredLabels,
+  sceneKeyFor,
+  selectSceneCandidates,
+} from "../src/lib/scene-review";
+import type { SceneReviewCandidate } from "../src/lib/scene-review";
 import type { ChapterGraphEntry, MajorEvent, WorldData } from "../src/types";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -588,6 +606,139 @@ const chipSpecs = [
   { id: "trap", entry: trapChapter, minPicks: 3 },
 ];
 
+// ── wave-2 review cases ────────────────────────────────────────────────────
+//
+// ★ EACH TASK GETS A DELIBERATE RIGHT ANSWER AND A CONTROL THAT MUST NOT BE
+//   ANSWERED CONFIDENTLY. A task whose only gate is "gets the easy one right"
+//   passes just as well when the model answers the same thing to everything —
+//   the blindness the adjudicator's canary gate exists to catch. Here the
+//   control IS the canary: it is built so that no answer is defensible, and
+//   confident silence is the whole product promise (a wrong scene label sits
+//   above the prose permanently, and a wrong promise sends a writer off to pay
+//   off a curtain).
+//
+// ★ THE SPEC'S THIRD TASK, ATTRIBUTION, WAS MEASURED OUT AND HAS NO CASES HERE.
+//   scripts/probe-attribution-anchor.cjs is its record. Gating a task nothing
+//   calls would be a harness reporting on code the app does not run.
+
+/**
+ * ★★ A FIXTURE WHOSE ANSWER IS A JUDGEMENT CALL IS NOT A GATE, IT IS MY TASTE.
+ *    The first pair here failed the live harness, and BOTH failures were the
+ *    fixture's fault. The positive case was three parts interior reflection to
+ *    one part decision, so "reflection" — what the model said — is a defensible
+ *    reading of it. The control contained a sustained argument, so "friction" —
+ *    what the model said — is defensible too. Gating on either would have been
+ *    gating on my reading of prose, which is exactly what this harness refuses
+ *    to do for chip labels, and it would have been tunable by rewording the
+ *    prompt until the model shared my opinion.
+ *
+ *    Both are rebuilt so the evidence, not the taste, fixes the answer: the
+ *    positive scene is pure external pursuit with no interiority at all, and
+ *    the control offers two words that BOTH plainly fail to describe what its
+ *    scene does. "none" is then the only defensible answer rather than the
+ *    modest one.
+ */
+const sceneClearCase: SceneReviewCandidate = {
+  sceneIndex: 0,
+  tension: "rising",
+  paragraphs: [
+    "She went to the harbour office first, and the clerk there told her the register had gone up to the customs house on Tuesday and had not come back.",
+    "At the customs house they said it had gone to the port captain. At the port captain's they said it had gone back to the harbour office, and the man who said it did not look up from his desk while he said it.",
+    "She walked the length of the quay again in the rain, and at the harbour office the same clerk told her the same thing in the same words, as if she had not been there an hour before.",
+    "So she waited by the door until it got dark, and when the clerk came out she followed him as far as the bridge and asked him again there, where there was nobody to hear him answer.",
+  ],
+  nearMisses: [{ label: "pursuit", score: 1.16 }, { label: "reflection", score: 1.11 }],
+};
+
+/**
+ * THE CONTROL. Two people making a meal and talking about nothing. Neither
+ * offered word describes it: nobody arrives, and nobody is in conflict with
+ * anybody. The engine gated them in on lexical features that misfired, which is
+ * exactly why near-misses exist — and "none" is the honest answer to a
+ * shortlist that does not contain one.
+ */
+const sceneControlCase: SceneReviewCandidate = {
+  sceneIndex: 1,
+  tension: "calm",
+  paragraphs: [
+    "They made the soup out of what was in the house, which was less than it had been but was still enough, and it took most of the afternoon because neither of them was in any hurry about it.",
+    "He cut the leeks badly and she did not say anything about it. She over-salted the pot and he did not say anything about that either, and they ate it at the small table with the window open.",
+    "Afterwards he washed and she dried, and they talked about the price of coal and about a dog on the lane that had started following the postman, and about nothing else at all.",
+    "It got dark while they were still sitting there. Neither of them got up to do anything about the lamp for a long while.",
+  ],
+  nearMisses: [{ label: "arrival", score: 1.15 }, { label: "confrontation", score: 1.10 }],
+};
+
+const sceneSpecs = [
+  { id: "pursues", candidate: sceneClearCase, expectLabel: "pursuit" },
+  { id: "control-neither-fits", candidate: sceneControlCase, expectLabel: null },
+];
+
+const chekhovSpecs: Array<{ id: string; candidate: ChekhovReviewCandidate; expectPromise: boolean }> = [
+  {
+    id: "promise",
+    expectPromise: true,
+    candidate: {
+      phrase: "sealed letter",
+      mentions: 2,
+      sentence: "She put the sealed letter under the ledger where nobody would look for it, and told no one it had come.",
+      chapterNumber: 4,
+      chaptersSince: 6,
+    },
+  },
+  {
+    // THE CONTROL. Vivid, specific, described at length — and a promise of
+    // nothing. This is the majority case in real prose and the one a task that
+    // makes "promise" cheap would get wrong.
+    id: "control-furniture",
+    expectPromise: false,
+    candidate: {
+      phrase: "chipped bowl",
+      mentions: 1,
+      sentence: "A chipped bowl sat on the sill where the afternoon light got at it, throwing a thin ring of white onto the wall behind.",
+      chapterNumber: 4,
+      chaptersSince: 6,
+    },
+  },
+];
+
+const sceneCases = sceneSpecs.map((c) => {
+  const selected = selectSceneCandidates([c.candidate]);
+  if (selected.length !== 1) throw new Error(`scene case "${c.id}" is not a near miss`);
+  const request = buildSceneRequest(c.candidate);
+  return {
+    id: c.id,
+    expectLabel: c.expectLabel,
+    noneLabel: SCENE_NONE,
+    minConfidence: SCENE_MIN_CONFIDENCE,
+    offered: request.offered,
+    tension: c.candidate.tension,
+    key: sceneKeyFor("fixture", c.candidate.sceneIndex, MODEL_ID, offeredLabels(c.candidate)),
+    systemPrompt: request.systemPrompt,
+    userText: request.userText,
+    schema: request.schema,
+    maxTokens: request.maxTokens,
+  };
+});
+
+const chekhovCases = chekhovSpecs.map((c) => {
+  const selected = selectChekhovCandidates([c.candidate]);
+  if (selected.length !== 1) throw new Error(`chekhov case "${c.id}" was not selected`);
+  const request = buildChekhovRequest(c.candidate);
+  return {
+    id: c.id,
+    expectPromise: c.expectPromise,
+    minConfidence: CHEKHOV_MIN_CONFIDENCE,
+    phrase: c.candidate.phrase,
+    sentence: c.candidate.sentence,
+    key: chekhovKeyFor("fixture", c.candidate.phrase, MODEL_ID),
+    systemPrompt: request.systemPrompt,
+    userText: request.userText,
+    schema: request.schema,
+    maxTokens: request.maxTokens,
+  };
+});
+
 // ── emit ───────────────────────────────────────────────────────────────────
 
 // The wire label the model must emit for a "break" — single-sourced from the
@@ -696,11 +847,15 @@ const payload = {
   adjudicatorPromptVersion: ADJUDICATOR_PROMPT_VERSION,
   entityReviewPromptVersion: ENTITY_REVIEW_PROMPT_VERSION,
   chipPromptVersion: CHIP_PROMPT_VERSION,
+  scenePromptVersion: SCENE_PROMPT_VERSION,
+  chekhovPromptVersion: CHEKHOV_PROMPT_VERSION,
   summaryPromptVersion: SUMMARY_PROMPT_VERSION,
   adjudication: adjudicationCases,
   entityReview: entityCases,
   timelineChips: chipCases,
   chapterSummaries: summaryCases,
+  sceneReview: sceneCases,
+  chekhovReview: chekhovCases,
 };
 
 mkdirSync(dirname(OUT), { recursive: true });
@@ -709,7 +864,8 @@ writeFileSync(OUT, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
 console.log(`wrote ${OUT}`);
 console.log(
   `  ${adjudicationCases.length} adjudication cases · ` +
-  `${entityCases.length} entity-review cases · ${chipCases.length} chip cases · modelId=${MODEL_ID}`,
+  `${entityCases.length} entity-review cases · ${chipCases.length} chip cases · ` +
+  `${sceneCases.length} scene · ${chekhovCases.length} chekhov · modelId=${MODEL_ID}`,
 );
 for (const c of adjudicationCases) {
   console.log(`  adj/${c.id.padEnd(9)} pack ${c.tokensEstimate} tok · rungs [${c.rungsIncluded.join(", ")}] · verdictKey ${c.verdictKey}`);

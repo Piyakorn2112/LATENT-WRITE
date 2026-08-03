@@ -85,7 +85,6 @@ import {
 } from "./lib/knowledge-ledger";
 import { runPendingAdjudications, ADJUDICATOR_TASK } from "./lib/adjudicator";
 import {
-  attributionInputFrom,
   chekhovCandidatesFrom,
   runAssistSweep,
   sceneCandidatesFrom,
@@ -93,7 +92,6 @@ import {
 } from "./lib/assist-sweep";
 import {
   alreadyAsked,
-  attributionSuggestionFor,
   chapterReviews,
   confirmedPromises,
   emptyReviewStore,
@@ -105,7 +103,6 @@ import {
   sceneLabelOverlay,
   type AssistReviewStore,
 } from "./lib/review-store";
-import { ATTRIBUTION_TASK } from "./lib/attribution-review";
 import { SCENE_TASK, offeredLabels } from "./lib/scene-review";
 import { CHEKHOV_TASK } from "./lib/chekhov-review";
 import { findChekhovCandidates } from "./lib/continuity";
@@ -1150,9 +1147,10 @@ export default function App() {
   }, [storyGraph, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── The review sweep (wave 2) ───────────────────────────────────────────
-  // One pass, three tasks, in the order that states their priority:
-  // attribution → scene → Chekhov. Eight questions per chapter, ranked and
-  // capped (plans/assistant-adjudication-wave-2.md §2), ~5s of idle work.
+  // One pass: scene near-misses, then Chekhov. Five questions per chapter,
+  // ranked and capped (plans/assistant-adjudication-wave-2.md §2), ~3s of idle
+  // work. The spec's third task, attribution, was built and then measured out —
+  // see the ★★ at the top of assist-sweep.ts.
   //
   // Scheduling is the adjudication sweep's, deliberately: idle ≥3s, only when
   // `assistantAvailable` says a run can succeed RIGHT NOW (so a sweep never
@@ -1201,9 +1199,6 @@ export default function App() {
         {
           chapterId,
           chapterContentHash: contentHash,
-          attribution: attributionInputFrom(
-            chapterId, contentHash, analysisResult.paragraphs, analysisResult.speechPredictions,
-          ),
           scenes: sceneCandidatesFrom(analysisResult.paragraphs, analysisResult.speechResults),
           chekhov: chapterIndex >= 0
             ? chekhovCandidatesFrom(
@@ -1245,9 +1240,7 @@ export default function App() {
       if (retryTimer !== null) window.clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", onVisible);
       reviewSweepRef.current++;
-      cancelAssistantWhere(
-        ({ task }) => task === ATTRIBUTION_TASK || task === SCENE_TASK || task === CHEKHOV_TASK,
-      );
+      cancelAssistantWhere(({ task }) => task === SCENE_TASK || task === CHEKHOV_TASK);
     };
   }, [analysisResult, analysisRunning, analysisRefining, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1291,21 +1284,6 @@ export default function App() {
     () => (activeReviews ? confirmedPromises(activeReviews) : undefined),
     [activeReviews],
   );
-
-  /**
-   * The model's reading of the span the writer has open, when it differs from
-   * the engine's. Offered in the popover; it reaches the adaptive path only if
-   * the writer confirms it — see the ★★ in review-store.ts for why the model
-   * does not get to write a correction itself.
-   */
-  const annotationSuggestion = useMemo(() => {
-    if (!annotationTarget || !activeReviews) return null;
-    const { target } = annotationTarget;
-    if (target.spanType !== "speech") return null;
-    return attributionSuggestionFor(
-      activeReviews, target.paragraphIndex, target.spanIndex, target.spanText,
-    );
-  }, [annotationTarget, activeReviews]);
 
   useEffect(() => { saveStoryGraph(storyGraph); }, [storyGraph]);
   useEffect(() => { saveReviewResults(reviewResults); }, [reviewResults]);
@@ -2496,7 +2474,6 @@ export default function App() {
           anchor={annotationTarget.anchor}
           worldData={novel.worldData}
           correctedSpeaker={annotationTarget.correctedSpeaker}
-          suggestion={annotationSuggestion}
           onConfirm={handleAnnotationConfirm}
           onClose={() => setAnnotationTarget(null)}
         />
