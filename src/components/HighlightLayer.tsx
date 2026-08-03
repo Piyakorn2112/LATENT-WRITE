@@ -487,12 +487,24 @@ interface Props {
   /** Guessed pronoun owners per paragraph (paragraph-relative offsets) —
    *  the engine's pronoun resolution surfaced. See resolvePronounOwners. */
   pronounOwners?: PronounOwner[][] | null;
+  /**
+   * Scene labels the local model resolved, keyed by the paragraph the scene
+   * starts at. Applied only where the engine produced NO label of its own —
+   * `classifyScene` abstained on a near-miss and the model broke the tie.
+   *
+   * ★ IT CANNOT OVERWRITE AN ENGINE LABEL, and the guard is the render below
+   *   preferring `meta.sceneLabel`, not the caller remembering to. The review
+   *   task never asks about a scene the engine answered (see
+   *   assist-sweep.sceneCandidatesFrom), so an override arriving for one is
+   *   already a bug — this is where it stays invisible instead of compounding.
+   */
+  sceneLabelOverrides?: Map<number, string>;
 }
 
 function HighlightLayerImpl({
   content, snapshotContent, paragraphs, speechResults, knownNames, entityNameMap, liveKnownNames, liveParagraphRange, visible = true,
   grammarSuggestions = [], toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
-  annotationOverrides, speechPredictions, actionPredictions, pronounOwners,
+  annotationOverrides, speechPredictions, actionPredictions, pronounOwners, sceneLabelOverrides,
 }: Props) {
   // Build a lowercase-name → entity-type map for type-aware tag rendering.
   const entityTypeMap = useMemo<Map<string, "character" | "place" | "faction" | "entity">>(() => {
@@ -924,11 +936,13 @@ function HighlightLayerImpl({
       }
 
       const tension = meta?.sceneTension ?? "calm";
+      // The engine's own label always wins; the model's only fills a silence.
+      const sceneLabel = meta?.sceneLabel ?? sceneLabelOverrides?.get(pi);
       out.push(
         <span key={`para${pi}`}>
-          {meta?.sceneStart && meta.sceneLabel && (
+          {meta?.sceneStart && sceneLabel && (
             <span aria-hidden="true" style={SCENE_ANCHOR}>
-              <span style={sceneTagStyle(tension)}>| {meta.sceneLabel}</span>
+              <span style={sceneTagStyle(tension)}>| {sceneLabel}</span>
             </span>
           )}
           {snapshotPlan.paragraphNodes[pi]}
@@ -943,7 +957,12 @@ function HighlightLayerImpl({
     }
 
     return out;
-  }, 4, { snapshotActive: snapshotContent !== content, paragraphs: paragraphs.length }), [content, snapshotContent, paragraphs, grammarSuggestions, onEntityClick, annotationMode, snapshotPlan, livePlan, liveParagraphRange]);
+    // ★ `sceneLabelOverrides` BELONGS IN THIS LIST. The model answers a scene
+    //   seconds after the analysis settles, with nothing else about the chapter
+    //   changing; without the dep the label would appear only on the next
+    //   keystroke, which reads as a flicker of arriving-late text rather than a
+    //   result. The caller passes a stable `undefined` when there is nothing.
+  }, 4, { snapshotActive: snapshotContent !== content, paragraphs: paragraphs.length }), [content, snapshotContent, paragraphs, grammarSuggestions, onEntityClick, annotationMode, snapshotPlan, livePlan, liveParagraphRange, sceneLabelOverrides]);
 
   if (nodes.length === 0) return null;
 

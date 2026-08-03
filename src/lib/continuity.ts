@@ -102,6 +102,38 @@ export interface ChekhovCandidate {
   phrase: string;
   /** Number of mentions in *this* chapter. */
   mentions: number;
+  /**
+   * The sentence that INTRODUCES the phrase, verbatim — the first place it
+   * occurs in this chapter.
+   *
+   * ★ THE WHOLE PROMISE-OR-FURNITURE QUESTION LIVES IN THIS SENTENCE. A phrase
+   *   on its own ("rusted pistol") cannot be judged: what separates a promise
+   *   from scenery is whether the prose hid it, loaded it, or stopped to say it
+   *   mattered. chekhov-review.ts drops a candidate that has no sentence rather
+   *   than ask about the phrase alone, because the phrase alone is an invitation
+   *   to invent. Empty only when the match cannot be located (it always can).
+   */
+  sentence: string;
+}
+
+/**
+ * The sentence containing `index`, bounded by terminal punctuation.
+ *
+ * Deliberately simple: this feeds a prompt, not a parser. An abbreviation that
+ * splits a sentence early costs the model a clause of context; a whole-paragraph
+ * fallback would cost it the signal in noise.
+ */
+function sentenceAround(text: string, index: number, max = 400): string {
+  const before = text.slice(0, index);
+  const startAt = Math.max(
+    before.lastIndexOf("."), before.lastIndexOf("!"), before.lastIndexOf("?"),
+    before.lastIndexOf("\n"),
+  );
+  const from = startAt === -1 ? 0 : startAt + 1;
+  const rest = text.slice(index);
+  const endRel = rest.search(/[.!?\n]/);
+  const to = endRel === -1 ? text.length : index + endRel + 1;
+  return text.slice(from, to).replace(/\s+/g, " ").trim().slice(0, max);
 }
 
 export function findChekhovCandidates(
@@ -122,7 +154,7 @@ export function findChekhovCandidates(
   // is preceded by a definite article — both signal "specificity".
   const re = /\b(?:the|a|an|his|her|their|its|my|your)\s+(?:[a-z]+\s+){0,2}([a-z]+ed|[a-z]+ing|[a-z]+)\s+([a-z]+)\b/g;
 
-  const counts = new Map<string, { phrase: string; mentions: number }>();
+  const counts = new Map<string, { phrase: string; mentions: number; at: number }>();
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const adj = m[1] ?? "";
@@ -134,11 +166,13 @@ export function findChekhovCandidates(
     const key = head;
     const ex = counts.get(key);
     if (ex) ex.mentions++;
-    else counts.set(key, { phrase, mentions: 1 });
+    // `m.index` of the FIRST match only: the introducing sentence is the one
+    // that made the promise, and a later mention is the story already using it.
+    else counts.set(key, { phrase, mentions: 1, at: m.index });
   }
 
   const out: ChekhovCandidate[] = [];
-  for (const [head, { phrase, mentions }] of counts) {
+  for (const [head, { phrase, mentions, at }] of counts) {
     // Skip noun heads that recur in later chapters at all — they're
     // already paying off (or the writer is referencing them).
     if (later.includes(` ${head} `) || later.includes(` ${head}.`) || later.includes(` ${head},`)) {
@@ -146,7 +180,7 @@ export function findChekhovCandidates(
     }
     // Only flag if there's enough specificity: the head appears as a
     // noun in a definite-article phrase 1+ time and doesn't recur.
-    out.push({ phrase, mentions });
+    out.push({ phrase, mentions, sentence: sentenceAround(text, at) });
   }
   out.sort((a, b) => b.mentions - a.mentions);
   return out.slice(0, limit);

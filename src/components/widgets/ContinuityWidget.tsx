@@ -22,6 +22,16 @@ interface Props {
   chapterIndex: number;
   /** Knowledge ledger. Findings are read through the shared selector only. */
   knowledgeStore?: KnowledgeLedgerStore;
+  /**
+   * Chekhov phrases the local model confirmed are real promises, lowercased,
+   * from `confirmedPromises` — the shared selector, never re-derived here.
+   *
+   * ★ IT MARKS, IT NEVER FILTERS. The regex found every phrase in this list and
+   *   the writer can see them all; a small model's "furniture" verdict is not
+   *   the authority that removes one from view. Confirmation is additive —
+   *   spec §3.2, and the reason a wrong verdict costs a writer nothing here.
+   */
+  confirmedChekhov?: Set<string>;
   onKnewAlready?: (candidate: KnowledgeCandidate) => void;
   onGoodCatch?: (candidate: KnowledgeCandidate) => void;
 }
@@ -75,7 +85,7 @@ const RULING_STYLE = {
 } as const;
 
 function ContinuityWidgetImpl({
-  chapters, worldData, chapterIndex, knowledgeStore, onKnewAlready, onGoodCatch,
+  chapters, worldData, chapterIndex, knowledgeStore, confirmedChekhov, onKnewAlready, onGoodCatch,
 }: Props) {
   const summary = useMemo(
     () => summarizeContinuity(chapters, worldData, chapterIndex),
@@ -88,6 +98,18 @@ function ContinuityWidgetImpl({
     () => (knowledgeStore ? surfacedKnowledgeFindings(knowledgeStore) : []),
     [knowledgeStore],
   );
+
+  // Confirmed promises sort to the front of the visible six. The list is
+  // capped at six for space, and a phrase the model called a real promise
+  // losing its place to a curtain is the one ordering that would matter.
+  const chekhovShown = useMemo(() => {
+    if (!confirmedChekhov || confirmedChekhov.size === 0) return summary.chekhov.slice(0, 6);
+    const rank = (phrase: string) => (confirmedChekhov.has(phrase.trim().toLowerCase()) ? 0 : 1);
+    return [...summary.chekhov].sort((a, b) => rank(a.phrase) - rank(b.phrase)).slice(0, 6);
+  }, [summary.chekhov, confirmedChekhov]);
+  const promisedCount = chekhovShown.filter(
+    (c) => confirmedChekhov?.has(c.phrase.trim().toLowerCase()),
+  ).length;
 
   if (!summary.hasAnything && knowledge.length === 0) return null;
 
@@ -291,32 +313,37 @@ function ContinuityWidgetImpl({
               </span>
             </div>
             <div className="wg-cont-chekhov">
-              {summary.chekhov.slice(0, 6).map((c) => (
-                <span
-                  key={c.phrase}
-                  className="wg-cont-chekhov-chip"
-                  style={{
-                    borderColor: `${CHEKHOV_COLOR}38`,
-                    background: `${CHEKHOV_COLOR}10`,
-                  }}
-                >
-                  <Anchor
-                    size={9}
-                    strokeWidth={2.4}
-                    style={{ color: CHEKHOV_COLOR, opacity: 0.78 }}
-                  />
+              {chekhovShown.map((c) => {
+                const promised = confirmedChekhov?.has(c.phrase.trim().toLowerCase()) ?? false;
+                return (
                   <span
-                    className="wg-cont-chekhov-name"
-                    style={{ color: CHEKHOV_COLOR }}
+                    key={c.phrase}
+                    className="wg-cont-chekhov-chip"
+                    style={{
+                      borderColor: promised ? `${CHEKHOV_COLOR}7a` : `${CHEKHOV_COLOR}38`,
+                      background: promised ? `${CHEKHOV_COLOR}1f` : `${CHEKHOV_COLOR}10`,
+                    }}
                   >
-                    {c.phrase}
+                    <Anchor
+                      size={9}
+                      strokeWidth={2.4}
+                      style={{ color: CHEKHOV_COLOR, opacity: promised ? 1 : 0.78 }}
+                    />
+                    <span
+                      className="wg-cont-chekhov-name"
+                      style={{ color: CHEKHOV_COLOR, fontWeight: promised ? 600 : undefined }}
+                    >
+                      {c.phrase}
+                    </span>
+                    <span className="wg-cont-chekhov-num">{c.mentions}×</span>
                   </span>
-                  <span className="wg-cont-chekhov-num">{c.mentions}×</span>
-                </span>
-              ))}
+                );
+              })}
             </div>
             <div className="wg-action-line">
-              Concrete things mentioned here that don't return. Pay them off, fade them, or cut them.
+              {promisedCount > 0
+                ? `Concrete things mentioned here that don't return. ${promisedCount === 1 ? "One reads" : `${promisedCount} read`} as a real promise — pay ${promisedCount === 1 ? "it" : "them"} off, fade ${promisedCount === 1 ? "it" : "them"}, or cut ${promisedCount === 1 ? "it" : "them"}.`
+                : "Concrete things mentioned here that don't return. Pay them off, fade them, or cut them."}
             </div>
           </div>
         )}

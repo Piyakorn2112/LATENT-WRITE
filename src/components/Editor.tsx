@@ -23,6 +23,9 @@ interface Props {
   onSpeechAnnotate?: (info: AnnotationTarget, anchor: DOMRect) => void;
   onActionAnnotate?: (info: AnnotationTarget, anchor: DOMRect) => void;
   annotationOverrides?: Map<string, string | null>;
+  /** Scene labels the local model resolved, by scene-start paragraph index.
+   *  Fills a silence the engine left; it never overwrites an engine label. */
+  sceneLabelOverrides?: Map<number, string>;
   speechPredictions?: AdaptivePredictionTrace[];
   actionPredictions?: ActionPrediction[][];
   toolHighlights?: ToolHighlight[];
@@ -62,7 +65,7 @@ function resolveParagraphSlice(content: string, caret: number): ParagraphSlice {
 
 export function Editor({
   chapter, onContentChange, analysisResult, knownNames, entityNameMap, onEntityClick,
-  annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides,
+  annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, sceneLabelOverrides,
   speechPredictions, actionPredictions, toolHighlights, typingSettleMs = 1000,
   sidePanelOpen = false,
   sidePanelCompensation = false,
@@ -276,6 +279,7 @@ export function Editor({
             onSpeechAnnotate={onSpeechAnnotate}
             onActionAnnotate={onActionAnnotate}
             annotationOverrides={annotationOverrides}
+            sceneLabelOverrides={sceneLabelOverrides}
             speechPredictions={speechPredictions}
             actionPredictions={actionPredictions}
           />

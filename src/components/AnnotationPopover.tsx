@@ -10,6 +10,17 @@ interface Props {
   /** If the user has already corrected this span, pass the corrected speaker so the
    *  popover pre-selects it instead of the raw detected speaker. */
   correctedSpeaker?: string | null;
+  /**
+   * The local model's reading of this line, when it read it and disagreed with
+   * the engine.
+   *
+   * ★ IT SELECTS, IT NEVER CONFIRMS. Clicking it moves the selection like
+   *   clicking any name in the list does; the writer still presses Confirm.
+   *   That is the whole safety property of the attribution task: confirming is
+   *   what writes to the annotation corpus and trains the ranker online, and a
+   *   small model's self-reported confidence is not a licence to do either.
+   */
+  suggestion?: { speaker: string; reason: string; confidence: number } | null;
   onConfirm: (correctedName: string | null) => void;
   onClose: () => void;
 }
@@ -17,7 +28,7 @@ interface Props {
 const POPOVER_WIDTH = 280;
 const GAP = 8;
 
-export function AnnotationPopover({ target, anchor, worldData, correctedSpeaker, onConfirm, onClose }: Props) {
+export function AnnotationPopover({ target, anchor, worldData, correctedSpeaker, suggestion, onConfirm, onClose }: Props) {
   const isSpeech = target.spanType === "speech";
 
   // Build sorted character list: all named characters + a "null" sentinel.
@@ -163,6 +174,22 @@ export function AnnotationPopover({ target, anchor, worldData, correctedSpeaker,
             {correctedSpeaker || "Narrative / None"}
           </span>
         </div>
+      )}
+
+      {/* The model's reading, when it read this line and disagreed. Clicking
+          selects it; the writer still confirms. */}
+      {suggestion && (
+        <button
+          type="button"
+          className={`annotation-popover-suggestion${selected === suggestion.speaker ? " annotation-popover-suggestion--taken" : ""}`}
+          onClick={() => setSelected(suggestion.speaker)}
+        >
+          <span className="annotation-popover-suggestion-head">
+            <span className="annotation-popover-current-label">Reads as</span>
+            <span className="annotation-popover-suggestion-name">{suggestion.speaker}</span>
+          </span>
+          <span className="annotation-popover-suggestion-reason">{suggestion.reason}</span>
+        </button>
       )}
 
       {/* Scrollable character list — click to select */}

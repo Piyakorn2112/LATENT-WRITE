@@ -11083,6 +11083,58 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   margin-bottom: 6px;
 }
 
+/* The local model's reading of the line. A SELECTOR, not a verdict: it sits
+   with the current/corrected pills above the list because that is what it is —
+   another reading of this span — and pressing it only moves the selection.
+   Quiet by default; the accent arrives once the writer has taken it. */
+.annotation-popover-suggestion {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--panel-btn-bg);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: border-color 0.13s ease, background 0.13s ease;
+}
+
+.annotation-popover-suggestion:hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+.annotation-popover-suggestion--taken {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-btn-bg));
+}
+
+.annotation-popover-suggestion-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.annotation-popover-suggestion-name {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.annotation-popover-suggestion-reason {
+  font-size: 10.5px;
+  line-height: 1.35;
+  color: var(--text-tertiary);
+}
+
 /* ═══════════════════════════════════════════
    STORY GRAPH PANEL
    ═══════════════════════════════════════════ */

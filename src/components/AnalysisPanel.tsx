@@ -83,6 +83,9 @@ interface Props {
   knowledgeStore?: KnowledgeLedgerStore;
   onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
   onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
+  /** Chekhov phrases the local model confirmed are real promises, lowercased.
+   *  Marks the deterministic list; it never filters it. */
+  confirmedChekhov?: Set<string>;
   onSelectChapter?: (id: string) => void;
   /** Renderer review result for the current chapter (null = not yet run). */
   reviewResult?: ReviewResult | null;
@@ -727,6 +730,7 @@ interface WidgetSlotProps {
   knowledgeStore?: KnowledgeLedgerStore;
   onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
   onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
+  confirmedChekhov?: Set<string>;
 }
 
 function resolveWidgetSlot(
@@ -735,7 +739,7 @@ function resolveWidgetSlot(
 ): { show: boolean; element: React.ReactNode } | null {
   const {
     result, prevResult, nextResult, showCrossArc, chapterContent, allChapters, chapterIndex, worldData, wordCount,
-    knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch,
+    knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, confirmedChekhov,
   } = props;
   const a = result.analysis;
   const hi = a.highModeAnalysis;
@@ -758,6 +762,7 @@ function resolveWidgetSlot(
             worldData={worldData}
             chapterIndex={chapterIndex}
             knowledgeStore={knowledgeStore}
+            confirmedChekhov={confirmedChekhov}
             onKnewAlready={onKnowledgeKnewAlready}
             onGoodCatch={onKnowledgeGoodCatch}
           />
@@ -788,7 +793,7 @@ function WidgetSet({
   result, prevResult, nextResult, showCrossArc,
   chapterContent, allChapters, chapterIndex, worldData, wordCount,
   widgetOrder, renderToolWidget,
-  knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch,
+  knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, confirmedChekhov,
 }: {
   result: ChapterAnalysisResult;
   prevResult: ChapterAnalysisResult | null;
@@ -804,6 +809,7 @@ function WidgetSet({
   knowledgeStore?: KnowledgeLedgerStore;
   onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
   onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
+  confirmedChekhov?: Set<string>;
 }) {
   const slotProps: WidgetSlotProps = {
     result,
@@ -818,6 +824,7 @@ function WidgetSet({
     knowledgeStore,
     onKnowledgeKnewAlready,
     onKnowledgeGoodCatch,
+    confirmedChekhov,
   };
 
   let staggerIndex = 0;
@@ -858,7 +865,7 @@ export function AnalysisPanel({
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
   onAutoSceneBreak, sceneBreaking, onOpenChange,
-  storyGraph, knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, onSelectChapter,
+  storyGraph, knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, confirmedChekhov, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
   onImportTools, onToolHighlights, onJumpToParagraph, onJumpToEvent,
   tier, onTierChange,
@@ -1316,6 +1323,7 @@ export function AnalysisPanel({
                       widgetOrder={widgetConfig.order}
                       renderToolWidget={renderToolWidget}
                       knowledgeStore={knowledgeStore}
+                      confirmedChekhov={confirmedChekhov}
                       onKnowledgeKnewAlready={onKnowledgeKnewAlready}
                       onKnowledgeGoodCatch={onKnowledgeGoodCatch}
                     />
@@ -1335,6 +1343,7 @@ export function AnalysisPanel({
                     widgetOrder={widgetConfig.order}
                     renderToolWidget={renderToolWidget}
                     knowledgeStore={knowledgeStore}
+                    confirmedChekhov={confirmedChekhov}
                     onKnowledgeKnewAlready={onKnowledgeKnewAlready}
                     onKnowledgeGoodCatch={onKnowledgeGoodCatch}
                   />

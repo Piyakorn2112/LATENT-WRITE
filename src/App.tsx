@@ -84,6 +84,31 @@ import {
   retireDeadAnchors,
 } from "./lib/knowledge-ledger";
 import { runPendingAdjudications, ADJUDICATOR_TASK } from "./lib/adjudicator";
+import {
+  attributionInputFrom,
+  chekhovCandidatesFrom,
+  runAssistSweep,
+  sceneCandidatesFrom,
+  sceneStartParagraphs,
+} from "./lib/assist-sweep";
+import {
+  alreadyAsked,
+  attributionSuggestionFor,
+  chapterReviews,
+  confirmedPromises,
+  emptyReviewStore,
+  loadReviewStore,
+  loadReviewStoreFromProject,
+  pruneReviewStore,
+  recordReviewAnswer,
+  saveReviewStore,
+  sceneLabelOverlay,
+  type AssistReviewStore,
+} from "./lib/review-store";
+import { ATTRIBUTION_TASK } from "./lib/attribution-review";
+import { SCENE_TASK, offeredLabels } from "./lib/scene-review";
+import { CHEKHOV_TASK } from "./lib/chekhov-review";
+import { findChekhovCandidates } from "./lib/continuity";
 import { chipKeyFor, runChipPick, CHIP_TASK } from "./lib/chip-picker";
 import { summaryKeyFor, runChapterSummary, SUMMARY_TASK } from "./lib/chapter-summary";
 import {
@@ -242,8 +267,36 @@ export default function App() {
     }, 500);
   }, []);
 
+  // Wave-2 review answers (attribution tie-breaks, scene near-misses, Chekhov
+  // promises). Same ref+state shape as the ledger: the sweep reads the ref so a
+  // long run never commits against a store that moved under it.
+  const [assistReviews, setAssistReviews] = useState(() => loadReviewStore());
+  const assistReviewsRef = useRef(assistReviews);
+  const assistReviewsSaveTimerRef = useRef<number | null>(null);
+  const commitAssistReviews = useCallback((
+    next: AssistReviewStore,
+    save: "now" | "debounced" = "debounced",
+  ) => {
+    assistReviewsRef.current = next;
+    setAssistReviews(next);
+    if (save === "now") { saveReviewStore(next); return; }
+    // The sweep commits once per answer so the UI fills in as work lands, but
+    // that is eight disk writes a chapter if each one is flushed.
+    if (assistReviewsSaveTimerRef.current !== null) window.clearTimeout(assistReviewsSaveTimerRef.current);
+    assistReviewsSaveTimerRef.current = window.setTimeout(() => {
+      assistReviewsSaveTimerRef.current = null;
+      saveReviewStore(assistReviewsRef.current);
+    }, 500);
+  }, []);
+  useEffect(() => () => {
+    if (assistReviewsSaveTimerRef.current !== null) {
+      window.clearTimeout(assistReviewsSaveTimerRef.current);
+      saveReviewStore(assistReviewsRef.current);
+    }
+  }, []);
+
   const hydrateProjectState = useCallback(async () => {
-    const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive, pKnowledge] = await Promise.all([
+    const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive, pKnowledge, pAssistReviews] = await Promise.all([
       loadNovelFromProject(),
       loadCurrentChapterIdFromProject(),
       loadStoryGraphFromProject(),
@@ -251,6 +304,7 @@ export default function App() {
       loadAnnotationStoreFromProject(),
       loadAdaptiveStoreFromProject(),
       loadKnowledgeLedgerFromProject(),
+      loadReviewStoreFromProject(),
     ]);
 
     const nextNovel = pNovel ?? emptyNovel();
@@ -261,6 +315,12 @@ export default function App() {
     const nextAnnotationStore = pAnnotations ?? { version: 1, corrections: [] };
     const nextAdaptiveStore = pAdaptive ?? emptyAdaptiveStore();
     const nextKnowledgeLedger = pKnowledge ?? emptyKnowledgeLedger();
+    // Pruned on the way in: a project whose chapters changed outside the app
+    // must not carry answers about chapters that no longer exist.
+    const nextAssistReviews = pruneReviewStore(
+      pAssistReviews ?? emptyReviewStore(),
+      nextNovel.chapters.map((chapter) => chapter.id),
+    );
 
     setNovel(nextNovel);
     setCurrentId(nextChapterId);
@@ -270,6 +330,8 @@ export default function App() {
     setAnnotationStore(nextAnnotationStore);
     setAdaptiveStore(nextAdaptiveStore);
     commitKnowledgeStore(nextKnowledgeLedger);
+    assistReviewsRef.current = nextAssistReviews;
+    setAssistReviews(nextAssistReviews);
     setAnnotationTarget(null);
     setEntityPopover(null);
     setToolHighlights([]);
@@ -288,6 +350,7 @@ export default function App() {
     if (!pAnnotations) saveAnnotationStore(nextAnnotationStore);
     if (!pAdaptive) saveAdaptiveStore(nextAdaptiveStore);
     if (!pKnowledge) saveKnowledgeLedger(nextKnowledgeLedger);
+    if (!pAssistReviews || nextAssistReviews !== pAssistReviews) saveReviewStore(nextAssistReviews);
   }, [commitKnowledgeStore]);
 
   // ── Desktop project hydration ──────────────────────────────────────────
@@ -1085,6 +1148,164 @@ export default function App() {
       cancelAssistantWhere(({ task }) => task === CHIP_TASK || task === SUMMARY_TASK);
     };
   }, [storyGraph, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── The review sweep (wave 2) ───────────────────────────────────────────
+  // One pass, three tasks, in the order that states their priority:
+  // attribution → scene → Chekhov. Eight questions per chapter, ranked and
+  // capped (plans/assistant-adjudication-wave-2.md §2), ~5s of idle work.
+  //
+  // Scheduling is the adjudication sweep's, deliberately: idle ≥3s, only when
+  // `assistantAvailable` says a run can succeed RIGHT NOW (so a sweep never
+  // triggers a download), a hidden window defers the start, 30s retry on a
+  // temporary no, and an edit or unmount bumps the sweep id — which cancels
+  // between items and aborts what is in flight.
+  //
+  // ★ IT WAITS FOR THE ANALYSIS TO SETTLE, not just to exist. A fast-tier
+  //   result and the high-tier result that replaces it share a content hash
+  //   but not their candidate sets, so sweeping the interim result spends part
+  //   of the budget answering questions about a ranking that is about to be
+  //   thrown away — and the answers do not even dedupe, because a different
+  //   offered set is a different cache key.
+  const reviewSweepRef = useRef(0);
+  useEffect(() => {
+    if (!prefs.assistant?.enabled || !window.electronAPI) return;
+    if (!analysisResult || !activeChapter || !activeChapter.content.trim()) return;
+    if (analysisRunning || analysisRefining) return;
+
+    const chapter = activeChapter;
+    const chapterId = chapter.id;
+    // The SNAPSHOT the analysis was computed from, never the live text: the
+    // candidates below are indices into it.
+    const content = analysisResult.contentSnapshot || chapter.content;
+    const contentHash = knowledgeContentHash(content);
+    const chapters = novel.chapters;
+    const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
+
+    const sweepId = ++reviewSweepRef.current;
+    const cancelled = () => reviewSweepRef.current !== sweepId;
+
+    const sweep = async () => {
+      if (cancelled()) return;
+      if (document.hidden) {
+        document.addEventListener("visibilitychange", onVisible, { once: true });
+        return;
+      }
+      if (!(await assistantAvailable())) {
+        if (!cancelled()) retryTimer = window.setTimeout(() => { void sweep(); }, 30_000);
+        return;
+      }
+      const modelId = await assistantModelId();
+      if (!modelId || cancelled()) return;
+
+      await runAssistSweep(
+        {
+          chapterId,
+          chapterContentHash: contentHash,
+          attribution: attributionInputFrom(
+            chapterId, contentHash, analysisResult.paragraphs, analysisResult.speechPredictions,
+          ),
+          scenes: sceneCandidatesFrom(analysisResult.paragraphs, analysisResult.speechResults),
+          chekhov: chapterIndex >= 0
+            ? chekhovCandidatesFrom(
+                findChekhovCandidates(chapters, chapterIndex),
+                chapter.number ?? chapterIndex + 1,
+                // Chapters that have gone by without the phrase returning —
+                // findChekhovCandidates only flags phrases absent from every
+                // later chapter, so this is the length of the silence.
+                Math.max(0, chapters.length - 1 - chapterIndex),
+              )
+            : [],
+        },
+        {
+          run: assistantRunJSON,
+          modelId,
+          isAsked: (key) => alreadyAsked(
+            chapterReviews(assistReviewsRef.current, chapterId, contentHash, modelId), key,
+          ),
+          onAnswer: (key, answer) => {
+            // A verdict reached against a snapshot the writer has since edited
+            // is dropped, not stored: recordReviewAnswer would otherwise stamp
+            // it onto the new hash and it would surface against prose it never
+            // read. Same rule as the adjudication sweep's sentence check.
+            if (cancelled()) return;
+            commitAssistReviews(recordReviewAnswer(
+              assistReviewsRef.current, chapterId, contentHash, modelId, key, answer, Date.now(),
+            ));
+          },
+          isCancelled: cancelled,
+        },
+      );
+    };
+    const onVisible = () => { if (!document.hidden && !cancelled()) void sweep(); };
+
+    let retryTimer: number | null = null;
+    const timer = window.setTimeout(() => { void sweep(); }, 3000);
+    return () => {
+      window.clearTimeout(timer);
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      document.removeEventListener("visibilitychange", onVisible);
+      reviewSweepRef.current++;
+      cancelAssistantWhere(
+        ({ task }) => task === ATTRIBUTION_TASK || task === SCENE_TASK || task === CHEKHOV_TASK,
+      );
+    };
+  }, [analysisResult, analysisRunning, analysisRefining, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Reading the review answers back ─────────────────────────────────────
+  // The model id is part of every cache key, so the DISPLAY needs it too — a
+  // selector that cannot check which model answered would happily show a
+  // previous model's verdicts after a swap.
+  const [assistModelId, setAssistModelId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!prefs.assistant?.enabled || !window.electronAPI) { setAssistModelId(null); return; }
+    let alive = true;
+    void assistantModelId().then((id) => { if (alive) setAssistModelId(id); });
+    return () => { alive = false; };
+  }, [prefs.assistant?.enabled]);
+
+  /** The active chapter's answers, or an empty entry when they are stale. */
+  const activeReviews = useMemo(() => {
+    if (!activeChapterId || !assistModelId || !analysisResult) return null;
+    const content = analysisResult.contentSnapshot || activeChapter?.content || "";
+    // The SAME hash the sweep wrote under: the analysed snapshot, not live text.
+    return chapterReviews(assistReviews, activeChapterId, knowledgeContentHash(content), assistModelId);
+  }, [assistReviews, activeChapterId, assistModelId, analysisResult, activeChapter?.content]);
+
+  /** Scene labels the model resolved, by the paragraph their scene starts at. */
+  const sceneLabelOverrides = useMemo(() => {
+    if (!activeReviews || !analysisResult) return undefined;
+    const starts = sceneStartParagraphs(analysisResult.speechResults);
+    // Re-derived, not stored: the overlay drops any answer whose shortlist has
+    // moved since, which is only knowable against the CURRENT engine output.
+    const shortlists = new Map(
+      sceneCandidatesFrom(analysisResult.paragraphs, analysisResult.speechResults)
+        .map((candidate) => [candidate.sceneIndex, offeredLabels(candidate)] as const),
+    );
+    const overlay = sceneLabelOverlay(activeReviews, starts, (i) => shortlists.get(i) ?? []);
+    if (overlay.size === 0) return undefined;
+    return new Map([...overlay].map(([paragraphIndex, value]) => [paragraphIndex, value.label]));
+  }, [activeReviews, analysisResult]);
+
+  /** Chekhov phrases the model confirmed are real promises, lowercased. */
+  const confirmedChekhov = useMemo(
+    () => (activeReviews ? confirmedPromises(activeReviews) : undefined),
+    [activeReviews],
+  );
+
+  /**
+   * The model's reading of the span the writer has open, when it differs from
+   * the engine's. Offered in the popover; it reaches the adaptive path only if
+   * the writer confirms it — see the ★★ in review-store.ts for why the model
+   * does not get to write a correction itself.
+   */
+  const annotationSuggestion = useMemo(() => {
+    if (!annotationTarget || !activeReviews) return null;
+    const { target } = annotationTarget;
+    if (target.spanType !== "speech") return null;
+    return attributionSuggestionFor(
+      activeReviews, target.paragraphIndex, target.spanIndex, target.spanText,
+    );
+  }, [annotationTarget, activeReviews]);
 
   useEffect(() => { saveStoryGraph(storyGraph); }, [storyGraph]);
   useEffect(() => { saveReviewResults(reviewResults); }, [reviewResults]);
@@ -2092,6 +2313,7 @@ export default function App() {
               onSpeechAnnotate={handleSpeechAnnotate}
               onActionAnnotate={handleActionAnnotate}
               annotationOverrides={activeSide === "left" ? annotationOverrides : undefined}
+              sceneLabelOverrides={activeSide === "left" ? sceneLabelOverrides : undefined}
               typingSettleMs={analysisDebounceMs}
               sidePanelOpen={analysisPanelOpen && !focusMode}
               sidePanelCompensation={false}
@@ -2120,6 +2342,7 @@ export default function App() {
               onSpeechAnnotate={handleSpeechAnnotate}
               onActionAnnotate={handleActionAnnotate}
               annotationOverrides={activeSide === "right" ? annotationOverrides : undefined}
+              sceneLabelOverrides={activeSide === "right" ? sceneLabelOverrides : undefined}
               typingSettleMs={analysisDebounceMs}
               sidePanelOpen={analysisPanelOpen && !focusMode}
               sidePanelCompensation={false}
@@ -2144,6 +2367,7 @@ export default function App() {
           onSpeechAnnotate={handleSpeechAnnotate}
           onActionAnnotate={handleActionAnnotate}
           annotationOverrides={annotationOverrides}
+          sceneLabelOverrides={sceneLabelOverrides}
           typingSettleMs={analysisDebounceMs}
           sidePanelOpen={analysisPanelOpen && !focusMode}
           sidePanelCompensation={!!prefs.sidePanelCompensation}
@@ -2272,6 +2496,7 @@ export default function App() {
           anchor={annotationTarget.anchor}
           worldData={novel.worldData}
           correctedSpeaker={annotationTarget.correctedSpeaker}
+          suggestion={annotationSuggestion}
           onConfirm={handleAnnotationConfirm}
           onClose={() => setAnnotationTarget(null)}
         />
@@ -2299,6 +2524,7 @@ export default function App() {
         worldData={novel.worldData}
         storyGraph={storyGraph}
         knowledgeStore={knowledgeStore}
+        confirmedChekhov={confirmedChekhov}
         onKnowledgeKnewAlready={handleKnowledgeKnewAlready}
         onKnowledgeGoodCatch={handleKnowledgeGoodCatch}
         onSelectChapter={(id) => {
