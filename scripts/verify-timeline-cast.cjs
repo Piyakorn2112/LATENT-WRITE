@@ -5,7 +5,9 @@
  * asserts the redesign's load-bearing properties in the rendered SVG: the
  * section header, full names (the old tracks truncated everything to 7
  * uppercase chars), bars with real height VARIATION (presence weight), the
- * drives diamonds, dashed absence bridges, and the per-character stat lines.
+ * agency squares (colour = event type), the peak-chapter ring, dashed absence
+ * bridges, and the per-character stat lines. It also asserts the OLD floating
+ * diamond is gone: a redesign that leaves both is a redesign nobody finished.
  *
  *   VITE_URL=http://localhost:5178 electron scripts/verify-timeline-cast.cjs
  */
@@ -38,9 +40,16 @@ app.whenReady().then(async () => {
   ok("an over-long name is ellipsised", !!p.ellipsised, String(p.ellipsised));
   ok("presence bars render", p.barCount >= 30, `bars: ${p.barCount}`);
   ok("bar heights VARY with presence weight", p.distinctHeights >= 5, `distinct heights: ${p.distinctHeights}`);
-  ok("drives diamonds render", p.diamondCount >= 5, `diamonds: ${p.diamondCount}`);
+  ok("★ the floating diamond is GONE", p.diamondCount === 0, `still drawing ${p.diamondCount}`);
+  ok("agency squares render below the baseline", p.driveCount >= 5, `squares: ${p.driveCount}`);
+  ok("★ …and are coloured BY EVENT TYPE", p.driveColorCount >= 3,
+    `distinct colours: ${p.driveColorCount} — one colour means the type is not being read`);
+  ok("the peak chapter is ringed", p.peakRingCount >= 4, `rings: ${p.peakRingCount}`);
+  ok("the type key names the colours", p.legendTypes.length >= 4, `legend: ${p.legendTypes.join(", ")}`);
+  ok("a track with counts but NO types still draws its squares",
+    p.driveCount >= 6, "the legacy-graph path must not silently draw nothing");
   ok("dashed bridges span absences", p.bridgeCount >= 2, `bridges: ${p.bridgeCount}`);
-  ok("stat lines carry drives/away/enters", p.statLines.length >= 4, `${p.statLines.length}: ${p.statLines.slice(0, 3).join(" | ")}`);
+  ok("stat lines carry peak/drives/away/enters", p.statLines.length >= 4, `${p.statLines.length}: ${p.statLines.slice(0, 3).join(" | ")}`);
 
   console.log("\ncast ledger, real component:");
   let failed = 0;

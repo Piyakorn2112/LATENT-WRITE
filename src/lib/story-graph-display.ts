@@ -10,6 +10,17 @@ export interface TimelineCharacterTrack {
    *  event count — "drives the chapter". Read from the persisted graph's
    *  majorEvents; costs no NLP. */
   drivesByChapter?: ReadonlyMap<string, number>;
+  /**
+   * The TYPES of the events this character drives, per chapter, in story order
+   * — "revelation", "confrontation", "climax"…
+   *
+   * ★ THE TYPE WAS ALREADY STORED AND WAS BEING THROWN AWAY. `majorEvents`
+   *   carries `type` on every event and the cast ledger reduced it to a count,
+   *   so the timeline could say a character drives three beats here but never
+   *   WHICH three. That is the difference between "she is busy" and "she is the
+   *   one making the revelations", and it costs nothing to carry.
+   */
+  driveTypesByChapter?: ReadonlyMap<string, readonly string[]>;
   /** Alias-aware mention counts per chapter. Only the async builder has the
    *  chapter text, so the snapshot builder leaves this unset and renderers
    *  fall back to uniform presence. */
@@ -82,6 +93,7 @@ function finalizeTracks(
   chapterIdsByName: Map<string, Set<string>>,
   limit: number,
   drivesByName?: Map<string, Map<string, number>>,
+  driveTypesByName?: Map<string, Map<string, string[]>>,
   mentionsByName?: Map<string, Map<string, number>>,
 ): TimelineCharacterTrack[] {
   const sortedNames = [...counts.entries()]
@@ -96,6 +108,7 @@ function finalizeTracks(
     color: getSpeakerColor(palette, name).text,
     chapterIds: chapterIdsByName.get(name) ?? new Set<string>(),
     drivesByChapter: drivesByName?.get(name.toLowerCase()),
+    driveTypesByChapter: driveTypesByName?.get(name.toLowerCase()),
     mentionsByChapter: mentionsByName?.get(name.toLowerCase()),
   }));
 }
@@ -105,19 +118,31 @@ function finalizeTracks(
 function buildDrivesByName(
   storyGraph: StoryGraph,
   canonicalMap: Map<string, string>,
-): Map<string, Map<string, number>> {
-  const out = new Map<string, Map<string, number>>();
+): {
+  counts: Map<string, Map<string, number>>;
+  types: Map<string, Map<string, string[]>>;
+} {
+  const counts = new Map<string, Map<string, number>>();
+  const types = new Map<string, Map<string, string[]>>();
   for (const [chapterId, entry] of Object.entries(storyGraph.entries)) {
     for (const evt of entry.majorEvents ?? []) {
       if (!evt.agent) continue;
       const canonical = canonicalCharacterName(evt.agent, canonicalMap).toLowerCase();
       if (!canonical) continue;
-      const per = out.get(canonical) ?? new Map<string, number>();
+      const per = counts.get(canonical) ?? new Map<string, number>();
       per.set(chapterId, (per.get(chapterId) ?? 0) + 1);
-      out.set(canonical, per);
+      counts.set(canonical, per);
+      // ★ COUNT AND TYPES ARE BUILT IN ONE WALK. Two passes over majorEvents
+      //   could disagree about which events have a resolvable agent, and the
+      //   ledger would then draw a different number of marks than it counts.
+      const perType = types.get(canonical) ?? new Map<string, string[]>();
+      const list = perType.get(chapterId) ?? [];
+      list.push(evt.type);
+      perType.set(chapterId, list);
+      types.set(canonical, perType);
     }
   }
-  return out;
+  return { counts, types };
 }
 
 function throwIfAborted(signal?: AbortSignal) {
@@ -155,7 +180,8 @@ export function buildSnapshotTimelineCharacterTracks(
     recordPresence(chapterId, present, counts, chapterIdsByName);
   }
 
-  return finalizeTracks(counts, chapterIdsByName, limit, buildDrivesByName(storyGraph, canonicalMap));
+  const drives = buildDrivesByName(storyGraph, canonicalMap);
+  return finalizeTracks(counts, chapterIdsByName, limit, drives.counts, drives.types);
 }
 
 export async function buildTimelineCharacterTracks(
@@ -208,8 +234,9 @@ export async function buildTimelineCharacterTracks(
   }
 
   throwIfAborted(options?.signal);
+  const driveData = buildDrivesByName(storyGraph, canonicalMap);
   return finalizeTracks(
     counts, chapterIdsByName, limit,
-    buildDrivesByName(storyGraph, canonicalMap), mentionsByName,
+    driveData.counts, driveData.types, mentionsByName,
   );
 }

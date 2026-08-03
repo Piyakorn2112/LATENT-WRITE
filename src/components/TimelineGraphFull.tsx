@@ -87,19 +87,48 @@ const BOX_MAX_W = 186;
 const LABEL_Y_NUM   = SPINE_BASE + TERRAIN_AMP + 18;  // = 358
 const LABEL_Y_TITLE = SPINE_BASE + TERRAIN_AMP + 30;  // = 370
 // ── Cast ledger ──────────────────────────────────────────────────────────────
-// One row per character: name + a compact stat line at their ENTRY point, a
-// bar per chapter whose height is that character's share of the chapter
-// (mention counts when the async track build has run; uniform otherwise), a
-// diamond over chapters where a stored event names them as AGENT, soft links
-// through continuous runs and dashed bridges across absences. Replaces the
-// dashed dot-tracks, which could only say "appears here" — never how much,
-// never who carries the chapter, and truncated every name to 7 characters.
+// One row per character, read against a single baseline that both halves share:
+//
+//   ABOVE the line  PRESENCE — a bar per chapter, height = that character's
+//                   share of it (mention counts once the async track build has
+//                   run; uniform otherwise). The tallest bar is ringed: that is
+//                   the chapter they matter most in.
+//   ON the line     CONTINUITY — soft links through consecutive chapters,
+//                   dashed bridges across absences of three or more.
+//   BELOW the line  AGENCY — one square per event this character DRIVES,
+//                   coloured by the event's type.
+//
+// ★★ THE AGENCY MARK USED TO BE A DIAMOND FLOATING ABOVE THE BAR, and it was
+//    the weakest thing in the ledger. It sat at `ty - h - 11`, so its height
+//    changed with the bar under it and the row read as scattered rather than
+//    aligned. It also encoded a single BIT — drives, or does not — while the
+//    data underneath had both the COUNT and the TYPE of every driven event.
+//    Below the baseline the marks share one Y, so a glance down the row reads
+//    as a rhythm; one square per event makes the count countable; and colouring
+//    by type says WHICH beats are theirs. "She drives three things here" and
+//    "she makes the revelations" are different sentences, and only the second
+//    is worth a writer's attention.
 const MAX_TRACKS    = 8;
 const CHAR_ZONE_TOP = SPINE_BASE + TERRAIN_AMP + 52;   // = 392
-const CAST_HEADER_H = 26;   // section title + legend above the rows
-const CHAR_TRACK_H  = 40;   // row: up-to-16px bars over a baseline + stats
-const CAST_BAR_MAX  = 16;
-const CAST_BAR_MIN  = 5;
+const CAST_HEADER_H = 34;   // section title, legend line, and the type key
+const CHAR_TRACK_H  = 56;   // row: bars over a baseline, agency squares under it
+// ★ RANGE IS WHAT MAKES A BAR READ. At 5-16px the heights were technically
+//   varying and visually identical — every chapter looked like the same pill.
+//   Widening the range and dropping the floor is what turns "presence" from a
+//   decoration back into a quantity.
+const CAST_BAR_MAX  = 24;
+const CAST_BAR_MIN  = 4;
+const CAST_BAR_W    = 9;
+/** Agency squares below the baseline: size, gap, and how many fit before the
+ *  row starts lying about the count. */
+const DRIVE_TICK    = 5.4;
+const DRIVE_GAP     = 2.4;
+const DRIVE_MAX     = 4;
+/** The event types worth naming in the cast legend. "transition" and
+ *  "scene-break" are structural rather than dramatic and almost never carry an
+ *  agent, so listing them would spend the legend's width on nothing. */
+const CAST_LEGEND_TYPES: Array<MajorEvent["type"]> =
+  ["climax", "confrontation", "revelation", "introduction"];
 // SVG_H is computed per-render
 
 // ─── Leaf-bubbling collision layout ──────────────────────────────────────────
@@ -158,7 +187,18 @@ interface TrackRenderData {
   lastX: number;
   /** The one-line story of this character's presence: "9 ch · drives 3 · away 5". */
   stats: string;
-  bars: Array<{ key: string; x: number; h: number; drives: boolean; tip: string }>;
+  bars: Array<{
+    key: string; x: number; h: number; tip: string;
+    /** The type of each event this character drives here, in story order.
+     *  Empty when they are merely present. */
+    driveTypes: string[];
+    /** Events beyond DRIVE_MAX, so the row can say so instead of silently
+     *  drawing fewer squares than it counted. */
+    driveOverflow: number;
+    /** Their biggest chapter. Ringed, so the peak is findable without reading
+     *  every bar height against its neighbours. */
+    peak: boolean;
+  }>;
   /** Continuous runs (adjacent chapters ≤2 apart). */
   links: Array<{ key: string; x1: number; x2: number }>;
   /** Absences longer than 2 chapters, bridged with a dash. */
@@ -410,8 +450,27 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
             fill="var(--panel-text-4)"
             fontSize={8.5} fontFamily="var(--font-ui)"
           >
-            taller bar = more of the chapter&#160;&#160;·&#160;&#160;◆ = drives an event&#160;&#160;·&#160;&#160;dashed = away
+            above the line = how much of the chapter&#160;&#160;·&#160;&#160;below = one square per event they drive&#160;&#160;·&#160;&#160;ring = their biggest chapter&#160;&#160;·&#160;&#160;dashed = away
           </text>
+          {/* The square colours ARE the legend. A writer should not have to
+              learn that violet means revelation from a paragraph elsewhere. */}
+          <g>
+            {CAST_LEGEND_TYPES.map((type, i) => (
+              <g key={`cast-legend-${type}`} transform={`translate(${PAD_X + 40 + i * 92}, ${CHAR_ZONE_TOP + 19})`}>
+                <rect
+                  x={0} y={-4} width={DRIVE_TICK} height={DRIVE_TICK} rx={1}
+                  fill={EVENT_COLOR[type]} opacity={0.95}
+                />
+                <text
+                  x={DRIVE_TICK + 4} y={-0.6}
+                  fill="var(--panel-text-4)"
+                  fontSize={7.6} fontFamily="var(--font-ui)" letterSpacing="0.03em"
+                >
+                  {type}
+                </text>
+              </g>
+            ))}
+          </g>
         </g>
       )}
       {trackLayouts.map((track) => (
@@ -456,28 +515,69 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
               strokeDasharray="2,5"
             />
           ))}
-          {/* Presence bars, growing up from the baseline. */}
-          {detailsReady && track.bars.map((bar) => (
-            <g key={bar.key}>
-              <rect
-                x={bar.x - 3.5} y={track.ty - bar.h}
-                width={7} height={bar.h}
-                rx={2.5}
-                fill={track.color} opacity={0.85}
-              >
-                <title>{bar.tip}</title>
-              </rect>
-              {bar.drives && (
-                <path
-                  d={`M ${bar.x},${track.ty - bar.h - 11} l 3.4,3.4 l -3.4,3.4 l -3.4,-3.4 Z`}
-                  fill={track.color}
-                  opacity={0.95}
+          {/* PRESENCE above the line, AGENCY below it. One baseline, two
+              readings, and every agency mark on the same Y so the row scans as
+              a rhythm instead of as scatter. */}
+          {detailsReady && track.bars.map((bar) => {
+            // Centre the squares under the bar so the two halves share an axis
+            // as well as a baseline.
+            const rowW = bar.driveTypes.length * DRIVE_TICK
+              + Math.max(0, bar.driveTypes.length - 1) * DRIVE_GAP;
+            const rowX = bar.x - rowW / 2;
+            return (
+              <g key={bar.key}>
+                {bar.peak && (
+                  <rect
+                    data-cast-mark="peak"
+                    x={bar.x - CAST_BAR_W / 2 - 2.5} y={track.ty - bar.h - 3}
+                    width={CAST_BAR_W + 5} height={bar.h + 6}
+                    rx={4.5}
+                    fill="none"
+                    stroke={track.color} strokeWidth={0.9} strokeOpacity={0.42}
+                  />
+                )}
+                <rect
+                  data-cast-mark="presence"
+                  x={bar.x - CAST_BAR_W / 2} y={track.ty - bar.h}
+                  width={CAST_BAR_W} height={bar.h}
+                  rx={2.5}
+                  // ★ ONE MARK, ONE MEANING. This dimmed to 0.5 when nobody
+                  //   drove anything, which put AGENCY on the bar as well as in
+                  //   the squares — and a pale bar reads as "less present",
+                  //   which is the one thing the height already says. Height is
+                  //   presence; the squares below are agency; the ring is the
+                  //   peak. Nothing encodes two things.
+                  fill={track.color} opacity={0.82}
                 >
                   <title>{bar.tip}</title>
-                </path>
-              )}
-            </g>
-          ))}
+                </rect>
+                {bar.driveTypes.map((type, i) => (
+                  <rect
+                    key={`${bar.key}-drive-${i}`}
+                    data-cast-mark="drive"
+                    data-drive-type={type}
+                    x={rowX + i * (DRIVE_TICK + DRIVE_GAP)}
+                    y={track.ty + 5.5}
+                    width={DRIVE_TICK} height={DRIVE_TICK}
+                    rx={1}
+                    fill={(EVENT_COLOR as Record<string, string>)[type] ?? track.color}
+                    opacity={0.95}
+                  >
+                    <title>{bar.tip}</title>
+                  </rect>
+                ))}
+                {bar.driveOverflow > 0 && (
+                  <text
+                    x={rowX + rowW + 3} y={track.ty + 10}
+                    fill="var(--panel-text-4)"
+                    fontSize={7.5} fontFamily="var(--font-ui)" fontWeight="700"
+                  >
+                    +{bar.driveOverflow}
+                  </text>
+                )}
+              </g>
+            );
+          })}
         </g>
       ))}
 
@@ -831,23 +931,38 @@ function TimelineGraphFullImpl({
       const hasMentionData = detected.some((c) => mentionsOf(c.ch.id) > 0);
       let drivesTotal = 0;
 
+      const peakMentions = hasMentionData ? maxMentions : -1;
       const bars = detected.map((chapter) => {
         const mentions = mentionsOf(chapter.ch.id);
         const drivesCount = track.drivesByChapter?.get(chapter.ch.id) ?? 0;
+        // ★ TYPES ARE THE TRUTH, THE COUNT IS THE FALLBACK. `driveTypesByChapter`
+        //   is only set by builders that walked majorEvents; an older persisted
+        //   graph has the count alone, and a row must still draw the right
+        //   NUMBER of squares then, just without their colours.
+        const storedTypes = track.driveTypesByChapter?.get(chapter.ch.id);
+        const allTypes = storedTypes && storedTypes.length > 0
+          ? [...storedTypes]
+          : Array.from({ length: drivesCount }, () => "standard");
         drivesTotal += drivesCount;
         // sqrt: presence reads perceptually, so 4x the mentions should look
         // clearly bigger without flattening every mid-weight chapter.
         const h = hasMentionData
           ? CAST_BAR_MIN + (CAST_BAR_MAX - CAST_BAR_MIN) * Math.sqrt(mentions / maxMentions)
           : (CAST_BAR_MIN + CAST_BAR_MAX) / 2;
+        const shownTypes = allTypes.slice(0, DRIVE_MAX);
+        const typeNames = allTypes.length > 0
+          ? ` · drives ${allTypes.length}: ${allTypes.join(", ")}`
+          : "";
         return {
           key: `bar-${track.name}-${chapter.ch.id}`,
           x: chapter.x,
           h,
-          drives: drivesCount > 0,
+          driveTypes: shownTypes,
+          driveOverflow: Math.max(0, allTypes.length - shownTypes.length),
+          peak: hasMentionData && mentions === peakMentions && mentions > 0,
           tip: `${track.name} — ch ${chapter.ch.number}`
             + (hasMentionData ? ` · ${mentions} mention${mentions === 1 ? "" : "s"}` : "")
-            + (drivesCount > 0 ? ` · drives ${drivesCount} event${drivesCount === 1 ? "" : "s"}` : ""),
+            + typeNames,
         };
       });
 
@@ -868,9 +983,15 @@ function TimelineGraphFullImpl({
       }
 
       const entersAt = detected[0]?.ch.number;
+      // The chapter they are most present in. Reading it off the bars means
+      // comparing every height against every other; naming it costs one word.
+      const peakChapter = hasMentionData
+        ? detected.find((c) => mentionsOf(c.ch.id) === maxMentions)?.ch.number
+        : undefined;
       const stats = [
         `${track.count} ch`,
         entersAt !== undefined && entersAt > 1 ? `enters ${entersAt}` : null,
+        peakChapter !== undefined ? `peak ${peakChapter}` : null,
         drivesTotal > 0 ? `drives ${drivesTotal}` : null,
         longestGap >= 3 ? `away ${longestGap}` : null,
       ].filter(Boolean).join(" · ");

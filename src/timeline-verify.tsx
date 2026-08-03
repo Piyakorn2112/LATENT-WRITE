@@ -63,6 +63,10 @@ const track = (
   present: number[],           // chapter numbers
   mentions: Record<number, number>,
   drives: Record<number, number>,
+  /** The TYPE of each driven event, so the agency squares carry their colour.
+   *  Omitted on one track on purpose — an older persisted graph has counts and
+   *  no types, and the row must still draw the right NUMBER of squares. */
+  driveTypes?: Record<number, string[]>,
 ): TimelineCharacterTrack => ({
   name,
   color,
@@ -70,17 +74,20 @@ const track = (
   chapterIds: new Set(present.map((n) => `ch${n}`)),
   mentionsByChapter: new Map(Object.entries(mentions).map(([n, m]) => [`ch${n}`, m])),
   drivesByChapter: new Map(Object.entries(drives).map(([n, d]) => [`ch${n}`, d])),
+  driveTypesByChapter: driveTypes
+    ? new Map(Object.entries(driveTypes).map(([n, t]) => [`ch${n}`, t]))
+    : undefined,
 });
 
 const tracks: TimelineCharacterTrack[] = [
   track("Elizabeth", "#e05d7a",
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
     { 1: 12, 2: 30, 3: 22, 4: 18, 5: 9, 6: 44, 7: 38, 8: 26, 9: 14, 10: 20, 11: 16, 12: 34, 13: 46, 14: 28 },
-    { 6: 2, 13: 1 }),
+    { 6: 2, 13: 1 }, { 6: ["revelation", "confrontation"], 13: ["climax"] }),
   track("Darcy", "#5b7cfa",
     [2, 3, 4, 6, 7, 8, 12, 13, 14],
     { 2: 14, 3: 20, 4: 16, 6: 30, 7: 26, 8: 22, 12: 10, 13: 32, 14: 18 },
-    { 6: 1, 13: 1 }),
+    { 6: 1, 13: 1 }, { 6: ["confrontation"], 13: ["revelation"] }),
   track("Jane", "#3aa981",
     [1, 2, 3, 4, 5, 9, 10, 11, 14],
     { 1: 8, 2: 16, 3: 10, 4: 20, 5: 12, 9: 9, 10: 6, 11: 10, 14: 12 },
@@ -88,7 +95,7 @@ const tracks: TimelineCharacterTrack[] = [
   track("Lady Catherine de Bourgh", "#b08a3e",
     [7, 12],
     { 7: 6, 12: 24 },
-    { 12: 1 }),
+    { 12: 1 }, { 12: ["confrontation"] }),
   track("Wickham", "#8a63c9",
     [3, 4, 9, 10],
     { 3: 10, 4: 8, 9: 18, 10: 22 },
@@ -120,10 +127,18 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
   );
   if (!svg) return { error: "no svg containing the CAST ledger" };
   const texts = [...svg.querySelectorAll("text")].map((t) => t.textContent ?? "");
-  const bars = [...svg.querySelectorAll("rect[rx='2.5']")];
+  // ★ SELECT ON MEANING, NOT ON PIXELS. These queries were written as
+  //   rect[rx='1'] and width<5, so the first time the marks were RESIZED four
+  //   gates went red while the component was perfectly correct. A visual gate
+  //   keyed to a size cannot survive visual work, which is the only work it
+  //   exists to check.
+  const bars = [...svg.querySelectorAll("[data-cast-mark='presence']")];
   const heights = bars.map((b) => Number(b.getAttribute("height")));
-  const diamonds = [...svg.querySelectorAll("path")]
-    .filter((p) => /l 3\.4,3\.4/.test(p.getAttribute("d") ?? ""));
+  // Agency squares sit BELOW the baseline; the old diamonds floated above the
+  // bars and moved with their height.
+  const drives = [...svg.querySelectorAll("[data-cast-mark='drive']")];
+  const driveColors = new Set(drives.map((r) => r.getAttribute("fill")));
+  const rings = [...svg.querySelectorAll("[data-cast-mark='peak']")];
   const dashed = [...svg.querySelectorAll("line[stroke-dasharray='2,5']")];
   return {
     castHeader: texts.includes("CAST"),
@@ -131,7 +146,13 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
     ellipsised: texts.find((t) => t.endsWith("…")) ?? null,
     barCount: bars.length,
     distinctHeights: new Set(heights.map((h) => h.toFixed(1))).size,
-    diamondCount: diamonds.length,
+    driveCount: drives.length,
+    driveColorCount: driveColors.size,
+    peakRingCount: rings.length,
+    legendTypes: texts.filter((t) =>
+      ["climax", "confrontation", "revelation", "introduction"].includes(t)),
+    diamondCount: [...svg.querySelectorAll("path")]
+      .filter((el) => /l 3\.4,3\.4/.test(el.getAttribute("d") ?? "")).length,
     bridgeCount: dashed.length,
     statLines: texts.filter((t) => /ch ·|· drives |· away |· enters /.test(t)),
   };
