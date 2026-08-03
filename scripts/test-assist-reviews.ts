@@ -45,6 +45,7 @@ import {
   CHEKHOV_TASK,
   buildChekhovRequest,
   chekhovKeyFor,
+  reasonEchoesSentence,
   isSurfacedChekhov,
   normalizeChekhov,
   runChekhovReview,
@@ -654,6 +655,33 @@ console.log("\n── 13. injected runner: end to end, no model ─────�
       "test-scene-labels.ts must keep measuring the engine alone");
     gate(sceneSeen[0]?.task === SCENE_TASK && sceneSeen[0]?.tag === "ch-7:scene-0",
       "…tagged per scene", sceneSeen[0]?.tag ?? "—");
+
+    // ── the transcription guard ─────────────────────────────────────────
+    // ★★ MEASURED, NOT GUESSED (scripts/probe-chekhov-floor.cjs, 9 sentences):
+    //    confidence does NOT separate right from wrong here — true promises
+    //    came back at 1, 0.75, 0.75 and false ones at 0.5, 1, 1, 0.5, 1, so no
+    //    floor is a lever. What separates them is whether the reason is a
+    //    reason: every confident FALSE promise had the input sentence copied
+    //    verbatim into it. Applying this dropped surfaced marks 6 → 4 while
+    //    keeping all 3 real promises.
+    const SENT = "The lamp had a cracked shade that threw the light unevenly across the ceiling of the little room.";
+    gate(reasonEchoesSentence(SENT, SENT), "chekhov: a verbatim reason is caught", "the exact sentence back");
+    gate(reasonEchoesSentence("The office kept a second ledger, and had done for as long as anyone could remember.",
+      "The office kept a second ledger, and had done for as long as anyone there could remember."),
+      "…and so is a near-verbatim one", "a long shared run is a quotation, not a paraphrase");
+    gate(!reasonEchoesSentence("she hides it and tells nobody it arrived",
+      "She put the sealed letter under the ledger where nobody would look for it, and told no one it had come."),
+      "…while a real paraphrase survives", "it says what the sentence DOES");
+    gate(!reasonEchoesSentence("the prose only puts the bowl in the room", SENT),
+      "…and so does a short clause about the sentence", "no long run, and it adds words of its own");
+    gate(normalizeChekhov(
+      { reason: SENT, verdict: "promise", confidence: 1 }, SENT) === null,
+      "★★ chekhov: a restated question is not an answer, whatever its confidence",
+      "promise @1.0 with the sentence as its reason → null");
+    gate(normalizeChekhov(
+      { reason: "she hides it and tells nobody", verdict: "promise", confidence: 0.9 },
+      "She put the sealed letter under the ledger and told no one.")?.verdict === "promise",
+      "…and a real reason still lands", "the guard is not a mute button");
 
     const none = await runSceneReview(SCENES[0], {
       run: stubRunner({ reason: "it is doing two things at once", label: "none", confidence: 0.95 }),

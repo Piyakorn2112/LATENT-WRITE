@@ -97,6 +97,48 @@ const COMMON_NOUNS = new Set([
   "kind","kinds","sort","point","part","parts",
 ]);
 
+/**
+ * Closed-class words, which a noun phrase never is.
+ *
+ * ★★ THIS EXISTS BECAUSE THE REGEX SURFACED "rather than" AS A CHEKHOV GUN, AND
+ *    THE LOCAL MODEL CONFIRMED IT AS A PROMISE at 0.7 — caught by READING what
+ *    scripts/verify-review-sweep-e2e.mjs actually produced, not by any gate.
+ *    The pattern matches `article + up to two words + word + word`, so any
+ *    run of lowercase words after "the" qualifies, and "…the register rather
+ *    than…" yields modifier "rather", head "than".
+ *
+ *    STOPWORDS and COMMON_NOUNS could not catch it, and adding "than" to them
+ *    would be whack-a-mole: the defect is not those two words, it is that
+ *    nothing tested WORD CLASS at all. A closed class is finite, so this is
+ *    the one filter that ends the game rather than playing another round.
+ *
+ * ★ IT MATTERS MOST FOR THE MODEL, NOT THE WIDGET. Junk like this recurs
+ *   constantly, and chekhov-review ranks by mentions — so the function words
+ *   sorted FIRST and spent the whole per-chapter budget before a real object
+ *   was ever asked about. And the question is unanswerable-but-plausible: the
+ *   model is grounded in the SENTENCE, which always sounds meaningful, so it
+ *   confirms rather than declines.
+ */
+const FUNCTION_WORDS = new Set([
+  // conjunctions & subordinators
+  "and","or","but","nor","yet","so","than","then","because","although","though",
+  "while","whereas","unless","until","since","if","whether","that","as","when",
+  "where","after","before","once",
+  // prepositions
+  "of","in","on","at","to","for","with","from","by","about","into","onto",
+  "over","under","above","below","through","between","among","against",
+  "without","within","across","behind","beside","toward","towards","upon",
+  "off","out","up","down","near","past","along","around",
+  // degree / focus adverbs and other closed-class filler
+  "rather","quite","very","almost","nearly","just","only","even","still",
+  "already","also","too","enough","such","more","most","less","least","much",
+  "many","few","several","other","others","another","same","own",
+  // pronouns and be/have/do forms that can land in the slots
+  "he","she","it","they","we","you","i","him","them","us","me","who","whom",
+  "whose","is","was","were","are","been","being","be","had","has","have",
+  "did","does","do","not","no","never","always",
+]);
+
 export interface ChekhovCandidate {
   /** The noun phrase, e.g. "rusted pistol". */
   phrase: string;
@@ -150,9 +192,21 @@ export function findChekhovCandidates(
   const later = chapters.slice(thisIndex + 1).map((c) => c.content.toLowerCase()).join("\n");
 
   // Match: definite-article + 0/1 adjective + concrete noun.
-  // Only fires when the noun is *capitalised in source* OR the phrase
-  // is preceded by a definite article — both signal "specificity".
-  const re = /\b(?:the|a|an|his|her|their|its|my|your)\s+(?:[a-z]+\s+){0,2}([a-z]+ed|[a-z]+ing|[a-z]+)\s+([a-z]+)\b/g;
+  //
+  // ★★ THE `{0,2}?` IS LAZY, AND IT USED TO BE GREEDY. Greedy, the optional
+  //    run swallowed the adjective AND the noun, so the two captures landed on
+  //    whatever TRAILED the phrase: "the rusted pistol on the shelf" produced
+  //    ("on", "the") — thrown away by STOPWORDS — and "…the register rather
+  //    than…" produced ("rather", "than"), which survived every filter and was
+  //    put to the local model, which called it a Chekhov promise at 0.7.
+  //
+  //    So this never extracted head nouns at all; it extracted trailing word
+  //    pairs that sometimes happened to be nouns. Lazy, the run yields as
+  //    little as it can and the captures land on the adjective and the head:
+  //    "rusted pistol", "jade token", "alarm bell", "small pawnbroker" where
+  //    the same prose previously gave "could penetrate", "sat doggedly",
+  //    "rather than". test-continuity-voice holds at 32/32 across the change.
+  const re = /\b(?:the|a|an|his|her|their|its|my|your)\s+(?:[a-z]+\s+){0,2}?([a-z]+ed|[a-z]+ing|[a-z]+)\s+([a-z]+)\b/g;
 
   const counts = new Map<string, { phrase: string; mentions: number; at: number }>();
   let m: RegExpExecArray | null;
@@ -162,6 +216,11 @@ export function findChekhovCandidates(
     if (!head || head.length < 4) continue;
     if (STOPWORDS.has(head) || COMMON_NOUNS.has(head)) continue;
     if (STOPWORDS.has(adj) || COMMON_NOUNS.has(adj)) continue;
+    // ★★ Word class, not vocabulary — see the note on FUNCTION_WORDS. A phrase
+    //    containing a closed-class word in either slot is not a noun phrase,
+    //    and asking a model whether "rather than" is a Chekhov gun wastes a
+    //    question on something that cannot have an answer.
+    if (FUNCTION_WORDS.has(head) || (adj && FUNCTION_WORDS.has(adj))) continue;
     const phrase = `${adj} ${head}`.trim();
     const key = head;
     const ex = counts.get(key);

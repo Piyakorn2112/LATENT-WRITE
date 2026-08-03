@@ -72,6 +72,23 @@ import type { ChekhovVerdictRecord, SceneLabelSuggestion } from "./review-store"
  *   never mean two different things. `groupIntoScenes` marks the first
  *   paragraph of every scene, including paragraph 0, so this reconstructs the
  *   engine's own grouping rather than re-deriving one.
+ *
+ * ★★ NO MARKED STARTS MEANS NO SCENES, NEVER "ONE SCENE". This returned `[0]`
+ *    as a defensive nicety, and the nicety was a bug. `detectSpeechInChapter`
+ *    SKIPS the scene-grouping post-pass entirely at the `fast` level
+ *    (`useGroupScenes = level !== 'fast'`), so on the typing path no paragraph
+ *    carries `sceneStart` — and the fallback then manufactured a single scene
+ *    spanning the WHOLE CHAPTER. The sweep would spend an inference on it every
+ *    fast-analysed chapter, ask the model to name the function of an entire
+ *    chapter read as a 1200-character head-and-tail excerpt, and store an
+ *    answer that can never render, because HighlightLayer draws a scene label
+ *    only where `meta.sceneStart` is set. Silent, permanent, and invisible to
+ *    every gate that called this with grouped input.
+ *
+ *    With grouping ON this is never empty for a non-empty chapter —
+ *    `groupIntoScenes` seeds its boundaries with [0] — so an empty result means
+ *    exactly one thing: the engine has not grouped this chapter, and there is
+ *    nothing here to have an opinion about.
  */
 export function sceneStartParagraphs(
   speechResults: readonly ChapterParaResult[],
@@ -80,8 +97,6 @@ export function sceneStartParagraphs(
   speechResults.forEach((result, index) => {
     if (result.meta.sceneStart) starts.push(index);
   });
-  // A chapter too short to group has no marked start but is still one scene.
-  if (starts.length === 0 && speechResults.length > 0) starts.push(0);
   return starts;
 }
 

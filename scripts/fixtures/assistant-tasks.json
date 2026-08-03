@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-08-03T17:17:52.853Z",
+  "generatedAt": "2026-08-03T17:31:27.831Z",
   "modelId": "qwen3-1.7b-q4_k_m",
   "packVersion": 1,
   "adjudicatorPromptVersion": 1,
   "entityReviewPromptVersion": 1,
   "chipPromptVersion": 2,
   "scenePromptVersion": 1,
-  "chekhovPromptVersion": 1,
+  "chekhovPromptVersion": 2,
   "summaryPromptVersion": 1,
   "adjudication": [
     {
@@ -809,7 +809,7 @@
       "minConfidence": 0.7,
       "phrase": "sealed letter",
       "sentence": "She put the sealed letter under the ledger where nobody would look for it, and told no one it had come.",
-      "key": "7fceea9a",
+      "key": "7ecee907",
       "systemPrompt": "A tool has flagged a thing that a novel names once and never mentions again.\nYou say whether the story PROMISED anything with it.\n\nYou are given the phrase, the sentence that introduces it, the chapter it\nappeared in, and how many chapters have passed since.\n\nMost of these are furniture, and furniture is the answer you should expect to\ngive. A novel describes a room with real things in it — a chipped bowl, a\nfolded coat, a lamp with a cracked shade — and never mentions them again\nbecause they were never promises. They were the room. Saying \"furniture\" is\ndoing the job, not giving up on it.\n\nA thing is a \"promise\" only when the sentence makes the story owe the reader\nsomething about it. That means one of:\n- someone hides it, locks it away, is warned about it, or is told not to touch it\n- it is loaded, sharpened, poisoned, sealed, addressed to someone, or otherwise\n  made ready for a use that has not happened yet\n- the prose stops to tell you it matters — someone stares at it, keeps it,\n  cannot stop thinking about it, or is changed by seeing it\n\nBeing vivid is not a promise. Being specific is not a promise. Being described\nat length is not a promise. If the sentence only puts the thing in the world,\nit is furniture.\n\nAnswer \"unsure\" when the sentence genuinely could be read either way. It costs\nnothing and it is better than a guess.\n\nAnswer as JSON: {\"reason\",\"verdict\",\"confidence\"} in that order.\nreason: FIRST, one clause of at most 15 words quoting what the sentence does.\nverdict: promise, furniture, or unsure.\nconfidence: a number from 0 to 1, how much the sentence shows. Never above 1.",
       "userText": "THE THING: sealed letter\nINTRODUCED IN: chapter 4\nMENTIONED: 2 times in that chapter, never again\nCHAPTERS SINCE: 6\n\nTHE SENTENCE THAT INTRODUCES IT\n  She put the sealed letter under the ledger where nobody would look for it, and told no one it had come.\n\nDoes that sentence promise the reader something about this thing?",
       "schema": {
@@ -839,7 +839,7 @@
       "minConfidence": 0.7,
       "phrase": "chipped bowl",
       "sentence": "A chipped bowl sat on the sill where the afternoon light got at it, throwing a thin ring of white onto the wall behind.",
-      "key": "e1678edd",
+      "key": "de678a24",
       "systemPrompt": "A tool has flagged a thing that a novel names once and never mentions again.\nYou say whether the story PROMISED anything with it.\n\nYou are given the phrase, the sentence that introduces it, the chapter it\nappeared in, and how many chapters have passed since.\n\nMost of these are furniture, and furniture is the answer you should expect to\ngive. A novel describes a room with real things in it — a chipped bowl, a\nfolded coat, a lamp with a cracked shade — and never mentions them again\nbecause they were never promises. They were the room. Saying \"furniture\" is\ndoing the job, not giving up on it.\n\nA thing is a \"promise\" only when the sentence makes the story owe the reader\nsomething about it. That means one of:\n- someone hides it, locks it away, is warned about it, or is told not to touch it\n- it is loaded, sharpened, poisoned, sealed, addressed to someone, or otherwise\n  made ready for a use that has not happened yet\n- the prose stops to tell you it matters — someone stares at it, keeps it,\n  cannot stop thinking about it, or is changed by seeing it\n\nBeing vivid is not a promise. Being specific is not a promise. Being described\nat length is not a promise. If the sentence only puts the thing in the world,\nit is furniture.\n\nAnswer \"unsure\" when the sentence genuinely could be read either way. It costs\nnothing and it is better than a guess.\n\nAnswer as JSON: {\"reason\",\"verdict\",\"confidence\"} in that order.\nreason: FIRST, one clause of at most 15 words quoting what the sentence does.\nverdict: promise, furniture, or unsure.\nconfidence: a number from 0 to 1, how much the sentence shows. Never above 1.",
       "userText": "THE THING: chipped bowl\nINTRODUCED IN: chapter 4\nMENTIONED: 1 time in that chapter, never again\nCHAPTERS SINCE: 6\n\nTHE SENTENCE THAT INTRODUCES IT\n  A chipped bowl sat on the sill where the afternoon light got at it, throwing a thin ring of white onto the wall behind.\n\nDoes that sentence promise the reader something about this thing?",
       "schema": {

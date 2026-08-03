@@ -30,8 +30,17 @@ import { tidyTruncatedText } from "./assistant-client";
 import type { AssistantJSONRunner } from "./assistant-client";
 
 export const CHEKHOV_TASK = "chekhov-review";
-/** Bump on ANY change to the prompt text or the schema. Invalidates stored verdicts. */
-export const CHEKHOV_PROMPT_VERSION = 1;
+/**
+ * Bump on ANY change to the prompt text or the schema. Invalidates stored
+ * verdicts.
+ *
+ * ★ 2 IS A VALIDATION CHANGE, NOT A PROMPT ONE — bumped anyway. Adding
+ *   `reasonEchoesSentence` means answers stored under v1 include confident
+ *   `promise` verdicts the guard would now reject, and those keep surfacing
+ *   until their chapter is edited. A version bump costs one re-ask per phrase
+ *   and is the only thing that clears them.
+ */
+export const CHEKHOV_PROMPT_VERSION = 2;
 
 /** Per-chapter budget. Two questions, ranked; the rest of the list is silent. */
 export const CHEKHOV_CAP = 2;
@@ -206,10 +215,60 @@ export interface ChekhovAnswer {
 /**
  * Mechanical checks only. Null when the answer is not usable at all — a shape
  * that is not an object, a verdict outside the three, a missing confidence, an
- * empty reason. A verdict of "furniture" or "unsure" is a USABLE answer and
+ * empty reason, or a reason that merely restates `sentence`. A verdict of "furniture" or "unsure" is a USABLE answer and
  * comes back intact; see the header ★ on why it is worth storing.
  */
-export function normalizeChekhov(raw: unknown): ChekhovAnswer | null {
+/** Words shared with the sentence, as a fraction of the reason's own words. */
+const LEXICAL_OVERLAP = 0.8;
+/** A verbatim run this long is a quotation, not a paraphrase. */
+const ECHO_RUN_WORDS = 6;
+
+/**
+ * Is this "reason" just the sentence handed back?
+ *
+ * ★★ THE TRANSCRIPTION TELL. Measured by scripts/probe-chekhov-floor.cjs over
+ *    nine sentences with a known character: the model's confidence does NOT
+ *    separate right from wrong (true promises at 1, 0.75, 0.75; false ones at
+ *    0.5, 1, 1, 0.5, 1 — so no floor is a lever). What DOES separate them is
+ *    whether the reason is a reason at all. Every confident false promise came
+ *    back with the input sentence copied verbatim into the reason field:
+ *
+ *      "The lamp had a cracked shade that threw the light unevenly across
+ *       the ceiling of the little room."          → promise, confidence 1.0
+ *
+ *    while every sentence it actually reasoned about produced a clause ABOUT
+ *    the sentence ("It does not reveal…", "The sentence promises that…"),
+ *    right or wrong. A model that has restated the question has not answered
+ *    it, and the confidence it reports for that non-answer is meaningless.
+ *
+ * ★ MECHANICAL, NOT A TUNED THRESHOLD. Two independent tells, either of which
+ *   is enough: a long verbatim run, or almost every word being the sentence's.
+ *   Both are properties of the STRINGS, so no prompt wording can be fitted to
+ *   them and re-measuring the probe on another model needs no re-tuning.
+ *   The same idea as `labelIsGrounded` in chip-picker.ts.
+ */
+export function reasonEchoesSentence(reason: string, sentence: string): boolean {
+  const words = (text: string) =>
+    collapse(text).toLowerCase().replace(/[^a-z0-9\s']/g, " ").split(/\s+/).filter(Boolean);
+  const r = words(reason);
+  const s = words(sentence);
+  if (r.length === 0 || s.length === 0) return false;
+
+  // A verbatim run of ECHO_RUN_WORDS or more.
+  if (r.length >= ECHO_RUN_WORDS) {
+    const hay = ` ${s.join(" ")} `;
+    for (let i = 0; i + ECHO_RUN_WORDS <= r.length; i++) {
+      if (hay.includes(` ${r.slice(i, i + ECHO_RUN_WORDS).join(" ")} `)) return true;
+    }
+  }
+
+  // Or almost nothing in the reason that is not already in the sentence.
+  const pool = new Set(s);
+  const shared = r.filter((w) => pool.has(w)).length;
+  return shared / r.length >= LEXICAL_OVERLAP;
+}
+
+export function normalizeChekhov(raw: unknown, sentence = ""): ChekhovAnswer | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
 
@@ -226,6 +285,10 @@ export function normalizeChekhov(raw: unknown): ChekhovAnswer | null {
   if (typeof reasonRaw !== "string") return null;
   const reason = tidyTruncatedText(collapse(reasonRaw).slice(0, REASON_MAX), REASON_MAX);
   if (!reason) return null;
+  // ★★ A restated question is not an answer — see reasonEchoesSentence. Null
+  //    rather than a downgraded verdict: the caller records that the question
+  //    was ASKED, so nothing is re-asked, and nothing unearned is stored.
+  if (sentence && reasonEchoesSentence(reason, sentence)) return null;
 
   return {
     verdict,
@@ -310,7 +373,7 @@ export async function runChekhovReview(
   });
   if (!result.ok) return null;
 
-  const answer = normalizeChekhov(result.json);
+  const answer = normalizeChekhov(result.json, candidate.sentence);
   if (!answer) return null;
 
   return {

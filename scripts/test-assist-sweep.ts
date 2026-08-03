@@ -35,6 +35,7 @@ import {
   type SweepAnswer,
 } from "../src/lib/assist-sweep";
 import { CHEKHOV_TASK, chekhovKeyFor } from "../src/lib/chekhov-review";
+import { findChekhovCandidates } from "../src/lib/continuity";
 import { SCENE_TASK, offeredLabels, sceneKeyFor } from "../src/lib/scene-review";
 import {
   chapterReviews,
@@ -96,6 +97,14 @@ const para = (over: Partial<ChapterParaResult["meta"]> = {}): ChapterParaResult 
 async function main() {
   console.log("\n[assist-sweep] adapters\n");
 
+  // Real-length prose, reused by the ungrouped gate below and the exclusion
+  // gate further down — both are vacuous under the 45-word floor.
+  const SCENE_PROSE_EARLY = [
+    "She went along the row of crates with the lamp held low, reading the chalk marks one after another, and none of them matched what the manifest in her other hand said they should.",
+    "The yard was quiet enough that she could hear the river working at the pilings, and she counted to the end of the row before she let herself believe it.",
+    "He was waiting by the office door when she came back, and he did not pretend to be doing anything else, which she supposed was a kind of honesty.",
+  ];
+
   // ── scene numbering ─────────────────────────────────────────────────────
   const grouped: ChapterParaResult[] = [
     para({ sceneStart: true, sceneTension: "calm" }),
@@ -106,10 +115,22 @@ async function main() {
   ];
   gate(JSON.stringify(sceneStartParagraphs(grouped)) === "[0,2,4]",
     "scene numbering follows the engine's own grouping", sceneStartParagraphs(grouped).join(","));
-  gate(JSON.stringify(sceneStartParagraphs([para(), para()])) === "[0]",
-    "…a chapter too short to group is still one scene", "no marked start → [0]");
   gate(sceneStartParagraphs([]).length === 0,
-    "…and an empty chapter is no scenes, not one empty one", "[]");
+    "…an empty chapter is no scenes", "[]");
+
+  // ★★ THE FAST PATH MARKS NOTHING, AND THAT MUST MEAN NOTHING TO REVIEW.
+  //    detectSpeechInChapter skips groupIntoScenes at level 'fast'
+  //    (useGroupScenes = level !== 'fast'), so no paragraph carries sceneStart.
+  //    This returned [0] once — inventing ONE scene spanning the whole chapter,
+  //    which burned an inference per fast-analysed chapter on a question about
+  //    a whole chapter, and stored an answer HighlightLayer can never draw
+  //    (it renders a label only where meta.sceneStart is set).
+  const ungrouped: ChapterParaResult[] = [para(), para(), para()];
+  gate(sceneStartParagraphs(ungrouped).length === 0,
+    "★★ a chapter the engine did not group has NO scenes, not one big one",
+    `${sceneStartParagraphs(ungrouped).length} starts from ungrouped input`);
+  gate(sceneCandidatesFrom(SCENE_PROSE_EARLY, ungrouped).length === 0,
+    "…so nothing is asked about it", "no marked start → no question, no wasted call");
 
   // ★ The engine-labelled scene must not be a question even though its raw
   //   scores can look like a margin loss (the prevLabel step-down).
@@ -132,6 +153,36 @@ async function main() {
   gate(built.length > 0 && built.every((c) => c.sceneIndex !== 1),
     "★ a scene the engine already labelled is never asked about",
     `asked about scene(s) [${built.map((c) => c.sceneIndex).join(",") || "none"}], engine labelled scene 1`);
+
+  // ── what the generator hands the sweep ──────────────────────────────────
+  //
+  // ★★ AN UNANSWERABLE QUESTION IS WORSE THAN A HARD ONE. The Chekhov regex
+  //    matches `article + up to two words + word + word`, so a clause like
+  //    "…the register rather than…" yields the phrase "rather than". The real
+  //    app produced exactly that, and the model confirmed it as a PROMISE at
+  //    0.7 — found by reading verify-review-sweep-e2e.mjs's output, invisible
+  //    to every gate. It is unanswerable-but-plausible: the model is grounded
+  //    in the SENTENCE, which always sounds meaningful, so it confirms rather
+  //    than declines. And junk recurs, so mentions-first ranking sorted it
+  //    ABOVE every real object and spent the budget on it.
+  const junkChapters = [
+    { id: "c1", number: 1, title: "One", content:
+      "He set the rusted pistol on the shelf rather than in the case, and did not look at it again." },
+    { id: "c2", number: 2, title: "Two", content: "Nothing here recurs from the chapter before it." },
+  ] as Parameters<typeof findChekhovCandidates>[0];
+  const generated = findChekhovCandidates(junkChapters, 0);
+  // ★ THE POSITIVE HALF IS WHAT KEEPS THE NEGATIVE HALF HONEST. "no closed-class
+  //   phrase" is satisfied perfectly by generating NOTHING, and this gate read
+  //   green that way once — the same vacuous-fixture trap as the scene one.
+  gate(generated.some((c) => c.phrase === "rusted pistol"),
+    "the generator still finds the real noun phrase",
+    `got [${generated.map((c) => c.phrase).join(", ") || "none"}]`);
+  gate(!generated.some((c) => /\b(rather|than|because|which|while|of|with|on|the)\b/.test(c.phrase)),
+    "★★ …and never hands the sweep a closed-class phrase",
+    `got [${generated.map((c) => c.phrase).join(", ") || "none"}]`);
+  gate(generated.every((c) => c.sentence.trim() !== ""),
+    "…and every candidate carries the sentence that introduces it",
+    "a phrase with no sentence is an invitation to invent");
 
   // ── the sweep ───────────────────────────────────────────────────────────
   console.log("\n[assist-sweep] order, budget, cancellation\n");
