@@ -118,7 +118,22 @@ const CHAR_TRACK_H  = 56;   // row: bars over a baseline, agency squares under i
 //   decoration back into a quantity.
 const CAST_BAR_MAX  = 24;
 const CAST_BAR_MIN  = 4;
-const CAST_BAR_W    = 9;
+/**
+ * Bar WIDTH says whether they speak in the chapter; height says how much of it
+ * they occupy.
+ *
+ * ★★ THIS REPLACED A CAP ON TOP OF THE BAR. The cap carried the same
+ *    information and read as a nail head — an extra element sitting above every
+ *    speaking chapter, which broke the row's baseline silhouette. Width is the
+ *    same categorical distinction with no added mark at all, and it stays
+ *    orthogonal to height, so nothing encodes two things.
+ *
+ *    The narrow bar is 6, not 3: area is width × height, so a very thin bar
+ *    would read as "less present" and fight the quantity the height already
+ *    states.
+ */
+const CAST_BAR_W       = 9;    // speaks here
+const CAST_BAR_W_QUIET = 6;    // on the page, silent
 /** Agency squares below the baseline: size, gap, and how many fit before the
  *  row starts lying about the count. */
 const DRIVE_TICK    = 5.4;
@@ -139,18 +154,6 @@ const CAST_LEGEND_TYPES: Array<MajorEvent["type"]> =
  *   outline, always the same size, categorically unlike a filled bar.
  */
 const CAST_GHOST_H = 9;
-/**
- * The cap that marks a chapter where they actually SPEAK.
- *
- * ★ IT HAS TO BE WIDER THAN THE BAR, and the first version was not. A 2.6px
- *   cap in the SAME COLOUR at slightly higher opacity, sitting on top of a bar
- *   of that colour, is invisible — 26 gates passed and the speaking chapters
- *   were indistinguishable from the silent ones when I looked at the render.
- *   Overhanging the bar makes the mark read as a shape rather than as a shade,
- *   which is the same reason evocation is hollow instead of faint.
- */
-const CAST_VOICE_CAP  = 2.8;
-const CAST_VOICE_OVER = 3.2;   // overhang per side
 /** Average advance width of the 8px UI font, for fitting the stat line to the
  *  room its character's entry chapter leaves. Measured against the rendered
  *  text by verify-timeline-cast.cjs, so a wrong value fails a gate rather than
@@ -487,7 +490,7 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
             fill="var(--panel-text-4)"
             fontSize={8.5} fontFamily="var(--font-ui)"
           >
-            solid bar = on the page&#160;&#160;·&#160;&#160;cap = speaks here&#160;&#160;·&#160;&#160;hollow = talked about while absent&#160;&#160;·&#160;&#160;ring = their biggest chapter&#160;&#160;·&#160;&#160;below = one square per event they drive
+            wide bar = speaks here&#160;&#160;·&#160;&#160;narrow = on the page, silent&#160;&#160;·&#160;&#160;hollow = talked about while absent&#160;&#160;·&#160;&#160;ring = their biggest chapter&#160;&#160;·&#160;&#160;below = one square per event they drive
           </text>
           {/* The square colours ARE the legend. A writer should not have to
               learn that violet means revelation from a paragraph elsewhere. */}
@@ -562,34 +565,37 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
             const rowW = bar.driveTypes.length * DRIVE_TICK
               + Math.max(0, bar.driveTypes.length - 1) * DRIVE_GAP;
             const rowX = bar.x - rowW / 2;
+            // Width is the voice: wide = speaks here, narrow = on the page and
+            // silent. See CAST_BAR_W.
+            const barW = bar.klass === "speaking" ? CAST_BAR_W : CAST_BAR_W_QUIET;
             return (
               <g key={bar.key}>
                 {bar.peak && (
                   <rect
                     data-cast-mark="peak"
-                    x={bar.x - CAST_BAR_W / 2 - 2.5} y={track.ty - bar.h - 3}
-                    width={CAST_BAR_W + 5} height={bar.h + 6}
+                    x={bar.x - barW / 2 - 2.5} y={track.ty - bar.h - 3}
+                    width={barW + 5} height={bar.h + 6}
                     rx={4.5}
                     fill="none"
                     stroke={track.color} strokeWidth={0.9} strokeOpacity={0.42}
                   />
                 )}
                 {/* ★ ONE MARK, ONE MEANING. Height is how much of the chapter
-                    they occupy; the cap says they speak in it; the ring says
-                    it is their biggest; the squares below are agency. Nothing
-                    encodes two things, and an earlier version that dimmed the
-                    bar when nobody drove an event put agency on the bar as
-                    well as in the squares — a pale bar reads as "less
+                    they occupy; WIDTH says whether they speak in it; the ring
+                    says it is their biggest; the squares below are agency.
+                    Nothing encodes two things, and an earlier version that
+                    dimmed the bar when nobody drove an event put agency on the
+                    bar as well as in the squares — a pale bar reads as "less
                     present", which is the one thing the height already says.
 
                     EVOCATION IS A DIFFERENT KIND OF MARK, NOT A FAINTER ONE.
-                    Hollow, fixed height, no cap and no ring: being talked
-                    about carries no quantity of presence to draw. */}
+                    Hollow, fixed height, no ring: being talked about carries no
+                    quantity of presence to draw. */}
                 <rect
                   data-cast-mark="presence"
                   data-presence={bar.klass}
-                  x={bar.x - CAST_BAR_W / 2} y={track.ty - bar.h}
-                  width={CAST_BAR_W} height={bar.h}
+                  x={bar.x - barW / 2} y={track.ty - bar.h}
+                  width={barW} height={bar.h}
                   rx={2.5}
                   fill={bar.klass === "mentioned" ? "none" : track.color}
                   opacity={bar.klass === "mentioned" ? 1 : 0.82}
@@ -600,18 +606,6 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
                 >
                   <title>{bar.tip}</title>
                 </rect>
-                {bar.klass === "speaking" && (
-                  <rect
-                    data-cast-mark="voice"
-                    x={bar.x - CAST_BAR_W / 2 - CAST_VOICE_OVER}
-                    y={track.ty - bar.h - CAST_VOICE_CAP + 0.6}
-                    width={CAST_BAR_W + CAST_VOICE_OVER * 2} height={CAST_VOICE_CAP}
-                    rx={1.4}
-                    fill={track.color} opacity={1}
-                  >
-                    <title>{bar.tip}</title>
-                  </rect>
-                )}
                 {bar.driveTypes.map((type, i) => (
                   <rect
                     key={`${bar.key}-drive-${i}`}

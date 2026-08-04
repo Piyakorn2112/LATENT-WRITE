@@ -155,7 +155,13 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
   const heights = bars.map((b) => Number(b.getAttribute("height")));
   const solid = bars.filter((b) => b.getAttribute("data-presence") !== "mentioned");
   const ghosts = bars.filter((b) => b.getAttribute("data-presence") === "mentioned");
-  const voices = [...svg.querySelectorAll("[data-cast-mark='voice']")];
+  // ★ SPEECH IS THE BAR'S WIDTH NOW, NOT A SEPARATE MARK — so the gate reads
+  //   the width of bars GROUPED BY data-presence rather than counting a
+  //   "voice" element. Still semantic: width IS the encoding here, and the
+  //   grouping key is the meaning, not a pixel value.
+  const widthOf = (klass) => [...new Set(bars
+    .filter((b) => b.getAttribute("data-presence") === klass)
+    .map((b) => Number(b.getAttribute("width"))))];
   // A ghost must be HOLLOW — the whole point is that it is a different kind of
   // mark, not a fainter one. Checking fill rather than opacity is deliberate:
   // opacity is a shade and shades are what this redesign removed.
@@ -181,7 +187,13 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
     distinctHeights: new Set(heights.map((h) => h.toFixed(1))).size,
     ghostCount: ghosts.length,
     solidCount: solid.length,
-    voiceCount: voices.length,
+    // ★ QUERIED, NOT ABSENT. Asserting `undefined` would pass the moment the
+    //   probe stopped reporting it, which is exactly what "the old mark is
+    //   gone" must not mean.
+    voiceMarkCount: svg.querySelectorAll("[data-cast-mark='voice']").length,
+    speakingWidths: widthOf("speaking"),
+    presentWidths: widthOf("present"),
+    speakingCount: bars.filter((b) => b.getAttribute("data-presence") === "speaking").length,
     ghostsHollow,
     solidsFilled,
     unclassified: bars.filter((b) => !b.getAttribute("data-presence")).length,

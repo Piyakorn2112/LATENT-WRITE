@@ -65,9 +65,15 @@ app.whenReady().then(async () => {
     `expected 6 (Darcy 2 + Jane 3 + Lady Catherine 1); got ${p.ghostCount}. ` +
     `10 means the no-data default flipped to "mentioned" and Wickham joined them`);
   ok("no bar renders unclassified", p.unclassified === 0, `unclassified: ${p.unclassified}`);
-  ok("speaking chapters carry a voice cap", p.voiceCount > 0, `caps: ${p.voiceCount}`);
-  ok("…but not every present chapter does", p.voiceCount < p.solidCount,
-    `caps ${p.voiceCount} vs solid ${p.solidCount} — a cap on everything says nothing`);
+  ok("speaking chapters render", p.speakingCount > 0, `speaking bars: ${p.speakingCount}`);
+  ok("…but not every present chapter speaks", p.speakingCount < p.solidCount,
+    `${p.speakingCount} of ${p.solidCount} — a mark on everything says nothing`);
+  ok("★ a speaking bar is WIDER than a silent one",
+    p.speakingWidths.length === 1 && p.presentWidths.length === 1
+    && p.speakingWidths[0] > p.presentWidths[0],
+    `speaking ${JSON.stringify(p.speakingWidths)} vs present ${JSON.stringify(p.presentWidths)}`);
+  ok("★ …and the old top cap is GONE", p.voiceMarkCount === 0,
+    `still drawing ${p.voiceMarkCount} — a redesign that leaves both marks in place is one nobody finished`);
   ok("★ \"enters\" is the walk-on, with the herald gap named",
     !!p.heraldLine && /enters 12/.test(p.heraldLine),
     `herald line: ${p.heraldLine} — Lady Catherine is named in 7 and arrives in 12`);
