@@ -29,7 +29,10 @@ type MapRequest = Parameters<typeof buildMapPixels>[0];
 
 const DISP_PX = 40;
 let ACTIVE_DISP = DISP_PX;
-const decode = (byte: number) => ACTIVE_DISP * (byte / 255 - 0.5);
+// ★ THE FILTER USES `scale = disp * 2`. Decoding with `disp` alone halves every
+//   displacement and makes an over-budget fold look fold-free — which is
+//   exactly how the clamp bug survived being probed.
+const decode = (byte: number) => 2 * ACTIVE_DISP * (byte / 255 - 0.5);
 
 interface Case { label: string; w: number; h: number; r: number;
   bezel?: number; dispPx?: number }

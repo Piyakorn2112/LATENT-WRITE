@@ -838,7 +838,25 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   // toolbar (bezel 18.4) is 12.27px. Asking for more does not make the glass
   // stronger — it makes the backdrop tear — so the pull is scaled to fit rather
   // than shipped as a doubled, mirrored band over the prose behind it.
-  const peakPx = ((req.dispPx ?? 40) * 127 * channelGain) / 255;
+  // ★★ THE FILTER'S SCALE IS `disp * 2`, NOT `disp`.
+  //
+  //   liquid-glass-filter.ts sets `feDisplacementMap.scale = disp * 2`, and the
+  //   primitive shifts by `scale * (channel/255 - 0.5)`. The largest |channel -
+  //   128| this packs is 127, so the real peak shift is
+  //
+  //       2 * dispPx * 127 / 255 * gain   ≈  dispPx * gain
+  //
+  //   i.e. 39.8px at dispPx 40 — TWICE what this used to compute. The fold-free
+  //   clamp was therefore sized against half the displacement it was meant to
+  //   bound, so every surface kept folding at 2x the budget while the code
+  //   believed it had clamped.
+  //
+  //   ★ AND THE PROBE COULD NOT CATCH IT, because probe-glass-fold.ts decoded
+  //   the map with the same `DISP_PX` rather than the filter's `2 * DISP_PX`.
+  //   A measurement that repeats the bug it is checking for agrees with it
+  //   every time; both had to be read against the FILTER, not against each
+  //   other.
+  const peakPx = (2 * (req.dispPx ?? 40) * 127 * channelGain) / 255;
   const budgetPx = foldFreeBudget(bezel);
   const foldFreeClamp = peakPx > budgetPx ? budgetPx / peakPx : 1;
 
