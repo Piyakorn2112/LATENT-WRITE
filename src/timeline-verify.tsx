@@ -159,7 +159,7 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
   //   the width of bars GROUPED BY data-presence rather than counting a
   //   "voice" element. Still semantic: width IS the encoding here, and the
   //   grouping key is the meaning, not a pixel value.
-  const widthOf = (klass) => [...new Set(bars
+  const widthOf = (klass: string) => [...new Set(bars
     .filter((b) => b.getAttribute("data-presence") === klass)
     .map((b) => Number(b.getAttribute("width"))))];
   // A ghost must be HOLLOW — the whole point is that it is a different kind of
