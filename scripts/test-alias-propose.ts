@@ -183,6 +183,38 @@ console.log("\nproposals, never merges");
     JSON.stringify(r.proposals.map((p) => `${p.character}←${p.alias}`)));
 }
 
+// ── 8 · the veto the model probe made explicit ──────────────────────────────
+console.log("\ntwo relatives, one surname");
+{
+  // ★★ qwen3-1.7b merged this exact pair at confidence 1.0, reasoning "both
+  //    names share the same surname Verrin and are given different first
+  //    names" — which is the proof they are two people. The engine refuses it,
+  //    and now says so with a named veto rather than by having no rule.
+  const text =
+    `Alise Verrin took the north road because it was longer and she wanted the time. ` +
+    `Mera Verrin had gone south that morning without telling anybody in the house. ` +
+    `Alise Verrin was not missed until evening, and Mera Verrin not until the next day. ` +
+    `Alise Verrin wrote nothing down; Mera Verrin wrote everything down.`;
+  const r = proposeAliases(
+    [{ name: "Alise Verrin" }], ["Alise Verrin", "Mera Verrin"], text,
+  );
+  gate(!has(r, "Alise Verrin", "Mera Verrin"),
+    "★★ two given names on one surname are two people",
+    JSON.stringify(r.proposals.map((p) => `${p.character}←${p.alias}`)));
+  gate(vetoed(r, "Mera Verrin", "distinct-given"),
+    "…and the veto is NAMED, not a gap where no rule happened to fire",
+    JSON.stringify(r.rejected));
+  // The pair: an initial is not a different given name.
+  const initials =
+    `A. Verrin took the north road. Alise Verrin came back at noon. ` +
+    `A. Verrin had signed the book, and Alise Verrin signed it again below. ` +
+    `Nobody could say why A. Verrin bothered.`;
+  const r2 = proposeAliases([{ name: "Alise Verrin" }], ["Alise Verrin", "A. Verrin"], initials);
+  gate(has(r2, "Alise Verrin", "A. Verrin"),
+    "…but an INITIAL still links — the veto must not swallow the initial rule",
+    JSON.stringify(r2.proposals.map((p) => `${p.character}←${p.alias}`)));
+}
+
 console.log(`\n${"═".repeat(74)}`);
 console.log(`${pass} passed, ${fail} failed`);
 console.log("═".repeat(74));

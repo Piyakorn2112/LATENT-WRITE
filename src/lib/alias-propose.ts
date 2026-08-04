@@ -55,6 +55,7 @@ export type AliasVeto =
   | "ambiguous"        // the form fits more than one character
   | "honorific-gender" // Mr against Mrs/Miss on the two names themselves
   | "shared-surname"   // the surname is a FAMILY's — "Mr." and "Miss" both use it
+  | "distinct-given"   // same surname, different given names: two relatives
   | "too-rare";        // not enough occurrences to be worth confirming
 
 /**
@@ -177,6 +178,20 @@ function evidenceFor(text: string, form: string): string {
   const at = m.index;
   return text.slice(Math.max(0, at - 60), Math.min(text.length, at + form.length + 70))
     .replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Same surname, different given names — two relatives, never one person.
+ * An INITIAL is not a different given name: "A. Verrin" and "Alise Verrin"
+ * agree, and the `initial` link rule has to survive this veto.
+ */
+function distinctGivenNames(a: NameParts, b: NameParts): boolean {
+  const at = a.tokens, bt = b.tokens;
+  if (at.length < 2 || bt.length < 2) return false;
+  if (at[at.length - 1].toLowerCase() !== bt[bt.length - 1].toLowerCase()) return false;
+  const initial = /^[a-z]\.?$/i;
+  if (initial.test(at[0]) || initial.test(bt[0])) return false;
+  return at[0].toLowerCase() !== bt[0].toLowerCase();
 }
 
 /** Do two names' gendered titles contradict each other? */
@@ -302,6 +317,23 @@ export function proposeAliases(
     seen.add(key);
 
     const parts = splitName(form);
+
+    // ★★ VALA ET AL.'S FIRST VETO, RECORDED BEFORE ANY LINK RULE RUNS. Same
+    //    non-empty surname, different non-empty given names, is proof of two
+    //    relatives. No link rule fires for that shape, so it was already
+    //    refused — but by SILENCE, and a rule that exists only as a gap cannot
+    //    be relied on or found by anyone reading the code. Written down
+    //    because the model probe showed exactly what happens without it:
+    //    qwen3-1.7b merged "Alise Verrin" into "Mera Verrin" at confidence 1.0,
+    //    reasoning "both names share the same surname Verrin and are given
+    //    different first names" — which is the proof they are two people.
+    for (const c of canonicals) {
+      if (c.known.has(key)) continue;
+      if (distinctGivenNames(c.parts, parts)) {
+        rejected.push({ character: c.raw, alias: form, veto: "distinct-given" });
+      }
+    }
+
     // Which canonical characters could own this form?
     const hits = canonicals
       .map((c) => ({ c, hit: c.known.has(key) ? null : ruleFor(c.parts, parts) }))
@@ -319,6 +351,7 @@ export function proposeAliases(
     }
 
     const { c, hit } = hits[0];
+    if (distinctGivenNames(c.parts, parts)) continue;   // already recorded above
     if (genderConflict(c.parts, parts)) {
       rejected.push({ character: c.raw, alias: form, veto: "honorific-gender" });
       continue;

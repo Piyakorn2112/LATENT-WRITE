@@ -15270,3 +15270,89 @@ body.electron-window-unfocused .wc-panel::after {
   font-size: 10px;
   color: var(--text-tertiary);
 }
+
+/* ── Alias suggestions (world data → character) ───────────────────────────
+   Proposals from alias-propose.ts. Deliberately quiet: this is a list the
+   writer confirms, not a finding demanding attention, and it sits under the
+   Aliases field it writes into. */
+.world-alias-suggest {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.world-alias-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+}
+
+.world-alias-name {
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 650;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+/* A merge removes an entry from the cast, so it says so before it is clicked. */
+.world-alias-kind {
+  font-family: var(--font-ui);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border: 1px solid var(--divider-line);
+  border-radius: 5px;
+  padding: 1px 4px;
+  flex-shrink: 0;
+}
+
+.world-alias-why {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-secondary);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-alias-evidence {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-style: italic;
+  color: var(--panel-text-4, var(--text-secondary));
+  padding: 0 8px 2px 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-alias-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.world-alias-btn {
+  padding: 3px 9px;
+  border-radius: 7px;
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease;
+}
+
+.world-alias-btn:hover { color: var(--text); border-color: var(--text-secondary); }

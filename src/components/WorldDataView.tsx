@@ -9,7 +9,8 @@ import type {
   WorldFaction,
   WorldPlace,
 } from "../types";
-import { ensureWorldData, scanAndClassify, type ScanProgress, type ScanResult } from "../lib/world-data";
+import { ensureWorldData, scanAndClassify, resolveSpeakerCandidates, autoExtractEntities, type ScanProgress, type ScanResult } from "../lib/world-data";
+import { proposeAliases, proposalsFor, type AliasProposal } from "../lib/alias-propose";
 import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
@@ -255,6 +256,13 @@ export function WorldDataView({
   novel, currentChapterId, worldData, intelMode, adaptiveContext,
   onChange, onEntityPredictionBatch, onEntityPredictionFeedback, onRename, onClose,
 }: Props) {
+  // ── Alias suggestions ───────────────────────────────────────────────────
+  //
+  // ★ COMPUTED ONLY WHILE THE CHARACTERS TAB IS OPEN, and keyed on the cast
+  //   rather than on the manuscript object. proposeAliases walks the whole book
+  //   once per candidate name; running it on every keystroke in a description
+  //   field would be a scan the writer never asked for.
+  const [dismissedAliases, setDismissedAliases] = useState<Set<string>>(() => new Set());
   const hasElectronNarrativeLM = typeof window !== "undefined" && !!((window as Window & {
     electronAPI?: { narrativeLMEmbed?: ((text: string) => Promise<number[] | null>) | undefined };
   }).electronAPI?.narrativeLMEmbed);
@@ -439,6 +447,83 @@ export function WorldDataView({
     if (selected === null) return;
     const next = list.map((e, i) => (i === selected ? { ...e, ...patch } : e));
     updateList(next);
+  };
+
+  // ── Alias suggestions ───────────────────────────────────────────────────
+  //
+  // Computed only while the CHARACTERS tab is open and keyed on the cast's
+  // names, not on the novel object: proposeAliases walks the whole book once
+  // per candidate name, and re-running it on every keystroke in a description
+  // field would be a scan nobody asked for.
+  const castKey = wd.characters.map((c) => `${c.name}|${(c.aliases ?? []).join(",")}`).join("¶");
+  const aliasResult = useMemo(() => {
+    if (tab !== "characters" || wd.characters.length === 0) return null;
+    const text = novel.chapters.map((c) => c.content).join("\n");
+    if (text.trim().length < 200) return null;
+    try {
+      // ★★ THE UNION, AND THE UNION IS THE WHOLE FIX. resolveSpeakerCandidates
+      //    goes through resolveKnownNames, which returns the writer's OWN cast
+      //    once worldData is non-empty — so on any real book the proposer would
+      //    only ever see names already in the list. It could offer to merge two
+      //    entries and could never offer "Lizzy", which is the case the feature
+      //    exists for. autoExtractEntities is what reads the manuscript.
+      //    Caught only by looking at a render that showed nothing.
+      const candidates = [...new Set([
+        ...resolveSpeakerCandidates(novel),
+        ...autoExtractEntities(novel, 3, 60),
+      ])];
+      return proposeAliases(wd.characters, candidates, text);
+    } catch (err) {
+      // ★ SAY SO OUT LOUD. A bare `catch {}` here would report "no suggestions"
+      //   for a thrown error and for a book with genuinely nothing to suggest,
+      //   identically and forever. This repo has already lost months to that
+      //   shape once, in the story-graph LM pass.
+      console.warn("[WorldData] alias proposals failed —", err);
+      return null;   // a proposal list is a nicety; it never breaks the editor
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, castKey, novel]);
+
+  /** Fold a proposed name into a character, and for a merge remove the entry
+   *  it came from. Everything the writer confirms happens HERE — alias-propose
+   *  never touches worldData. */
+  const acceptAlias = (proposal: AliasProposal) => {
+    const characters = wd.characters.map((c) => {
+      if (c.name.trim().toLowerCase() !== proposal.character.trim().toLowerCase()) return c;
+      const aliases = mergeEntityAliases(c.aliases, [proposal.alias]);
+      return { ...c, aliases };
+    });
+    // A MERGE also removes the duplicate cast entry, carrying its aliases and
+    // any description across rather than dropping work the writer has done.
+    const next = proposal.kind === "merge"
+      ? (() => {
+          const doomed = characters.find(
+            (c) => c.name.trim().toLowerCase() === proposal.alias.trim().toLowerCase());
+          if (!doomed) return characters;
+          return characters
+            .map((c) => (c.name.trim().toLowerCase() === proposal.character.trim().toLowerCase()
+              ? {
+                  ...c,
+                  aliases: mergeEntityAliases(c.aliases, doomed.aliases, [doomed.name]),
+                  description: c.description?.trim() ? c.description : doomed.description,
+                  role: (c as WorldCharacter).role?.trim()
+                    ? (c as WorldCharacter).role
+                    : (doomed as WorldCharacter).role,
+                }
+              : c))
+            .filter((c) => c.name.trim().toLowerCase() !== proposal.alias.trim().toLowerCase());
+        })()
+      : characters;
+    onChange({ ...wd, characters: next as WorldCharacter[] });
+    if (proposal.kind === "merge") setSelected(null);
+  };
+
+  const dismissAlias = (proposal: AliasProposal) => {
+    setDismissedAliases((prev) => {
+      const nextSet = new Set(prev);
+      nextSet.add(`${proposal.character.toLowerCase()}|${proposal.alias.toLowerCase()}`);
+      return nextSet;
+    });
   };
 
   const moveCurrentTo = (targetTab: Tab) => {
@@ -809,6 +894,16 @@ export function WorldDataView({
                     onRename={onRename}
                     tabKey={`${tab}:${selected}`}
                     isCharacter={tab === "characters"}
+                    aliasProposals={
+                      tab === "characters" && aliasResult
+                        ? proposalsFor(aliasResult, current.name).filter(
+                            (pr) => !dismissedAliases.has(
+                              `${pr.character.toLowerCase()}|${pr.alias.toLowerCase()}`),
+                          )
+                        : []
+                    }
+                    onAcceptAlias={acceptAlias}
+                    onDismissAlias={dismissAlias}
                   />
                 ) : (
                   <div className="world-edit-empty">
@@ -826,8 +921,30 @@ export function WorldDataView({
   );
 }
 
+/**
+ * ★ SHORT ENOUGH TO SURVIVE THE COLUMN. The first wording ("shares the
+ *   surname") truncated to "shares the surn…" between the name and the two
+ *   buttons — a reason nobody can read is not a reason. The full phrasing lives
+ *   in the row's tooltip, where width is free.
+ */
+const ALIAS_RULE_WHY: Record<AliasProposal["rule"], string> = {
+  "given-name":     "same first name",
+  "family-name":    "same surname",
+  "title-stripped": "same name, titled",
+  hypocorism:       "short form",
+  initial:          "initial + surname",
+};
+const ALIAS_RULE_LONG: Record<AliasProposal["rule"], string> = {
+  "given-name":     "shares the given name with this character",
+  "family-name":    "shares this character's surname",
+  "title-stripped": "the same name, with a title in front of it",
+  hypocorism:       "a derivable short form of this name",
+  initial:          "an initial plus the same surname",
+};
+
 function EntityForm({
   entity, currentTab, roleLabel, onPatch, onMoveTo, onRename, tabKey, isCharacter,
+  aliasProposals, onAcceptAlias, onDismissAlias,
 }: {
   entity: Entity;
   currentTab: Tab;
@@ -837,6 +954,9 @@ function EntityForm({
   onRename: (oldName: string, newName: string, scope: "chapter" | "book") => void;
   tabKey: string;
   isCharacter: boolean;
+  aliasProposals: AliasProposal[];
+  onAcceptAlias: (proposal: AliasProposal) => void;
+  onDismissAlias: (proposal: AliasProposal) => void;
 }) {
   const aliasesText = (entity.aliases ?? []).join(", ");
   const roleField = (entity as WorldCharacter).role ?? (entity as WorldPlace).type ?? "";
@@ -900,6 +1020,59 @@ function EntityForm({
           placeholder="comma-separated, e.g. Iris, The Listener"
         />
       </label>
+
+      {/* Proposals from alias-propose.ts. They sit UNDER the field they write
+          into, carry the rule that fired and a verbatim line from the book, and
+          do nothing until the writer clicks — the module never touches
+          worldData. A merge says so before it is clicked, because it removes an
+          entry from the cast. */}
+      {isCharacter && aliasProposals.length > 0 && (
+        <div className="world-field">
+          <span className="world-field-label">
+            Also called{aliasProposals.some((p) => p.kind === "merge") ? " · possible duplicate" : ""}
+          </span>
+          <div className="world-alias-suggest">
+            {aliasProposals.map((proposal) => (
+              <div key={`${proposal.character}|${proposal.alias}`}>
+                <div className="world-alias-row">
+                  <span className="world-alias-name">{proposal.alias}</span>
+                  {proposal.kind === "merge" && (
+                    <span className="world-alias-kind" title="Accepting removes the other cast entry">
+                      duplicate
+                    </span>
+                  )}
+                  <span
+                    className="world-alias-why"
+                    title={`${ALIAS_RULE_LONG[proposal.rule]} · appears ${proposal.occurrences} times`}
+                  >
+                    {ALIAS_RULE_WHY[proposal.rule]} · {proposal.occurrences}&#215;
+                    {proposal.uncertain ? " · unsure" : ""}
+                  </span>
+                  <span className="world-alias-actions">
+                    <button
+                      className="world-alias-btn"
+                      onClick={() => onAcceptAlias(proposal)}
+                      title={proposal.kind === "merge"
+                        ? `Fold "${proposal.alias}" into "${proposal.character}" and remove the duplicate entry`
+                        : `Add "${proposal.alias}" as an alias`}
+                    >
+                      {proposal.kind === "merge" ? "Same person" : "Add"}
+                    </button>
+                    <button className="world-alias-btn" onClick={() => onDismissAlias(proposal)}>
+                      No
+                    </button>
+                  </span>
+                </div>
+                {proposal.evidence && (
+                  <div className="world-alias-evidence" title={proposal.evidence}>
+                    &#8230;{proposal.evidence}&#8230;
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <label className="world-field">
         <span className="world-field-label">{roleLabel}</span>
