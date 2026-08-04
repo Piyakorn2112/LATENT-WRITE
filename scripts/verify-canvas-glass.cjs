@@ -109,6 +109,7 @@ const PROBE = `(() => {
 
   return {
     engine: typeof window.__lqgCanvas === "function" ? window.__lqgCanvas() : null,
+    totals: typeof window.__lqgCanvasTotals === "function" ? window.__lqgCanvasTotals() : null,
     claimed: claimed.map((el) => ({
       ...describe(el),
       rect: (() => { const r = el.getBoundingClientRect();
@@ -251,10 +252,26 @@ app.whenReady().then(async () => {
   ok("claimed surfaces have no backdrop-filter left",
     p.claimed.every((c) => c.backdrop === "none"),
     `backdrop: ${p.claimed.map((c) => c.backdrop).join(" | ")}`);
-  ok("declined surfaces KEPT a backdrop-filter",
-    p.declinedStillFiltered.every((d) => d.backdrop !== "none"),
-    `${p.declinedStillFiltered.filter((d) => d.backdrop === "none").length} declined with no filter — ` +
-    `those surfaces have no glass at all`);
+  // ★ THIS GATE MEANS TWO DIFFERENT THINGS DEPENDING ON THE FALLBACK, and as an
+  //   `every()` over a possibly-empty list it would pass vacuously in the case
+  //   that matters. With the fallback OFF nothing can decline, so the assertion
+  //   becomes "nothing declined" — a real check with a real failure mode.
+  const fb = p.totals && p.totals.fallbackEnabled;
+  if (fb) {
+    ok("declined surfaces KEPT a backdrop-filter",
+      p.declinedStillFiltered.length > 0
+        ? p.declinedStillFiltered.every((d) => d.backdrop !== "none")
+        : true,
+      `${p.declinedStillFiltered.filter((d) => d.backdrop === "none").length} declined with no filter — ` +
+      `those surfaces have no glass at all`);
+  } else {
+    ok("★ fallback is OFF, so nothing declined",
+      p.declinedStillFiltered.length === 0,
+      `${p.declinedStillFiltered.length} surfaces declined with the fallback disabled: ` +
+      `${p.declinedStillFiltered.map((d) => d.cls).join(", ")} — with no fallback they have no glass`);
+  }
+  console.log(`\n  (fallback is ${fb ? "ON" : "OFF"} — ` +
+    `${fb ? "unpaintable surfaces revert to backdrop-filter" : "every surface stays on the canvas path"})`);
 
   console.log(`\ncanvas glass, real app:`);
   let failed = 0;

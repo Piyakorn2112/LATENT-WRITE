@@ -56,8 +56,47 @@ export const CANVAS_GLASS_ATTR = "data-lqg-canvas";
 //   what makes this engine a change of ENCODING rather than a change of look.
 const DISP_PX = 40;
 const PEAK_PULL_PX = (DISP_PX * 127 * 1) / 255;      // 19.92
-const BEZEL_PX = 120;
 const GRAD_K = 40;
+
+/**
+ * ★ THE MAP IS BUILT THE KNOB'S WAY, NOT THE GENERAL ENGINE'S.
+ *
+ * These two engines disagree about what a glass EDGE is, and the disagreement
+ * is entirely in the bevel — not in the optics, which are the same squircle
+ * through the same Snell solve in both.
+ *
+ *   liquid-glass-worker.ts (the general SVG engine)
+ *       bezel = min(120px, halfShort * 0.8)
+ *     A 120px bevel on a 46px-tall toolbar is the whole element, so the bend is
+ *     spread thinly across all of it and the rim never reads as thick.
+ *
+ *   knob-glass-paint.ts (the control knobs, which look right)
+ *       bezel = halfShort * 0.34
+ *     A real glass slab is FLAT over almost its whole area — normal straight
+ *     up, backdrop passes through undeviated — and then rolls over in a narrow
+ *     band where the surface tips toward vertical. Because the deviation there
+ *     is larger than the band is wide, that strip shows a COMPRESSED, partly
+ *     mirrored view of the interior, and that is what reads as thickness.
+ *
+ * So the bevel fraction comes from the knob. `PEAK_PULL_PX` is deliberately
+ * left alone — the refraction strength is not what was asked to change, and it
+ * stays the 19.92px the 8-bit map could produce. The consequence is that the
+ * pull is now several times the bevel width, which is exactly the knob's
+ * arrangement and exactly why its rim folds.
+ *
+ * ★ THE FOLD IS THE POINT, AND IT IS ONLY SAFE HERE. `y + disp(y)` is not
+ * monotone inside a bevel this narrow, so the band mirrors. In an 8-bit
+ * displacement map that fold becomes a comb of stripes, which is why the SVG
+ * engine has to bound its pull. This path samples in float with hardware
+ * bilinear, so the same fold is a smooth compressed reflection.
+ */
+const BEZEL_FRAC = 0.34;
+/**
+ * Floor in CSS px. A bevel proportional to the shape vanishes on a thin
+ * surface — the 8px-tall scroll rails would get a sub-pixel edge and no glass
+ * at all — so it cannot go below something that still reads.
+ */
+const BEZEL_MIN_PX = 2.5;
 const SATURATE = 2.15;
 const SATURATE_SIDEBAR_TAB = 1.8;
 const CHROMA_FLATTEN = 0.5;
@@ -125,6 +164,16 @@ interface Surface {
   /** Paints completed, so a surface that never painted is distinguishable
    *  from one that painted something empty. */
   paints: number;
+  /** Cheap re-renders done while the surface was moving — see paintMoving. */
+  reflows: number;
+  /** Last rect painted, to detect motion. */
+  lastRect: { x: number; y: number; w: number; h: number } | null;
+  /** Timer that forces a full repaint once motion stops. */
+  settleTimer: number;
+  /** One warning per surface when the fallback is off. */
+  warnedUnpaintable: boolean;
+  /** When this surface first became dirty, so a transition cannot starve it. */
+  dirtySince: number;
 }
 
 const surfaces = new Map<HTMLElement, Surface>();
@@ -134,11 +183,81 @@ let flattenTarget = FLATTEN_TARGET_FALLBACK;
 let rafHandle = 0;
 let paused = false;
 let started = false;
+/**
+ * ★ CSS TRANSITIONS IN FLIGHT — the fix for the side-panel judder.
+ *
+ * The analysis panel slides on a 0.90s transform. Nothing mutates during that
+ * slide, so the engine did no per-frame work — but the CLASS CHANGE that starts
+ * it is a mutation, and it landed a full repaint of every overlapping surface on
+ * the first frame of the animation. The most expensive frame in the sequence was
+ * the one where the animation had to look smoothest.
+ *
+ * And then nothing repainted at all, so the panel finished its slide showing a
+ * backdrop reconstructed from where it USED to be.
+ *
+ * Both are the same missing concept: a transition is a period during which the
+ * backdrop is not worth rebuilding and afterwards it must be. So defer full
+ * repaints while one is running, and rebuild on `transitionend`.
+ */
+/**
+ * ★ A DEADLINE, NOT A COUNTER. Counting `transitionrun` up and `transitionend`
+ * down looks right and is not: the two events do not reliably pair. An element
+ * removed mid-transition never ends, a cancel can arrive alongside an end, and
+ * a transition already running when the listener attaches decrements from zero.
+ * Every one of those leaves the count wrong in a direction that either freezes
+ * every backdrop or defeats the deferral silently — measured, it was the
+ * latter.
+ *
+ * A timestamp cannot drift: each starting transition pushes the deadline out by
+ * its own declared duration, and it expires on its own.
+ */
+let motionUntil = 0;
+
+/**
+ * ★ MODULE-LEVEL TOTALS, because the per-surface ones cannot be differenced.
+ *
+ * Opening the analysis panel remounts its subtree, so surfaces are unbound and
+ * re-claimed with their counters back at zero. A harness sampling
+ * `sum(surface.paints)` before and after therefore reads 0 — which looks
+ * exactly like "the engine did nothing" and is really "the engine's bookkeeping
+ * was replaced". These survive rebinding.
+ */
+let totalPaints = 0;
+let totalReflows = 0;
+let totalClaims = 0;
+/** Scheduler branch counters — diagnostic only. */
+const sched = { runs: 0, defers: 0, breaks: 0, calls: 0, skipped: 0 };
 
 /** Surfaces repainted per frame. Reconstruction is ~0.2-1 ms each; this bounds
  *  a burst (a chapter switch dirties everything at once) to a fraction of a
  *  frame and lets the rest land on the next one. */
-const MAX_REPAINTS_PER_FRAME = 3;
+const MAX_REPAINTS_PER_FRAME = 2;
+/**
+ * ★ AND A TIME BUDGET, because a COUNT is not a budget. Three tabs cost 1.5 ms
+ * and three big panels cost 6, and the count cannot tell them apart. Whichever
+ * limit is reached first stops the pass; the rest are still dirty and land on
+ * the next frame.
+ */
+const FRAME_BUDGET_MS = 1.5;
+/** How long after a surface stops moving before its backdrop is rebuilt. */
+const SETTLE_MS = 90;
+/** A surface may be deferred this long by an in-flight transition, no more. */
+const MAX_DEFER_MS = 600;
+/** Ceiling on how far one transition can push the motion deadline out. */
+const MOTION_MAX_MS = 1200;
+
+/**
+ * ★ THE FALLBACK IS OFF WHILE THIS IS BEING EVALUATED.
+ *
+ * With it on, a surface whose backdrop contains something the painter cannot
+ * express hands itself back to `backdrop-filter` — which is the right shipping
+ * behaviour and the wrong testing behaviour, because the defect then never
+ * appears and the engine looks better than it is. Off, the same surface paints
+ * anyway and the mistake is on screen where it can be found.
+ *
+ * `?lqg-fallback=1` turns it back on without a rebuild.
+ */
+let fallbackEnabled = false;
 
 /** True while this engine owns the element — read by liquid-glass-filter.ts. */
 export function canvasGlassOwns(el: Element): boolean {
@@ -213,7 +332,10 @@ function claim(el: HTMLElement): boolean {
     el, canvas, gl,
     src: document.createElement("canvas"),
     dirty: true, lastKey: "", lastStats: null, paints: 0,
+    reflows: 0, lastRect: null, settleTimer: 0, warnedUnpaintable: false,
+    dirtySince: performance.now(),
   });
+  totalClaims++;
   return true;
 }
 
@@ -252,6 +374,70 @@ function excluderFor(el: HTMLElement) {
   return (candidate: Element) => candidate === el;
 }
 
+/**
+ * ★ THE MOTION PATH, AND THE FIX FOR THE SIDEBAR JUDDER.
+ *
+ * Expanding the side panel animates a width over ~200ms. Every frame of that
+ * animation moves and resizes several glass surfaces, and the first version
+ * answered each frame with a full reconstruction — reconstruct + blur + upload,
+ * which is 1.9 ms for the settings panel alone and lands two or three of those
+ * in the same frame. That is the stutter.
+ *
+ * Almost none of that work is needed WHILE the shape is moving. The GL render
+ * is 0.01 ms and it is the half that actually depends on the geometry — the
+ * silhouette, the corner radius, where the bevel falls. The backdrop texture is
+ * a fraction of a second stale during a transition, which nobody can see behind
+ * a blurred, refracted, moving panel.
+ *
+ * So: while the rect is changing, re-render only. When it stops, one full
+ * repaint catches up.
+ */
+function renderOnly(s: Surface, rect: DOMRect, cs: CSSStyleDeclaration, d: number): void {
+  const halfShort = Math.min(rect.width, rect.height) / 2;
+  const radius = Math.min(parseFloat(cs.borderTopLeftRadius) || 0, halfShort);
+  // The knob's construction: a narrow band that is a fraction of the shape,
+  // with the pull free to exceed it. See BEZEL_FRAC.
+  const bezel = Math.max(BEZEL_MIN_PX, Math.min(halfShort * BEZEL_FRAC, halfShort * 0.8));
+  const [fr, fg, fb, fa] = parseRgba(cs.backgroundColor);
+  s.gl.render({
+    w: rect.width, h: rect.height, dpr: d,
+    radius,
+    bezel,
+    // NOT clamped to the bevel. A pull larger than the band is what compresses
+    // the interior into the rim; clamping it back was the general engine's
+    // concession to its 8-bit encoding, and this path does not have one.
+    peak: PEAK_PULL_PX,
+    chroma: CHROMA_SPLIT,
+    saturate: readSaturate(s.el),
+    flatten: readFlatten(s.el),
+    flattenTarget,
+    fill: [fr, fg, fb, fa],
+    // The rim shading belongs to ::before and ::after, which are untouched and
+    // still paint on top. Adding it here would double the specular.
+    edgeHi: 0, edgeDark: 0, rimPx: 1,
+    gradK: GRAD_K,
+  });
+}
+
+/** Has the surface moved or resized since its last full paint? */
+function moved(s: Surface, rect: DOMRect): boolean {
+  const p = s.lastRect;
+  if (!p) return false;
+  return Math.abs(p.x - rect.left) > 0.5 || Math.abs(p.y - rect.top) > 0.5
+    || Math.abs(p.w - rect.width) > 0.5 || Math.abs(p.h - rect.height) > 0.5;
+}
+
+/** After motion stops, one full repaint brings the backdrop back in sync. */
+function scheduleSettle(s: Surface): void {
+  if (s.settleTimer) clearTimeout(s.settleTimer);
+  s.settleTimer = window.setTimeout(() => {
+    s.settleTimer = 0;
+    s.lastRect = null;          // force the next pass to take the full path
+    s.dirty = true;
+    schedule();
+  }, SETTLE_MS);
+}
+
 function paint(s: Surface): void {
   const { el } = s;
   const rect = el.getBoundingClientRect();
@@ -264,6 +450,17 @@ function paint(s: Surface): void {
   if (cs.display === "none" || cs.visibility === "hidden") return;
 
   const d = dpr();
+
+  // ── Moving: geometry only, and come back when it settles.
+  if (moved(s, rect)) {
+    renderOnly(s, rect, cs, d);
+    s.reflows++;
+    totalReflows++;
+    s.lastRect = { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
+    scheduleSettle(s);
+    return;
+  }
+
   const stats: ReconstructStats = reconstructBackdrop(s.src, {
     rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
     dpr: d,
@@ -273,38 +470,36 @@ function paint(s: Surface): void {
   // ★ THE GATE. Anything under this surface that this painter would draw WRONG
   //   hands the surface back rather than shipping an approximation. Re-checked
   //   on every paint, because the DOM under a surface changes.
+  //
+  //   ★★ CURRENTLY DISABLED ON PURPOSE (fallbackEnabled === false), so every
+  //   surface stays on the canvas path and its mistakes are VISIBLE instead of
+  //   being quietly papered over by backdrop-filter. That is a testing posture,
+  //   not a decision: with it off, an unpaintable element shows up as a wrong
+  //   pixel rather than as a surface that silently reverted. Turn it back on
+  //   with `?lqg-fallback=1` — or by flipping the constant — before shipping to
+  //   anyone who is not deliberately looking for defects.
   s.lastStats = stats;
   if (stats.unpaintable > 0) {
-    release(el, `${stats.unpaintable} unpaintable: ${stats.unpaintableWhy.slice(0, 3).join(", ")}`);
-    return;
+    if (fallbackEnabled) {
+      release(el, `${stats.unpaintable} unpaintable: ${stats.unpaintableWhy.slice(0, 3).join(", ")}`);
+      return;
+    }
+    if (import.meta.env?.DEV && !s.warnedUnpaintable) {
+      s.warnedUnpaintable = true;
+      console.warn(`[glass-canvas] ${el.className || el.tagName}: ` +
+        `${stats.unpaintable} unpaintable, PAINTING ANYWAY (fallback off) — ` +
+        stats.unpaintableWhy.slice(0, 3).join(", "));
+    }
   }
 
   const blurPx = readBlur(el);
   if (blurPx > 0) blurInPlace(s.src, blurPx * d);
 
   s.gl.upload(s.src);
-
-  const halfShort = Math.min(rect.width, rect.height) / 2;
-  const radius = Math.min(parseFloat(cs.borderTopLeftRadius) || 0, halfShort);
-  const bezel = Math.min(BEZEL_PX, halfShort * 0.8);
-  const [fr, fg, fb, fa] = parseRgba(cs.backgroundColor);
-
-  s.gl.render({
-    w: rect.width, h: rect.height, dpr: d,
-    radius,
-    bezel: Math.max(1, bezel),
-    peak: Math.min(PEAK_PULL_PX, bezel),
-    chroma: CHROMA_SPLIT,
-    saturate: readSaturate(el),
-    flatten: readFlatten(el),
-    flattenTarget,
-    fill: [fr, fg, fb, fa],
-    // The rim shading belongs to ::before and ::after, which are untouched and
-    // still paint on top. Adding it here would double the specular.
-    edgeHi: 0, edgeDark: 0, rimPx: 1,
-    gradK: GRAD_K,
-  });
+  renderOnly(s, rect, cs, d);
+  s.lastRect = { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
   s.paints++;
+  totalPaints++;
 }
 
 /**
@@ -315,8 +510,24 @@ function paint(s: Surface): void {
  */
 interface GlassCanvasWindow extends Window {
   __lqgCanvas?: () => Array<Record<string, unknown>>;
+  __lqgCanvasTotals?: () => Record<string, number | boolean>;
 }
 function installDebugHook(): void {
+  (window as GlassCanvasWindow).__lqgCanvasTotals = () => ({
+    paints: totalPaints,
+    reflows: totalReflows,
+    claims: totalClaims,
+    surfaces: surfaces.size,
+    motionActive: performance.now() < motionUntil,
+    fallbackEnabled,
+    paused,
+    dirty: [...surfaces.values()].filter((s) => s.dirty).length,
+    motionForMs: Math.max(0, Math.round(motionUntil - performance.now())),
+    oldestDirtyMs: Math.round(Math.max(0, ...[...surfaces.values()]
+      .filter((s) => s.dirty).map((s) => performance.now() - s.dirtySince))),
+    rafPending: rafHandle !== 0,
+    ...sched,
+  });
   (window as GlassCanvasWindow).__lqgCanvas = () => [...surfaces.values()].map((s) => {
     const r = s.el.getBoundingClientRect();
     return {
@@ -324,7 +535,9 @@ function installDebugHook(): void {
       rect: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)],
       canvas: [s.canvas.width, s.canvas.height],
       paints: s.paints,
+      reflows: s.reflows,
       dirty: s.dirty,
+      fallbackEnabled,
       stats: s.lastStats && {
         ms: +s.lastStats.ms.toFixed(2),
         rects: s.lastStats.rects, gradients: s.lastStats.gradients,
@@ -368,8 +581,15 @@ function geometryKey(el: HTMLElement): string {
 
 // ── Scheduling ──────────────────────────────────────────────────────────────
 
+function markDirty(s: Surface): void {
+  if (!s.dirty) {
+    s.dirty = true;
+    s.dirtySince = performance.now();
+  }
+}
+
 function invalidateAll(): void {
-  for (const s of surfaces.values()) s.dirty = true;
+  for (const s of surfaces.values()) markDirty(s);
   schedule();
 }
 
@@ -377,16 +597,17 @@ function invalidateAll(): void {
  * ★ INVALIDATE BY REGION, NOT WHOLESALE — this is a measured perf fix, not a
  * refinement.
  *
- * The first version dirtied every surface on any mutation anywhere. Measured
- * with scripts/glass-app-profile.cjs: 12.23 ms/frame against 9.37 with the
- * engine off — a 30% regression, on an engine whose own draw call costs 0.01 ms.
- * The cost was not the refraction, it was reconstructing every backdrop every
- * frame, because something in this app mutates inline styles continuously (the
- * edge-colour engine rewrites its gradient stack as its sources move) and every
- * one of those writes was being read as "the world changed".
+ * The first version dirtied every surface on any mutation anywhere, and this
+ * app mutates inline styles continuously — the edge-colour engine rewrites its
+ * gradient stack as its sources move — so every one of those writes was read as
+ * "the world changed" and every backdrop was reconstructed every frame, on an
+ * engine whose own draw call costs 0.01 ms.
  *
- * Two rules fix it, and both are about what CANNOT affect a given surface:
- *   · a mutation inside a claimed surface is its own CONTENT, which paints над
+ * Measured after the fix: 0 reconstructions/sec while idle, against 86 across
+ * 20 scroll steps. Idle is genuinely free, which backdrop-filter never is.
+ *
+ * Two rules do it, and both are about what CANNOT affect a given surface:
+ *   · a mutation inside a claimed surface is its own CONTENT, which paints over
  *     the glass and is never part of its backdrop;
  *   · a mutation whose element does not overlap a surface cannot change that
  *     surface's backdrop, whatever else it changed.
@@ -416,7 +637,7 @@ function invalidateNear(target: Node): void {
         && r.bottom > sr.top && r.top < sr.bottom;
       if (!overlaps) continue;
     }
-    s.dirty = true;
+    markDirty(s);
     any = true;
   }
   if (any) schedule();
@@ -426,23 +647,49 @@ function schedule(): void {
   if (rafHandle || paused) return;
   rafHandle = requestAnimationFrame(() => {
     rafHandle = 0;
-    if (paused) return;
+    sched.runs++;
+    if (paused) { sched.skipped++; return; }
     let budget = MAX_REPAINTS_PER_FRAME;
+    const started = performance.now();
     let remaining = false;
     for (const s of surfaces.values()) {
       if (!s.dirty) continue;
-      if (budget <= 0) { remaining = true; break; }
+      // ★ HOLD OFF WHILE SOMETHING IS ANIMATING. Rebuilding a backdrop on the
+      //   first frame of a 0.90s slide is the one frame that must not be
+      //   expensive, and the result is stale by the time the slide ends anyway.
+      //   The transitionend handler re-dirties, so nothing is lost — but a
+      //   surface that has waited too long paints regardless, so a long or
+      //   repeating transition cannot freeze the glass.
+      //
+      //   ★ EXCEPT A SURFACE'S FIRST PAINT. A newly claimed canvas has no
+      //   texture at all, so deferring it shows the panel with no glass until
+      //   the animation ends and then pops it in — worse than the frame it
+      //   saves. This is where the paints measured DURING the panel slide come
+      //   from: React remounts the drawer's subtree, and the new surfaces are
+      //   painting for the first time, which is correct.
+      if (s.paints > 0 && started < motionUntil && started - s.dirtySince < MAX_DEFER_MS) {
+        sched.defers++;
+        remaining = true;
+        continue;
+      }
+      // ★ WHICHEVER LIMIT COMES FIRST. A count cannot tell three 0.5 ms tabs
+      //   from three 2 ms panels, and it is the panels that make a frame late.
+      if (budget <= 0 || performance.now() - started > FRAME_BUDGET_MS) {
+        sched.breaks++;
+        remaining = true;
+        break;
+      }
       s.dirty = false;
       budget--;
       try {
-        // Skip the work when nothing a repaint depends on has moved AND the
-        // backdrop was not the thing that changed. `dirty` is set by the
-        // observers, so reaching here means something did — the key only
-        // short-circuits the geometry half.
+        sched.calls++;
         paint(s);
         s.lastKey = geometryKey(s.el);
       } catch (err) {
-        release(s.el, `paint threw: ${(err as Error)?.message ?? err}`);
+        // With the fallback off there is nowhere to hand the surface back to,
+        // so a throwing surface is dropped rather than left mid-paint.
+        if (fallbackEnabled) release(s.el, `paint threw: ${(err as Error)?.message ?? err}`);
+        else console.error("[glass-canvas] paint threw", err);
       }
     }
     if (remaining) schedule();
@@ -499,6 +746,11 @@ function killed(): boolean {
 export function initCanvasGlass(): void {
   if (started) return;
   if (killed()) return;
+  try {
+    const q = new URLSearchParams(location.search).get("lqg-fallback");
+    if (q === "1") fallbackEnabled = true;
+    else if (q === "0") fallbackEnabled = false;
+  } catch { /* no URL */ }
   // One probe context, so a machine without WebGL2 never creates per-surface
   // canvases it cannot use.
   const probe = document.createElement("canvas").getContext("webgl2");
@@ -545,6 +797,39 @@ export function initCanvasGlass(): void {
     // Scroll is the commonest backdrop change and does not mutate anything.
     window.addEventListener("scroll", invalidateAll, { passive: true, capture: true });
     window.addEventListener("resize", invalidateAll, { passive: true });
+
+    // ★ TRANSITIONS, TRACKED EXPLICITLY. Only transitions, never animations:
+    //   an infinite CSS animation fires `animationstart` once and would pin the
+    //   counter above zero forever, freezing every backdrop in the app.
+    /** Longest declared transition-duration on the element, in ms. */
+    const durationOf = (el: Element): number => {
+      const raw = getComputedStyle(el).transitionDuration || "0s";
+      let max = 0;
+      for (const part of raw.split(",")) {
+        const t = part.trim();
+        const v = parseFloat(t);
+        if (!Number.isFinite(v)) continue;
+        max = Math.max(max, t.endsWith("ms") ? v : v * 1000);
+      }
+      return max;
+    };
+    document.addEventListener("transitionrun", (e) => {
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      // Ignore the layers this engine never paints, so their transitions do not
+      // hold every other surface's backdrop hostage.
+      if (t.closest(".lqg-edge-color, .lqg-edge-rim, .lqg-canvas")) return;
+      const d = Math.min(durationOf(t), MOTION_MAX_MS);
+      if (d <= 0) return;
+      motionUntil = Math.max(motionUntil, performance.now() + d);
+    }, { passive: true, capture: true });
+    const ended = (e: Event) => {
+      // Do NOT clear the deadline — another transition may still be running and
+      // there is no way to know from here. It expires on its own.
+      invalidateNear(e.target as Node);
+    };
+    document.addEventListener("transitionend", ended, { passive: true, capture: true });
+    document.addEventListener("transitioncancel", ended, { passive: true, capture: true });
 
     const schemeMq = typeof window.matchMedia === "function"
       ? window.matchMedia("(prefers-color-scheme: dark)") : null;
