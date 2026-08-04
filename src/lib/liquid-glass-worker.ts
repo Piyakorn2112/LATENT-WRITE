@@ -113,9 +113,6 @@ const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
 // past the budget.
 const BEZEL_PX = 80;
 const BEZEL_FRAC = 0.5;
-// What those two were before the thinning, kept for the lens.
-const BEZEL_PX_LEGACY = 120;
-const BEZEL_FRAC_LEGACY = 0.8;
 
 // Progressive blur — sharp-rim → blurred-interior gradient.
 //   BLUR_EDGE_MIN       — mask value at the very edge. >0 means blur is already
@@ -231,7 +228,6 @@ function scalarsFor(
   baselineMask: number,
   blurRimEnd: number,
   bezel: number,
-  legacy: boolean,
 ): void {
   const edgeCoverage = edgeAaWidth > 0
     ? clamp01(0.5 + distToEdge / edgeAaWidth)
@@ -307,13 +303,7 @@ function scalarsFor(
   // 8-BIT map the same fold is quantised into a comb. The fold is not the
   // defect; folding inside this encoding is.
   const t = Math.min(Math.max(distToEdge, 0), bezel) / bezel;
-  // ★ The lens keeps the raw squircle→Snell profile it always had — steep at
-  //   the rim and collapsing within a fraction of the bezel, which is what
-  //   gives that surface its strong folding edge. Everything else takes the
-  //   bounded-derivative falloff above.
-  const disp = legacy
-    ? snellDisp(Math.min(dh(t), 5.0), N1 / N2)
-    : RIM_DISP * falloff(t);
+  const disp = RIM_DISP * falloff(t);
 
   if (disp < 1e-6) {
     S_flag = S_MASK_ONLY;
@@ -392,8 +382,6 @@ interface MapRequest {
   /** The filter's feDisplacementMap scale — knob presets need it to size
    *  their fold-free budget. */
   dispPx?: number;
-  /** Pin this map to the pre-fold-free profile — the big bubble lens only. */
-  legacyProfile?: boolean;
 }
 
 interface MapResponse {
@@ -576,12 +564,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const halfShorter = Math.min(halfW, halfH);
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
-  // ★ The lens also keeps the OLD bezel geometry: the thinner edge shipped for
-  //   the panels would narrow the one surface whose whole point is a fat rim.
-  const legacy = req.legacyProfile === true;
-  const bezel = legacy
-    ? Math.min(req.bezel ?? BEZEL_PX_LEGACY, halfShorter * BEZEL_FRAC_LEGACY)
-    : Math.min(req.bezel ?? BEZEL_PX, halfShorter * BEZEL_FRAC);
+  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * BEZEL_FRAC);
   // Ramp goes from the actual rim (distToEdge = 0) up to blurRimEnd. Within
   // that band, mask starts at BLUR_EDGE_MIN (so the very edge is already
   // partly blurred — no sharp band) and rises to 1 (full blur).
@@ -670,10 +653,8 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   for (let px = 0; px < mwElem; px++) {
     const px_rel = (px + 0.5) * sxInv - halfW;
     QX[px] = Math.abs(px_rel) - insetX;
-    // legacy: (centre, +EPS) reproduces the original one-sided difference
-    // exactly; otherwise straddle the pixel.
-    QXA[px] = legacy ? QX[px] : Math.abs(px_rel - GRAD_HALF) - insetX;
-    QXB[px] = Math.abs(px_rel + (legacy ? GRAD_EPS : GRAD_HALF)) - insetX;
+    QXA[px] = Math.abs(px_rel - GRAD_HALF) - insetX;
+    QXB[px] = Math.abs(px_rel + GRAD_HALF) - insetX;
   }
   const QY = new Float64Array(mhElem);
   const QYA = new Float64Array(mhElem);
@@ -681,8 +662,8 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   for (let py = 0; py < mhElem; py++) {
     const py_rel = (py + 0.5) * syInv - halfH;
     QY[py] = Math.abs(py_rel) - insetY;
-    QYA[py] = legacy ? QY[py] : Math.abs(py_rel - GRAD_HALF) - insetY;
-    QYB[py] = Math.abs(py_rel + (legacy ? GRAD_EPS : GRAD_HALF)) - insetY;
+    QYA[py] = Math.abs(py_rel - GRAD_HALF) - insetY;
+    QYB[py] = Math.abs(py_rel + GRAD_HALF) - insetY;
   }
 
   // Per-axis scalars + axis-aligned gradient. On every straight run of the
@@ -697,7 +678,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const colGx = new Float64Array(mwElem);
   for (let px = 0; px < mwElem; px++) {
     const qx = QX[px];
-    scalarsFor(r - qx, edgeAaWidth, baselineMask, blurRimEnd, bezel, legacy);
+    scalarsFor(r - qx, edgeAaWidth, baselineMask, blurRimEnd, bezel);
     colFlag[px] = S_flag;
     colMask[px] = S_mask;
     colDisp[px] = S_disp;
@@ -717,7 +698,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const rowGy = new Float64Array(mhElem);
   for (let py = 0; py < mhElem; py++) {
     const qy = QY[py];
-    scalarsFor(r - qy, edgeAaWidth, baselineMask, blurRimEnd, bezel, legacy);
+    scalarsFor(r - qy, edgeAaWidth, baselineMask, blurRimEnd, bezel);
     rowFlag[py] = S_flag;
     rowMask[py] = S_mask;
     rowDisp[py] = S_disp;
@@ -780,7 +761,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
       let cov: number;
       if (qx > 0 && qy > 0) {
         // Corner arc — genuinely two-dimensional, solve per pixel.
-        scalarsFor(-sdSharpQ(qx, qy, r), edgeAaWidth, baselineMask, blurRimEnd, bezel, legacy);
+        scalarsFor(-sdSharpQ(qx, qy, r), edgeAaWidth, baselineMask, blurRimEnd, bezel);
         flag = S_flag;
         maskV = S_mask;
         disp = S_disp;
@@ -859,9 +840,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   // than shipped as a doubled, mirrored band over the prose behind it.
   const peakPx = ((req.dispPx ?? 40) * 127 * channelGain) / 255;
   const budgetPx = foldFreeBudget(bezel);
-  // The lens is allowed to exceed the fold-free budget — that fold IS its look,
-  // and at 4x supersample the 8-bit comb it would otherwise cause cannot show.
-  const foldFreeClamp = legacy ? 1 : (peakPx > budgetPx ? budgetPx / peakPx : 1);
+  const foldFreeClamp = peakPx > budgetPx ? budgetPx / peakPx : 1;
 
   for (let py = 0; py < mhElem; py++) {
     const rowBase = py * mwElem;

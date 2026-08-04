@@ -32,12 +32,13 @@ let ACTIVE_DISP = DISP_PX;
 const decode = (byte: number) => ACTIVE_DISP * (byte / 255 - 0.5);
 
 interface Case { label: string; w: number; h: number; r: number;
-  bezel?: number; dispPx?: number; legacy?: boolean }
+  bezel?: number; dispPx?: number }
 const CASES: Case[] = [
   // The scene-break / re-paragraph bubble, as liquid-glass-filter asks for it:
-  // LENS_REFRACTION 20, LENS_REFRACTION_RADIUS 20.
-  { label: "LENS 220x220 r110 OLD", w: 220, h: 220, r: 110, bezel: 20, dispPx: 20, legacy: true },
-  { label: "LENS 220x220 r110 NEW", w: 220, h: 220, r: 110, bezel: 20, dispPx: 20, legacy: false },
+  // LENS_REFRACTION 20, LENS_REFRACTION_RADIUS 20. It runs the same profile as
+  // everything else — pinning it to the old one was tried and reverted, because
+  // the old math gave it the SAME 10.00px peak plus a 10.4% fold.
+  { label: "lens      220x220 r110", w: 220, h: 220, r: 110, bezel: 20, dispPx: 20 },
   { label: "toolbar   920x46  r23", w: 920, h: 46, r: 23 },
   { label: "tab        26x34  r13", w: 26, h: 34, r: 13 },
   { label: "pill      180x34  r17", w: 180, h: 34, r: 17 },
@@ -54,7 +55,6 @@ for (const c of CASES) {
   const req = {
     elemW: c.w, elemH: c.h, radius: c.r, overflow: 40, preset: "default",
     bezel: c.bezel ?? null, mapPad: null, dispPx: c.dispPx ?? DISP_PX,
-    legacyProfile: c.legacy === true,
   } as MapRequest;
   ACTIVE_DISP = c.dispPx ?? DISP_PX;
   const m = buildMapPixels(req);
