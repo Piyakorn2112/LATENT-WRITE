@@ -37,9 +37,33 @@ export const PRESENCE_PROMPT_VERSION = 1;
 
 /** Per-chapter budget. The deterministic engine already answered the rest. */
 export const PRESENCE_CAP = 3;
-/** Below this the engine's own uncertain call stands, unchanged. */
+/**
+ * Below this the engine's own uncertain call stands, unchanged.
+ *
+ * ★ THIS IS A CONSERVATIVE GATE, NOT A DISCRIMINATOR, and the measurement says
+ *   so: on the deferred set the model's confidence does NOT separate right from
+ *   wrong (correct answers came back at 0.8, 0.7 and also 0.5 and 0.0; the one
+ *   wrong answer at 0.5). The floor declines two correct answers to block one
+ *   wrong one. That trade is only acceptable BECAUSE DECLINING IS FREE — the
+ *   deterministic engine already holds a call for every deferred mark. A
+ *   feature with nothing to fall back on could not buy safety this way.
+ */
 export const PRESENCE_MIN_CONFIDENCE = 0.7;
 
+/**
+ * ★★ "unsure" IS MEASURED UNREACHABLE ON qwen3-1.7b AND IS KEPT ANYWAY.
+ *    Across 17 probe cases — including two written to be genuinely
+ *    unresolvable ("The Ferrars question came up again", a name standing alone)
+ *    — it was returned zero times. So the abstention this task actually uses is
+ *    the CONFIDENCE FLOOR, not the label, and nothing here should be described
+ *    as if the model declines on its own.
+ *
+ *    It stays in the enum for two reasons: an unreachable grammar branch costs
+ *    nothing at run time, and removing it would force a binary choice on a
+ *    model that has already shown it will answer 0.5 rather than abstain.
+ *    Re-run scripts/probe-presence-review.cjs on any new model before repeating
+ *    this claim — reachability is a property of the model, not of the prompt.
+ */
 export type PresenceVerdict = "in-the-scene" | "talked-about" | "unsure";
 
 /** Wire order is the schema's declaration order; see the ★ on the enum. */
@@ -95,18 +119,38 @@ Answer "talked-about" when the name is only the SUBJECT OF SOMEONE'S ATTENTION:
 - the name appears only as a possessive or a place — "at Sir William's",
   "Lady Catherine's drawing-room" — and the person is not in it
 
-Two passages that look almost identical can differ here, so read the verb that
-governs the name. "danced with Miss Bingley" puts her in the room. "thought of
-poor Miss Bingley" does not, and the only difference is the verb.
+Two passages that look almost identical can differ here, so find the verb that
+governs the name and ask WHOSE verb it is. A verb sitting next to a name is not
+the same as a verb that name performs: in "they all agreed that Anselm was
+right", the agreeing is done by "they", and Anselm is not in the room.
 
 Answer "unsure" when the passages genuinely do not settle it. That costs
 nothing: a tool has already made its own call and will keep it.
 
 Answer as JSON: {"reason","verdict","confidence"} in that order.
-reason: FIRST, one clause of at most 14 words naming the verb or action that
-  decided it. Do not copy a passage back.
+reason: FIRST, one clause of at most 14 words, naming the verb AND WHO PERFORMS
+  IT — "she pities him", "he arrives", "the aunt reports it". Do not copy a
+  passage back and do not repeat an example from these instructions.
 verdict: in-the-scene, talked-about, or unsure.
 confidence: a number from 0 to 1, how much the passages show. Never above 1.`;
+
+/**
+ * The instruction text a reason must not simply hand back.
+ *
+ * ★★ THE MODEL COPIED THE PROMPT'S OWN WORKED EXAMPLE INTO ITS REASON — measured:
+ *    for a passage about Colonel Brandon walking through a door it answered
+ *    correctly and explained itself with "danced with Miss Bingley", which was
+ *    the example three paragraphs up. `reasonEchoesSentence` only compared the
+ *    reason against the SNIPPETS, so a reason echoing the INSTRUCTIONS sailed
+ *    through and inflated the right-answer count by luck. A right answer with a
+ *    borrowed reason is not evidence the task works.
+ *
+ *    The worked example was also rewritten to use a name that appears nowhere
+ *    in this app's corpus, so if it is echoed again the tell is unmistakable.
+ */
+export const PRESENCE_EXAMPLE_TEXT =
+  "they all agreed that Anselm was right the agreeing is done by they and Anselm " +
+  "is not in the room she pities him he arrives the aunt reports it";
 
 // ── input & selection ─────────────────────────────────────────────────────
 
@@ -232,6 +276,9 @@ export function normalizePresence(raw: unknown, snippets: readonly string[] = []
   for (const snippet of snippets) {
     if (snippet && reasonEchoesSentence(reason, snippet)) return null;
   }
+  // ★ AND against the INSTRUCTIONS — see PRESENCE_EXAMPLE_TEXT. Same mechanical
+  //   predicate, second reference text.
+  if (reasonEchoesSentence(reason, PRESENCE_EXAMPLE_TEXT)) return null;
 
   return {
     verdict,

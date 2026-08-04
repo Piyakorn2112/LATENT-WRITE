@@ -33,8 +33,12 @@ import {
   sceneCandidatesFrom,
   sceneStartParagraphs,
   type SweepAnswer,
+  presenceCandidatesFrom,
 } from "../src/lib/assist-sweep";
 import { CHEKHOV_TASK, chekhovKeyFor } from "../src/lib/chekhov-review";
+import { PRESENCE_TASK, presenceKeyFor } from "../src/lib/presence-review";
+import { classifyChapterPresence } from "../src/lib/character-presence";
+import { alreadyAsked, presenceOverrides } from "../src/lib/review-store";
 import {
   concretenessOf, detectHandoff, findChekhovCandidates, findUnintroducedArrivals,
 } from "../src/lib/continuity";
@@ -401,6 +405,58 @@ async function main() {
   const confirmed = confirmedPromises(chapterReviews(promiseStore, CHAPTER_ID, HASH, MODEL));
   gate(confirmed.has("sealed letter") && !confirmed.has("loose board"),
     "only a CONFIDENT promise is marked", `${[...confirmed].join(", ") || "none"}`);
+
+  // ── presence: only the marks the engine DEFERRED become questions ────────
+  {
+    const text =
+      `The hall was cold and the fire had gone out hours before anyone noticed. ` +
+      `“We should have sent for Corwin days ago,” said Alder, and nobody answered him. ` +
+      `She caught Bramble by the sleeve before he could reach the door. ` +
+      `Alder wrote to Corwin twice that winter and burned both of the letters.`;
+    const cast = ["Alder", "Bramble", "Corwin"].map((name) => ({ name, variants: [] as string[] }));
+    const classified = classifyChapterPresence(text, cast);
+    const candidates = presenceCandidatesFrom(classified, text, 4);
+    const askedNames = candidates.map((c) => c.name).sort();
+
+    gate(candidates.length > 0, "the sweep has presence questions to ask", `${candidates.length}`);
+    // ★ THE PAIRED POSITIVE AND NEGATIVE. "ask about nobody" satisfies any
+    //   filter gate perfectly; "ask about everybody" satisfies any coverage
+    //   gate. Both directions, on the same fixture.
+    gate(candidates.length < classified.filter((p) => p.klass !== "absent").length,
+      "…but not about every character in the chapter", `asked ${askedNames.join(", ")}`);
+    const decided = classified.filter((p) => p.klass !== "absent" && !p.uncertain).map((p) => p.name);
+    gate(decided.every((n) => !askedNames.includes(n)),
+      "★ a mark the engine DECIDED is never sent to the model",
+      `decided [${decided.join(", ")}] vs asked [${askedNames.join(", ")}]`);
+    gate(candidates.every((c) => c.snippets.length > 0 && c.snippets.every((s) => s.trim() !== "")),
+      "every question carries verbatim evidence — no snippet, no question");
+    gate(candidates.every((c) => !c.snippets.join(" ").includes("PASSAGES")),
+      "the snippets are prose, not the prompt scaffolding");
+  }
+
+  // ── presence: the store only overrides what it was told to ───────────────
+  {
+    let s2 = recordReviewAnswer(
+      emptyReviewStore(), CHAPTER_ID, HASH, MODEL, presenceKeyFor(HASH, "Corwin", MODEL),
+      { kind: "presence", value: { name: "Corwin", verdict: "talked-about", confidence: 0.9,
+        reason: "the letters are written to him", applied: "mentioned" } },
+      1000,
+    );
+    s2 = recordReviewAnswer(
+      s2, CHAPTER_ID, HASH, MODEL, presenceKeyFor(HASH, "Bramble", MODEL),
+      { kind: "presence", value: { name: "Bramble", verdict: "in-the-scene", confidence: 0.5,
+        reason: "she catches him by the sleeve", applied: null } },
+      1000,
+    );
+    const entry = chapterReviews(s2, CHAPTER_ID, HASH, MODEL);
+    const over = presenceOverrides(entry);
+    gate(over.get("corwin") === "mentioned", "a confident answer overrides the mark", `${over.get("corwin")}`);
+    gate(!over.has("bramble"),
+      "★ a BELOW-FLOOR answer is stored but changes nothing — the engine keeps its call",
+      `${over.get("bramble")}`);
+    gate(alreadyAsked(entry, presenceKeyFor(HASH, "Bramble", MODEL)),
+      "…and is still recorded as asked, so it is not asked again every mount");
+  }
 
   const pruned = pruneReviewStore(store, ["ch-1"]);
   gate(Object.keys(pruned.chapters).length === 0,

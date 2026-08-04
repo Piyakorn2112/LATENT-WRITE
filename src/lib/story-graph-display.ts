@@ -143,6 +143,7 @@ function finalizeTracks(
 function readStoredPresence(
   storyGraph: StoryGraph,
   canonicalMap: Map<string, string>,
+  overrides?: PresenceOverrides,
 ): { presence: Map<string, Map<string, "speaking" | "present" | "mentioned">>; uncertain: Map<string, Set<string>> } {
   const presence = new Map<string, Map<string, "speaking" | "present" | "mentioned">>();
   const uncertain = new Map<string, Set<string>>();
@@ -165,6 +166,22 @@ function readStoredPresence(
         set.add(chapterId);
         uncertain.set(canonical, set);
       }
+    }
+  }
+  // ★ THE MODEL'S ANSWER LANDS LAST AND ONLY WHERE THE ENGINE DEFERRED. It can
+  //   only exist for a mark assist-sweep asked about, and it only asks about
+  //   `uncertain` ones — so this cannot overturn a confident engine call even
+  //   if a stale override survived a re-analysis. Applying it also CLEARS the
+  //   uncertain flag: the question has been answered, and leaving the mark
+  //   dashed would ask the writer to distrust a call that was just settled.
+  for (const [chapterId, byName] of overrides ?? []) {
+    for (const [nameLower, klass] of byName) {
+      const canonical = canonicalCharacterName(nameLower, canonicalMap).toLowerCase();
+      const per = presence.get(canonical);
+      if (!per?.has(chapterId)) continue;
+      if (!uncertain.get(canonical)?.has(chapterId)) continue;
+      per.set(chapterId, klass);
+      uncertain.get(canonical)?.delete(chapterId);
     }
   }
   return { presence, uncertain };
@@ -219,16 +236,21 @@ async function yieldToMainThread() {
   });
 }
 
+/** chapterId -> lower-cased character name -> the class the model settled on. */
+export type PresenceOverrides =
+  ReadonlyMap<string, ReadonlyMap<string, "present" | "mentioned">>;
+
 export function buildSnapshotTimelineCharacterTracks(
   storyGraph: StoryGraph,
   worldData: WorldData | undefined,
   limit = Number.POSITIVE_INFINITY,
+  overrides?: PresenceOverrides,
 ): TimelineCharacterTrack[] {
   const canonicalMap = buildCanonicalCharacterMap(worldData);
   const counts = new Map<string, number>();
   const chapterIdsByName = new Map<string, Set<string>>();
 
-  const stored = readStoredPresence(storyGraph, canonicalMap);
+  const stored = readStoredPresence(storyGraph, canonicalMap, overrides);
 
   for (const [chapterId, entry] of Object.entries(storyGraph.entries)) {
     const present = new Set<string>();
@@ -260,6 +282,7 @@ export async function buildTimelineCharacterTracks(
   worldData: WorldData | undefined,
   limit = Number.POSITIVE_INFINITY,
   options?: TimelineTrackBuildOptions,
+  overrides?: PresenceOverrides,
 ): Promise<TimelineCharacterTrack[]> {
   const canonicalMap = buildCanonicalCharacterMap(worldData);
   const worldMatchers = buildWorldCharacterMatchers(worldData);
@@ -281,7 +304,7 @@ export async function buildTimelineCharacterTracks(
   //   long book would compile a few regexes per character per chapter on the
   //   path that draws the panel. Graphs persisted before `presence` existed
   //   have nothing stored, and those recompute.
-  const stored = readStoredPresence(storyGraph, canonicalMap);
+  const stored = readStoredPresence(storyGraph, canonicalMap, overrides);
   const presenceByName = stored.presence;
   const uncertainByName = stored.uncertain;
   const castForPresence = (worldData?.characters ?? [])

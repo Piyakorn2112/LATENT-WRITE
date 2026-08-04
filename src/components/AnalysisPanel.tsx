@@ -22,6 +22,7 @@ import { CrossArcWidget } from "./widgets/CrossArcWidget";
 import { PlaceholderWidget } from "./widgets/PlaceholderWidget";
 import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon, LayersIcon, Wand2Icon, resolveToolIcon } from "./Icon";
 import { StoryGraphPanel } from "./StoryGraphPanel";
+import type { PresenceOverrides } from "../lib/story-graph-display";
 import { RendererPanel } from "./RendererPanel";
 import { WidgetConfigOverlay } from "./WidgetConfigOverlay";
 import type { StoryGraph, ReviewResult } from "../types";
@@ -86,6 +87,8 @@ interface Props {
   /** Chekhov phrases the local model confirmed are real promises, lowercased.
    *  Marks the deterministic list; it never filters it. */
   confirmedChekhov?: Set<string>;
+  /** Presence classes the model settled, per chapter — deferred marks only. */
+  presenceOverrides?: PresenceOverrides;
   onSelectChapter?: (id: string) => void;
   /** Renderer review result for the current chapter (null = not yet run). */
   reviewResult?: ReviewResult | null;
@@ -810,6 +813,7 @@ function WidgetSet({
   onKnowledgeKnewAlready?: (candidate: KnowledgeCandidate) => void;
   onKnowledgeGoodCatch?: (candidate: KnowledgeCandidate) => void;
   confirmedChekhov?: Set<string>;
+  /** Presence classes the model settled, per chapter — deferred marks only. */
 }) {
   const slotProps: WidgetSlotProps = {
     result,
@@ -865,7 +869,8 @@ export function AnalysisPanel({
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
   onAutoSceneBreak, sceneBreaking, onOpenChange,
-  storyGraph, knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, confirmedChekhov, onSelectChapter,
+  storyGraph, knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, confirmedChekhov,
+  presenceOverrides, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
   onImportTools, onToolHighlights, onJumpToParagraph, onJumpToEvent,
   tier, onTierChange,
@@ -1411,6 +1416,7 @@ export function AnalysisPanel({
               currentChapterId={chapterId ?? null}
               onSelectChapter={handleGraphSelectChapter}
               onJumpToEvent={onJumpToEvent ? (cid, evt) => { onJumpToEvent(cid, evt); setView(null); } : undefined}
+              presenceOverrides={presenceOverrides}
             />
           </div>
         )}

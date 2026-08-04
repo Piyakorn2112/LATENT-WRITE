@@ -86,14 +86,17 @@ import {
 import { runPendingAdjudications, ADJUDICATOR_TASK } from "./lib/adjudicator";
 import {
   chekhovCandidatesFrom,
+  presenceCandidatesFrom,
   runAssistSweep,
   sceneCandidatesFrom,
   sceneStartParagraphs,
 } from "./lib/assist-sweep";
+import { classifyChapterPresence } from "./lib/character-presence";
 import {
   alreadyAsked,
   chapterReviews,
   confirmedPromises,
+  presenceOverrides as presenceOverridesFor,
   emptyReviewStore,
   loadReviewStore,
   loadReviewStoreFromProject,
@@ -105,6 +108,7 @@ import {
 } from "./lib/review-store";
 import { SCENE_TASK, offeredLabels } from "./lib/scene-review";
 import { CHEKHOV_TASK } from "./lib/chekhov-review";
+import { PRESENCE_TASK } from "./lib/presence-review";
 import { findChekhovCandidates } from "./lib/continuity";
 import { chipKeyFor, runChipPick, CHIP_TASK } from "./lib/chip-picker";
 import { summaryKeyFor, runChapterSummary, SUMMARY_TASK } from "./lib/chapter-summary";
@@ -1179,6 +1183,15 @@ export default function App() {
     const chapters = novel.chapters;
     const chapterIndex = chapters.findIndex((c) => c.id === chapterId);
 
+    const worldCharacters = (novel.worldData?.characters ?? [])
+      .filter((c) => !!c.name && c.name.trim().length >= 2);
+    const presenceCast = worldCharacters.map((c) => ({
+      name: c.name.trim(), variants: c.aliases ?? [],
+    }));
+    const presenceVariants = new Map<string, readonly string[]>(
+      worldCharacters.map((c) => [c.name.trim(), c.aliases ?? []]),
+    );
+
     const sweepId = ++reviewSweepRef.current;
     const cancelled = () => reviewSweepRef.current !== sweepId;
 
@@ -1210,6 +1223,19 @@ export default function App() {
                 Math.max(0, chapters.length - 1 - chapterIndex),
               )
             : [],
+          // Only the marks character-presence.ts declared UNCERTAIN reach the
+          // model; presenceCandidatesFrom is where that filter lives.
+          //
+          // ★ CUT FROM `content`, THE ANALYSIS SNAPSHOT, NOT FROM THE LIVE
+          //   TEXT. The answer is cached under that snapshot's hash, so a
+          //   snippet taken from prose the writer has since edited would be
+          //   stored against a hash it was never read under.
+          presence: presenceCandidatesFrom(
+            classifyChapterPresence(content, presenceCast),
+            content,
+            chapter.number ?? chapterIndex + 1,
+            presenceVariants,
+          ),
         },
         {
           run: assistantRunJSON,
@@ -1240,7 +1266,8 @@ export default function App() {
       if (retryTimer !== null) window.clearTimeout(retryTimer);
       document.removeEventListener("visibilitychange", onVisible);
       reviewSweepRef.current++;
-      cancelAssistantWhere(({ task }) => task === SCENE_TASK || task === CHEKHOV_TASK);
+      cancelAssistantWhere(({ task }) =>
+        task === SCENE_TASK || task === CHEKHOV_TASK || task === PRESENCE_TASK);
     };
   }, [analysisResult, analysisRunning, analysisRefining, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1278,6 +1305,21 @@ export default function App() {
     if (overlay.size === 0) return undefined;
     return new Map([...overlay].map(([paragraphIndex, value]) => [paragraphIndex, value.label]));
   }, [activeReviews, analysisResult]);
+
+  /**
+   * Presence classes the model settled, keyed chapterId -> lower-cased name.
+   *
+   * ★ ONE CHAPTER WIDE, BECAUSE THE SWEEP IS. assist-sweep only ever runs on
+   *   the chapter the writer is in, so this map has at most one key. The ledger
+   *   draws every chapter and the other rows keep the engine's own call, which
+   *   is the honest state: nothing has been asked about them.
+   */
+  const presenceOverrides = useMemo(() => {
+    if (!activeReviews || !activeChapterId) return undefined;
+    const byName = presenceOverridesFor(activeReviews);
+    if (byName.size === 0) return undefined;
+    return new Map([[activeChapterId, byName]]);
+  }, [activeReviews, activeChapterId]);
 
   /** Chekhov phrases the model confirmed are real promises, lowercased. */
   const confirmedChekhov = useMemo(
@@ -2502,6 +2544,7 @@ export default function App() {
         storyGraph={storyGraph}
         knowledgeStore={knowledgeStore}
         confirmedChekhov={confirmedChekhov}
+        presenceOverrides={presenceOverrides}
         onKnowledgeKnewAlready={handleKnowledgeKnewAlready}
         onKnowledgeGoodCatch={handleKnowledgeGoodCatch}
         onSelectChapter={(id) => {

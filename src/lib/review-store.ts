@@ -36,6 +36,7 @@
 import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
 import { CHEKHOV_MIN_CONFIDENCE } from "./chekhov-review";
 import type { ChekhovVerdict } from "./chekhov-review";
+import type { PresenceVerdict } from "./presence-review";
 
 const KEY = "glass-editor:assist-reviews-v1";
 
@@ -63,6 +64,15 @@ export interface ChekhovVerdictRecord {
   reason: string;
 }
 
+export interface PresenceVerdictRecord {
+  name: string;
+  verdict: PresenceVerdict;
+  confidence: number;
+  reason: string;
+  /** The class this imposes, or null when the engine's own call stands. */
+  applied: "present" | "mentioned" | null;
+}
+
 export interface ChapterReviews {
   chapterId: string;
   /** `knowledgeContentHash(content)` when these answers were reached. */
@@ -72,9 +82,13 @@ export interface ChapterReviews {
   updated: number;
   scenes: Record<string, SceneLabelSuggestion>;
   chekhov: Record<string, ChekhovVerdictRecord>;
+  /** Optional: entries written before the presence task existed have none, and
+   *  every reader must treat that as "nothing was asked", not as "nothing is
+   *  present". */
+  presence?: Record<string, PresenceVerdictRecord>;
   /**
    * Every cache key asked, answered or not. Capped by construction: three
-   * scene + two Chekhov questions per chapter per hash.
+   * scene + two Chekhov + three presence questions per chapter per hash.
    */
   asked: string[];
 }
@@ -84,7 +98,7 @@ export interface AssistReviewStore {
   chapters: Record<string, ChapterReviews>;
 }
 
-export type ReviewKind = "scene" | "chekhov";
+export type ReviewKind = "scene" | "chekhov" | "presence";
 
 // ── Storage (annotation-store contract) ───────────────────────────────────
 
@@ -162,7 +176,8 @@ export function alreadyAsked(entry: ChapterReviews, key: string): boolean {
 
 type Answer =
   | { kind: "scene"; value: SceneLabelSuggestion }
-  | { kind: "chekhov"; value: ChekhovVerdictRecord };
+  | { kind: "chekhov"; value: ChekhovVerdictRecord }
+  | { kind: "presence"; value: PresenceVerdictRecord };
 
 /**
  * Record one answer, or the fact that a question was asked and produced
@@ -191,6 +206,7 @@ export function recordReviewAnswer(
   };
   if (answer?.kind === "scene") entry.scenes = { ...entry.scenes, [key]: answer.value };
   if (answer?.kind === "chekhov") entry.chekhov = { ...entry.chekhov, [key]: answer.value };
+  if (answer?.kind === "presence") entry.presence = { ...(entry.presence ?? {}), [key]: answer.value };
   return { ...store, chapters: { ...store.chapters, [chapterId]: entry } };
 }
 
@@ -249,6 +265,26 @@ export function sceneLabelOverlay(
  *   the writer can see it, and a small model is not the authority that removes
  *   something from view.
  */
+/**
+ * Presence classes the model settled, keyed by canonical character name.
+ *
+ * ★ ONLY THE MARKS THE ENGINE DEFERRED CAN BE HERE AT ALL — assist-sweep only
+ *   asks about `uncertain` ones — so this can never overturn a call the engine
+ *   made confidently. `applied` is null for every below-floor answer, which is
+ *   most of them: the measurement showed the model's confidence does not
+ *   separate right from wrong, so the floor is a conservative gate and what it
+ *   costs is declined answers. Declining is free here and only here, because
+ *   the engine already holds a call for every one of them.
+ */
+export function presenceOverrides(entry: ChapterReviews): Map<string, "present" | "mentioned"> {
+  const out = new Map<string, "present" | "mentioned">();
+  for (const value of Object.values(entry.presence ?? {})) {
+    if (!value.applied) continue;
+    out.set(value.name.trim().toLowerCase(), value.applied);
+  }
+  return out;
+}
+
 export function confirmedPromises(entry: ChapterReviews): Set<string> {
   const out = new Set<string>();
   for (const value of Object.values(entry.chekhov)) {

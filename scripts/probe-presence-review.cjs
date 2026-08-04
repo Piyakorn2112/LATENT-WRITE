@@ -57,6 +57,29 @@ const CASES = [
   { id: 'posses',  name: 'Harriet',         expect: 'talked-about',
     snippet: 'The room had been Harriet’s once, though nobody in the house said so now.' },
 
+  // ── MORE OF THE CLASS THE ENGINE ACTUALLY DEFERS. The pairs above mostly
+  //    get decided, which is the engine working — but it left only three cases
+  //    to score the model on. These are all object-of-a-verb with no predicate
+  //    of the character's own, which is precisely the deferred shape, and they
+  //    pair present against absent on the same construction.
+  { id: 'sleeve',  name: 'Anselm',          expect: 'in-the-scene',
+    snippet: 'She caught Anselm by the sleeve before he could turn away from the table.' },
+  { id: 'knee',    name: 'Prosper',         expect: 'in-the-scene',
+    snippet: 'The dog went straight to Prosper and put its head down on his knee.' },
+  { id: 'pitied',  name: 'Anselm',          expect: 'talked-about',
+    snippet: 'The whole village pitied Anselm, though not one of them had seen him in years.' },
+  { id: 'dead',    name: 'Prosper',         expect: 'talked-about',
+    snippet: 'He had inherited the mill from Prosper, who was twenty years dead by then.' },
+
+  // ── "unsure" REACHABILITY. A grammar enum label can be unreachable for a
+  //    small model — measured before in this repo, on a different task, across
+  //    seven prompt variants. If nothing here returns "unsure", the abstention
+  //    is decorative and the confidence floor is doing all the work.
+  { id: 'noinfo',  name: 'Ferrars',         expect: null,
+    snippet: 'The Ferrars question came up again, as it always did, and then it was dropped.' },
+  { id: 'frag',    name: 'Elinor',          expect: null,
+    snippet: 'Elinor. The word had a weight to it that nothing else in the letter had.' },
+
   // ── genuinely arguable: no expected answer, they show where "unsure" lands
   { id: 'visited', name: 'Bingley',         expect: null,
     snippet: 'Mr. Bennet was among the earliest of those who waited on Mr. Bingley.' },
@@ -88,16 +111,22 @@ async function main() {
   if (!status.model.present) { console.log('SKIP — no model on disk.'); app.exit(0); return; }
   console.log(`model: ${status.model.id}\n`);
 
-  // ★ Prompt, schema and floor come from the MODULE, never a copy here.
+  // ★ Prompt, schema and floor come from the MODULE, never a copy here — and
+  //   so does the ENGINE's own call, because that is what decides whether a
+  //   case is ever sent to the model at all.
   const dumped = execFileSync(NODE, [TSX, '-e',
     'import {buildPresenceRequest, PRESENCE_MIN_CONFIDENCE} from "./src/lib/presence-review";' +
+    'import {classifyChapterPresence} from "./src/lib/character-presence";' +
     'const cases = JSON.parse(process.argv[process.argv.length-1]);' +
     'console.log(JSON.stringify({floor: PRESENCE_MIN_CONFIDENCE, built: cases.map((c)=>' +
-    'buildPresenceRequest({name:c.name,snippets:[c.snippet],mentions:1,chapterNumber:4}))}))',
+    'buildPresenceRequest({name:c.name,snippets:[c.snippet],mentions:1,chapterNumber:4})),' +
+    'engine: cases.map((c)=>{const p=classifyChapterPresence(c.snippet,[{name:c.name,variants:[]}])[0];' +
+    'return {klass:p.klass, uncertain:p.uncertain};})}))',
     JSON.stringify(CASES),
   ], { cwd: ROOT, encoding: 'utf8' });
   const mod = JSON.parse(dumped.trim().split('\n').pop());
   const FLOOR = mod.floor;
+  CASES.forEach((c, i) => { c.engine = mod.engine[i]; });
 
   const rows = [];
   for (let i = 0; i < CASES.length; i++) {
@@ -125,50 +154,83 @@ async function main() {
 
   const GOLD_CLASS = { 'in-the-scene': 'present', 'talked-about': 'mentioned' };
 
+  // ★★ SCORE AT THE CUT THE PRODUCT USES. The first run of this probe fed the
+  //    model every case and reported 2 right / 1 wrong-applied — but three of
+  //    those cases are ones the ENGINE decides on its own and never sends. A
+  //    task can only be judged on the inputs it actually receives, and asking
+  //    it about questions it will never be asked measures nothing. (Those three
+  //    were not wasted: running them through the engine is what exposed the
+  //    three engine bugs fixed in the previous commit.)
   console.log('raw verdict → what the shipped path does with it\n');
   let right = 0, wrongApplied = 0, declined = 0, dropped = 0, scored = 0;
+  let engineOnly = 0, engineWrong = 0;
   for (const r of rows) {
     const raw = r.j ? `${r.j.verdict}@${r.j.confidence}` : 'none';
     const gold = r.c.expect ? GOLD_CLASS[r.c.expect] : null;
+    const asked = r.c.engine.uncertain;
     let mark = ' ';
-    if (gold) {
+    if (gold && asked) {
       scored++;
       if (r.applied === gold) { mark = '✓'; right++; }
       else if (r.applied === null) { mark = '·'; declined++; }
       else { mark = '✗'; wrongApplied++; }
+      if (r.j && !r.shipped) dropped++;
+    } else if (gold) {
+      engineOnly++;
+      if (r.c.engine.klass !== gold) { mark = '!'; engineWrong++; } else { mark = '—'; }
     } else {
       mark = '?';
     }
-    if (r.j && !r.shipped) dropped++;
     console.log(`  ${mark} ${r.c.id.padEnd(8)} ${r.c.name.padEnd(16)} ` +
-      `expect=${String(r.c.expect ?? '—').padEnd(13)} raw=${raw.padEnd(20)} ` +
-      `applied=${String(r.applied ?? 'nothing')}${r.j && !r.shipped ? '  ← DROPPED by the validator' : ''}`);
+      `expect=${String(r.c.expect ?? '—').padEnd(13)} ` +
+      `engine=${(r.c.engine.klass + (asked ? '/ASK' : '')).padEnd(15)} ` +
+      `raw=${raw.padEnd(20)} applied=${String(r.applied ?? 'nothing')}` +
+      `${r.j && !r.shipped ? '  ← DROPPED by the validator' : ''}`);
     console.log(`      ${r.j ? r.j.reason : 'no answer'}`);
   }
 
-  console.log(`\n── scored on the ${scored} cases with a gold answer ──────────────────`);
+  console.log(`\n  — = the engine decided it correctly and never asks (${engineOnly - engineWrong} cases)`);
+  console.log(`  ! = the engine decided it WRONG without asking (${engineWrong}) — an ENGINE bug, not a model one`);
+
+  console.log(`\n── scored on the ${scored} cases the engine actually DEFERS ──────────`);
   console.log(`  right, and applied      ${right}`);
   console.log(`  WRONG, and applied      ${wrongApplied}   ← the only ones a writer ever sees`);
   console.log(`  declined (unsure / below the ${FLOOR} floor)  ${declined}`);
   console.log(`  answers dropped by the validator  ${dropped}`);
 
   // ── is the floor a lever, or does confidence interleave? ─────────────────
-  const conf = (pred) => rows.filter(pred).map((r) => (r.j ? r.j.confidence : 0));
+  // ★ A MISSING ANSWER IS NOT A CORRECT ANSWER AT CONFIDENCE ZERO. The first
+  //   version mapped `r.j == null` to 0 and then reported "no threshold
+  //   separates them" because a wrong answer at 0.5 outranked that phantom.
+  //   Only rows the model actually answered belong in a confidence comparison.
+  const conf = (pred) => rows.filter((r) => r.c.engine.uncertain && r.j && pred(r))
+    .map((r) => r.j.confidence);
   const rightC = conf((r) => r.c.expect && r.j && r.j.verdict === r.c.expect);
   const wrongC = conf((r) => r.c.expect && r.j && r.j.verdict !== r.c.expect && r.j.verdict !== 'unsure');
   console.log(`\n  confidence on CORRECT verdicts : [${rightC.join(', ') || '—'}]`);
   console.log(`  confidence on WRONG verdicts   : [${wrongC.join(', ') || '—'}]`);
   const minRight = rightC.length ? Math.min(...rightC) : null;
   const maxWrong = wrongC.length ? Math.max(...wrongC) : null;
+  const rightBelow = rightC.filter((c) => c < FLOOR).length;
+  const wrongBelow = wrongC.filter((c) => c < FLOOR).length;
   console.log('');
   if (maxWrong === null) {
-    console.log(`  ✓ nothing was answered wrongly at all; the floor is not doing work.`);
+    console.log('  ✓ nothing was answered wrongly at all; the floor is not doing work here.');
   } else if (minRight !== null && maxWrong < minRight) {
     console.log(`  ★ A THRESHOLD SEPARATES THEM: wrong ≤ ${maxWrong} < ${minRight} ≤ right.`);
   } else {
-    console.log(`  ★★ NO THRESHOLD SEPARATES THEM: a wrong answer at ${maxWrong} sits at or`);
-    console.log(`     above a right one at ${minRight}. The floor is not the lever — find a`);
-    console.log('     mechanical feature or withdraw the task.');
+    // ★ THE OLD MESSAGE HERE SAID "withdraw the task", AND THAT IS THE WRONG
+    //   ADVICE WHEN WRONG-AND-APPLIED IS ZERO. Interleaving means the floor is
+    //   not a SEPARATOR — it is a conservative gate, and what it costs is
+    //   declined answers, which are free: the deterministic engine already has
+    //   a call for every one of them. Withdrawal is warranted when wrong
+    //   answers SURVIVE the floor, not merely when confidence is uninformative.
+    console.log(`  ★ CONFIDENCE DOES NOT SEPARATE RIGHT FROM WRONG (wrong up to ${maxWrong},`);
+    console.log(`    right down to ${minRight}). So the ${FLOOR} floor is a conservative gate, not a`);
+    console.log(`    discriminator: it declines ${rightBelow} correct answer(s) to block ${wrongBelow} wrong one(s).`);
+    console.log('    That trade is only acceptable because declining is FREE — the engine');
+    console.log('    keeps its own call. It would not be acceptable for a feature that had');
+    console.log('    nothing to fall back on.');
   }
 
   // ── the abstention has to be REACHABLE, or it is decorative ──────────────

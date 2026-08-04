@@ -4,6 +4,7 @@ import type { Novel, StoryGraph, WorldData } from "../types";
 import {
   buildSnapshotTimelineCharacterTracks,
   buildTimelineCharacterTracks,
+  type PresenceOverrides,
   type TimelineCharacterTrack,
 } from "../lib/story-graph-display";
 import { buildArcInsights } from "../lib/story-arc-insights";
@@ -20,6 +21,13 @@ interface Props {
   onSelectChapter: (id: string) => void;
   /** Opens a chapter and selects an event's source clause in the editor. */
   onJumpToEvent?: (chapterId: string, event: { sentence?: string; paragraphIndex?: number }) => void;
+  /**
+   * Presence classes the local model settled, per chapter. Only ever covers
+   * marks the deterministic engine DEFERRED — assist-sweep asks about nothing
+   * else — and only the chapter the writer is currently in, because that is the
+   * only chapter the sweep is scoped to.
+   */
+  presenceOverrides?: PresenceOverrides;
 }
 
 type LMStatus = "idle" | "loading" | "ready" | "offline";
@@ -40,6 +48,7 @@ const electronAPI = (window as Window & {
 
 function StoryGraphPanelImpl({
   storyGraph, chapters, syncChapters, worldData, currentChapterId, onSelectChapter, onJumpToEvent,
+  presenceOverrides,
 }: Props) {
   const [overlayOpen, setOverlayOpen] = useState(false);
   // Chapter the full view should open its inspector on. Set when an insight
@@ -69,8 +78,8 @@ function StoryGraphPanelImpl({
   const hasElectron   = !!electronAPI?.narrativeLMEmbed;
 
   const snapshotTracks = useMemo(
-    () => buildSnapshotTimelineCharacterTracks(storyGraph, worldData, 8),
-    [storyGraph, worldData],
+    () => buildSnapshotTimelineCharacterTracks(storyGraph, worldData, 8, presenceOverrides),
+    [storyGraph, worldData, presenceOverrides],
   );
   const topChars = syncedTracks ?? snapshotTracks;
 
@@ -100,7 +109,7 @@ function StoryGraphPanelImpl({
       void buildTimelineCharacterTracks(storyGraph, syncChapters, worldData, 8, {
         signal: controller.signal,
         yieldEvery: syncChapters.length > 80 ? 2 : 4,
-      })
+      }, presenceOverrides)
         .then((tracks) => {
           if (controller.signal.aborted) return;
           startTransition(() => setSyncedTracks(tracks));
@@ -117,7 +126,7 @@ function StoryGraphPanelImpl({
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [syncChapters, storyGraph, worldData]);
+  }, [syncChapters, storyGraph, worldData, presenceOverrides]);
 
   function fmtWords(n: number): string {
     return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);

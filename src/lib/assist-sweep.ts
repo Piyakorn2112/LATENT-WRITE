@@ -53,14 +53,23 @@ import {
   sceneKeyFor,
   selectSceneCandidates,
 } from "./scene-review";
+import {
+  PRESENCE_CAP,
+  presenceKeyFor,
+  presenceSnippets,
+  runPresenceReview,
+  selectPresenceCandidates,
+} from "./presence-review";
 import { sceneCandidateScores } from "./scene-function";
+import type { PresenceReviewCandidate } from "./presence-review";
+import type { CharacterPresence } from "./character-presence";
 import type { ChekhovReviewCandidate } from "./chekhov-review";
 import type { SceneReviewCandidate } from "./scene-review";
 import type { ChekhovCandidate } from "./continuity";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { ChapterParaResult } from "./speech-detect";
 import type { Tension } from "./scene-function";
-import type { ChekhovVerdictRecord, SceneLabelSuggestion } from "./review-store";
+import type { ChekhovVerdictRecord, PresenceVerdictRecord, SceneLabelSuggestion } from "./review-store";
 
 // ── Adapters ──────────────────────────────────────────────────────────────
 
@@ -182,15 +191,42 @@ export function chekhovCandidatesFrom(
 
 // ── The sweep ─────────────────────────────────────────────────────────────
 
+/**
+ * Turn a chapter's UNCERTAIN presence marks into questions.
+ *
+ * ★ ONLY THE UNCERTAIN ONES, AND THE FILTER IS HERE RATHER THAN IN THE PROMPT.
+ *   character-presence.ts decides 90% of marks by itself; sending those to the
+ *   model could only make them worse, and it would spend the budget on
+ *   questions that already have answers. The candidate list IS the contract.
+ */
+export function presenceCandidatesFrom(
+  presence: readonly CharacterPresence[],
+  chapterText: string,
+  chapterNumber: number,
+  variantsByName?: ReadonlyMap<string, readonly string[]>,
+): PresenceReviewCandidate[] {
+  return presence
+    .filter((p) => p.uncertain && p.klass !== "absent")
+    .map((p) => ({
+      name: p.name,
+      snippets: presenceSnippets(chapterText, p.name, variantsByName?.get(p.name) ?? []),
+      mentions: p.evidence.mentions,
+      chapterNumber,
+    }))
+    .filter((c) => c.snippets.length > 0);
+}
+
 export type SweepAnswer =
   | { kind: "scene"; value: SceneLabelSuggestion }
-  | { kind: "chekhov"; value: ChekhovVerdictRecord };
+  | { kind: "chekhov"; value: ChekhovVerdictRecord }
+  | { kind: "presence"; value: PresenceVerdictRecord };
 
 export interface AssistSweepInput {
   chapterId: string;
   chapterContentHash: string;
   scenes: readonly SceneReviewCandidate[];
   chekhov: readonly ChekhovReviewCandidate[];
+  presence?: readonly PresenceReviewCandidate[];
 }
 
 export interface AssistSweepOptions {
@@ -206,7 +242,7 @@ export interface AssistSweepOptions {
   onAnswer: (key: string, answer: SweepAnswer | null) => void;
   isCancelled?: () => boolean;
   /** Test seam. Production leaves these at the module caps. */
-  caps?: { scene?: number; chekhov?: number };
+  caps?: { scene?: number; chekhov?: number; presence?: number };
 }
 
 export interface AssistSweepStats {
@@ -237,6 +273,7 @@ export async function runAssistSweep(
   const caps = {
     scene: opts.caps?.scene ?? SCENE_CAP,
     chekhov: opts.caps?.chekhov ?? CHEKHOV_CAP,
+    presence: opts.caps?.presence ?? PRESENCE_CAP,
   };
 
   for (const scene of selectSceneCandidates(input.scenes, caps.scene)) {
@@ -291,6 +328,41 @@ export async function runAssistSweep(
         verdict: result.verdict,
         confidence: result.confidence,
         reason: result.reason,
+      },
+    });
+  }
+
+  // ── 3 · presence ────────────────────────────────────────────────────────
+  //
+  // ★ LAST IN THE ORDER, AND THAT IS THE RANKING. Scene labels and unpaid
+  //   promises are things a writer acts on; a presence mark is something they
+  //   read. When the budget runs out mid-chapter, the reading loses and the
+  //   deterministic call — which is already right nine times in ten — stands.
+  for (const candidate of selectPresenceCandidates(input.presence ?? [], caps.presence)) {
+    if (cancelled()) { stats.cancelled = true; return stats; }
+    const key = presenceKeyFor(input.chapterContentHash, candidate.name, opts.modelId);
+    if (opts.isAsked(key)) { stats.skipped++; continue; }
+    stats.asked++;
+    const result = await runPresenceReview(candidate, {
+      run: opts.run,
+      modelId: opts.modelId,
+      chapterContentHash: input.chapterContentHash,
+      chapterId: input.chapterId,
+    });
+    if (cancelled()) { stats.cancelled = true; return stats; }
+    if (!result) { opts.onAnswer(key, null); continue; }
+    stats.answered++;
+    // Stored whatever `applied` is. A below-floor answer changes no mark and
+    // is still worth keeping — it is what stops the same name being asked
+    // about on every mount.
+    opts.onAnswer(key, {
+      kind: "presence",
+      value: {
+        name: result.name,
+        verdict: result.verdict,
+        confidence: result.confidence,
+        reason: result.reason,
+        applied: result.applied,
       },
     });
   }
