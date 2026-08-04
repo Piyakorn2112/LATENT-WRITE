@@ -35,8 +35,6 @@
  *  for the two harnesses that prove a change is pixel-identical.
  */
 
-import { CANVAS_GLASS_ATTR } from "./glass-canvas";
-
 const SVG_ID = "lg-filter-svg";
 const NS = "http://www.w3.org/2000/svg";
 const SELECTOR = ".liquid-glass, .analysis-tab, .analysis-action-group, .liquid-glass-control-knob, .liquid-glass-lens";
@@ -817,15 +815,6 @@ const idleSchedule: (cb: () => void) => IdleHandle =
 
 function applyTo(element: HTMLElement) {
   if (elementSchedule.has(element)) return;
-  // ★ THE CANVAS ENGINE OWNS THIS ONE. src/lib/glass-canvas claims the
-  //   panel-class surfaces and refracts them from a backdrop it reconstructs
-  //   itself; building a displacement map for the same element would cost a
-  //   worker round-trip and a filter-region raster per frame for something the
-  //   CSS then disables anyway. The attribute is the handshake, so the two
-  //   engines never both hold an element, and a surface the canvas path hands
-  //   BACK (see release()) loses the attribute and lands here on the next
-  //   class mutation.
-  if (element.hasAttribute(CANVAS_GLASS_ATTR)) return;
 
   trackedElements.add(element);
 
