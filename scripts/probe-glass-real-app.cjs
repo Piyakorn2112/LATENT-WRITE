@@ -41,7 +41,7 @@ const FREEZE = `(() => {
 })()`;
 
 const SETUP = `(async () => {
-  const mod = await import("/src/lab/backdrop-reconstruct.ts");
+  const mod = await import("/src/lib/glass-canvas/backdrop.ts");
   const holder = document.createElement("canvas");
   holder.id = "__recon";
   holder.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;display:none";

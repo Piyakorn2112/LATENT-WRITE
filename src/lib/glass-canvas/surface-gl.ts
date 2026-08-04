@@ -1,7 +1,7 @@
 /**
- * glass-gl.ts — SANDBOX. Not imported by the app.
+ * surface-gl.ts — the glass optics as a fragment shader.
  *
- * The knob painter's optics, moved to a fragment shader.
+ * The knob painter's optics, moved to the GPU and generalised to a rounded rect.
  *
  * ─── WHY THE GPU IS NOT OPTIONAL HERE ────────────────────────────────────────
  *
@@ -52,6 +52,8 @@ uniform float u_edgeHi;       // specular on the up/down-facing rim
 uniform float u_edgeDark;     // darkening on the side-facing rim
 uniform float u_rim;          // rim-shading hairline width, device px
 uniform float u_gradK;        // smooth-max width, device px — see sdRoundRect
+uniform float u_flatten;      // fraction of the neutral signal to fade out
+uniform float u_flattenK;     // luminance the neutral collapses toward
 
 const float ETA = ${ETA};
 
@@ -169,9 +171,31 @@ void main() {
     c.b = texture(u_src, (px - nrm * (disp + sep)) * inv).b;
   }
 
-  // Saturate the refracted backdrop, then the surface's own tint over it.
-  float lum = dot(c, vec3(0.213, 0.715, 0.072));
+  // ★ CHROMA FLATTEN, THEN SATURATE — the same two steps, in the same order,
+  //   as the SVG chain's combined colour matrix (liquid-glass-filter.ts):
+  //
+  //       flatten:  out = base - t * (luma(base) - k)
+  //       saturate: out = luma + (out - luma) * s
+  //
+  //   A neutral pixel is all luma and collapses toward the page's own tone by
+  //   the fraction t, so prose behind the glass fades INTO the page rather than
+  //   competing with the surface. A coloured pixel's chroma is the zero-sum
+  //   part of that expression and passes through untouched. This is what PAYS
+  //   FOR the app's low blur, and leaving it out of the first sandbox shader is
+  //   exactly why those renders read busier than the shipping ones.
+  //
+  //   Rec.709 luma, matching the filter's LUMA constant — not the 0.213/0.715/
+  //   0.072 the knob painter happens to use for its own saturate.
+  const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+  if (u_flatten > 0.0) {
+    float l = dot(c, LUMA);
+    c = c - u_flatten * (l - u_flattenK);
+  }
+  float lum = dot(c, LUMA);
   c = clamp(lum + (c - lum) * u_sat, 0.0, 1.0);
+
+  // The surface's own tint last, straight alpha over the refracted backdrop —
+  // the order backdrop-filter composites in.
   c = mix(c, u_fill.rgb, u_fill.a);
 
   // Rim shading: a hairline at the very edge — white where it faces up/down,
@@ -201,6 +225,10 @@ export interface GlassGLScene {
   peak: number;
   chroma?: number;
   saturate?: number;
+  /** Fraction of the neutral (black-and-white) signal to fade out. */
+  flatten?: number;
+  /** Luminance the flattened neutral collapses toward — the page's own tone. */
+  flattenTarget?: number;
   /** Surface tint, as [r, g, b, a] with rgb in 0..1. */
   fill: [number, number, number, number];
   edgeHi?: number;
@@ -254,7 +282,8 @@ export class GlassGL {
     this.prog = prog;
     gl.useProgram(prog);
     for (const n of ["u_src", "u_size", "u_radius", "u_bezel", "u_peak",
-      "u_chroma", "u_sat", "u_fill", "u_edgeHi", "u_edgeDark", "u_rim", "u_gradK"]) {
+      "u_chroma", "u_sat", "u_fill", "u_edgeHi", "u_edgeDark", "u_rim", "u_gradK",
+      "u_flatten", "u_flattenK"]) {
       this.u[n] = gl.getUniformLocation(prog, n);
     }
 
@@ -324,6 +353,8 @@ export class GlassGL {
     // to device px here, and floored so a tiny surface still gets a smooth
     // field rather than a hard switch across two pixels.
     gl.uniform1f(this.u.u_gradK, Math.max(2, (scene.gradK ?? 40) * dpr * 0.25));
+    gl.uniform1f(this.u.u_flatten, scene.flatten ?? 0);
+    gl.uniform1f(this.u.u_flattenK, scene.flattenTarget ?? 0.94);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

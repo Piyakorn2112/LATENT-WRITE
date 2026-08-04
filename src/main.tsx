@@ -4,8 +4,18 @@ import App from "./App";
 import { WorkspaceWindow } from "./components/WorkspaceWindow";
 import "./styles.css";
 import { initLiquidGlassFilter } from "./lib/liquid-glass-filter";
+import { initCanvasGlass } from "./lib/glass-canvas";
 import { initEdgeColor } from "./lib/edge-color/edge-color";
 
+// ★ ORDER MATTERS, IN ONE DIRECTION ONLY. The canvas engine claims the
+// panel-class surfaces it can serve faithfully and marks them with
+// data-lqg-canvas; initLiquidGlassFilter skips anything carrying that
+// attribute. Running it first means those surfaces never build a displacement
+// map at all, rather than building one and having the CSS disable it a frame
+// later. Anything the canvas engine declines — no WebGL2, or a backdrop it
+// cannot paint faithfully — stays unmarked and the SVG engine takes it exactly
+// as before. The control knobs and the loading lens are never claimed.
+initCanvasGlass();
 initLiquidGlassFilter();
 // Edge colour layer (two parts, opt-in by class, no main-app code changes):
 //   · BODY GLOW — a sibling inserted just BEHIND each glass surface, so the

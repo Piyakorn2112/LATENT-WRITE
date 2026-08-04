@@ -1,9 +1,18 @@
 # Glass lab — can we reconstruct the backdrop and refract it ourselves?
 
-**Sandbox. Nothing in `src/lab/` is imported by the app.** This is the
-feasibility study for replacing the SVG `backdrop-filter` glass with a canvas
-path that owns its own backdrop, the way `KnobGlass` already does for the
-control knobs.
+> **This shipped.** The answer was yes, and the engine now lives in
+> `src/lib/glass-canvas/`, claiming the panel-class surfaces
+> (`.liquid-glass`, `.analysis-tab`, `.analysis-action-group`). The control
+> knobs and the loading lens deliberately keep the SVG engine, and the
+> edge-glow system is untouched. Gates: `npm run verify:canvas-glass` and
+> `npm run diff:canvas-glass`. Kill switch: `?lqg-canvas=0`.
+>
+> This file is the study that got there, kept because it is the record of what
+> was measured and what was ruled out.
+
+**The lab harness itself is a sandbox** — `glass-lab.html` and the probes drive
+the shipping modules rather than a copy of them, so the numbers below stay
+honest as the engine changes.
 
 Every number below was measured by a script in `scripts/`, on this machine, at
 `dpr 2`. Re-run any of them; none of them are quoted from memory.

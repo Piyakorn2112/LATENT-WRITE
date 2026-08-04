@@ -14,8 +14,10 @@
  */
 
 import { initLiquidGlassFilter } from "./lib/liquid-glass-filter";
-import { reconstructBackdrop, type ReconstructStats } from "./lab/backdrop-reconstruct";
-import { GlassGL } from "./lab/glass-gl";
+// The lab now drives the SHIPPING modules rather than a copy of them — a
+// sandbox that measures a fork measures the fork.
+import { reconstructBackdrop, type ReconstructStats } from "./lib/glass-canvas/backdrop";
+import { GlassGL } from "./lib/glass-canvas/surface-gl";
 
 // ── The backdrop content ────────────────────────────────────────────────────
 //

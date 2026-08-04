@@ -1,7 +1,8 @@
 /**
- * backdrop-reconstruct.ts — SANDBOX. Not imported by the app.
+ * backdrop.ts — repaint what lies under a glass surface, so the surface can
+ * refract it itself instead of asking the compositor for a backdrop.
  *
- * ─── THE QUESTION THIS EXISTS TO ANSWER ──────────────────────────────────────
+ * ─── WHY THIS EXISTS ─────────────────────────────────────────────────────────
  *
  * `KnobGlass` refracts properly because it RECONSTRUCTS its backdrop: it reads
  * the track and the panel out of the live DOM and repaints them into a canvas,
@@ -26,6 +27,14 @@
  * backdrop elements, no background-image except linear-gradient. Every one of
  * those is a real limitation and the harness measures what they cost in pixels
  * rather than leaving them as a caveat in a comment.
+ *
+ * ★ AND IT REPORTS WHEN IT IS OUT OF ITS DEPTH — `unpaintable`. An element that
+ * carries one of those constructs AND actually paints something is a pixel this
+ * module will get wrong, so the caller (glass-canvas/index.ts) hands that
+ * surface back to the SVG engine rather than shipping a quiet approximation.
+ * Counting only what was SKIPPED would not catch it: the two worst errors ever
+ * measured here — a sideways gradient and a grey premultiplied ramp — were
+ * elements the painter drew, confidently, wrong.
  */
 
 export interface ReconstructStats {
@@ -43,6 +52,23 @@ export interface ReconstructStats {
   glyphs: number;
   /** Elements skipped because this painter cannot express them, by reason. */
   skipped: Record<string, number>;
+  /**
+   * ★ THE GATE. Elements that carry a construct this painter cannot express AND
+   * paint something anyway — i.e. pixels it is knowingly getting wrong. Any
+   * value above zero means the surface must fall back to `backdrop-filter`.
+   * `skipped` counts masks on empty boxes too, which cost nothing, so it is
+   * information rather than a decision.
+   */
+  unpaintable: number;
+  /** What made it unpaintable, for the log — element description → reason. */
+  unpaintableWhy: string[];
+  /** Nested canvases blitted straight in (the orb, another glass surface). */
+  blits: number;
+  /** Elements the walk actually descended into, and how many it pruned. A
+   *  reconstruction that paints nothing is either looking at nothing or being
+   *  pruned before it gets there, and only these two numbers tell them apart. */
+  visited: number;
+  pruned: number;
   /** Range measurements spent finding line-box splits — the text path's cost. */
   rangeOps: number;
   /**
@@ -61,8 +87,40 @@ const UNSUPPORTED: Array<[string, (cs: CSSStyleDeclaration, el: Element) => bool
   ["blend-mode", (cs) => cs.mixBlendMode !== "normal"],
   ["mask", (cs) => cs.maskImage !== "none" && cs.maskImage !== ""],
   ["bg-image", (cs) => cs.backgroundImage !== "none" && !cs.backgroundImage.includes("gradient")],
-  ["replaced", (_cs, el) => ["IMG", "CANVAS", "VIDEO", "SVG", "svg"].includes(el.tagName)],
+  // CANVAS is deliberately absent — it is blitted exactly with drawImage, so it
+  // is supported rather than skipped. Everything else replaced still is not.
+  ["replaced", (_cs, el) => ["IMG", "VIDEO", "IFRAME"].includes(el.tagName)
+    || el.tagName.toLowerCase() === "svg"],
 ];
+
+/** Short human label for the gate's log — enough to find the element again. */
+function describe(el: Element): string {
+  const cls = (el.className || "").toString().split(/\s+/).filter(Boolean).slice(0, 2).join(".");
+  return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+}
+
+/**
+ * Does this element put ink anywhere? Only these get to disqualify a surface.
+ * Deliberately generous — a false "yes" costs one surface its canvas path and
+ * falls back to something correct, a false "no" ships a wrong pixel.
+ */
+function paintsSomething(el: Element, cs: CSSStyleDeclaration): boolean {
+  // A replaced element paints its own content and reports none of it in style —
+  // asking about backgrounds would call an <img> blank.
+  if (["IMG", "VIDEO", "IFRAME"].includes(el.tagName)) return true;
+  if (el.tagName.toLowerCase() === "svg") return true;
+  if (cs.backgroundImage && cs.backgroundImage !== "none") return true;
+  const m = (cs.backgroundColor || "").match(/[\d.]+/g);
+  if (m && (m.length < 4 || Number(m[3]) > 0.004)) return true;
+  for (const w of [cs.borderTopWidth, cs.borderBottomWidth, cs.borderLeftWidth, cs.borderRightWidth]) {
+    if (parseFloat(w) > 0) return true;
+  }
+  if (cs.boxShadow && cs.boxShadow !== "none") return true;
+  for (const n of el.childNodes) {
+    if (n.nodeType === 3 && (n.textContent || "").trim()) return true;
+  }
+  return false;
+}
 
 function roundRect(
   ctx: CanvasRenderingContext2D,
@@ -329,7 +387,9 @@ export function reconstructBackdrop(
   ctx.clearRect(0, 0, rect.w, rect.h);
 
   const stats: ReconstructStats = {
-    ms: 0, rects: 0, gradients: 0, borders: 0, lines: 0, glyphs: 0, skipped: {}, rangeOps: 0,
+    ms: 0, rects: 0, gradients: 0, borders: 0, lines: 0, glyphs: 0,
+    skipped: {}, unpaintable: 0, unpaintableWhy: [], blits: 0,
+    visited: 0, pruned: 0, rangeOps: 0,
   };
   const skip = (why: string) => { stats.skipped[why] = (stats.skipped[why] || 0) + 1; };
   if (opts.debug) stats.ops = [];
@@ -371,10 +431,52 @@ export function reconstructBackdrop(
     // An element whose whole subtree is outside the region cannot contribute —
     // except when it does not bound its children (rare), so only prune when the
     // element has a layout box at all.
-    if ((r.width > 0 || r.height > 0) && !hit(r) && cs.overflow !== "visible") return;
+    if ((r.width > 0 || r.height > 0) && !hit(r) && cs.overflow !== "visible") {
+      stats.pruned++;
+      return;
+    }
+    stats.visited++;
 
     if (hit(r) && r.width > 0.01 && r.height > 0.01) {
-      for (const [why, test] of UNSUPPORTED) if (test(cs, el)) skip(why);
+      const reasons: string[] = [];
+      for (const [why, test] of UNSUPPORTED) if (test(cs, el)) { skip(why); reasons.push(why); }
+
+      // ★ A NESTED CANVAS IS BLITTED, NOT APPROXIMATED. The intelligence orb
+      //   and any glass surface already claimed by this engine both paint into
+      //   canvases, and `drawImage` reproduces them exactly — which turns the
+      //   commonest "replaced element" from a hole in the reconstruction into a
+      //   pixel-perfect copy. Only when it is untransformed: a transformed
+      //   canvas would need the transform applied, and this is not a CSS engine.
+      if (el instanceof HTMLCanvasElement) {
+        const drawable = el.width > 0 && el.height > 0 && cs.transform === "none";
+        if (drawable) {
+          try {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(el, r.left - ox, r.top - oy, r.width, r.height);
+            ctx.restore();
+            stats.blits++;
+            note(el, r, "blit", `${el.width}x${el.height}`);
+          } catch {
+            // A canvas whose context was lost, or a tainted one. Not fatal, but
+            // it IS a pixel we did not draw.
+            stats.unpaintable++;
+            stats.unpaintableWhy.push(`${describe(el)}: canvas blit failed`);
+          }
+        } else if (el.width > 0 && el.height > 0) {
+          stats.unpaintable++;
+          stats.unpaintableWhy.push(`${describe(el)}: transformed canvas`);
+        }
+        return;   // its children are fallback content and never paint
+      }
+
+      // ★ THE GATE, evaluated on what this element actually PAINTS. A mask on
+      //   an empty box costs nothing and must not disqualify a surface; a mask
+      //   on something with a background is a pixel we would draw wrong.
+      if (reasons.length && paintsSomething(el, cs)) {
+        stats.unpaintable++;
+        stats.unpaintableWhy.push(`${describe(el)}: ${reasons.join("+")}`);
+      }
 
       const radius = parseFloat(cs.borderTopLeftRadius) || 0;
       const grad = cs.backgroundImage.includes("gradient")

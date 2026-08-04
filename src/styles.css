@@ -354,6 +354,49 @@ body {
   background: rgba(100, 140, 255, 0.18);
 }
 
+/* ─── Canvas glass path ───
+   src/lib/glass-canvas takes over the PANEL-CLASS surfaces (.liquid-glass,
+   .analysis-tab, .analysis-action-group) and refracts a backdrop it
+   reconstructs itself, per pixel in float on the GPU. The control knobs and the
+   loading lens are deliberately NOT claimed and keep the SVG engine.
+
+   ★ THE CANVAS SITS AT z-index -1, WHICH IS THE WHOLE POINT. A positioned child
+   at a negative stack level paints straight after the element's own background
+   and before every positioned descendant — so it lands underneath ::before (the
+   0.5px specular ring, z-index 0) and ::after (the edge glow, z-index 5) rather
+   than over them. Both pseudo-elements are untouched by this path.
+
+   ★ `isolation: isolate` REPLACES A STACKING CONTEXT, it does not add one. A
+   negative-z child only stays inside its parent if the parent forms a stacking
+   context, and the only reason .liquid-glass formed one was its own
+   backdrop-filter. Dropping the filter without this would let the canvas escape
+   backwards past the element — AND would change ::after, because
+   mix-blend-mode: plus-lighter blends against its stacking context, so the glow
+   would start compositing against the page instead. Keeping the context is what
+   keeps the edge-glow system identical.
+
+   The element's own background is left in place on purpose: the canvas is
+   opaque and covers it, so it costs one hidden fill and buys a graceful failure
+   — a surface whose GL context is lost still reads as a translucent panel. */
+.lqg-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  /* No border-radius here on purpose. The shader computes its own coverage from
+     the rounded-rect SDF, and letting CSS clip as well would antialias the same
+     edge twice and darken the rim. */
+}
+
+[data-lqg-canvas] {
+  isolation: isolate;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* ─── Liquid Glass primitive ───
    Surface is a flat translucent fill + backdrop blur — no gradient on the body.
    The specular ring lives entirely in ::before, masked to the 1px border area only. */
