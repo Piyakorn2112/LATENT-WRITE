@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- SANDBOX. Not part of the app build.
+     http://localhost:5173/glass-lab.html
+
+     Asks one question: can the backdrop under a glass surface be RECONSTRUCTED
+     accurately enough, and refracted cheaply enough, to replace the SVG
+     displacement-map path the app ships?
+
+     The backdrop is the one the app actually has — prose in the editor's own
+     serif on the page's own tone, plus the coloured chips the analysis layer
+     paints over it. Not a hostile checkerboard: glass-verify.html already owns
+     that job, and the point here is fidelity on the REAL content, where a
+     reconstruction either lands the glyphs where the browser put them or does
+     not.
+
+     Driven by scripts/probe-glass-lab.cjs. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Glass lab — backdrop reconstruction + GPU refraction</title>
+    <style>
+      :root {
+        --font-body: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+        --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+        --page: #f4f4f6;
+        --ink: #16161a;
+        --lqg-flatten-target: 0.94;
+      }
+      html, body { margin: 0; padding: 0; }
+      body {
+        width: 1200px; height: 900px; overflow: hidden;
+        background: var(--page); color: var(--ink);
+        font-family: var(--font-ui);
+      }
+
+      /* ── The backdrop: the app's own content, at the app's own metrics ── */
+      #stage { position: absolute; inset: 0; }
+      .prose {
+        position: absolute; left: 60px; top: 40px; width: 700px;
+        font-family: var(--font-body);
+        font-size: 19px; line-height: 1.75;
+        color: var(--ink);
+      }
+      .prose p { margin: 0 0 1.1em; }
+      /* The analysis layer's marks — the coloured half of what sits under glass. */
+      .mark-entity { background: rgba(90, 124, 250, 0.16); border-radius: 3px; }
+      .mark-action { background: rgba(224, 93, 122, 0.14); border-radius: 3px; }
+      .mark-under  { border-bottom: 1.5px solid rgba(58, 169, 129, 0.7); }
+      .chips {
+        position: absolute; left: 60px; top: 700px; width: 700px;
+        display: flex; gap: 8px; flex-wrap: wrap;
+      }
+      .chip {
+        font-size: 12px; padding: 4px 10px; border-radius: 999px;
+        background: rgba(90, 124, 250, 0.18); color: #2b3ea8;
+      }
+      .chip.b { background: rgba(224, 93, 122, 0.18); color: #a12b47; }
+      .chip.c { background: rgba(58, 169, 129, 0.20); color: #16624a; }
+      .rail {
+        position: absolute; left: 820px; top: 40px; width: 320px; height: 820px;
+        border-radius: 18px;
+        background: linear-gradient(180deg, #14141a 0%, #232334 100%);
+      }
+      .rail-row {
+        position: absolute; left: 20px; width: 280px; height: 10px; border-radius: 5px;
+        background: rgba(255, 255, 255, 0.10);
+      }
+      .rail-accent { background: linear-gradient(90deg, #f5c451, #e05d7a); }
+
+      /* ── The glass targets. All three occupy the same rect. ───────────── */
+      #target-svg, #target-gl, #target-recon {
+        position: absolute; box-sizing: border-box;
+      }
+      /* The SVG path: the shipping primitive, with the app's own tint/edge so
+         the comparison is against what the app really looks like. */
+      #target-svg {
+        background: rgba(255, 255, 255, 0.28);
+        box-shadow: 0 8px 30px rgba(20, 20, 30, 0.12);
+      }
+      #target-gl, #target-recon { display: block; }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="stage">
+      <div class="prose" id="prose"></div>
+      <div class="chips" id="chips"></div>
+      <div class="rail" id="rail"></div>
+    </div>
+    <div id="target-svg" class="liquid-glass" hidden></div>
+    <canvas id="target-gl" hidden></canvas>
+    <canvas id="target-recon" hidden></canvas>
+    <script type="module" src="/src/glass-lab.ts"></script>
+  </body>
+</html>
