@@ -28,7 +28,10 @@
  *   keep that true.
  */
 
-import { reconstructBackdrop, type ReconstructStats } from "./backdrop";
+import {
+  buildDisplayList, paintDisplayList,
+  type DisplayList, type ReconstructStats,
+} from "./backdrop";
 import { GlassGL } from "./surface-gl";
 
 /**
@@ -90,7 +93,14 @@ const GRAD_K = 40;
  * engine has to bound its pull. This path samples in float with hardware
  * bilinear, so the same fold is a smooth compressed reflection.
  */
-const BEZEL_FRAC = 0.34;
+/**
+ * ★ TWICE THE KNOB'S BAND. The knob uses 0.34 of the half-short-side, and on a
+ * panel that band reads thin — a knob is 24px tall and a toolbar is 46, so the
+ * same fraction gives an edge less than half as thick in absolute terms as the
+ * eye expects from something that large. Doubled by request; the pull is
+ * unchanged, so the fold is gentler and the compressed rim strip is wider.
+ */
+const BEZEL_FRAC = 0.68;
 /**
  * Floor in CSS px. A bevel proportional to the shape vanishes on a thin
  * surface — the 8px-tall scroll rails would get a sub-pixel edge and no glass
@@ -225,24 +235,23 @@ let motionUntil = 0;
 let totalPaints = 0;
 let totalReflows = 0;
 let totalClaims = 0;
+/** Display lists built, and the cost of the most recent one. */
+let totalLists = 0;
+let lastListMs = 0;
 /** Scheduler branch counters — diagnostic only. */
 const sched = { runs: 0, defers: 0, breaks: 0, calls: 0, skipped: 0 };
 
 /** Surfaces repainted per frame. Reconstruction is ~0.2-1 ms each; this bounds
  *  a burst (a chapter switch dirties everything at once) to a fraction of a
  *  frame and lets the rest land on the next one. */
-const MAX_REPAINTS_PER_FRAME = 2;
+const MAX_REPAINTS_PER_FRAME = 64;
 /**
  * ★ AND A TIME BUDGET, because a COUNT is not a budget. Three tabs cost 1.5 ms
  * and three big panels cost 6, and the count cannot tell them apart. Whichever
  * limit is reached first stops the pass; the rest are still dirty and land on
  * the next frame.
  */
-const FRAME_BUDGET_MS = 1.5;
-/** How long after a surface stops moving before its backdrop is rebuilt. */
-const SETTLE_MS = 90;
-/** A surface may be deferred this long by an in-flight transition, no more. */
-const MAX_DEFER_MS = 600;
+const FRAME_BUDGET_MS = 6;
 /** Ceiling on how far one transition can push the motion deadline out. */
 const MOTION_MAX_MS = 1200;
 
@@ -369,11 +378,6 @@ function unbind(el: Element): void {
 
 const dpr = () => Math.min(window.devicePixelRatio || 1, 3);
 
-/** Never let a surface reconstruct itself, its own canvas, or its content. */
-function excluderFor(el: HTMLElement) {
-  return (candidate: Element) => candidate === el;
-}
-
 /**
  * ★ THE MOTION PATH, AND THE FIX FOR THE SIDEBAR JUDDER.
  *
@@ -419,26 +423,7 @@ function renderOnly(s: Surface, rect: DOMRect, cs: CSSStyleDeclaration, d: numbe
   });
 }
 
-/** Has the surface moved or resized since its last full paint? */
-function moved(s: Surface, rect: DOMRect): boolean {
-  const p = s.lastRect;
-  if (!p) return false;
-  return Math.abs(p.x - rect.left) > 0.5 || Math.abs(p.y - rect.top) > 0.5
-    || Math.abs(p.w - rect.width) > 0.5 || Math.abs(p.h - rect.height) > 0.5;
-}
-
-/** After motion stops, one full repaint brings the backdrop back in sync. */
-function scheduleSettle(s: Surface): void {
-  if (s.settleTimer) clearTimeout(s.settleTimer);
-  s.settleTimer = window.setTimeout(() => {
-    s.settleTimer = 0;
-    s.lastRect = null;          // force the next pass to take the full path
-    s.dirty = true;
-    schedule();
-  }, SETTLE_MS);
-}
-
-function paint(s: Surface): void {
+function paint(s: Surface, list: DisplayList): void {
   const { el } = s;
   const rect = el.getBoundingClientRect();
   if (rect.width < 2 || rect.height < 2) return;
@@ -451,21 +436,19 @@ function paint(s: Surface): void {
 
   const d = dpr();
 
-  // ── Moving: geometry only, and come back when it settles.
-  if (moved(s, rect)) {
-    renderOnly(s, rect, cs, d);
-    s.reflows++;
-    totalReflows++;
-    s.lastRect = { x: rect.left, y: rect.top, w: rect.width, h: rect.height };
-    scheduleSettle(s);
-    return;
-  }
+  // ★ THE REPLAY, not a reconstruction. The DOM was walked once for the whole
+  //   frame; this is canvas drawing with no style resolution in it, which is
+  //   what lets every surface update on every frame instead of taking turns.
+  const res = paintDisplayList(s.src, list, {
+    x: rect.left, y: rect.top, w: rect.width, h: rect.height,
+  }, d, el);
 
-  const stats: ReconstructStats = reconstructBackdrop(s.src, {
-    rect: { x: rect.left, y: rect.top, w: rect.width, h: rect.height },
-    dpr: d,
-    exclude: excluderFor(el),
-  });
+  const stats: ReconstructStats = {
+    ...list.stats,
+    ms: res.ms,
+    unpaintable: res.unpaintable,
+    unpaintableWhy: res.unpaintableWhy,
+  };
 
   // ★ THE GATE. Anything under this surface that this painter would draw WRONG
   //   hands the surface back rather than shipping an approximation. Re-checked
@@ -526,6 +509,8 @@ function installDebugHook(): void {
     oldestDirtyMs: Math.round(Math.max(0, ...[...surfaces.values()]
       .filter((s) => s.dirty).map((s) => performance.now() - s.dirtySince))),
     rafPending: rafHandle !== 0,
+    lists: totalLists,
+    lastListMs: Math.round(lastListMs * 100) / 100,
     ...sched,
   });
   (window as GlassCanvasWindow).__lqgCanvas = () => [...surfaces.values()].map((s) => {
@@ -649,31 +634,49 @@ function schedule(): void {
     rafHandle = 0;
     sched.runs++;
     if (paused) { sched.skipped++; return; }
-    let budget = MAX_REPAINTS_PER_FRAME;
     const started = performance.now();
+
+    // ★ ONE WALK FOR THE WHOLE FRAME. The region is the union of every dirty
+    //   surface, so the DOM is traversed once no matter how many surfaces need
+    //   repainting — which is the difference between all of them tracking a
+    //   scroll and a few of them taking turns.
+    const pending: Surface[] = [];
+    for (const s of surfaces.values()) if (s.dirty) pending.push(s);
+    if (!pending.length) return;
+
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const s of pending) {
+      const r = s.el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top);
+      x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom);
+    }
+    if (!Number.isFinite(x0)) { for (const s of pending) s.dirty = false; return; }
+
+    let list: DisplayList;
+    try {
+      list = buildDisplayList({ region: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } });
+    } catch (err) {
+      console.error("[glass-canvas] display list failed", err);
+      for (const s of pending) s.dirty = false;
+      return;
+    }
+    lastListMs = list.stats.ms;
+    totalLists++;
+
+    let budget = MAX_REPAINTS_PER_FRAME;
     let remaining = false;
-    for (const s of surfaces.values()) {
+    for (const s of pending) {
       if (!s.dirty) continue;
-      // ★ HOLD OFF WHILE SOMETHING IS ANIMATING. Rebuilding a backdrop on the
-      //   first frame of a 0.90s slide is the one frame that must not be
-      //   expensive, and the result is stale by the time the slide ends anyway.
-      //   The transitionend handler re-dirties, so nothing is lost — but a
-      //   surface that has waited too long paints regardless, so a long or
-      //   repeating transition cannot freeze the glass.
+      // ★ NO DEFERRAL. An earlier version held repaints back during CSS
+      //   transitions and rate-limited them to two surfaces a frame, which is
+      //   exactly what made the glass lag: at seven surfaces a full refresh
+      //   took four frames, so a scroll left the backdrop visibly behind the
+      //   page. With one shared walk a whole frame's worth of surfaces replays
+      //   in a fraction of a millisecond, so they all update, every frame.
       //
-      //   ★ EXCEPT A SURFACE'S FIRST PAINT. A newly claimed canvas has no
-      //   texture at all, so deferring it shows the panel with no glass until
-      //   the animation ends and then pops it in — worse than the frame it
-      //   saves. This is where the paints measured DURING the panel slide come
-      //   from: React remounts the drawer's subtree, and the new surfaces are
-      //   painting for the first time, which is correct.
-      if (s.paints > 0 && started < motionUntil && started - s.dirtySince < MAX_DEFER_MS) {
-        sched.defers++;
-        remaining = true;
-        continue;
-      }
-      // ★ WHICHEVER LIMIT COMES FIRST. A count cannot tell three 0.5 ms tabs
-      //   from three 2 ms panels, and it is the panels that make a frame late.
+      //   The budget survives only as a runaway guard for a pathological frame
+      //   (a hundred surfaces, a giant panel); it is not expected to trip.
       if (budget <= 0 || performance.now() - started > FRAME_BUDGET_MS) {
         sched.breaks++;
         remaining = true;
@@ -683,7 +686,7 @@ function schedule(): void {
       budget--;
       try {
         sched.calls++;
-        paint(s);
+        paint(s, list);
         s.lastKey = geometryKey(s.el);
       } catch (err) {
         // With the fallback off there is nowhere to hand the surface back to,

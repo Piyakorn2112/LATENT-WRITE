@@ -79,6 +79,7 @@ const RECON = (i) => `(() => {
     rect: { x: r.left, y: r.top, w: r.width, h: r.height },
     dpr,
     exclude: (e) => skipSet.has(e),
+    debug: true,
   });
   holder.style.left = r.left + "px";
   holder.style.top = r.top + "px";
@@ -170,6 +171,15 @@ app.whenReady().then(async () => {
     })()`);
     d.blurred = blurred;
     rows.push({ s, d, stats });
+    // ★ When a surface reconstructs badly, print WHAT IT DREW. An error number
+    //   says a surface is wrong; the op list says which element is missing.
+    if (d.mae > 2) {
+      console.log(`      ops for ${s.name} (MAE ${d.mae.toFixed(2)}):`);
+      for (const o of (stats.ops || []).slice(0, 14)) {
+        console.log(`        ${o.kind.padEnd(7)} ${o.el.slice(0, 44).padEnd(44)} [${o.rect.join(",")}] ${o.paint}`);
+      }
+      console.log(`        visited=${stats.visited} pruned=${stats.pruned} lines=${stats.lines} glyphs=${stats.glyphs}`);
+    }
     const cannot = Object.entries(stats.skipped)
       .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}:${n}`).join(" ") || "-";
     console.log(
