@@ -168,11 +168,26 @@ console.log("\npredicates a verb list cannot reach");
 // ── 5 · the uncertain middle is declared, not guessed ───────────────────────
 console.log("\nthe uncertain middle");
 {
+  // ★ THIS GATE USED TO ASSERT `uncertain`, AND THAT WAS THE ENGINE'S LIMIT
+  //   BEING WRITTEN DOWN AS A REQUIREMENT. Once the reported-clause rule
+  //   learned wh-complementizers and stopped being vetoed by `object`, the
+  //   engine decides it — correctly. Asserting the stronger claim; the
+  //   genuinely-uncertain case below carries what this one used to.
   const text = `She smiled, as she thought of poor Miss Bingley, and turned back to the letter.`;
   const r = classifyChapterPresence(text, cast("Miss Bingley"));
-  gate(find(r, "Miss Bingley").uncertain === true,
-    "\"thought of X\" is flagged uncertain rather than called either way",
-    `klass=${find(r, "Miss Bingley").klass} uncertain=${find(r, "Miss Bingley").uncertain}`);
+  gate(find(r, "Miss Bingley").klass === "mentioned",
+    "\"thought of X\" is a report, so X is not in the room",
+    `klass=${find(r, "Miss Bingley").klass}`);
+  gate(find(r, "Miss Bingley").evidence.reported === true, "…and the evidence names why");
+}
+{
+  // Object of a preposition, no report, no predicate of their own. A reader
+  // could argue it either way and so can the engine — so it says so.
+  const text = `Mr. Bennet was among the earliest of those who waited on Mr. Bingley.`;
+  const r = classifyChapterPresence(text, cast("Mr. Bingley"));
+  gate(find(r, "Mr. Bingley").uncertain === true,
+    "acted upon with no report and no predicate of their own is declared uncertain",
+    `klass=${find(r, "Mr. Bingley").klass} uncertain=${find(r, "Mr. Bingley").uncertain}`);
 }
 {
   // The PAIR for the gate above: unambiguous prose must NOT be flagged, or
@@ -242,6 +257,45 @@ console.log("\nvariants");
   gate(split.filter((p) => p.klass !== "absent").length === 2,
     "★ WITHOUT the variants the same prose yields TWO characters — which is what " +
     "the DEV books do today, and why presence is coupled to the alias work");
+}
+
+// ── 8 · minimal pairs: same name, opposite reading ──────────────────────────
+//
+// ★★ THESE FOUR PAIRS FOUND THREE ENGINE BUGS THE 67-CHAPTER CORPUS PROBE
+//    COULD NOT. The corpus has no gold labels, so it can only show a
+//    DISTRIBUTION — it cannot say which side of the line a mark belongs on.
+//    Pairs that share a name and differ only in the governing verb make the
+//    right answer unarguable, and three of eight came back decided WRONG:
+//      · "handed the letter to X" matched the distal rule and read as absence
+//      · "wondering WHAT X would have made of it" — no wh-complementizer
+//      · "agreed, long before, THAT X was…" — the separator could not cross
+//        the commas, so the report clause was invisible
+//    They are gates now so none of the three can come back.
+console.log("\nminimal pairs (same name, opposite reading)");
+{
+  const PAIRS: Array<[string, string, string, "present" | "mentioned"]> = [
+    ["Wickham", "He handed the letter to Wickham without a word, and watched him read it to the end.", "hand-over", "present"],
+    ["Wickham", "He could not stop wondering what Wickham would have made of it, had he been there.", "wonder-about", "mentioned"],
+    ["Marianne", "Elinor sat beside Marianne through the whole of it, saying nothing at all.", "sit-beside", "present"],
+    ["Marianne", "Her aunt wrote that Marianne had been ill again, and was not to travel.", "written-of", "mentioned"],
+    ["Colonel Brandon", "The door opened and Colonel Brandon came in, still in his riding coat.", "walks-in", "present"],
+    ["Colonel Brandon", "They had all agreed, long before, that Colonel Brandon was the steadiest man in the county.", "agreed-that", "mentioned"],
+    ["Harriet", "Nobody spoke until Harriet set down her cup and looked up at the two of them.", "acts", "present"],
+  ];
+  let decided = 0, wrong = 0;
+  for (const [name, text, label, gold] of PAIRS) {
+    const p = classifyChapterPresence(text, cast(name))[0];
+    if (p.uncertain) continue;             // handed to the model, not an error
+    decided += 1;
+    if (p.klass !== gold) {
+      wrong += 1;
+      gate(false, `${label}: decided ${p.klass}, gold ${gold}`, JSON.stringify(p.evidence));
+    }
+  }
+  gate(wrong === 0, `nothing decided against gold (${decided} of ${PAIRS.length} decided)`);
+  // ★ THE PAIR FOR THE PAIRS. "Decide nothing, declare everything uncertain"
+  //   passes the gate above perfectly and is a useless engine.
+  gate(decided >= 5, `…and most pairs are actually DECIDED, not deferred (${decided}/${PAIRS.length})`);
 }
 
 console.log(`\n${"═".repeat(74)}`);

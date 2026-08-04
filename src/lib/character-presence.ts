@@ -101,13 +101,20 @@ const AUX =
   "(?:was|were|is|are|am|be|been|being|had|has|have|would|could|should|will|" +
   "shall|did|does|do|might|may|must|used to|ought)";
 
-/** Irregular pasts a `-ed` test cannot reach. */
+/** Irregular pasts a `-ed` test cannot reach.
+ *
+ *  ★ THE ZERO-CHANGE PASTS ARE THE EASY ONES TO FORGET — set, put, cut, let,
+ *    hit, shut, cost, spread. "Harriet SET down her cup" has no morphological
+ *    tell at all, and leaving them out sent a plainly on-page character to the
+ *    model as uncertain. */
 const IRREGULAR =
   "(?:said|saw|knew|thought|felt|came|went|took|gave|made|found|told|began|" +
   "stood|sat|rose|spoke|heard|held|drew|threw|caught|brought|bought|sought|" +
   "fought|left|met|kept|slept|swept|wept|crept|leapt|read|ran|won|lost|" +
-  "sent|spent|bent|lent|built|fell|felt|hung|swung|struck|stuck|shook|took|" +
-  "wrote|rode|drove|broke|spoke|woke|chose|froze|stole|bore|wore|tore|swore)";
+  "sent|spent|bent|lent|built|fell|hung|swung|struck|stuck|shook|" +
+  "wrote|rode|drove|broke|woke|chose|froze|stole|bore|wore|tore|swore|" +
+  "set|put|cut|let|hit|shut|cost|hurt|burst|spread|shed|split|quit|bid|" +
+  "grew|blew|flew|knelt|lay|laid|led|fed|bled|slid|hid|bit|lit|dug|clung)";
 
 /** Titles ride WITH the name in prose, so any pattern anchored on a delimiter
  *  before the name has to step over them — "welcome, Mr. Harker, to my house"
@@ -121,10 +128,45 @@ const TITLE =
  *  "she asked whether X had been at Longbourn" is evoked, never present. This
  *  is the one principled veto here: it is about clause embedding, not about
  *  which words happen to sit nearby. */
+/**
+ * ★ INFLECTIONS MATTER HERE AND THE FIRST LIST HAD ONLY PAST TENSE. "He could
+ *   not stop WONDERING what Wickham would have made of it" is an intensional
+ *   context and `wondered` does not match `wondering`, so the engine read
+ *   "Wickham would have made" as a plain finite clause and put him in the room.
+ */
 const REPORT_VERB =
-  "(?:said|says|asked|asks|replied|answered|told|thought|believed|hoped|" +
-  "wondered|supposed|imagined|remembered|heard|knew|feared|declared|wrote|" +
-  "mentioned|spoke of|talked of|complained|insisted|argued|explained)";
+  "(?:said|says|saying|asked|asks|asking|replied|replies|replying|answered|" +
+  "answers|answering|told|tells|telling|thought|thinks|thinking|believed|" +
+  "believes|believing|hoped|hopes|hoping|wondered|wonders|wondering|" +
+  "supposed|supposes|supposing|imagined|imagines|imagining|remembered|" +
+  "remembers|remembering|heard|hears|hearing|knew|knows|knowing|feared|" +
+  "fears|fearing|declared|declares|wrote|writes|writing|written|mentioned|" +
+  "mentions|mentioning|complained|insisted|insists|argued|argues|explained|" +
+  "explains|agreed|agrees|admitted|admits|decided|decides|discovered|" +
+  "learned|learnt|realised|realized|understood|guessed|forgot|forgets)";
+
+/**
+ * ★ WH-WORDS OPEN A COMPLEMENT CLAUSE TOO, and leaving them out was half of the
+ *   same bug: "wondering WHAT Wickham would have made of it" embeds Wickham
+ *   exactly as "wondering THAT…" would.
+ */
+const COMPLEMENTIZER =
+  "(?:that|whether|if|about|of|what|who|whom|whose|where|when|how|why|which)";
+
+/**
+ * Verbs that put a thing into someone's hand IN PERSON.
+ *
+ * ★★ "handed the letter to X" IS PRESENCE AND IT MATCHED THE DISTAL RULE. The
+ *    distal NOUN pattern reads "letter … to NAME" as communication at a
+ *    distance, which is right for a posted letter and exactly wrong for one
+ *    handed across a table — and handing it over is the more common scene. The
+ *    veto is on the verb that governs the noun, because the noun alone cannot
+ *    carry the distinction.
+ */
+const HANDOVER =
+  "(?:handed|hands|hand|gave|gives|give|given|passed|passes|pass|brought|" +
+  "brings|bring|offered|offers|offer|showed|shows|show|held|holds|hold|" +
+  "pushed|slid|dropped|placed|laid|put|tossed|threw|read)";
 
 /**
  * ★ COMMUNICATION AT A DISTANCE IS EVIDENCE OF ABSENCE, and it reads exactly
@@ -226,8 +268,12 @@ function compile(entry: CharacterVariants): CompiledMatcher | null {
     object: new RegExp(
       `\\b${FINITE}\\b(?:\\s+\\w+){0,2}\\s+(?:with|on|at|to|upon|towards?|for|from|after|beside|against|about)?\\s*(?:${TITLE})?${N}${RB}`,
     ),
+    // ★ THE SEPARATOR ALLOWS PUNCTUATION here for the same reason `distal`
+    //   does: "They had all agreed, LONG BEFORE, that Colonel Brandon was…"
+    //   puts two commas between the verb and its complementizer, and `\s+\w+`
+    //   cannot cross them. The engine read that as Brandon acting.
     reported: new RegExp(
-      `\\b${REPORT_VERB}\\b(?:\\s+\\w+){0,3}\\s+(?:that|whether|if|about|of)\\s+(?:\\w+\\s+){0,4}(?:${TITLE})?${N}${RB}`,
+      `${LB}${REPORT_VERB}${RB}(?:[\\s,]+\\w+){0,3}[\\s,]+${COMPLEMENTIZER}\\s+(?:\\w+\\s+){0,4}(?:${TITLE})?${N}${RB}`,
     ),
     // ★ THE SEPARATOR HAS TO ALLOW PUNCTUATION. `\s+\w+` cannot cross the comma
     //   in "Letter, Mina Murray to Miss Lucy Westenra" — Dracula's chapter
@@ -236,7 +282,8 @@ function compile(entry: CharacterVariants): CompiledMatcher | null {
     //   which is how the miss was caught: a fix that changes nothing did not.
     distal: new RegExp(
       `${LB}${DISTAL_VERB}${RB}(?:[\\s,]+\\w+){0,3}[\\s,]+(?:to|from)\\s+(?:${TITLE})?${N}${RB}` +
-      `|${LB}${DISTAL_NOUN}${RB}(?:[\\s,]+[\\w.]+){0,4}[\\s,]+(?:to|from)\\s+(?:${TITLE})?${N}${RB}`, "i",
+      `|(?<!${LB}${HANDOVER}${RB}[^.!?]{0,40})${LB}${DISTAL_NOUN}${RB}` +
+      `(?:[\\s,]+[\\w.]+){0,4}[\\s,]+(?:to|from)\\s+(?:${TITLE})?${N}${RB}`, "i",
     ),
   };
 }
@@ -296,15 +343,20 @@ export function classifyChapterPresence(
     let uncertain = false;
     let cue = "";
 
+    // ★ THE LADDER IS ORDERED BY WHAT DOMINATES WHAT, not by signal strength.
+    //   `reported` used to sit below `subject` and be vetoed by `object`, and
+    //   both were wrong for the same reason: when a name is inside a complement
+    //   clause, the subject and object matches the other tests find are matches
+    //   INSIDE that clause. "They agreed that Colonel Brandon was the steadiest
+    //   man" has Brandon heading a finite clause and he is still not in the
+    //   room. An intensional context swallows everything nested in it, which is
+    //   what makes it a veto rather than one more vote.
     if (speaks) {
       klass = "speaking"; confidence = 0.95;
       cue = cueAround(text, new RegExp(m.speaks.source));
-    } else if (subject && !reported) {
-      klass = "present"; confidence = addressed || object ? 0.9 : 0.8;
-      cue = cueAround(narration, new RegExp(m.subject.source));
     } else if (addressed) {
-      // Someone in the scene said their name TO them. Strong on its own, and
-      // it is the only signal that survives a chapter where they never act.
+      // Someone in the scene said their name TO them. Direct evidence, and the
+      // only signal that survives a chapter where they never act.
       klass = "present"; confidence = 0.75;
       cue = cueAround(dialogue, new RegExp(m.addressed.source, "i"));
     } else if (narrationMentions === 0) {
@@ -317,9 +369,12 @@ export function classifyChapterPresence(
       // the meaning is the opposite.
       klass = "mentioned"; confidence = 0.75;
       cue = cueAround(narration, new RegExp(m.distal.source, "i"));
-    } else if (reported && !object) {
+    } else if (reported) {
       klass = "mentioned"; confidence = 0.7;
       cue = cueAround(narration, new RegExp(m.reported.source));
+    } else if (subject) {
+      klass = "present"; confidence = object ? 0.9 : 0.8;
+      cue = cueAround(narration, new RegExp(m.subject.source));
     } else if (object) {
       // Acted upon but never acting or speaking. Genuinely could be either —
       // "danced with Miss Bingley" is presence, "thought of poor Miss Bingley"
