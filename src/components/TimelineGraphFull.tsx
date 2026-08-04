@@ -129,6 +129,34 @@ const DRIVE_MAX     = 4;
  *  agent, so listing them would spend the legend's width on nothing. */
 const CAST_LEGEND_TYPES: Array<MajorEvent["type"]> =
   ["climax", "confrontation", "revelation", "introduction"];
+/**
+ * Height of an EVOKED chapter's mark — a character named but not on the page.
+ *
+ * ★ FIXED, AND HOLLOW, ON PURPOSE. A solid bar scaled by mention count would
+ *   say "she is very present here" about a chapter she spends somewhere else,
+ *   which is exactly the lie the old ledger told. Talking about someone a lot
+ *   is not a quantity of presence, so the mark carries no quantity: it is one
+ *   outline, always the same size, categorically unlike a filled bar.
+ */
+const CAST_GHOST_H = 9;
+/**
+ * The cap that marks a chapter where they actually SPEAK.
+ *
+ * ★ IT HAS TO BE WIDER THAN THE BAR, and the first version was not. A 2.6px
+ *   cap in the SAME COLOUR at slightly higher opacity, sitting on top of a bar
+ *   of that colour, is invisible — 26 gates passed and the speaking chapters
+ *   were indistinguishable from the silent ones when I looked at the render.
+ *   Overhanging the bar makes the mark read as a shape rather than as a shade,
+ *   which is the same reason evocation is hollow instead of faint.
+ */
+const CAST_VOICE_CAP  = 2.8;
+const CAST_VOICE_OVER = 3.2;   // overhang per side
+/** Average advance width of the 8px UI font, for fitting the stat line to the
+ *  room its character's entry chapter leaves. Measured against the rendered
+ *  text by verify-timeline-cast.cjs, so a wrong value fails a gate rather than
+ *  silently clipping. */
+const STAT_CHAR_W      = 4.5;
+const STAT_LEFT_MARGIN = 6;
 // SVG_H is computed per-render
 
 // ─── Leaf-bubbling collision layout ──────────────────────────────────────────
@@ -185,10 +213,19 @@ interface TrackRenderData {
   ty: number;
   firstX: number;
   lastX: number;
-  /** The one-line story of this character's presence: "9 ch · drives 3 · away 5". */
+  /** The one-line story of this character's presence: "9 ch · drives 3 · away 5".
+   *  Capped at four items — the line is right-aligned at the character's entry
+   *  chapter and has only that much room. */
   stats: string;
+  /** Every stat, for the tooltip, where width costs nothing. */
+  statsFull: string;
   bars: Array<{
     key: string; x: number; h: number; tip: string;
+    /** On the page and talking / on the page / named but elsewhere. Drives the
+     *  KIND of mark, not its shade — see CAST_GHOST_H. */
+    klass: "speaking" | "present" | "mentioned";
+    /** The deterministic signals could not call this chapter either way. */
+    uncertain: boolean;
     /** The type of each event this character drives here, in story order.
      *  Empty when they are merely present. */
     driveTypes: string[];
@@ -450,7 +487,7 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
             fill="var(--panel-text-4)"
             fontSize={8.5} fontFamily="var(--font-ui)"
           >
-            above the line = how much of the chapter&#160;&#160;·&#160;&#160;below = one square per event they drive&#160;&#160;·&#160;&#160;ring = their biggest chapter&#160;&#160;·&#160;&#160;dashed = away
+            solid bar = on the page&#160;&#160;·&#160;&#160;cap = speaks here&#160;&#160;·&#160;&#160;hollow = talked about while absent&#160;&#160;·&#160;&#160;ring = their biggest chapter&#160;&#160;·&#160;&#160;below = one square per event they drive
           </text>
           {/* The square colours ARE the legend. A writer should not have to
               learn that violet means revelation from a paragraph elsewhere. */}
@@ -492,6 +529,7 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
             fontSize={8} fontFamily="var(--font-ui)"
           >
             {track.stats}
+            <title>{`${track.name} — ${track.statsFull}`}</title>
           </text>
           {/* Continuous runs, then dashed bridges across absences. */}
           {detailsReady && track.links.map((run) => (
@@ -536,21 +574,44 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
                     stroke={track.color} strokeWidth={0.9} strokeOpacity={0.42}
                   />
                 )}
+                {/* ★ ONE MARK, ONE MEANING. Height is how much of the chapter
+                    they occupy; the cap says they speak in it; the ring says
+                    it is their biggest; the squares below are agency. Nothing
+                    encodes two things, and an earlier version that dimmed the
+                    bar when nobody drove an event put agency on the bar as
+                    well as in the squares — a pale bar reads as "less
+                    present", which is the one thing the height already says.
+
+                    EVOCATION IS A DIFFERENT KIND OF MARK, NOT A FAINTER ONE.
+                    Hollow, fixed height, no cap and no ring: being talked
+                    about carries no quantity of presence to draw. */}
                 <rect
                   data-cast-mark="presence"
+                  data-presence={bar.klass}
                   x={bar.x - CAST_BAR_W / 2} y={track.ty - bar.h}
                   width={CAST_BAR_W} height={bar.h}
                   rx={2.5}
-                  // ★ ONE MARK, ONE MEANING. This dimmed to 0.5 when nobody
-                  //   drove anything, which put AGENCY on the bar as well as in
-                  //   the squares — and a pale bar reads as "less present",
-                  //   which is the one thing the height already says. Height is
-                  //   presence; the squares below are agency; the ring is the
-                  //   peak. Nothing encodes two things.
-                  fill={track.color} opacity={0.82}
+                  fill={bar.klass === "mentioned" ? "none" : track.color}
+                  opacity={bar.klass === "mentioned" ? 1 : 0.82}
+                  stroke={bar.klass === "mentioned" ? track.color : "none"}
+                  strokeWidth={bar.klass === "mentioned" ? 1.1 : 0}
+                  strokeOpacity={bar.klass === "mentioned" ? 0.5 : 0}
+                  strokeDasharray={bar.uncertain && bar.klass === "mentioned" ? "2,1.6" : undefined}
                 >
                   <title>{bar.tip}</title>
                 </rect>
+                {bar.klass === "speaking" && (
+                  <rect
+                    data-cast-mark="voice"
+                    x={bar.x - CAST_BAR_W / 2 - CAST_VOICE_OVER}
+                    y={track.ty - bar.h - CAST_VOICE_CAP + 0.6}
+                    width={CAST_BAR_W + CAST_VOICE_OVER * 2} height={CAST_VOICE_CAP}
+                    rx={1.4}
+                    fill={track.color} opacity={1}
+                  >
+                    <title>{bar.tip}</title>
+                  </rect>
+                )}
                 {bar.driveTypes.map((type, i) => (
                   <rect
                     key={`${bar.key}-drive-${i}`}
@@ -932,8 +993,18 @@ function TimelineGraphFullImpl({
       let drivesTotal = 0;
 
       const peakMentions = hasMentionData ? maxMentions : -1;
+      let speakingCount = 0;
+      let evokedCount = 0;
       const bars = detected.map((chapter) => {
         const mentions = mentionsOf(chapter.ch.id);
+        // ★ NO CLASSIFICATION MEANS PRESENT, NOT MENTIONED. Graphs persisted
+        //   before the classifier existed carry nothing, and defaulting those
+        //   to "mentioned" would redraw a writer's whole cast as ghosts on the
+        //   first launch after an update.
+        const klass = track.presenceByChapter?.get(chapter.ch.id) ?? "present";
+        const uncertain = track.uncertainChapters?.has(chapter.ch.id) ?? false;
+        if (klass === "speaking") speakingCount += 1;
+        if (klass === "mentioned") evokedCount += 1;
         const drivesCount = track.drivesByChapter?.get(chapter.ch.id) ?? 0;
         // ★ TYPES ARE THE TRUTH, THE COUNT IS THE FALLBACK. `driveTypesByChapter`
         //   is only set by builders that walked majorEvents; an older persisted
@@ -945,22 +1016,33 @@ function TimelineGraphFullImpl({
           : Array.from({ length: drivesCount }, () => "standard");
         drivesTotal += drivesCount;
         // sqrt: presence reads perceptually, so 4x the mentions should look
-        // clearly bigger without flattening every mid-weight chapter.
-        const h = hasMentionData
-          ? CAST_BAR_MIN + (CAST_BAR_MAX - CAST_BAR_MIN) * Math.sqrt(mentions / maxMentions)
-          : (CAST_BAR_MIN + CAST_BAR_MAX) / 2;
+        // clearly bigger without flattening every mid-weight chapter. An evoked
+        // chapter gets the fixed ghost height instead — see CAST_GHOST_H.
+        const h = klass === "mentioned"
+          ? CAST_GHOST_H
+          : hasMentionData
+            ? CAST_BAR_MIN + (CAST_BAR_MAX - CAST_BAR_MIN) * Math.sqrt(mentions / maxMentions)
+            : (CAST_BAR_MIN + CAST_BAR_MAX) / 2;
         const shownTypes = allTypes.slice(0, DRIVE_MAX);
         const typeNames = allTypes.length > 0
           ? ` · drives ${allTypes.length}: ${allTypes.join(", ")}`
           : "";
+        const klassWord = klass === "speaking" ? "speaks here"
+          : klass === "mentioned" ? "talked about, not on the page"
+          : "on the page, silent";
         return {
           key: `bar-${track.name}-${chapter.ch.id}`,
           x: chapter.x,
           h,
+          klass,
+          uncertain,
           driveTypes: shownTypes,
           driveOverflow: Math.max(0, allTypes.length - shownTypes.length),
-          peak: hasMentionData && mentions === peakMentions && mentions > 0,
-          tip: `${track.name} — ch ${chapter.ch.number}`
+          // The peak is about how much of a chapter they OCCUPY, so a chapter
+          // they are only talked about in can never be one.
+          peak: klass !== "mentioned" && hasMentionData && mentions === peakMentions && mentions > 0,
+          tip: `${track.name} — ch ${chapter.ch.number} · ${klassWord}`
+            + (uncertain ? " (unsure)" : "")
             + (hasMentionData ? ` · ${mentions} mention${mentions === 1 ? "" : "s"}` : "")
             + typeNames,
         };
@@ -982,19 +1064,52 @@ function TimelineGraphFullImpl({
         (gap > 2 ? bridges : links).push(pair);
       }
 
-      const entersAt = detected[0]?.ch.number;
+      // ★ "ENTERS" MEANS WALKS ON, NOT GETS NAMED. A character the others
+      //   discuss for four chapters before she arrives used to read as entering
+      //   in chapter one, which is the opposite of what the writer set up.
+      const firstOnPage = bars.find((b) => b.klass !== "mentioned");
+      const firstOnPageCh = firstOnPage
+        ? detected[bars.indexOf(firstOnPage)]?.ch.number
+        : undefined;
+      const firstNamedCh = detected[0]?.ch.number;
       // The chapter they are most present in. Reading it off the bars means
       // comparing every height against every other; naming it costs one word.
       const peakChapter = hasMentionData
-        ? detected.find((c) => mentionsOf(c.ch.id) === maxMentions)?.ch.number
+        ? detected.find((c) =>
+            mentionsOf(c.ch.id) === maxMentions
+            && track.presenceByChapter?.get(c.ch.id) !== "mentioned")?.ch.number
         : undefined;
-      const stats = [
-        `${track.count} ch`,
-        entersAt !== undefined && entersAt > 1 ? `enters ${entersAt}` : null,
-        peakChapter !== undefined ? `peak ${peakChapter}` : null,
+      // The gap between being talked about and turning up is a setup the writer
+      // built, so it gets said out loud rather than left to be inferred.
+      const heraldGap = firstOnPageCh !== undefined && firstNamedCh !== undefined
+        ? firstOnPageCh - firstNamedCh
+        : 0;
+      // ★ THE LINE IS RIGHT-ALIGNED AT THE CHARACTER'S ENTRY, so its width is
+      //   whatever margin that chapter happens to leave — for a lead who is
+      //   there from chapter 1 that is almost nothing. Adding three new facts
+      //   pushed those stat lines clean off the left edge with every gate
+      //   green. A fixed item cap does not fix it either: the space depends on
+      //   WHERE the character enters, so the line is fitted to the room it
+      //   actually has and the full list lives in the tooltip, where width is
+      //   free.
+      const ranked = [
+        firstOnPageCh !== undefined && firstOnPageCh > 1 ? `enters ${firstOnPageCh}` : null,
+        heraldGap >= 2 ? `named from ${firstNamedCh}` : null,
+        speakingCount > 0 ? `speaks ${speakingCount}` : null,
         drivesTotal > 0 ? `drives ${drivesTotal}` : null,
+        evokedCount > 0 ? `offstage ${evokedCount}` : null,
+        peakChapter !== undefined ? `peak ${peakChapter}` : null,
         longestGap >= 3 ? `away ${longestGap}` : null,
-      ].filter(Boolean).join(" · ");
+      ].filter((v): v is string => Boolean(v));
+      const statsFull = [`${track.count} ch`, ...ranked].join(" · ");
+      // Right-anchored at firstX - 12, so the room is everything left of that.
+      const avail = (detected[0]?.x ?? PAD_X) - 12 - STAT_LEFT_MARGIN;
+      let stats = `${track.count} ch`;
+      for (const item of ranked) {
+        const next = `${stats} · ${item}`;
+        if (next.length * STAT_CHAR_W > avail) break;
+        stats = next;
+      }
 
       return {
         name: track.name,
@@ -1003,6 +1118,7 @@ function TimelineGraphFullImpl({
         firstX: detected[0]?.x ?? PAD_X,
         lastX: detected[detected.length - 1]?.x ?? PAD_X,
         stats,
+        statsFull,
         bars,
         links,
         bridges,

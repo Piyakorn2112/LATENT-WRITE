@@ -51,6 +51,34 @@ app.whenReady().then(async () => {
   ok("dashed bridges span absences", p.bridgeCount >= 2, `bridges: ${p.bridgeCount}`);
   ok("stat lines carry peak/drives/away/enters", p.statLines.length >= 4, `${p.statLines.length}: ${p.statLines.slice(0, 3).join(" | ")}`);
 
+  // ── presence vs evocation ────────────────────────────────────────────────
+  ok("evoked chapters render as their own mark", p.ghostCount > 0, `ghosts: ${p.ghostCount}`);
+  // The PAIR. "Everything is a ghost" would satisfy the gate above perfectly.
+  ok("…and most chapters are still solid presence", p.solidCount > p.ghostCount * 3,
+    `solid ${p.solidCount} vs ghost ${p.ghostCount}`);
+  ok("★ a ghost is HOLLOW, not a fainter bar", p.ghostsHollow === true,
+    "fill must be none — a shade is what this redesign removed");
+  ok("…and a present chapter is filled", p.solidsFilled === true, "solid bars must not be hollow");
+  ok("★ every ghost is the SAME height", p.ghostHeights === 1,
+    `distinct ghost heights: ${p.ghostHeights} — being talked about is not a quantity of presence`);
+  ok("★ a track with NO presence data draws solid, not ghosts", p.ghostCount === 6,
+    `expected 6 (Darcy 2 + Jane 3 + Lady Catherine 1); got ${p.ghostCount}. ` +
+    `10 means the no-data default flipped to "mentioned" and Wickham joined them`);
+  ok("no bar renders unclassified", p.unclassified === 0, `unclassified: ${p.unclassified}`);
+  ok("speaking chapters carry a voice cap", p.voiceCount > 0, `caps: ${p.voiceCount}`);
+  ok("…but not every present chapter does", p.voiceCount < p.solidCount,
+    `caps ${p.voiceCount} vs solid ${p.solidCount} — a cap on everything says nothing`);
+  ok("★ \"enters\" is the walk-on, with the herald gap named",
+    !!p.heraldLine && /enters 12/.test(p.heraldLine),
+    `herald line: ${p.heraldLine} — Lady Catherine is named in 7 and arrives in 12`);
+  ok("★ no stat line runs off the left edge", p.statOverflowCount === 0,
+    `${p.statOverflowCount} overflowing — the line is right-anchored at the ` +
+    `character's entry chapter, so every fact added to it grows into the margin`);
+  ok("stat line counts speaking chapters", !!p.speaksLine, String(p.speaksLine));
+  ok("stat line counts offstage chapters", !!p.offstageLine, String(p.offstageLine));
+  ok("the legend explains the hollow mark", p.legendMentionsHollow === true,
+    "a mark nobody can decode is decoration");
+
   console.log("\ncast ledger, real component:");
   let failed = 0;
   for (const r of results) {

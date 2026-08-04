@@ -351,7 +351,26 @@ export interface ChapterGraphEntry {
   role: string;
   tensionPeak: number;    // 0–1 normalized
   tensionCurve: number[]; // 8-point downsampled for sparkline
+  /** Characters actually ON THE PAGE — speaking or acting. This used to mean
+   *  "named anywhere in the chapter", which put a woman three counties away in
+   *  the same list as the man arguing in the room. See `presence` for the full
+   *  classification and character-presence.ts for why. */
   charactersPresent: string[];
+  /**
+   * Per-character presence class for this chapter, evocation included.
+   *
+   * Optional: entries persisted before this existed carry none, and every
+   * display consumer must fall back to uniform presence rather than to an
+   * empty cast. The class strings mirror `PresenceClass` in
+   * character-presence.ts; they are spelled out here so types.ts keeps no
+   * import into lib/.
+   */
+  presence?: Array<{
+    name: string;
+    klass: "speaking" | "present" | "mentioned";
+    /** The deterministic signals could not call this one. */
+    uncertain?: boolean;
+  }>;
   wordCount: number;
   proseRegister: string;  // ProseRegister string
   majorEvents: MajorEvent[];

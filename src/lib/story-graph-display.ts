@@ -1,5 +1,6 @@
 import type { Novel, StoryGraph, WorldData } from "../types";
 import { buildSpeakerPalette, getSpeakerColor } from "./palette";
+import { classifyChapterPresence } from "./character-presence";
 
 export interface TimelineCharacterTrack {
   name: string;
@@ -25,6 +26,18 @@ export interface TimelineCharacterTrack {
    *  chapter text, so the snapshot builder leaves this unset and renderers
    *  fall back to uniform presence. */
   mentionsByChapter?: ReadonlyMap<string, number>;
+  /**
+   * Whether the character is ON THE PAGE in each chapter or only talked about.
+   *
+   * ★ THE ABSENCE IS THE INFORMATION. Dropping evoked chapters would make the
+   *   ledger honest and less useful at the same time — "everyone keeps
+   *   mentioning her while she is away" is exactly the shape a writer wants to
+   *   see. Unset for graphs persisted before the classifier existed, and the
+   *   renderer must then draw every chapter as plain presence.
+   */
+  presenceByChapter?: ReadonlyMap<string, "speaking" | "present" | "mentioned">;
+  /** Chapters whose class the deterministic signals could not call. */
+  uncertainChapters?: ReadonlySet<string>;
 }
 
 interface TimelineTrackBuildOptions {
@@ -88,13 +101,20 @@ function recordPresence(
   }
 }
 
+/** Everything the two builders gather that is keyed by lower-cased name. */
+interface TrackExtras {
+  drivesByName?: Map<string, Map<string, number>>;
+  driveTypesByName?: Map<string, Map<string, string[]>>;
+  mentionsByName?: Map<string, Map<string, number>>;
+  presenceByName?: Map<string, Map<string, "speaking" | "present" | "mentioned">>;
+  uncertainByName?: Map<string, Set<string>>;
+}
+
 function finalizeTracks(
   counts: Map<string, number>,
   chapterIdsByName: Map<string, Set<string>>,
   limit: number,
-  drivesByName?: Map<string, Map<string, number>>,
-  driveTypesByName?: Map<string, Map<string, string[]>>,
-  mentionsByName?: Map<string, Map<string, number>>,
+  extras: TrackExtras = {},
 ): TimelineCharacterTrack[] {
   const sortedNames = [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
@@ -102,15 +122,52 @@ function finalizeTracks(
     .map(([name]) => name);
 
   const palette = buildSpeakerPalette(sortedNames);
-  return sortedNames.map((name) => ({
-    name,
-    count: counts.get(name) ?? 0,
-    color: getSpeakerColor(palette, name).text,
-    chapterIds: chapterIdsByName.get(name) ?? new Set<string>(),
-    drivesByChapter: drivesByName?.get(name.toLowerCase()),
-    driveTypesByChapter: driveTypesByName?.get(name.toLowerCase()),
-    mentionsByChapter: mentionsByName?.get(name.toLowerCase()),
-  }));
+  return sortedNames.map((name) => {
+    const key = name.toLowerCase();
+    return {
+      name,
+      count: counts.get(name) ?? 0,
+      color: getSpeakerColor(palette, name).text,
+      chapterIds: chapterIdsByName.get(name) ?? new Set<string>(),
+      drivesByChapter: extras.drivesByName?.get(key),
+      driveTypesByChapter: extras.driveTypesByName?.get(key),
+      mentionsByChapter: extras.mentionsByName?.get(key),
+      presenceByChapter: extras.presenceByName?.get(key),
+      uncertainChapters: extras.uncertainByName?.get(key),
+    };
+  });
+}
+
+/** Collect the stored per-chapter presence classes, canonicalised through the
+ *  alias map so "Holmes" and "Sherlock Holmes" land on one track. */
+function readStoredPresence(
+  storyGraph: StoryGraph,
+  canonicalMap: Map<string, string>,
+): { presence: Map<string, Map<string, "speaking" | "present" | "mentioned">>; uncertain: Map<string, Set<string>> } {
+  const presence = new Map<string, Map<string, "speaking" | "present" | "mentioned">>();
+  const uncertain = new Map<string, Set<string>>();
+  for (const [chapterId, entry] of Object.entries(storyGraph.entries)) {
+    for (const record of entry.presence ?? []) {
+      const canonical = canonicalCharacterName(record.name, canonicalMap).toLowerCase();
+      if (!canonical) continue;
+      const per = presence.get(canonical) ?? new Map<string, "speaking" | "present" | "mentioned">();
+      // ★ A CANONICAL NAME CAN COLLECT TWO RECORDS in one chapter once aliases
+      //   merge two surface forms. Keep the STRONGER reading: someone who
+      //   speaks as "Holmes" and is merely named as "Sherlock Holmes" is
+      //   speaking, and taking whichever record happened to be stored last
+      //   would make the class depend on iteration order.
+      const rank = { mentioned: 0, present: 1, speaking: 2 } as const;
+      const prior = per.get(chapterId);
+      if (!prior || rank[record.klass] > rank[prior]) per.set(chapterId, record.klass);
+      presence.set(canonical, per);
+      if (record.uncertain) {
+        const set = uncertain.get(canonical) ?? new Set<string>();
+        set.add(chapterId);
+        uncertain.set(canonical, set);
+      }
+    }
+  }
+  return { presence, uncertain };
 }
 
 /** chapterId -> event count per character (lowercased canonical name), read
@@ -171,17 +228,30 @@ export function buildSnapshotTimelineCharacterTracks(
   const counts = new Map<string, number>();
   const chapterIdsByName = new Map<string, Set<string>>();
 
+  const stored = readStoredPresence(storyGraph, canonicalMap);
+
   for (const [chapterId, entry] of Object.entries(storyGraph.entries)) {
     const present = new Set<string>();
     for (const rawName of entry.charactersPresent ?? []) {
       const canonical = canonicalCharacterName(rawName, canonicalMap);
       if (canonical) present.add(canonical);
     }
+    // Evoked characters get a track too — being talked about while away is a
+    // shape the ledger should show, not hide.
+    for (const record of entry.presence ?? []) {
+      const canonical = canonicalCharacterName(record.name, canonicalMap);
+      if (canonical) present.add(canonical);
+    }
     recordPresence(chapterId, present, counts, chapterIdsByName);
   }
 
   const drives = buildDrivesByName(storyGraph, canonicalMap);
-  return finalizeTracks(counts, chapterIdsByName, limit, drives.counts, drives.types);
+  return finalizeTracks(counts, chapterIdsByName, limit, {
+    drivesByName: drives.counts,
+    driveTypesByName: drives.types,
+    presenceByName: stored.presence,
+    uncertainByName: stored.uncertain,
+  });
 }
 
 export async function buildTimelineCharacterTracks(
@@ -205,14 +275,45 @@ export async function buildTimelineCharacterTracks(
     pattern: m.pattern ? new RegExp(m.pattern.source, "gi") : null,
   }));
 
+  // ★ THE STORED CLASSIFICATION IS PREFERRED AND THE RECOMPUTE IS THE FALLBACK,
+  //   not the other way round. buildChapterEntry already ran the classifier
+  //   with the chapter's own worldData; redoing it here for every chapter of a
+  //   long book would compile a few regexes per character per chapter on the
+  //   path that draws the panel. Graphs persisted before `presence` existed
+  //   have nothing stored, and those recompute.
+  const stored = readStoredPresence(storyGraph, canonicalMap);
+  const presenceByName = stored.presence;
+  const uncertainByName = stored.uncertain;
+  const castForPresence = (worldData?.characters ?? [])
+    .filter((c) => c.name && c.name.trim().length >= 2)
+    .map((c) => ({ name: c.name.trim(), variants: c.aliases ?? [] }));
+
   for (let chapterIndex = 0; chapterIndex < chapters.length; chapterIndex += 1) {
     throwIfAborted(options?.signal);
     const chapter = chapters[chapterIndex];
     const present = new Set<string>();
+    const entry = storyGraph.entries[chapter.id];
 
-    for (const rawName of storyGraph.entries[chapter.id]?.charactersPresent ?? []) {
+    for (const rawName of entry?.charactersPresent ?? []) {
       const canonical = canonicalCharacterName(rawName, canonicalMap);
       if (canonical) present.add(canonical);
+    }
+
+    if (!entry?.presence?.length && castForPresence.length > 0) {
+      for (const record of classifyChapterPresence(chapter.content, castForPresence)) {
+        if (record.klass === "absent") continue;
+        const canonical = canonicalCharacterName(record.name, canonicalMap);
+        if (!canonical) continue;
+        const key = canonical.toLowerCase();
+        const per = presenceByName.get(key) ?? new Map<string, "speaking" | "present" | "mentioned">();
+        per.set(chapter.id, record.klass);
+        presenceByName.set(key, per);
+        if (record.uncertain) {
+          const set = uncertainByName.get(key) ?? new Set<string>();
+          set.add(chapter.id);
+          uncertainByName.set(key, set);
+        }
+      }
     }
 
     for (const matcher of countMatchers) {
@@ -235,8 +336,11 @@ export async function buildTimelineCharacterTracks(
 
   throwIfAborted(options?.signal);
   const driveData = buildDrivesByName(storyGraph, canonicalMap);
-  return finalizeTracks(
-    counts, chapterIdsByName, limit,
-    driveData.counts, driveData.types, mentionsByName,
-  );
+  return finalizeTracks(counts, chapterIdsByName, limit, {
+    drivesByName: driveData.counts,
+    driveTypesByName: driveData.types,
+    mentionsByName,
+    presenceByName,
+    uncertainByName,
+  });
 }

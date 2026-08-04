@@ -67,6 +67,10 @@ const track = (
    *  Omitted on one track on purpose — an older persisted graph has counts and
    *  no types, and the row must still draw the right NUMBER of squares. */
   driveTypes?: Record<number, string[]>,
+  /** speaking / present / mentioned per chapter. Omitted on one track on
+   *  purpose: a graph persisted before the classifier existed must still draw
+   *  SOLID bars, not a row of ghosts. */
+  presence?: Record<number, "speaking" | "present" | "mentioned">,
 ): TimelineCharacterTrack => ({
   name,
   color,
@@ -77,25 +81,40 @@ const track = (
   driveTypesByChapter: driveTypes
     ? new Map(Object.entries(driveTypes).map(([n, t]) => [`ch${n}`, t]))
     : undefined,
+  presenceByChapter: presence
+    ? new Map(Object.entries(presence).map(([n, k]) => [`ch${n}`, k]))
+    : undefined,
 });
+
+const S = "speaking" as const, P = "present" as const, M = "mentioned" as const;
 
 const tracks: TimelineCharacterTrack[] = [
   track("Elizabeth", "#e05d7a",
     [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],
     { 1: 12, 2: 30, 3: 22, 4: 18, 5: 9, 6: 44, 7: 38, 8: 26, 9: 14, 10: 20, 11: 16, 12: 34, 13: 46, 14: 28 },
-    { 6: 2, 13: 1 }, { 6: ["revelation", "confrontation"], 13: ["climax"] }),
+    { 6: 2, 13: 1 }, { 6: ["revelation", "confrontation"], 13: ["climax"] },
+    { 1: S, 2: S, 3: S, 4: S, 5: P, 6: S, 7: P, 8: S, 9: P, 10: S, 11: S, 12: S, 13: S, 14: S }),
   track("Darcy", "#5b7cfa",
     [2, 3, 4, 6, 7, 8, 12, 13, 14],
     { 2: 14, 3: 20, 4: 16, 6: 30, 7: 26, 8: 22, 12: 10, 13: 32, 14: 18 },
-    { 6: 1, 13: 1 }, { 6: ["confrontation"], 13: ["revelation"] }),
+    { 6: 1, 13: 1 }, { 6: ["confrontation"], 13: ["revelation"] },
+    // Talked about in 2 before he ever speaks, and discussed again in 12 while
+    // he is away arranging things — the shape the old ledger drew as presence.
+    { 2: M, 3: S, 4: P, 6: S, 7: P, 8: S, 12: M, 13: S, 14: S }),
   track("Jane", "#3aa981",
     [1, 2, 3, 4, 5, 9, 10, 11, 14],
     { 1: 8, 2: 16, 3: 10, 4: 20, 5: 12, 9: 9, 10: 6, 11: 10, 14: 12 },
-    {}),
+    {}, undefined,
+    // In London for 9-11: the family keeps naming her and she is not there.
+    { 1: S, 2: S, 3: P, 4: S, 5: P, 9: M, 10: M, 11: M, 14: S }),
   track("Lady Catherine de Bourgh", "#b08a3e",
     [7, 12],
     { 7: 6, 12: 24 },
-    { 12: 1 }, { 12: ["confrontation"] }),
+    { 12: 1 }, { 12: ["confrontation"] },
+    // ★ THE HERALD GAP. Named in 7, walks on in 12. The stat line has to say
+    //   "enters 12 · named from 7" — reading it as "enters 7" is the exact
+    //   inversion of the setup the writer built.
+    { 7: M, 12: S }),
   track("Wickham", "#8a63c9",
     [3, 4, 9, 10],
     { 3: 10, 4: 8, 9: 18, 10: 22 },
@@ -134,6 +153,20 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
   //   exists to check.
   const bars = [...svg.querySelectorAll("[data-cast-mark='presence']")];
   const heights = bars.map((b) => Number(b.getAttribute("height")));
+  const solid = bars.filter((b) => b.getAttribute("data-presence") !== "mentioned");
+  const ghosts = bars.filter((b) => b.getAttribute("data-presence") === "mentioned");
+  const voices = [...svg.querySelectorAll("[data-cast-mark='voice']")];
+  // A ghost must be HOLLOW — the whole point is that it is a different kind of
+  // mark, not a fainter one. Checking fill rather than opacity is deliberate:
+  // opacity is a shade and shades are what this redesign removed.
+  const ghostsHollow = ghosts.every((g) => g.getAttribute("fill") === "none");
+  const solidsFilled = solid.every((s) => s.getAttribute("fill") !== "none");
+  // ★ THE LEGACY TRACK CANNOT BE FOUND BY ATTRIBUTE — Wickham carries no
+  //   presence data and the renderer defaults him to "present", so his bars
+  //   look exactly like classified ones, which is the required behaviour. The
+  //   gate is therefore the exact ghost COUNT: Darcy 2 + Jane 3 + Lady
+  //   Catherine 1. If the no-data default ever flips to "mentioned", Wickham's
+  //   four chapters join them and this reads 10.
   // Agency squares sit BELOW the baseline; the old diamonds floated above the
   // bars and moved with their height.
   const drives = [...svg.querySelectorAll("[data-cast-mark='drive']")];
@@ -146,6 +179,13 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
     ellipsised: texts.find((t) => t.endsWith("…")) ?? null,
     barCount: bars.length,
     distinctHeights: new Set(heights.map((h) => h.toFixed(1))).size,
+    ghostCount: ghosts.length,
+    solidCount: solid.length,
+    voiceCount: voices.length,
+    ghostsHollow,
+    solidsFilled,
+    unclassified: bars.filter((b) => !b.getAttribute("data-presence")).length,
+    ghostHeights: new Set(ghosts.map((g) => g.getAttribute("height"))).size,
     driveCount: drives.length,
     driveColorCount: driveColors.size,
     peakRingCount: rings.length,
@@ -155,5 +195,20 @@ interface W extends Window { __probe?: () => Record<string, unknown> }
       .filter((el) => /l 3\.4,3\.4/.test(el.getAttribute("d") ?? "")).length,
     bridgeCount: dashed.length,
     statLines: texts.filter((t) => /ch ·|· drives |· away |· enters /.test(t)),
+    // ★ THE STAT LINE IS RIGHT-ANCHORED, so every fact added to it grows
+    //   LEFTWARD into the panel margin. Adding three pushed the leads' lines
+    //   clean off the left edge — 26 gates green, and visibly broken. This
+    //   measures the rendered text rather than trusting a character budget.
+    statOverflowCount: [...svg.querySelectorAll("text")]
+      .filter((t) => /\d+ ch(\s|$|·)/.test(t.textContent ?? ""))
+      .filter((t) => {
+        const x = Number(t.getAttribute("x") ?? 0);
+        const w = (t as SVGTextElement).getComputedTextLength?.() ?? 0;
+        return x - w < 0;   // right-anchored: left edge falls outside the svg
+      }).length,
+    heraldLine: texts.find((t) => /named from /.test(t)) ?? null,
+    speaksLine: texts.find((t) => /· speaks \d/.test(t)) ?? null,
+    offstageLine: texts.find((t) => /· offstage \d/.test(t)) ?? null,
+    legendMentionsHollow: texts.some((t) => /hollow = talked about/.test(t)),
   };
 };

@@ -2,6 +2,7 @@ import type { Chapter, MajorEvent, WorldData } from "../types";
 import type { ChapterGraphEntry, StoryGraph } from "../types";
 import type { ChapterAnalysisResult } from "./use-analysis";
 import { detectNarrativeEvents } from "./narrative-events";
+import { classifyChapterPresence } from "./character-presence";
 
 const DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV ?? false;
 
@@ -62,15 +63,26 @@ export function buildChapterEntry(
       if (p.actor) charSet.add(p.actor);
     }
   }
-  // Also: any named character in worldData who actually appears in this chapter's text.
-  // This ensures Hollow Iris characters (Nora, Iris, Helia, Kaelen…) are always tracked
-  // even when the speech-detection NLP doesn't attribute dialogue to them directly.
-  if (worldData?.characters) {
-    for (const c of worldData.characters) {
-      if (c.name && c.name.length >= 2 && chapter.content.includes(c.name)) {
-        charSet.add(c.name);
-      }
-    }
+  // Also: any named character in worldData who actually appears in this
+  // chapter's text — so characters are tracked even when speech detection does
+  // not attribute dialogue to them directly.
+  //
+  // ★ THIS USED TO BE `chapter.content.includes(c.name)`. A bare substring test
+  //   cannot tell "Corwin pushed the door open" from "I suppose Corwin told you
+  //   what he saw at the mill", and it marked both as present — 13% of the
+  //   ledger's marks on the DEV books were people who were somewhere else.
+  //   classifyChapterPresence splits them, and records the ones it cannot call
+  //   so a reviewer has something specific to look at.
+  const presenceRecords = worldData?.characters?.length
+    ? classifyChapterPresence(
+        chapter.content,
+        worldData.characters
+          .filter((c) => c.name && c.name.trim().length >= 2)
+          .map((c) => ({ name: c.name.trim(), variants: c.aliases ?? [] })),
+      )
+    : [];
+  for (const p of presenceRecords) {
+    if (p.klass === "speaking" || p.klass === "present") charSet.add(p.name);
   }
 
   const full = analysis.tensionCurve;
@@ -134,6 +146,15 @@ export function buildChapterEntry(
     tensionPeak,
     tensionCurve,
     charactersPresent: [...charSet].slice(0, 8),
+    // Evocation rides along so the ledger can draw "talked about, not here"
+    // instead of dropping the name entirely — the absence IS the information.
+    presence: presenceRecords
+      .filter((p) => p.klass !== "absent")
+      .map((p) => ({
+        name: p.name,
+        klass: p.klass as "speaking" | "present" | "mentioned",
+        ...(p.uncertain ? { uncertain: true } : {}),
+      })),
     wordCount: words,
     proseRegister: analysis.register,
     majorEvents,
