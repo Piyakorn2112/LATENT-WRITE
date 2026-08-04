@@ -99,7 +99,23 @@ const MAP_RENDER_OVERSAMPLE: Record<MapPreset, number> = {
 };
 
 // Visual bezel thickness in element pixels (must match main-thread filter).
-const BEZEL_PX = 120;
+//
+// ★ THINNER EDGE. Was 120px capped at 0.8 of the half-short-side, which on a
+// 46px-tall toolbar put the bevel at 18.4 of 23 available px — nearly the whole
+// half, so the bend was spread across the entire bar and never read as an edge.
+// A real glass slab is FLAT over almost its whole area and rolls over in a
+// narrow band; this is that band.
+//
+// ★ AND IT IS COUPLED TO THE STRENGTH, deliberately. The fold-free budget is
+// `bezel / 1.5`, so a thinner bevel also caps the pull harder — that is the
+// arithmetic of not tearing the backdrop in an 8-bit gather, not a separate
+// choice. Widen the bevel if more refraction is wanted; do not raise the pull
+// past the budget.
+const BEZEL_PX = 80;
+const BEZEL_FRAC = 0.5;
+// What those two were before the thinning, kept for the lens.
+const BEZEL_PX_LEGACY = 120;
+const BEZEL_FRAC_LEGACY = 0.8;
 
 // Progressive blur — sharp-rim → blurred-interior gradient.
 //   BLUR_EDGE_MIN       — mask value at the very edge. >0 means blur is already
@@ -215,7 +231,7 @@ function scalarsFor(
   baselineMask: number,
   blurRimEnd: number,
   bezel: number,
-  eta: number,
+  legacy: boolean,
 ): void {
   const edgeCoverage = edgeAaWidth > 0
     ? clamp01(0.5 + distToEdge / edgeAaWidth)
@@ -249,9 +265,55 @@ function scalarsFor(
   }
 
   // ── Snell displacement from the bezel profile ────────────────────────
+  //
+  // ★★ THE FOLD-FREE FALLOFF. This is the fix for the refracted content
+  // doubling and smearing behind a glass surface — the thing that reads as the
+  // content leaning one way at the top of the bar and the other way at the
+  // bottom.
+  //
+  // feDisplacementMap GATHERS: out(P) = backdrop(P + disp(P)). The backdrop is
+  // bent only while the sampling position keeps ADVANCING —
+  //
+  //     d/dy [ y + disp(y) ] > 0        i.e.   A · max|g'| ≤ bezel
+  //
+  // The raw squircle→Snell profile fails that badly. Its slope is clamped at 5
+  // right at the rim and collapses within ~10% of the bezel, so max|g'| is an
+  // order of magnitude past 1. Measured on the SHIPPED maps
+  // (scripts/probe-glass-fold.ts), fraction of interior texels whose sampling
+  // runs BACKWARDS:
+  //
+  //     toolbar 920x46   37.2%   worst -4.33x normal
+  //     tab      26x34   43.7%   worst -7.00x
+  //     pill    180x34   41.0%   worst -5.59x
+  //     popover 420x120  18.7%   worst -3.86x
+  //
+  // Backwards sampling re-reads backdrop the gather has already read, mirrored
+  // and compressed — over prose that doubles the letterforms, which is exactly
+  // what the toolbar shows over a chapter title.
+  //
+  // ★ THE FIX IS THE SHAPE, NOT THE STRENGTH. A FLATTER falloff lets the SAME
+  // rim pull stay fold-free: the smoothstep complement g(t) = (1−t)²(1+2t) has
+  // g(0)=1, g(1)=0, zero slope at both ends and max|g'| = 1.5 exactly. The rim
+  // magnitude is untouched — only the decay inward is reshaped — so the glass
+  // bends exactly as hard at its edge as before.
+  //
+  // ★ AND IT IS NOT A NEW IDEA HERE. knob-glass.ts has carried precisely this
+  // for the control knobs since their own banding investigation, with the same
+  // constant and the same reasoning; the general worker simply never got it.
+  //
+  // ★ WHY THE CANVAS PATH COULD FOLD HAPPILY AND THIS CANNOT. knob-glass-paint
+  // folds ON PURPOSE — in float, with bilinear sampling, a fold is a smooth
+  // compressed reflection and it is what makes a rim read as thick glass. In an
+  // 8-BIT map the same fold is quantised into a comb. The fold is not the
+  // defect; folding inside this encoding is.
   const t = Math.min(Math.max(distToEdge, 0), bezel) / bezel;
-  const slope = Math.min(dh(t), 5.0);
-  const disp = snellDisp(slope, eta);
+  // ★ The lens keeps the raw squircle→Snell profile it always had — steep at
+  //   the rim and collapsing within a fraction of the bezel, which is what
+  //   gives that surface its strong folding edge. Everything else takes the
+  //   bounded-derivative falloff above.
+  const disp = legacy
+    ? snellDisp(Math.min(dh(t), 5.0), N1 / N2)
+    : RIM_DISP * falloff(t);
 
   if (disp < 1e-6) {
     S_flag = S_MASK_ONLY;
@@ -261,6 +323,28 @@ function scalarsFor(
   S_flag = S_FULL;
   S_disp = disp;
   S_cov = dispCoverage;
+}
+
+/**
+ * Bounded-derivative falloff: 1 at the rim → 0 at the bezel depth, with
+ * max|g'| = 1.5 exactly (at t = ½). Identical to knob-glass.ts's.
+ */
+const MAX_G_SLOPE = 1.5;
+function falloff(t: number): number {
+  const u = 1 - t;
+  return u * u * (1 + 2 * t);
+}
+
+/**
+ * The rim magnitude, straight from the physics — the squircle's steepest slope
+ * refracted through Snell. Unchanged from before: only the decay INWARD is
+ * reshaped, so the glass bends exactly as hard at its edge as it always did.
+ */
+const RIM_DISP = snellDisp(Math.min(dh(0), 5.0), N1 / N2);
+
+/** The largest peak pull a bezel of this width can carry without folding. */
+export function foldFreeBudget(bezelPx: number): number {
+  return bezelPx / MAX_G_SLOPE;
 }
 
 /**
@@ -308,6 +392,8 @@ interface MapRequest {
   /** The filter's feDisplacementMap scale — knob presets need it to size
    *  their fold-free budget. */
   dispPx?: number;
+  /** Pin this map to the pre-fold-free profile — the big bubble lens only. */
+  legacyProfile?: boolean;
 }
 
 interface MapResponse {
@@ -490,7 +576,12 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const halfShorter = Math.min(halfW, halfH);
   const r = Math.min(Math.max(radius, RADIUS_FLOOR), halfShorter);
 
-  const bezel = Math.min(req.bezel ?? BEZEL_PX, halfShorter * 0.8);
+  // ★ The lens also keeps the OLD bezel geometry: the thinner edge shipped for
+  //   the panels would narrow the one surface whose whole point is a fat rim.
+  const legacy = req.legacyProfile === true;
+  const bezel = legacy
+    ? Math.min(req.bezel ?? BEZEL_PX_LEGACY, halfShorter * BEZEL_FRAC_LEGACY)
+    : Math.min(req.bezel ?? BEZEL_PX, halfShorter * BEZEL_FRAC);
   // Ramp goes from the actual rim (distToEdge = 0) up to blurRimEnd. Within
   // that band, mask starts at BLUR_EDGE_MIN (so the very edge is already
   // partly blurred — no sharp band) and rises to 1 (full blur).
@@ -498,7 +589,6 @@ export function buildMapPixels(req: MapRequest): MapPixels {
 
   const sxInv = elemW / mwElem;
   const syInv = elemH / mhElem;
-  const eta = N1 / N2;
   const edgeAaWidth = EDGE_AA_SPAN[preset] * Math.max(sxInv, syInv);
 
   const data = new Uint8ClampedArray(new ArrayBuffer(mw * mh * 4));
@@ -531,26 +621,68 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   maskBuf.fill(baselineMask);
 
   // ── Axis tables ──────────────────────────────────────────────────────────
-  // q values for each pixel centre, plus the +GRAD_EPS gradient probe. These
-  // are exactly the values sdRoundedBox/sdRoundedBoxSmooth used to recompute
-  // per pixel (same expressions, same order), so every consumer below sees
-  // identical floats — but the abs/subtract now runs O(w + h) times.
+  // q values for each pixel centre, plus the gradient probes.
+  //
+  // ★★ THE PROBE IS CENTRED ON THE PIXEL, AND IT HAS TO BE. This is the fix for
+  // the long-standing report that refracted content "leans left at the top and
+  // right at the bottom".
+  //
+  // The probe used to be one-sided: `|px_rel + GRAD_EPS| - insetX`, differenced
+  // against the pixel's own q. Putting the +EPS inside the abs is what makes
+  // the difference carry the outward sign for free, and that part is right. But
+  // a one-sided difference estimates the derivative at p + EPS/2, not at p —
+  // and because the step is taken in p, that offset points the SAME absolute
+  // way above and below the centreline. So the normal is read from a field
+  // shifted down and right, and the resulting angular error is NOT
+  // mirror-symmetric: it tilts one way at the top edge and the other way at the
+  // bottom. That is a lean, by construction, and no amount of tuning the
+  // profile or the falloff removes it.
+  //
+  // Measured on the shape's own SDF in FLOAT, with no packing anywhere — the
+  // largest |gx(x, y) − gx(x, −y)| inside the bezel, which a correct field
+  // makes exactly zero (scripts/probe-glass-gradient-bias.ts):
+  //
+  //     shape                       one-sided      centred
+  //     toolbar  920x46  r23           0.0320       0.0000
+  //     panel    370x620 r24           0.8896       0.0000
+  //     square   300x300 r24           0.8896       0.0000
+  //     circle   220x220 r110          0.0073       0.0000
+  //
+  // 0.032 of a unit normal is ~1.8°, which against the 20px peak pull is ~0.6px
+  // of horizontal displacement with opposite signs top and bottom — four times
+  // feDisplacementMap's own 0.157px quantisation step. So this was never a
+  // rounding artifact and never a Chromium limitation; it was ours.
+  //
+  // The error is largest inside the GRAD_K smooth-max blend band, because that
+  // is where the normal actually rotates. A stadium keeps that band outside its
+  // bezel, which is why the toolbar's number is 20x smaller than the panel's —
+  // but still not zero, and still visible on a 46px-tall bar.
+  //
+  // Cost: one extra SDF evaluation per pixel, and only in the blend branch —
+  // the axis-aligned fast paths below still take none.
   const insetX = halfW - r;
   const insetY = halfH - r;
+  const GRAD_HALF = GRAD_EPS * 0.5;
 
   const QX = new Float64Array(mwElem);
-  const QXE = new Float64Array(mwElem);
+  const QXA = new Float64Array(mwElem);
+  const QXB = new Float64Array(mwElem);
   for (let px = 0; px < mwElem; px++) {
     const px_rel = (px + 0.5) * sxInv - halfW;
     QX[px] = Math.abs(px_rel) - insetX;
-    QXE[px] = Math.abs(px_rel + GRAD_EPS) - insetX;
+    // legacy: (centre, +EPS) reproduces the original one-sided difference
+    // exactly; otherwise straddle the pixel.
+    QXA[px] = legacy ? QX[px] : Math.abs(px_rel - GRAD_HALF) - insetX;
+    QXB[px] = Math.abs(px_rel + (legacy ? GRAD_EPS : GRAD_HALF)) - insetX;
   }
   const QY = new Float64Array(mhElem);
-  const QYE = new Float64Array(mhElem);
+  const QYA = new Float64Array(mhElem);
+  const QYB = new Float64Array(mhElem);
   for (let py = 0; py < mhElem; py++) {
     const py_rel = (py + 0.5) * syInv - halfH;
     QY[py] = Math.abs(py_rel) - insetY;
-    QYE[py] = Math.abs(py_rel + GRAD_EPS) - insetY;
+    QYA[py] = legacy ? QY[py] : Math.abs(py_rel - GRAD_HALF) - insetY;
+    QYB[py] = Math.abs(py_rel + (legacy ? GRAD_EPS : GRAD_HALF)) - insetY;
   }
 
   // Per-axis scalars + axis-aligned gradient. On every straight run of the
@@ -565,15 +697,16 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const colGx = new Float64Array(mwElem);
   for (let px = 0; px < mwElem; px++) {
     const qx = QX[px];
-    scalarsFor(r - qx, edgeAaWidth, baselineMask, blurRimEnd, bezel, eta);
+    scalarsFor(r - qx, edgeAaWidth, baselineMask, blurRimEnd, bezel, legacy);
     colFlag[px] = S_flag;
     colMask[px] = S_mask;
     colDisp[px] = S_disp;
     colCov[px] = S_cov;
-    // Where this column leads, sd = qx − r and sd(probe) = qxe − r, so
-    // gy is exactly 0 and the normalised gx is exactly ±1 (or 0,0 when the
-    // original's length guard trips).
-    const g = (QXE[px] - r) - (qx - r);
+    // Where this column leads, sd = qx − r for every probe, so gy is exactly 0
+    // and the normalised gx is exactly ±1 (or 0,0 when the length guard trips).
+    // Centred now: the difference is between the two probes, not probe-minus-
+    // centre, which is what makes the two halves of the shape mirror exactly.
+    const g = QXB[px] - QXA[px];
     colGx[px] = Math.abs(g) < 1e-6 ? 0 : g < 0 ? -1 : 1;
   }
 
@@ -584,12 +717,12 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   const rowGy = new Float64Array(mhElem);
   for (let py = 0; py < mhElem; py++) {
     const qy = QY[py];
-    scalarsFor(r - qy, edgeAaWidth, baselineMask, blurRimEnd, bezel, eta);
+    scalarsFor(r - qy, edgeAaWidth, baselineMask, blurRimEnd, bezel, legacy);
     rowFlag[py] = S_flag;
     rowMask[py] = S_mask;
     rowDisp[py] = S_disp;
     rowCov[py] = S_cov;
-    const g = (QYE[py] - r) - (qy - r);
+    const g = QYB[py] - QYA[py];
     rowGy[py] = Math.abs(g) < 1e-6 ? 0 : g < 0 ? -1 : 1;
   }
 
@@ -610,7 +743,8 @@ export function buildMapPixels(req: MapRequest): MapPixels {
 
   for (let py = 0; py < mhElem; py++) {
     const qy = QY[py];
-    const qye = QYE[py];
+    const qya = QYA[py];
+    const qyb = QYB[py];
     const rFlag = rowFlag[py];
     const rMask = rowMask[py];
     const rDisp = rowDisp[py];
@@ -646,7 +780,7 @@ export function buildMapPixels(req: MapRequest): MapPixels {
       let cov: number;
       if (qx > 0 && qy > 0) {
         // Corner arc — genuinely two-dimensional, solve per pixel.
-        scalarsFor(-sdSharpQ(qx, qy, r), edgeAaWidth, baselineMask, blurRimEnd, bezel, eta);
+        scalarsFor(-sdSharpQ(qx, qy, r), edgeAaWidth, baselineMask, blurRimEnd, bezel, legacy);
         flag = S_flag;
         maskV = S_mask;
         disp = S_disp;
@@ -684,9 +818,11 @@ export function buildMapPixels(req: MapRequest): MapPixels {
         gx = colGx[px];
         gy = 0;
       } else {
-        const d0 = sdSmoothQ(qx, qy, r);
-        const rawGx = sdSmoothQ(QXE[px], qy, r) - d0;
-        const rawGy = sdSmoothQ(qx, qye, r) - d0;
+        // Centred difference: both probes straddle the pixel, so the estimate
+        // belongs to the pixel rather than to a point a quarter-pixel down and
+        // to the right. See the axis-table note above for the measurement.
+        const rawGx = sdSmoothQ(QXB[px], qy, r) - sdSmoothQ(QXA[px], qy, r);
+        const rawGy = sdSmoothQ(qx, qyb, r) - sdSmoothQ(qx, qya, r);
         const len = hypot2(rawGx, rawGy);
         if (len < 1e-6) {
           gx = 0;
@@ -713,6 +849,20 @@ export function buildMapPixels(req: MapRequest): MapPixels {
   // displacement strength is uniform around the entire perimeter.
   const norm = maxMag > 0 ? maxMag : 1;
 
+  // ★ AND THE AMPLITUDE CLAMP — the flatter falloff alone is not enough.
+  //
+  // The packed byte becomes `dispPx · (byte/255 − 0.5)` element px, so this
+  // map's peak pull is `dispPx · 127 · gain / 255` = 19.92px for the default
+  // preset. Fold-free needs that inside `bezel / 1.5`, which on the 46px-tall
+  // toolbar (bezel 18.4) is 12.27px. Asking for more does not make the glass
+  // stronger — it makes the backdrop tear — so the pull is scaled to fit rather
+  // than shipped as a doubled, mirrored band over the prose behind it.
+  const peakPx = ((req.dispPx ?? 40) * 127 * channelGain) / 255;
+  const budgetPx = foldFreeBudget(bezel);
+  // The lens is allowed to exceed the fold-free budget — that fold IS its look,
+  // and at 4x supersample the 8-bit comb it would otherwise cause cannot show.
+  const foldFreeClamp = legacy ? 1 : (peakPx > budgetPx ? budgetPx / peakPx : 1);
+
   for (let py = 0; py < mhElem; py++) {
     const rowBase = py * mwElem;
     const dstBase = ((py + ovY) * mw + ovX) * 4;
@@ -729,8 +879,23 @@ export function buildMapPixels(req: MapRequest): MapPixels {
         if (m !== baselineMask) data[b + 2] = m;
         continue;
       }
-      data[b]     = (128 + (rx / norm) * 127 * channelGain + 0.5) | 0;
-      data[b + 1] = (128 + (ry / norm) * 127 * channelGain + 0.5) | 0;
+      // ★★ SYMMETRIC ROUNDING — the fix for "the bottom is straight, the top
+      // still leans".
+      //
+      // `(128 + v + 0.5) | 0` FLOORS, because `128 + v` is always positive. So
+      // it rounds +v up and −v toward zero: a displacement of +0.5 and one of
+      // −0.5 land on bytes 129 and 128, not 129 and 127. The top half of a
+      // surface carries the opposite sign to the bottom half, so that is a
+      // systematic 1-LSB (dispPx/255 = 0.157px) bias between them — one rim
+      // blending harder than the other, which is exactly the residual
+      // asymmetry left once the fold was gone.
+      //
+      // knob-glass.ts has rounded away from zero since its own investigation
+      // and records the same symptom; the general worker never got the fix.
+      const vx = (rx / norm) * 127 * channelGain * foldFreeClamp;
+      const vy = (ry / norm) * 127 * channelGain * foldFreeClamp;
+      data[b]     = 128 + (vx < 0 ? -Math.round(-vx) : Math.round(vx));
+      data[b + 1] = 128 + (vy < 0 ? -Math.round(-vy) : Math.round(vy));
       data[b + 2] = maskBuf[i];
       data[b + 3] = 255;
     }

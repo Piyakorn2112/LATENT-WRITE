@@ -249,6 +249,7 @@ function buildMapInWorker(
   bezel: number | null,
   superSample: number,
   mapPad: number | null,
+  legacyProfile: boolean,
 ): Promise<BuiltMap | null> {
   const w = ensureWorker();
   if (!w) return Promise.resolve(null);
@@ -258,6 +259,7 @@ function buildMapInWorker(
       resolve({ url: URL.createObjectURL(blob), padX, padY }));
     w.postMessage({
       id, elemW, elemH, radius, overflow, preset, bezel, superSample, mapPad,
+      legacyProfile,
       // Knobs author their map at press density; every other preset ignores it.
       displayScale: isKnobPreset(preset) ? KNOB_DISPLAY_SCALE : undefined,
       // …and need the filter's displacement scale to size their fold-free
@@ -354,6 +356,24 @@ function readBlur(el: Element): number {
 function readDisp(el: Element): number {
   if (el.classList.contains("liquid-glass-lens")) return LENS_REFRACTION;
   return DISP_PX;
+}
+
+/**
+ * ★ THE BIG BUBBLE LENS KEEPS THE OLD GLASS MATH.
+ *
+ * The scene-break / re-paragraph lens is a large clear bubble whose whole
+ * character comes from the strong, folding rim the original profile produced.
+ * The fold-free falloff and its amplitude clamp — which fixed the doubled,
+ * leaning prose behind the flat panel surfaces — flatten exactly the thing this
+ * one is FOR. So the lens is pinned to the pre-fix profile and the panels keep
+ * the new one, by request and after looking at both.
+ *
+ * It is the only surface that opts out, and it can afford to: it is transient,
+ * it sits over a deliberately blurred field, and it is supersampled 4x, so the
+ * comb a fold produces in an 8-bit map never gets the chance to show.
+ */
+function readLegacyProfile(el: Element): boolean {
+  return el.classList.contains("liquid-glass-lens");
 }
 
 // Refraction radius (bezel width) override; null → the worker's BEZEL_PX.
@@ -665,6 +685,7 @@ async function ensureFilter(
   superSample: number,
   saturate: number,
   chromaGate: number,
+  legacyProfile: boolean,
 ): Promise<string | null> {
   ensureSvgRoot();
   const w = snap(elemW);
@@ -688,7 +709,8 @@ async function ensureFilter(
 
   const promise = (async () => {
     const overflow = disp + blur * 2 + 4;
-    const map = await buildMapInWorker(w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX);
+    const map = await buildMapInWorker(
+      w, h, r, overflow, preset, bezel, superSample, MAP_PAD_PX, legacyProfile);
     if (!map) return null;
 
     const filter = buildFilterEl(id, w, h, overflow, map, blur, preset, disp, superSample, saturate, chromaGate);
@@ -835,10 +857,12 @@ function applyTo(element: HTMLElement) {
     const superSample = readSuperSample(element);
     const saturate = readSaturate(element);
     const chromaGate = readChromaGate(element);
-    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}-d${disp}-z${bezel ?? "def"}-s${superSample}-q${saturate}-c${chromaGate}@${flattenTarget}`;
+    const legacyProfile = readLegacyProfile(element);
+    const key = `${preset}-${snap(w)}-${snap(h)}-${snap(r)}-b${blur}-d${disp}-z${bezel ?? "def"}-s${superSample}-q${saturate}-c${chromaGate}-l${legacyProfile ? 1 : 0}@${flattenTarget}`;
     if (lastSize.get(element) === key) return;
     lastSize.set(element, key);
-    const id = await ensureFilter(w, h, r, blur, preset, disp, bezel, superSample, saturate, chromaGate);
+    const id = await ensureFilter(
+      w, h, r, blur, preset, disp, bezel, superSample, saturate, chromaGate, legacyProfile);
     if (!id) return; // worker dead → CSS fallback stays
     if (glassPaused) return;
     if (lastSize.get(element) !== key) return;
