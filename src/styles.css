@@ -88,6 +88,31 @@
   --text-entity-tag: rgba(255, 255, 255, 0.696);
   --bg-edge-right: #eef0f3;
 
+  /* ── Veil dither ── The GPU compositor rasterises the scroll-edge veil
+     gradients WITHOUT dithering (the software raster headless probes use
+     DOES dither, which is why captures always looked clean). Both veils
+     span only 1–2 of 255 levels end-to-end in dark mode, so on real
+     hardware the whole "gradient" quantises into flat plateaus separated
+     by hard contours: a full-height vertical cut left of the analysis
+     panel, and horizontal striping under the toolbar. One 8-bit step at
+     page luma 25 is ~7% relative luminance — plainly visible; the same
+     step at light's 233 is 0.4% — invisible. So light mode needs, and
+     gets, nothing: amplitude stays 0 here and the dither pseudos paint
+     nothing at all.
+     The fix is the dither the compositor skipped: per-pixel black noise
+     (feTurbulence in the alpha channel, RGB zeroed) laid over each veil,
+     masked by the veil's own ramp so the jitter scales with veil strength
+     and vanishes where the veil does. ~±half a level — enough to dissolve
+     a 1-level contour, far too faint to read as grain. */
+  /* The feFuncA stretch matters: raw fractalNoise alpha clusters tightly
+     around its mid value, which SHIFTS the whole field by a constant
+     instead of spreading pixels across the rounding threshold — measured
+     as a brand-new solid plateau at the veil's left edge. slope 3 expands
+     the histogram to the full 0..1 range so neighbouring pixels actually
+     straddle the threshold, which is the entire point of a dither. */
+  --veil-dither-noise: url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='128' height='128'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='1' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0'/><feComponentTransfer><feFuncA type='linear' slope='3' intercept='-1'/></feComponentTransfer></filter><rect width='128' height='128' filter='url(%23n)'/></svg>");
+  --veil-dither-a: 0;
+
   /* Multiplier on the edge-colour glow's overlay opacity, read once by
      src/lib/edge-color (and re-read when the colour scheme flips). Light mode
      needs more: a bright surface gives a colour wash far less to work against
@@ -315,6 +340,9 @@
     --text-body: #d4d4d0;
     --divider-line: rgba(255, 255, 255, 0.08);
     --bg-edge-right: #111110;
+    /* Veil dither on — see the light-mode block for the why. 0.06 × mean
+       noise alpha (~0.5) × page luma 25 ≈ ±¾ of a level of jitter. */
+    --veil-dither-a: 0.06;
 
     /* Settings / floating glass panel — dark mode (dark glass over dark bg) */
     --panel-bg: rgba(14, 14, 12, 0.84);
@@ -545,10 +573,40 @@ body {
   transition: opacity 220ms cubic-bezier(0.25, 0.1, 0.25, 1);
   z-index: 2;
 }
+/* Dither for the wash above. UNMASKED, full amplitude across the whole box:
+   the wash's first quantisation contour sits almost at the element's left
+   edge, where its alpha is still tiny — every ramp- or onset-shaped mask
+   tried starved the noise exactly at that most visible step (the 25→24
+   plateau survived two mask shapes untouched). A sparse ±¾-level noise
+   field ending at the box edge has no visible boundary of its own — unlike
+   the solid 1-level contour it dissolves. Dark mode only via
+   --veil-dither-a (see :root). */
+.scroll-edge-right::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+  background-image: var(--veil-dither-noise);
+  opacity: var(--veil-dither-a);
+}
 
 .scroll-edge-top-overlay {
   opacity: var(--scroll-edge-top-overlay-opacity);
   transition: opacity 220ms cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+/* Dither for the top veil — the ::after paints above the strips and the
+   overlay (DOM order), masked to the overlay's solid → 95% fade so the
+   noise tracks the veil's strength. Dark mode only via --veil-dither-a. */
+.scroll-edge-top::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--veil-dither-noise);
+  opacity: calc(var(--veil-dither-a) * var(--scroll-edge-top-overlay-opacity));
+  -webkit-mask-image: linear-gradient(to bottom, #000 15%, transparent 95%);
+  mask-image: linear-gradient(to bottom, #000 15%, transparent 95%);
 }
 
 /* ── Scroll-edge blur fade during fast scroll ──
