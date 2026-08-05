@@ -103,7 +103,7 @@ export interface AliasProposalResult {
   rejected: AliasRejection[];
 }
 
-const TITLES = [
+export const TITLES = [
   "Mr", "Mrs", "Ms", "Miss", "Dr", "Sir", "Lord", "Lady", "Captain", "Colonel",
   "Professor", "Madam", "Madame", "Monsieur", "Mademoiselle", "Aunt", "Uncle",
   "Father", "Mother", "Brother", "Sister", "Master", "Major", "General",
@@ -124,7 +124,7 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const LB = "(?<![A-Za-z0-9])";
 const RB = "(?![A-Za-z0-9])";
 
-interface NameParts {
+export interface NameParts {
   /** Title token without the dot, lower-cased, or "". */
   title: string;
   /** Everything after the title, original case. */
@@ -160,8 +160,12 @@ export function hypocorismOf(short: string, long: string): boolean {
 }
 
 /** "X and Y" / "X or Y" anywhere in the book is proof of two people. An author
- *  never coordinates a character with her own nickname. */
-function coordinated(text: string, a: string, b: string): boolean {
+ *  never coordinates a character with her own nickname.
+ *
+ *  Exported because alias-scan.ts harvests forms this file's morphology can
+ *  never link — a vocative nickname, an epithet — and those need the SAME
+ *  vetoes. A second copy of a safety rule is a rule that drifts. */
+export function coordinated(text: string, a: string, b: string): boolean {
   const A = esc(a), B = esc(b);
   return new RegExp(
     `${LB}(?:${A}\\s+(?:and|or)\\s+${B}|${B}\\s+(?:and|or)\\s+${A})${RB}`, "i",
@@ -195,7 +199,7 @@ function distinctGivenNames(a: NameParts, b: NameParts): boolean {
 }
 
 /** Do two names' gendered titles contradict each other? */
-function genderConflict(a: NameParts, b: NameParts): boolean {
+export function genderConflict(a: NameParts, b: NameParts): boolean {
   const g = (t: string) => (MALE_TITLES.has(t) ? "m" : FEMALE_TITLES.has(t) ? "f" : "");
   const ga = g(a.title), gb = g(b.title);
   return ga !== "" && gb !== "" && ga !== gb;
@@ -222,7 +226,7 @@ function genderConflict(a: NameParts, b: NameParts): boolean {
  *    many times over, so a majority would confidently return "male" and merge
  *    Georgiana anyway. The presence of both is the signal; the ratio is noise.
  */
-function surnameSharedByFamily(text: string, bare: string): boolean {
+export function surnameSharedByFamily(text: string, bare: string): boolean {
   if (!bare || bare.includes(" ")) return false;
   const n = esc(bare);
   const has = (titles: Iterable<string>) => {
