@@ -207,7 +207,10 @@ function modeNote(
 ): string | undefined {
   if (option.value === "off") return "Deterministic engines only. Nothing is downloaded.";
   const tier = MODE_TIER[option.value as Exclude<AssistantMode, "off">];
-  const st = live?.model?.tier === tier ? live : tierStatus[tier] ?? null;
+  // ★ The per-tier answer FIRST. `live` is only usable when it happens to be
+  //   about this tier, and using it otherwise is what put one model's download
+  //   state under another model's name.
+  const st = tierStatus[tier] ?? (live?.model?.tier === tier ? live : null);
 
   if (st?.state === "downloading") {
     const pct = Math.round((st.progress?.fraction ?? 0) * 100);
@@ -265,7 +268,18 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
     if (!api) return;
     let cancelled = false;
     const refresh = () => {
+      // ★★ EVERY TIER, NOT JUST THE ACTIVE ONE. `assistantStatus()` with no
+      //    argument answers about the DEFAULT tier, so a panel sitting in max
+      //    mode was reading the 1.7B's presence and printing it under "Max" —
+      //    and the "download, once" line then appeared beside a model that was
+      //    already on disk. Three modes need three answers; one status cannot
+      //    describe them.
       void api.assistantStatus().then((next) => { if (!cancelled) setStatus(next); }).catch(() => {});
+      for (const tier of ["small", "max"] as const) {
+        void api.assistantStatus({ tier })
+          .then((next) => { if (!cancelled) setTierStatus((prev) => ({ ...prev, [tier]: next })); })
+          .catch(() => {});
+      }
     };
     refresh();
     const off = api.onAssistantProgress?.(() => refresh());

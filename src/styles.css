@@ -481,6 +481,7 @@ body {
 .world-panel::after,
 .glass-range-knob::after,
 .glass-toggle-knob::after,
+.glass-mode-knob::after,
 .renderer-full-panel::after,
 .timeline-full-panel::after,
 .wc-panel::after,
@@ -7321,6 +7322,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
    background goes transparent so the canvas IS the surface; the specular
    ::before ring and the drop shadow stay in CSS, over and under it. */
 .glass-toggle-knob--painted,
+.glass-mode-knob--painted,
 .glass-range-knob--painted {
   /* The canvas paints the surface, so the element's own fill must not double
      it — but the TINT still belongs to CSS, so it stays a variable the
@@ -14295,6 +14297,7 @@ body.electron-window-unfocused .app .liquid-glass::before,
 body.electron-window-unfocused .app .analysis-tab::before,
 body.electron-window-unfocused .app .analysis-action-group::before,
 body.electron-window-unfocused .app .glass-range-knob::before,
+body.electron-window-unfocused .app .glass-mode-knob::before,
 body.electron-window-unfocused .app .glass-toggle-knob::before {
   content: none !important;
 }
@@ -14306,6 +14309,7 @@ body.electron-window-unfocused .app .liquid-glass::after,
 body.electron-window-unfocused .app .analysis-tab::after,
 body.electron-window-unfocused .app .analysis-action-group::after,
 body.electron-window-unfocused .app .glass-range-knob::after,
+body.electron-window-unfocused .app .glass-mode-knob::after,
 body.electron-window-unfocused .app .glass-toggle-knob::after,
 body.electron-window-unfocused .app .world-panel::after,
 body.electron-window-unfocused .app .widget-card::after {
@@ -15764,6 +15768,19 @@ body.electron-window-unfocused .wc-panel::after {
    this the knob swells and then snaps back flat while the finger is still
    down. Measured: the knob read 98px (scale 1) 420ms into a press that should
    have left it at 197px. Same rule, same values, as .glass-toggle--glass-active. */
+/* ★★ `:active` IS THE HALF THAT ACTUALLY WORKS, and shipping only the
+   `--glass-active` class was the bug. `.glass-mode:hover .glass-mode-knob` is
+   (0,3,0); a lone `.glass-mode--glass-active .glass-mode-knob` is (0,2,0), so
+   under a real mouse — which is hovering whenever it is pressing — hover won
+   and the knob sat at 1.06 and NEVER SWELLED. The glass simply never appeared.
+   `:active` ties hover at (0,3,0) and is declared later, so it wins; the class
+   is the companion that holds the state while the JS dwell runs on after the
+   button is released. Exactly the pair `.glass-toggle:active` uses, and the
+   reason the toggle does not have this bug.
+
+   ★ Measured with a REAL mouse (sendInputEvent), because synthetic
+   PointerEvents never set :hover — the first test could not see this at all. */
+.glass-mode:active .glass-mode-knob,
 .glass-mode--glass-active .glass-mode-knob {
   transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
   background: rgba(255, 255, 255, 0.18);
