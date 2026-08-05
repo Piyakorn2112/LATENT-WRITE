@@ -175,6 +175,75 @@ console.log("\ncomplementary distribution ranks, and refuses to rank on nothing"
     "vacuously true of a name that is not there, and that is the empty-set trap");
 }
 
+// ── 4b · the rules that only a REAL BOOK exposed ───────────────────────────
+//
+// ★★ EVERY GATE HERE COMES FROM A ROW A WRITER WOULD HAVE SEEN. The stress
+//    chapter is 20 paragraphs and cannot produce a family of five, a running
+//    head, a possessive, or an interjection in the vocative slot. Running the
+//    scan over Pride and Prejudice, Dracula, Sherlock and Gatsby produced all
+//    four, and each is locked here against the smallest prose that shows it.
+console.log("\nrules that a 20-paragraph fixture cannot reach");
+{
+  const run = (cast: string[], content: string) =>
+    scanAliases({ characters: cast.map((name) => ({ name, aliases: [] })), chapters: [{ content }] });
+
+  // A cast entry that is a FAMILY's surname can own nothing.
+  const family = run(["Bennet"], [
+    "Mr. Bennet was in the library, as Mr. Bennet always was at that hour.",
+    "Elizabeth Bennet came down late. Elizabeth Bennet had been reading.",
+    "Miss Bennet said nothing at all, and Miss Bennet was not asked.",
+    "Lydia Bennet laughed at the window. Lydia Bennet laughed at everything.",
+  ].join("\n\n"));
+  gate(family.candidates.length === 0,
+    "★ a cast entry that is a family surname collects nobody",
+    `collected ${family.candidates.map((c) => c.alias).join(", ")} — three sisters welded into one entry`);
+  gate(family.rejected.some((r) => r.veto === "shared-surname"),
+    "…and says shared-surname, so the refusal can be audited");
+
+  // A Title-Case token that lives all over the book is not a name-part.
+  const passing = run(["Watson"], [
+    "\"Hullo, Watson,\" he said, and Watson looked up from the fire.",
+    "\"Hullo, Watson,\" he said again the next morning, in the same tone.",
+    "Hullo is a word this narrator uses constantly. Hullo, said the boy.",
+    "Hullo, said the porter. Hullo, said the driver. Hullo to the whole street.",
+  ].join("\n\n"));
+  gate(!passing.candidates.some((c) => c.alias === "Hullo"),
+    "★ a greeting beside a name is not absorbed as a name-part",
+    `offered: ${passing.candidates.map((c) => c.alias).join(", ")}`);
+
+  // …but a token that lives ONLY beside the name is exactly that. The paired
+  // positive: a collocation test that refuses everything passes the gate above.
+  const partOf = run(["Wolfshiem"], [
+    "Meyer Wolfshiem came in at eleven. Nobody had asked Meyer Wolfshiem to come.",
+    "The card on the table said Meyer Wolfshiem, and under it, a telephone number.",
+  ].join("\n\n"));
+  gate(partOf.candidates.some((c) => c.alias === "Meyer Wolfshiem")
+    && partOf.candidates.some((c) => c.alias === "Meyer"),
+    "…and a token that lives only beside the name still is",
+    `offered: ${partOf.candidates.map((c) => c.alias).join(", ")}`);
+
+  // The possessive is the same name, not a second one.
+  const poss = run(["Mina"], [
+    "Mina Murray wrote it down. The page was Mina Murray's, in Mina Murray's hand.",
+    "Mina Murray had kept a journal for years, and Mina Murray's journal was thorough.",
+  ].join("\n\n"));
+  gate(!poss.candidates.some((c) => /['’]s$/.test(c.alias)),
+    "a possessive is never offered as its own name",
+    `offered: ${poss.candidates.map((c) => c.alias).join(", ")}`);
+  gate(poss.candidates.some((c) => c.alias === "Murray"),
+    "…and the name underneath it still is");
+
+  // A running head is typography, not a name.
+  const caps = run(["Holmes"], [
+    "THE ADVENTURE OF THE COPPER BEECHES\n\nHolmes sat down.",
+    "HUNTER Holmes read the telegram twice, and HUNTER Holmes said nothing.",
+    "Holmes was not surprised. Holmes was never surprised by a telegram.",
+  ].join("\n\n"));
+  gate(!caps.candidates.some((c) => /HUNTER/.test(c.alias)),
+    "an ALL-CAPS heading token is not a name",
+    `offered: ${caps.candidates.map((c) => c.alias).join(", ")}`);
+}
+
 // ── 5 · nothing silently mutates the cast ─────────────────────────────────
 console.log("\nthe scan proposes and never applies");
 {

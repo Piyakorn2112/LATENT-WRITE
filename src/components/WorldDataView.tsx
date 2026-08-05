@@ -9,7 +9,7 @@ import type {
   WorldFaction,
   WorldPlace,
 } from "../types";
-import { ensureWorldData, scanAndClassify, resolveSpeakerCandidates, autoExtractEntities, type ScanProgress, type ScanResult } from "../lib/world-data";
+import { ensureWorldData, scanAndClassify, resolveSpeakerCandidates, extractNameCandidatesFast, type ScanProgress, type ScanResult } from "../lib/world-data";
 import { proposeAliases, proposalsFor, coordinated, type AliasProposal } from "../lib/alias-propose";
 import { scanAliases, type AliasCandidate, type AliasScanResult } from "../lib/alias-scan";
 import {
@@ -427,7 +427,12 @@ export function WorldDataView({
             const result = scanAliases({
               characters: wd.characters,
               chapters: novel.chapters,
-              extraCandidates: autoExtractEntities(novel, 3, 60),
+              // ★★ NOT autoExtractEntities. It classifies every candidate with a
+              //    full-text regex apiece to decide place/faction/entity — 17s on
+              //    Pride and Prejudice, 39s on Dracula — and the alias scan
+              //    discards the classification, because an alias only ever
+              //    attaches to a CHARACTER. Names only, same discovery.
+              extraCandidates: extractNameCandidatesFast(novel, 3, 60),
               onProgress: (done, total, label) => setScanProgress({
                 stage: "extract", label, detail: `${done} / ${total}`,
                 completed: done, total,
@@ -594,9 +599,14 @@ export function WorldDataView({
       //    entries and could never offer "Lizzy", which is the case the feature
       //    exists for. autoExtractEntities is what reads the manuscript.
       //    Caught only by looking at a render that showed nothing.
+      // ★★ AND THE SAME STALL WAS ALREADY HERE, on a memo that re-runs whenever
+      //    the cast changes while the characters tab is open — so typing a name
+      //    into the panel froze the app for 17s on Pride and Prejudice and 39s
+      //    on Dracula. Measured, not suspected. The classification was always
+      //    discarded: proposeAliases wants candidate NAMES.
       const candidates = [...new Set([
         ...resolveSpeakerCandidates(novel),
-        ...autoExtractEntities(novel, 3, 60),
+        ...extractNameCandidatesFast(novel, 3, 60),
       ])];
       return proposeAliases(wd.characters, candidates, text);
     } catch (err) {

@@ -54,6 +54,28 @@
  *     is not a sentence start? This is the one that kills "Then Vale left" and
  *     "Suddenly Vasquez turned": a sentence-opening adverb is capitalised in
  *     every instance, a proper noun is capitalised mid-clause too.
+ *
+ * ── MEASURED ON FIVE PUBLIC-DOMAIN NOVELS ──────────────────────────────────
+ *
+ * Pride, Sherlock, Dracula, Gatsby, Carol — cast taken as the top 12 extracted
+ * names, which is harsher than a real writer's cast and puts junk like "God"
+ * and "West Egg" in it. 52 rows offered, 444 forms refused, ~0.7–4.1s a book.
+ *
+ * Adjacency, titled, attested and morphology rows are near-clean: "Mina ←
+ * Madam Mina" (87×), "Van Helsing ← Professor Van Helsing", "Elizabeth ←
+ * Lizzy", "Gatsby ← Jay Gatsby", "Lucy ← Lucy Westenra".
+ *
+ * ★ THE VOCATIVE LAYER IS THE WEAK ONE AND IT STAYS THAT WAY. Ten of the 52
+ *   rows come from it and roughly half are wrong — "Van Helsing ← Jack",
+ *   "Gatsby ← Yeah", "Watson ← Jones". Raising the floor from one resolution
+ *   to two removed most of it (`Watson ← Hullo`, `Wilson ← Listen`, `Don ←
+ *   Ah-h-h` all went); what survives is another CHARACTER'S name spoken in a
+ *   scene where the wrong person was the only one left standing. Fixing it
+ *   properly needs subject-hood — a name that also ACTS is a person in their
+ *   own right, not a nickname — and that is a second full pass over the book.
+ *   Left undone deliberately: these rows arrive unticked, carry the passage,
+ *   and cost a glance. Do not "fix" it by deleting the layer; it is the only
+ *   thing that finds a nickname which appears nowhere but dialogue.
  */
 import { isCommonWordName } from "./action-detect";
 import { detectSpeechInChapter } from "./speech-detect";
@@ -176,6 +198,20 @@ const MAX_PER_CHARACTER = 8;
 const PRESENCE_WINDOW = 2;
 /** Below this many occurrences a stray form is not worth the model's time. */
 const MIN_UNRESOLVED = 4;
+/**
+ * ★★ THE COLLOCATION TEST, and it is what separates a name-part from a word
+ *    that merely stood next to a name. A surname BELONGS to its character:
+ *    "Vasquez" occurs only ever inside "Elena Vasquez", "Sherlock" only ever
+ *    before "Holmes". A greeting or a passing character does not — measured on
+ *    the Sherlock corpus, adjacency alone offered `Watson ← Hullo` ("Hullo
+ *    Watson," he said) and `Watson ← Jones`, because a Title-Case token beside
+ *    a name is the same shape whatever the token means.
+ *
+ *    So: a neighbour is a name-part only if MOST of its occurrences in the book
+ *    are attached to this name. Titles are exempt — "Miss" is shared by every
+ *    woman in the book by definition, and that is what a title IS.
+ */
+const MIN_ADJACENT_SHARE = 0.5;
 /** How many unattached forms may reach the model layer. */
 const MAX_UNRESOLVED = 8;
 
@@ -232,6 +268,11 @@ function plausibleName(
   opts: { attested?: boolean; alsoSeenAs?: string; positionProven?: boolean } = {},
 ): AliasScanVeto | null {
   if (NEVER_A_NAME.has(token.toLowerCase().replace(/\.$/, ""))) return "common-word";
+  // ★ AN ALL-CAPS TOKEN IS TYPOGRAPHY, NOT A NAME — a chapter heading, a sign,
+  //   a shout. `[A-Z][A-Za-z]*` matches "HUNTER" as happily as "Hunter", and on
+  //   the Sherlock corpus that put `Holmes ← HUNTER` in front of the writer,
+  //   harvested from a running head. Two letters minimum so an initial survives.
+  if (/^[A-Z]{2,}$/.test(token)) return "common-word";
   // ★★ A VOCATIVE IS ALREADY IN A PROPER-NOUN-ONLY POSITION, so asking
   //    looksProperNoun about it is asking the same question twice and getting
   //    the wrong answer: the vocative slot is bounded by a comma or an opening
@@ -308,9 +349,20 @@ export function absorbNeighbours(
     `(?:(${TOKEN})[ \\t]+)?${LB}${esc(name)}${RB}(?:[ \\t]+(${TOKEN})${RB})?`,
     "g",
   );
+  // ★ A POSSESSIVE IS THE SAME NAME. The token class has to allow an apostrophe
+  //   for O'Brien and D'Arcy, which also swallows the trailing 's — and the
+  //   result was `Mina ← Mina Murray's` and `Lucy ← Westenra's` offered
+  //   alongside the bare forms, two rows for one decision and neither of them
+  //   how the name is spelled. Strip only a TRAILING possessive; the internal
+  //   apostrophe is part of the name.
+  const bare = (t: string) => t.replace(/['’]s$/, "").replace(/['’]$/, "");
+  const add = (into: Map<string, number>, token: string) => {
+    const key = bare(token);
+    if (key.length >= 2) into.set(key, (into.get(key) ?? 0) + 1);
+  };
   for (const m of text.matchAll(re)) {
-    if (m[1]) left.set(m[1], (left.get(m[1]) ?? 0) + 1);
-    if (m[2]) right.set(m[2], (right.get(m[2]) ?? 0) + 1);
+    if (m[1]) add(left, m[1]);
+    if (m[2]) add(right, m[2]);
   }
   return { left, right };
 }
@@ -547,6 +599,19 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
       rejected.push({ character: c.raw, alias, veto: "shared-surname" });
       return;
     }
+    // ★★ AND THE CANONICAL SIDE, which is the direction that actually bites.
+    //    The check above asks whether the ALIAS is a family's surname. It says
+    //    nothing when the CAST ENTRY is one — and a writer who has typed
+    //    "Bennet" into the panel has an entry that could be any of five people.
+    //    Measured on Pride and Prejudice: that entry collected "Elizabeth
+    //    Bennet", "Lydia Bennet" and "Eliza Bennet" as its own aliases, three
+    //    sisters welded into one character, silently. If the book writes both a
+    //    male and a female title before the entry's own name, nothing can be
+    //    attached to it, because nobody can tell which family member it means.
+    if (!c.parts.bare.includes(" ") && surnameSharedByFamily(text, c.parts.bare)) {
+      rejected.push({ character: c.raw, alias, veto: "shared-surname" });
+      return;
+    }
     // ★ "X and Y" anywhere in the book is proof of two people, and it is the
     //   veto that matters most for an EPITHET: "Elena and the Ash Marshal
     //   exchanged a look" settles it instantly and no other test would.
@@ -589,6 +654,10 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
 
     for (const [token, hits] of right) {
       if (hits < MIN_INFERRED) continue;
+      if (hits / Math.max(1, countOf(text, token)) < MIN_ADJACENT_SHARE) {
+        rejected.push({ character: c.raw, alias: token, veto: "common-word" });
+        continue;
+      }
       const veto = plausibleName(token, text, { alsoSeenAs: `${c.raw} ${token}` });
       if (veto) { rejected.push({ character: c.raw, alias: token, veto }); continue; }
       // The full form is near-certain: it CONTAINS the canonical name.
@@ -609,6 +678,10 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
           `addressed as “${token} ${c.raw}” ${hits}×`, false);
         continue;
       }
+      if (hits / Math.max(1, countOf(text, token)) < MIN_ADJACENT_SHARE) {
+        rejected.push({ character: c.raw, alias: token, veto: "common-word" });
+        continue;
+      }
       const veto = plausibleName(token, text, { alsoSeenAs: `${token} ${c.raw}` });
       if (veto) { rejected.push({ character: c.raw, alias: token, veto }); continue; }
       offer(c, `${token} ${c.raw}`, "adjacent-left", 0.9,
@@ -620,7 +693,7 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
 
   // ── layer 3 · vocatives ─────────────────────────────────────────────────
   input.onProgress?.(3, 4, "Listening for spoken names");
-  const vocativeAmbiguous = new Map<string, { count: number; snippets: string[]; speakers: Set<string> }>();
+  const vocativeAmbiguous = new Map<string, { count: number; snippets: string[]; speakers: Set<string>; candidates: Set<string> }>();
   const vocativeCounts = new Map<string, Map<string, number>>();
 
   paragraphs.forEach((para, i) => {
@@ -651,8 +724,9 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
           //   that was never harvested at all.
           for (const who of here) rejected.push({ character: who, alias: token, veto: "ambiguous" });
           const entry = vocativeAmbiguous.get(token)
-            ?? { count: 0, snippets: [], speakers: new Set<string>() };
+            ?? { count: 0, snippets: [], speakers: new Set<string>(), candidates: new Set<string>() };
           entry.count += 1;
+          for (const who of here) entry.candidates.add(who);
           // ★ CARRIED FORWARD SO THE MODEL IS NEVER OFFERED THE SPEAKER. The
           //   inversion that makes a vocative useful — it names the person
           //   spoken TO — is a fact, not a guess, and it survives the handoff
@@ -677,6 +751,25 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
     }
   });
 
+  // ★★ AN AMBIGUOUS INSTANCE REINFORCES AN ALREADY-UNIQUE RESOLUTION. Speech
+  //    attribution is not perfect, and when it misses, a vocative that would
+  //    have resolved cleanly lands in the ambiguous pile instead — so a real
+  //    nickname spoken twice can be left holding one resolution and get thrown
+  //    away by the floor below. If the token already resolves to exactly ONE
+  //    person elsewhere, and that person is among the candidates present for
+  //    this instance, the instance is theirs. This can only strengthen an
+  //    existing link, never invent one: the person must already be the unique
+  //    answer AND be in the room. Same anchoring rule as speech-detect's
+  //    sandwich pass — propagate belief from attested points, never from
+  //    guesses.
+  for (const [token, entry] of vocativeAmbiguous) {
+    const byName = vocativeCounts.get(token.toLowerCase());
+    if (!byName || byName.size !== 1) continue;
+    const [who] = [...byName.keys()];
+    if (!entry.candidates.has(who)) continue;
+    byName.set(who, (byName.get(who) ?? 0) + entry.count);
+  }
+
   for (const [key, byName] of vocativeCounts) {
     const ranked = [...byName.entries()].sort((a, b) => b[1] - a[1]);
     // ★ AMBIGUITY IS A VETO, NOT A TIE-BREAK — the rule alias-propose is built
@@ -687,6 +780,17 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
       continue;
     }
     const [who, hits] = ranked[0];
+    // ★★ ONCE IS A COINCIDENCE — the rule adjacency already lives by, applied
+    //    to the RIGHT counter. `offer` gates on how often the word occurs in
+    //    the book, which for an interjection is often. Measured: every bad
+    //    vocative row across four novels said "spoken to X 1×" — `Watson ←
+    //    Hullo`, `Gatsby ← Yeah`, `Wilson ← Listen`, `Don ← Ah-h-h`. One
+    //    resolution cannot be told apart from an interjection landing beside
+    //    whoever happened to be in the room; a real nickname is used again.
+    if (hits < MIN_INFERRED) {
+      rejected.push({ character: who, alias: key, veto: "too-rare" });
+      continue;
+    }
     const c = cast.find((x) => x.raw === who);
     if (!c) continue;
     // Restore the surface casing from the manuscript.
@@ -695,37 +799,9 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
       `spoken to ${who} ${hits}×`, false);
   }
 
-  // ── ambiguity across the whole harvest ──────────────────────────────────
-  //
-  // ★★ RE-CHECKED ON THE OUTPUT, not just per form. Two layers can each link
-  //    one form to a different character quite happily — the adjacency pass
-  //    reads "Vasquez" off Elena while a vocative reads it off Marcus — and
-  //    neither pass can see the other. Same principle, applied last.
-  //
-  // ★ EXCEPT WHEN THE FORM CONTAINS THE NAME. "Elena Vasquez" is claimed by
-  //   "Elena" and by "Vasquez" whenever the writer's cast holds both — which is
-  //   the fragmented cast this whole feature exists to repair — and dropping it
-  //   as ambiguous would refuse the one row that fixes it. Containment is
-  //   itself the proof: an alias that is the canonical name PLUS more can only
-  //   be that character. The dangerous direction is the reverse ("Bennet"
-  //   inside "Elizabeth Bennet" and "Jane Bennet"), and that one still drops.
-  const containsName = (alias: string, character: string) =>
-    new RegExp(`${LB}${esc(character)}${RB}`, "i").test(alias);
-  const claimants = new Map<string, Set<string>>();
-  for (const cand of rawCandidates) {
-    if (containsName(cand.alias, cand.character)) continue;
-    const set = claimants.get(cand.alias.toLowerCase()) ?? new Set<string>();
-    set.add(cand.character.toLowerCase());
-    claimants.set(cand.alias.toLowerCase(), set);
-  }
-
+  // ── one row per pair ────────────────────────────────────────────────────
   const byPair = new Map<string, AliasCandidate>();
   for (const cand of rawCandidates) {
-    if (!containsName(cand.alias, cand.character)
-      && (claimants.get(cand.alias.toLowerCase())?.size ?? 0) > 1) {
-      rejected.push({ character: cand.character, alias: cand.alias, veto: "ambiguous" });
-      continue;
-    }
     const key = `${cand.character.toLowerCase()}|${cand.alias.toLowerCase()}`;
     const prior = byPair.get(key);
     // Attested beats inferred; within a class, the higher confidence wins.
@@ -775,6 +851,44 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
     if (r.veto === "too-rare" || r.veto === "ambiguous" || r.veto === "coordination"
       || r.veto === "shared-surname" || r.veto === "honorific-gender") {
       rejected.push({ character: r.character, alias: r.alias, veto: r.veto });
+    }
+  }
+
+  // ── ambiguity across the WHOLE output, morphology included ──────────────
+  //
+  // ★★ RE-CHECKED LAST, AND "LAST" MEANS AFTER THE MORPHOLOGY MERGE. This pass
+  //    used to run on the harvest, before alias-propose contributed — and
+  //    alias-propose adds rows nobody re-examined. Measured on the Sherlock
+  //    corpus with a fragmented cast holding both "Holmes" and "Sherlock
+  //    Holmes": adjacency produced `Holmes ← Sherlock`, morphology then added
+  //    `Sherlock Holmes ← Sherlock`, and BOTH shipped — one name offered as two
+  //    different people's alias, which is the precise failure this check
+  //    exists to prevent. A veto that runs before the last producer is not a
+  //    veto. Found only by running it on a real book.
+  //
+  // ★ EXCEPT WHEN THE ALIAS BEGINS WITH THE NAME. "Elena Vasquez" is claimed by
+  //   "Elena" and by "Vasquez" whenever the cast holds both — the fragmented
+  //   cast this feature exists to repair — and dropping it would refuse the row
+  //   that fixes it. ★★ ONLY THE PREFIX DIRECTION IS SAFE, and the first
+  //   version of this said "contains", which is not. On Pride and Prejudice a
+  //   cast entry "Bennet" collected `Elizabeth Bennet`, `Lydia Bennet` AND
+  //   `Eliza Bennet` — three sisters folding into one surname, exempted from
+  //   the one check that would have caught them. A given name plus a surname
+  //   can only be that person; a surname is a whole family's.
+  const beginsWithName = (alias: string, character: string) =>
+    new RegExp(`^${esc(character)}${RB}`, "i").test(alias.trim());
+  const claimants = new Map<string, Set<string>>();
+  for (const cand of byPair.values()) {
+    if (beginsWithName(cand.alias, cand.character)) continue;
+    const set = claimants.get(cand.alias.toLowerCase()) ?? new Set<string>();
+    set.add(cand.character.toLowerCase());
+    claimants.set(cand.alias.toLowerCase(), set);
+  }
+  for (const [key, cand] of [...byPair.entries()]) {
+    if (beginsWithName(cand.alias, cand.character)) continue;
+    if ((claimants.get(cand.alias.toLowerCase())?.size ?? 0) > 1) {
+      rejected.push({ character: cand.character, alias: cand.alias, veto: "ambiguous" });
+      byPair.delete(key);
     }
   }
 
@@ -838,7 +952,7 @@ function collectUnresolved(
   paragraphs: readonly ScanParagraph[],
   cast: readonly { raw: string }[],
   knownForms: ReadonlySet<string>,
-  vocativeAmbiguous: ReadonlyMap<string, { count: number; snippets: string[]; speakers: Set<string> }>,
+  vocativeAmbiguous: ReadonlyMap<string, { count: number; snippets: string[]; speakers: Set<string>; candidates: Set<string> }>,
   resolved: readonly AliasCandidate[],
 ): UnresolvedForm[] {
   const taken = new Set(resolved.map((c) => c.alias.toLowerCase()));
