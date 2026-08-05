@@ -120,7 +120,10 @@ export type AssistantState =
   | "low-memory"
   | "error";
 
-export type AssistantTier = "small";
+/** ★ "max" is the 4B thinking tier; see the registry in electron/assistant.cjs.
+ *  Widened here rather than at each call site so the bridge, the status shape
+ *  and the ensure/delete options all move together. */
+export type AssistantTier = "small" | "max";
 
 export interface AssistantStatus {
   state: AssistantState;
@@ -134,6 +137,13 @@ export interface AssistantStatus {
     source: "env" | "userData";
   };
   progress?: { received: number; total: number; fraction: number };
+  /**
+   * Set when the last load had to SHORTEN its context to fit this machine.
+   * Present rather than silent because a trimmed window is the feature quietly
+   * getting worse, and the writer should be told once, beside the control that
+   * made the choice.
+   */
+  degraded?: { tier: string; wanted: number; using: number; availableBytes: number } | null;
   host: {
     alive: boolean;
     pid: number | null;

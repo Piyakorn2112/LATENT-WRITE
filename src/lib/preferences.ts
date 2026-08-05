@@ -40,7 +40,20 @@ export interface Preferences {
    *  can never turn a model download on by accident. */
   assistant?: {
     enabled: boolean;
-    tier?: "auto" | "small";
+    /**
+     * ★ THREE NAMED STATES, and `enabled` is now derived from this rather than
+     *   the other way round. `off` runs the deterministic engines alone and
+     *   downloads nothing; `on` is the 1.7B every prompt in this repo was
+     *   measured against; `max` is the 4B thinking model, a bigger download and
+     *   a different set of prompts.
+     *
+     * ★★ `enabled` IS KEPT AND KEPT TRUTHFUL. Half a dozen call sites gate on
+     *    it, and a migration that leaves a stale `true` beside `mode: "off"`
+     *    would have the model loading for a writer who just switched it off.
+     *    Both are written together, always, in `readAssistant`.
+     */
+    mode?: AssistantMode;
+    tier?: "auto" | "small" | "max";
     /** A writer-supplied model URL, used when the pinned source is unreachable. */
     sourceUrl?: string;
   };
@@ -67,12 +80,36 @@ const DEFAULTS: Preferences = {
 
 const KEY = "latentwrite:prefs-v1";
 
+export type AssistantMode = "off" | "on" | "max";
+
+/** The registry tier each mode loads. `off` loads nothing. */
+export const MODE_TIER: Record<Exclude<AssistantMode, "off">, "small" | "max"> = {
+  on: "small",
+  max: "max",
+};
+
 /** Absent, malformed, or half-written assistant prefs all read as "not opted in".
  *  Returning undefined (rather than `{enabled:false}`) keeps "never asked" and
  *  "asked and declined" the same state — the feature is dormant either way. */
 function readAssistant(raw: Preferences["assistant"] | undefined): Preferences["assistant"] {
-  if (!raw || typeof raw !== "object" || raw.enabled !== true) return undefined;
-  return { enabled: true, tier: raw.tier === "small" ? "small" : "auto" };
+  if (!raw || typeof raw !== "object") return undefined;
+  // ★ MIGRATION, IN THE DIRECTION THAT CANNOT SURPRISE ANYONE. A prefs blob
+  //   written before modes existed has `enabled: true` and no mode — that
+  //   writer opted into the 1.7B, so they get "on", never "max": a silent
+  //   upgrade would start a 2.5 GB download nobody asked for.
+  const mode: AssistantMode | undefined =
+    raw.mode === "off" || raw.mode === "on" || raw.mode === "max"
+      ? raw.mode
+      : raw.enabled === true ? "on" : undefined;
+  if (!mode || mode === "off") return undefined;
+  const tier = mode === "max" ? "max" : raw.tier === "small" ? "small" : "auto";
+  // `enabled` is derived, never trusted from disk — see the note on the field.
+  return { enabled: true, mode, tier, sourceUrl: raw.sourceUrl };
+}
+
+/** The mode a Preferences blob represents. Absent assistant prefs = off. */
+export function assistantMode(prefs: Preferences): AssistantMode {
+  return prefs.assistant?.mode ?? (prefs.assistant?.enabled ? "on" : "off");
 }
 
 export function loadPrefs(): Preferences {

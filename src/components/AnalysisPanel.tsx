@@ -29,10 +29,11 @@ import type { StoryGraph, ReviewResult } from "../types";
 import { SeparatorHorizontal } from "lucide-react";
 import { IOS_COLORS } from "../lib/palette";
 import type { Preferences, Typography, WritingGoals } from "../lib/preferences";
-import { FONT_LABELS } from "../lib/preferences";
+import { FONT_LABELS, assistantMode, MODE_TIER, type AssistantMode } from "../lib/preferences";
 import { NumberStepper } from "./NumberStepper";
 import { GlassRange } from "./GlassRange";
 import { GlassToggle } from "./GlassToggle";
+import { GlassModeSelector, type ModeOption } from "./GlassModeSelector";
 import {
   type WidgetConfig,
   type WidgetConfigEntry,
@@ -160,6 +161,70 @@ function assistantStatusLine(status: AssistantStatus | null, enabled: boolean): 
 }
 
 /**
+ * The three modes, and what each one actually costs. The numbers are the
+ * measured ones — see the registry in electron/assistant.cjs — because a
+ * download size a writer can check is the difference between a choice and a
+ * leap of faith.
+ */
+const MODE_OPTIONS: ReadonlyArray<ModeOption<AssistantMode>> = [
+  {
+    value: "off",
+    label: "Off",
+    title: "Deterministic engines only. Nothing is downloaded.",
+  },
+  {
+    value: "on",
+    label: "On",
+    title: "Qwen3 1.7B, 1.1 GB. Marks, classifies and checks continuity while you write.",
+  },
+  {
+    value: "max",
+    label: "Max",
+    title: "Qwen3 4B Thinking, 2.5 GB. Reads for meaning. Needs about 3.7 GB free.",
+  },
+];
+
+/** Size on disk per mode, for the line under the track. */
+const MODE_SIZE: Record<AssistantMode, string> = {
+  off: "",
+  on: "1.1 GB",
+  max: "2.5 GB",
+};
+
+/**
+ * The one line under the track. It answers, in order of what the writer needs:
+ * is it downloading, did it have to shrink to fit this machine, is the model
+ * even here yet, and otherwise what this mode does.
+ *
+ * ★ THE DEGRADE NOTE IS SHOWN WHERE THE CHOICE WAS MADE. A shorter context is
+ *   the feature quietly getting worse; putting the reason anywhere but beside
+ *   the control that caused it is how a silent downgrade happens.
+ */
+function modeNote(
+  option: ModeOption<AssistantMode>,
+  tierStatus: Record<string, AssistantStatus | null>,
+  live: AssistantStatus | null,
+): string | undefined {
+  if (option.value === "off") return "Deterministic engines only. Nothing is downloaded.";
+  const tier = MODE_TIER[option.value as Exclude<AssistantMode, "off">];
+  const st = live?.model?.tier === tier ? live : tierStatus[tier] ?? null;
+
+  if (st?.state === "downloading") {
+    const pct = Math.round((st.progress?.fraction ?? 0) * 100);
+    return `Downloading ${MODE_SIZE[option.value]}… ${pct}%`;
+  }
+  const degraded = st?.degraded;
+  if (degraded) {
+    return `Running at ${degraded.using / 1024}k context on this machine `
+      + `(wanted ${degraded.wanted / 1024}k) — close other apps for the full window.`;
+  }
+  if (st && !st.model?.present) {
+    return `${MODE_SIZE[option.value]} download, once. ${option.title ?? ""}`.trim();
+  }
+  return option.title;
+}
+
+/**
  * "Local enhancements" — the one opt-in for the local model, which now serves
  * several engines (entity review, timeline chips, chapter summaries,
  * continuity adjudication), so the row is named for the capability rather than
@@ -167,7 +232,10 @@ function assistantStatusLine(status: AssistantStatus | null, enabled: boolean): 
  * so the row does not exist there rather than existing and refusing.
  */
 function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSetPrefs: (next: Preferences) => void }) {
-  const enabled = !!prefs.assistant?.enabled;
+  const mode = assistantMode(prefs);
+  const enabled = mode !== "off";
+  /** Per-tier presence, so each mode can say whether ITS model is on disk. */
+  const [tierStatus, setTierStatus] = useState<Record<string, AssistantStatus | null>>({});
   const [status, setStatus] = useState<AssistantStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -204,23 +272,36 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
     return () => { cancelled = true; off?.(); };
   }, []);
 
-  const handleToggle = (next: boolean) => {
-    onSetPrefs({ ...prefs, assistant: { ...(prefs.assistant ?? {}), enabled: next } });
+  /**
+   * Switching mode. `off` unloads and downloads nothing; the other two ensure
+   * THEIR OWN tier's model, so choosing one never fetches the other.
+   *
+   * ★ THE PREF IS WRITTEN BEFORE THE DOWNLOAD STARTS, not after it finishes. A
+   *   2.5 GB fetch can outlive the panel, the window, or the writer's patience,
+   *   and a mode that only sticks on success means closing the panel mid-download
+   *   silently reverts the choice they made.
+   */
+  const handleMode = (next: AssistantMode) => {
+    const tier = next === "off" ? undefined : MODE_TIER[next];
+    onSetPrefs({
+      ...prefs,
+      assistant: { ...(prefs.assistant ?? {}), enabled: next !== "off", mode: next, tier },
+    });
     const api = window.electronAPI;
     if (!api) return;
-    if (!next) {
+    if (next === "off") {
       void api.assistantUnload().catch(() => {});
       void api.assistantStatus().then(setStatus).catch(() => {});
       return;
     }
     setBusy(true);
-    // "auto" is the runtime's own choice, so it is expressed by NOT pinning a
-    // tier; only an explicit pin travels.
-    const opts = prefs.assistant?.tier === "small" ? { tier: "small" as const } : undefined;
-    void api.assistantEnsureModel(opts)
+    void api.assistantEnsureModel({ tier })
       .catch(() => undefined)
-      .then(() => api.assistantStatus())
-      .then((s) => setStatus(s ?? null))
+      .then(() => api.assistantStatus({ tier }))
+      .then((s) => {
+        setStatus(s ?? null);
+        setTierStatus((prev) => ({ ...prev, [tier as string]: s ?? null }));
+      })
       .catch(() => {})
       .finally(() => setBusy(false));
   };
@@ -287,10 +368,21 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
         >
           ⋯
         </button>
-        <GlassToggle
-          checked={enabled}
-          onChange={handleToggle}
-          ariaLabel="Toggle local enhancements"
+      </div>
+
+      {/* ★ THE MODE LIVES ON ITS OWN ROW, not squeezed beside the title. A
+          three-stop track needs width to stay readable, and its knob swells
+          past the track on press — a control that grows cannot sit in a tight
+          right-hand column. */}
+      <div className="assistant-mode-row">
+        <GlassModeSelector
+          value={mode}
+          options={MODE_OPTIONS.map((o) => ({
+            ...o,
+            note: o.value === mode ? modeNote(o, tierStatus, status) : undefined,
+          }))}
+          onChange={handleMode}
+          ariaLabel="Local enhancement mode"
         />
       </div>
 

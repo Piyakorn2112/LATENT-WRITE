@@ -15823,3 +15823,13 @@ body.electron-window-unfocused .wc-panel::after {
   padding: 0 4px;
   line-height: 1.4;
 }
+
+/* The mode selector's own row inside the settings panel. It is full-width and
+   under the title rather than beside it: a three-stop track needs room to stay
+   readable, and its knob swells past the track on press, so it cannot live in
+   a tight right-hand column the way a toggle does. */
+.assistant-mode-row {
+  padding: 2px 0 10px;
+}
+
+.assistant-mode-row .glass-mode { height: 28px; }

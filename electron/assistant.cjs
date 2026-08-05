@@ -58,7 +58,47 @@ const MODEL_REGISTRY = {
     bytes: 1107409472,
     sha256: 'b139949c5bd74937ad8ed8c8cf3d9ffb1e99c866c823204dc42c0d91fa181897',
     contextSize: 4096,   // Metal tier; pass 2048 for the CPU tier
+    minContextSize: 2048,
     noThink: true,       // Qwen3 thinking-mode toggle applies
+    // ★★ MEASURED, NOT DERIVED. scripts/probe-mem-footprint loaded this model
+    //    at 2048 / 4096 / 8192 / 16384 and read the helper's RSS: 1763 / 1940 /
+    //    2484 / 3176 MB. That is 103 KB per token of context — over the useful
+    //    range, MORE than the entire 1.06 GB weights file. Without it in the
+    //    budget below, the guard thinks a long context is free.
+    kvBytesPerToken: 103 * 1024,
+  },
+  /**
+   * ★ THE "MAX" TIER — a real reasoning model, chosen against the 8 GB ceiling
+   *   rather than for a leaderboard. Qwen3-4B-Thinking-2507 at Q4_K_M is 2.5 GB
+   *   of weights and ~132 KB/token of KV (36 layers against the 1.7B's 28,
+   *   scaled from the measurement above):
+   *
+   *        4k context  ~3.7 GB   fits 8 GB
+   *        8k context  ~4.3 GB   fits 12 GB, marginal on 8
+   *       16k context  ~5.5 GB   12 GB only
+   *
+   * ★★ AND NO MoE, DELIBERATELY. MoE saves COMPUTE, not memory — every expert
+   *    stays resident, so Qwen3-30B-A3B is ~18.6 GB at Q4 despite activating
+   *    3B a token. There is no MoE at a size that helps an 8 GB target; the
+   *    smallest useful ones land where this dense 4B already sits, with worse
+   *    tooling support.
+   */
+  max: {
+    id: 'qwen3-4b-thinking-2507-q4_k_m',
+    tier: 'max',
+    label: 'Qwen3 4B Thinking (Q4_K_M)',
+    license: 'Apache-2.0',
+    repo: 'unsloth/Qwen3-4B-Thinking-2507-GGUF',
+    revision: 'f40adb104d4d44aee52f398b60597c5866a973a3',
+    file: 'Qwen3-4B-Thinking-2507-Q4_K_M.gguf',
+    bytes: 2497281152,
+    sha256: 'ddd52e18200baab281c5c46f70d544ce4d4fe4846eab1608f2fff48a64554212',
+    contextSize: 8192,
+    /** What it drops to when the machine cannot hold the preferred size. */
+    minContextSize: 4096,
+    /** A thinking model must be allowed to think — the toggle stays off. */
+    noThink: false,
+    kvBytesPerToken: 132 * 1024,
   },
 };
 
@@ -81,6 +121,7 @@ let _inflight = null;          // { requestId, resolve, timer }
 let _claiming = false;         // a run has claimed the slot but is still loading
 let _download = null;          // { tier, promise, received, total }
 let _lowMemory = null;         // { needBytes, availableBytes } while latched
+let _degraded = null;          // { tier, wanted, using } when context was trimmed to fit
 let _fatal = null;             // string
 let _idleTimer = null;
 let _lastProgressAt = 0;
@@ -300,6 +341,9 @@ function assistantStatus({ tier } = {}) {
   const p = modelPathFor(tier);
   return {
     state: currentState(tier),
+    /** Set when the last load had to shorten its context to fit this machine.
+     *  The UI shows it once, beside the control that made the choice. */
+    degraded: _degraded && _degraded.tier === entry.tier ? _degraded : null,
     model: {
       id: entry.id,
       tier: entry.tier,
@@ -680,6 +724,41 @@ async function ensureHost() {
   return child;
 }
 
+/**
+ * What a load of this model at this context actually costs.
+ *
+ * ★★ THE KV CACHE WAS MISSING FROM THIS BUDGET, and it is the bigger term over
+ *    the useful range. Measured on Qwen3-1.7B: the weights are 1.06 GB, and
+ *    going from 2k to 16k context added 1.41 GB — so the guard was approving
+ *    loads that then had to swap. On an 8 GB machine, which is the target this
+ *    tier exists for, that is the difference between "works" and "beachball".
+ */
+function loadCostBytes(entry, modelPath, wantContext) {
+  const weights = fs.statSync(modelPath).size;
+  const perToken = Number(entry.kvBytesPerToken) || 0;
+  return weights + perToken * wantContext + memoryHeadroomBytes();
+}
+
+/**
+ * The largest context this machine can actually hold, at or below the wanted
+ * one, or null when even the floor does not fit.
+ *
+ * ★ DEGRADE, DO NOT REFUSE. A writer who picked "max" on a small machine gets
+ *   max at a shorter context and a note saying so, rather than a greyed-out
+ *   control and no feature. The note is the price of the degrade — a silently
+ *   shortened context is a feature quietly getting worse for reasons nobody
+ *   can see.
+ */
+function fittingContext(entry, modelPath, wantContext) {
+  const floor = Number(entry.minContextSize) || wantContext;
+  const available = availableMemoryBytes();
+  for (let ctx = wantContext; ctx >= floor; ctx = Math.floor(ctx / 2)) {
+    if (available >= loadCostBytes(entry, modelPath, ctx)) return ctx;
+    if (ctx === floor) break;
+  }
+  return available >= loadCostBytes(entry, modelPath, floor) ? floor : null;
+}
+
 /** Fork (if needed), guard memory, then load the model in the host. */
 async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
   const entry = activeEntry(tier);
@@ -700,12 +779,18 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
       return { ok: false, error: _fatal };
     }
 
-    const needBytes = fs.statSync(modelPath).size + memoryHeadroomBytes();
     const availableBytes = availableMemoryBytes();
-    if (availableBytes < needBytes) {
+    const fitContext = fittingContext(entry, modelPath, wantContext);
+    if (fitContext === null) {
+      const needBytes = loadCostBytes(entry, modelPath, Number(entry.minContextSize) || wantContext);
       _lowMemory = { needBytes, availableBytes };
       return { ok: false, error: 'low-memory', needBytes, availableBytes };
     }
+    // Reported so the UI can say WHAT was trimmed and why, once.
+    _degraded = fitContext < wantContext
+      ? { tier: entry.tier, wanted: wantContext, using: fitContext, availableBytes }
+      : null;
+    const needBytes = loadCostBytes(entry, modelPath, fitContext);
     _lowMemory = null;
 
     await ensureHost();
@@ -727,7 +812,7 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
       };
       _host.on('message', onMsg);
       _host.postMessage({
-        type: 'load', modelPath, contextSize: wantContext,
+        type: 'load', modelPath, contextSize: fitContext,
         gpuLayers: process.env.ASSISTANT_GPU_LAYERS ? Number(process.env.ASSISTANT_GPU_LAYERS) : 'max',
         kvCacheType: entry.kvCacheType || null,
       });
@@ -736,7 +821,7 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
     _hostLoading = false;
     if (!loaded.ok) { _fatal = loaded.error; return loaded; }
     armIdleTimer();
-    return { ok: true, ..._hostLoaded, verifyMs: verified.ms };
+    return { ok: true, ..._hostLoaded, verifyMs: verified.ms, degraded: _degraded };
   })().finally(() => { _loadPromise = null; });
 
   return _loadPromise;
