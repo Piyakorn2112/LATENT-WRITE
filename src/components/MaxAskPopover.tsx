@@ -1,0 +1,198 @@
+import { useEffect, useRef, useState } from "react";
+import { assistantRunJSON, cancelWhere } from "../lib/assistant-client";
+import {
+  MAX_ASK_TASK,
+  runMaxAsk,
+  type AskKind,
+  type MaxAskInput,
+  type MaxAskResult,
+} from "../lib/max-ask";
+import type { AssistantJSONRunner } from "../lib/assistant-client";
+
+interface Props {
+  /** Click point, viewport coordinates. */
+  x: number;
+  y: number;
+  /** First line of the paragraph under the pointer, so the writer can confirm
+   *  the surface is about the paragraph they think it is. */
+  paragraphPreview: string;
+  build: (kind: AskKind, question?: string) => MaxAskInput | null;
+  onClose: () => void;
+}
+
+/**
+ * The right-click surface for max mode: a small menu over the paragraph, then
+ * the answer in place.
+ *
+ * ★ THE MODEL RUNS ON THE MAX TIER WITH THINKING ON — `tier: "max"` and
+ *   `noThink: false` ride every request from here, which is the one place in
+ *   the app that uses the 4B. Every other engine keeps the 1.7B it was
+ *   measured against.
+ *
+ * ★ CLOSING CANCELS. The runtime is single-flight; a writer who right-clicks,
+ *   asks, and immediately closes must not leave a 4B inference blocking the
+ *   entity reviewer for ten seconds. cancelWhere on unmount, by task.
+ */
+const maxRunner: AssistantJSONRunner = (req) =>
+  // contextSize 4096: the widened pack caps at 3200 tokens + a 640-token
+  // answer, so the 8k default would spend ~530 MB of KV cache on nothing —
+  // and on an 8 GB machine that headroom is the difference between the
+  // memory guard refusing and the answer arriving.
+  assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 4096 });
+
+const MENU: ReadonlyArray<{ kind: AskKind; label: string; hint: string }> = [
+  { kind: "check", label: "Check against the story", hint: "does anything here conflict?" },
+  { kind: "explain", label: "What is this doing?", hint: "the work this paragraph performs" },
+  { kind: "suggest", label: "What could follow?", hint: "grounded in what is established" },
+];
+
+const RUNG_LABEL: Record<string, string> = {
+  passage: "this paragraph",
+  ask: "the question",
+  who: "who is present",
+  neighbours: "the surrounding paragraphs",
+  "story-so-far": "earlier chapters",
+  "open-threads": "open threads",
+  related: "earlier passages",
+};
+
+type Phase =
+  | { name: "menu" }
+  | { name: "asking"; label: string }
+  | { name: "done"; result: MaxAskResult }
+  | { name: "failed"; reason?: string };
+
+export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props) {
+  const [phase, setPhase] = useState<Phase>({ name: "menu" });
+  const [question, setQuestion] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+  const aliveRef = useRef(true);
+
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+      cancelWhere((job) => job.task === MAX_ASK_TASK);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onDown = (e: PointerEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown, true);
+    };
+  }, [onClose]);
+
+  const ask = (kind: AskKind, q?: string) => {
+    const input = build(kind, q);
+    if (!input) { setPhase({ name: "failed", reason: "no-input" }); return; }
+    setPhase({ name: "asking", label: "Reading the passage…" });
+    void runMaxAsk(input, {
+      run: maxRunner,
+      onStep: (step) => {
+        if (aliveRef.current && step === 2) {
+          setPhase({ name: "asking", label: "Reading more of the story…" });
+        }
+      },
+    }).then((result) => {
+      if (!aliveRef.current) return;
+      setPhase(result.answer
+        ? { name: "done", result }
+        : { name: "failed", reason: result.failReason });
+    });
+  };
+
+  // Clamp into the viewport; the menu opens toward whichever side has room.
+  const W = 340;
+  const left = Math.max(12, Math.min(x, window.innerWidth - W - 12));
+  const top = Math.max(12, Math.min(y + 8, window.innerHeight - 220));
+
+  return (
+    <div
+      ref={boxRef}
+      className="max-ask liquid-glass"
+      style={{ left, top, width: W }}
+      role="dialog"
+      aria-label="Ask about this paragraph"
+    >
+      <div className="max-ask-context" title={paragraphPreview}>{paragraphPreview}</div>
+
+      {phase.name === "menu" && (
+        <>
+          {MENU.map((m) => (
+            <button key={m.kind} type="button" className="max-ask-item" onClick={() => ask(m.kind)}>
+              <span className="max-ask-item-label">{m.label}</span>
+              <span className="max-ask-item-hint">{m.hint}</span>
+            </button>
+          ))}
+          <form
+            className="max-ask-question"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (question.trim()) ask("question", question.trim());
+            }}
+          >
+            <input
+              className="max-ask-question-input"
+              placeholder="Ask about this paragraph…"
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              // The editor owns most shortcuts; a question being typed must not
+              // trigger them.
+              onKeyDown={(e) => e.stopPropagation()}
+            />
+          </form>
+        </>
+      )}
+
+      {phase.name === "asking" && (
+        <div className="max-ask-wait">
+          <span className="max-ask-wait-dot" aria-hidden="true" />
+          {phase.label}
+        </div>
+      )}
+
+      {phase.name === "done" && (
+        <div className="max-ask-answer">
+          <p className="max-ask-answer-text">{phase.result.answer?.answer}</p>
+          {phase.result.answer && RUNG_LABEL[phase.result.answer.basis] && (
+            <div className="max-ask-basis">from {RUNG_LABEL[phase.result.answer.basis]}</div>
+          )}
+          {/* An answer the loop had to break out of is still shown — best
+              effort beats silence — but says so rather than passing as full. */}
+          {phase.result.stopped !== "answered" && (
+            <div className="max-ask-basis">best effort — context ran out</div>
+          )}
+          <button type="button" className="max-ask-again" onClick={() => setPhase({ name: "menu" })}>
+            Ask something else
+          </button>
+        </div>
+      )}
+
+      {phase.name === "failed" && (
+        <div className="max-ask-answer">
+          <p className="max-ask-answer-text max-ask-answer-text--muted">
+            {/* ★ "low-memory" is the guard doing its job, and it deserves its
+                own words: "still loading, try again" sends the writer into a
+                retry loop against a refusal that will not change until they
+                free the memory. */}
+            {/low-memory/.test(phase.reason ?? "")
+              ? "Not enough free memory for the Max model right now — close some other apps and try again."
+              : /busy/.test(phase.reason ?? "")
+                ? "The assistant is busy with another task — try again in a few seconds."
+                : "No answer this time — the model may still be loading. Try again in a moment."}
+          </p>
+          <button type="button" className="max-ask-again" onClick={() => setPhase({ name: "menu" })}>
+            Back
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -5,6 +5,8 @@ import { IndexView } from "./components/IndexView";
 import { WorldDataView } from "./components/WorldDataView";
 import { SplitDivider } from "./components/SplitDivider";
 import { EntityPopover } from "./components/EntityPopover";
+import { MaxAskPopover } from "./components/MaxAskPopover";
+import { buildAskInput, splitEngineParagraphs } from "./lib/max-ask-context";
 import { AnnotationPopover } from "./components/AnnotationPopover";
 import { DebugPanel } from "./components/DebugPanel";
 
@@ -112,6 +114,7 @@ import { PRESENCE_TASK } from "./lib/presence-review";
 import { findChekhovCandidates } from "./lib/continuity";
 import { chipKeyFor, runChipPick, CHIP_TASK } from "./lib/chip-picker";
 import { summaryKeyFor, runChapterSummary, SUMMARY_TASK } from "./lib/chapter-summary";
+import { assistantMode } from "./lib/preferences";
 import {
   assistantAvailable,
   assistantModelId,
@@ -454,6 +457,17 @@ export default function App() {
 
   // Inline entity popover — opened by clicking a highlighted name in the editor.
   const [entityPopover, setEntityPopover] = useState<{ name: string; anchor: DOMRect } | null>(null);
+  /**
+   * The right-click ask surface. Present only in MAX mode with the runtime
+   * available — the gate lives HERE, once, by not passing the handler at all:
+   * the Editor stays mode-ignorant and off/on keep right-click untouched.
+   */
+  const [maxAsk, setMaxAsk] = useState<{ chapterId: string; paragraphIndex: number; x: number; y: number } | null>(null);
+  const maxAskAvailable = assistantMode(prefs) === "max"
+    && typeof window !== "undefined" && !!window.electronAPI;
+  const handleAskParagraph = maxAskAvailable
+    ? (info: { chapterId: string; paragraphIndex: number; x: number; y: number }) => setMaxAsk(info)
+    : undefined;
 
   // Cold-start cast confirmation — shown at most once per manuscript, and
   // only at safe moments (app load, .txt import), never mid-typing.
@@ -2339,6 +2353,7 @@ export default function App() {
               sidePanelCompensation={false}
               layoutWidthKey={editorLayoutKey}
               splitMode
+              onAskParagraph={handleAskParagraph}
             />
           </div>
           <SplitDivider ratio={splitRatio} onRatioChange={setSplitRatio} />
@@ -2368,6 +2383,7 @@ export default function App() {
               sidePanelCompensation={false}
               layoutWidthKey={editorLayoutKey}
               splitMode
+              onAskParagraph={handleAskParagraph}
             />
           </div>
         </div>
@@ -2392,6 +2408,7 @@ export default function App() {
           sidePanelOpen={analysisPanelOpen && !focusMode}
           sidePanelCompensation={!!prefs.sidePanelCompensation}
           layoutWidthKey={editorLayoutKey}
+          onAskParagraph={handleAskParagraph}
         />
       ) : (
         <div className="empty-state">
@@ -2437,6 +2454,25 @@ export default function App() {
           onSkip={handleCastSkip}
         />
       )}
+
+      {maxAsk && (() => {
+        const askChapter = novel.chapters.find((c) => c.id === maxAsk.chapterId);
+        const preview = askChapter
+          ? (splitEngineParagraphs(askChapter.content)[maxAsk.paragraphIndex] ?? "").slice(0, 120)
+          : "";
+        return (
+          <MaxAskPopover
+            x={maxAsk.x}
+            y={maxAsk.y}
+            paragraphPreview={preview}
+            build={(kind, question) => buildAskInput(
+              { novel, chapterId: maxAsk.chapterId, worldData: novel.worldData, storyGraph },
+              maxAsk.paragraphIndex, kind, question,
+            )}
+            onClose={() => setMaxAsk(null)}
+          />
+        );
+      })()}
 
       {entityPopover && (
         <EntityPopover

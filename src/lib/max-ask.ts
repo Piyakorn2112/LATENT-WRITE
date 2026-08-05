@@ -417,6 +417,9 @@ export interface MaxAskResult {
   steps: number;
   /** Why the loop stopped — always one of a closed set, never "it just did". */
   stopped: "answered" | "steps" | "rungs-exhausted" | "repeat" | "deadline" | "failed";
+  /** The runtime's reason when stopped === "failed" — "low-memory" and "busy"
+   *  deserve different words in the UI than a generic shrug. */
+  failReason?: string;
   packHash: string;
   tokensEstimate: number;
   rungsIncluded: string[];
@@ -467,7 +470,8 @@ export async function runMaxAsk(
       timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
     });
     if (!result.ok) {
-      return { answer: best, steps, stopped: "failed", packHash: pack.packHash,
+      return { answer: best, steps, stopped: "failed", failReason: result.reason,
+        packHash: pack.packHash,
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
     }
 

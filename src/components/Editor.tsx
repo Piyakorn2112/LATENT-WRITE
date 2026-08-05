@@ -9,6 +9,7 @@ import { measurePerfSync } from "../lib/perf-trace";
 import { resolveLiveKnownNames, type EntityNameMap } from "../lib/world-data";
 import * as HighlightLayerModule from "./HighlightLayer";
 import { checkGrammar } from "../lib/grammar-check";
+import { paragraphIndexAt } from "../lib/max-ask-context";
 
 const HighlightLayer = HighlightLayerModule.HighlightLayer;
 
@@ -34,6 +35,13 @@ interface Props {
   sidePanelCompensation?: boolean;
   layoutWidthKey?: string;
   splitMode?: boolean;
+  /**
+   * Right-click on a paragraph → the max-ask surface. Present only when the
+   * assistant is in max mode, so the handler's existence IS the gate: no mode
+   * checks in here, and off/on modes keep whatever the platform does with
+   * right-click (in Electron: nothing).
+   */
+  onAskParagraph?: (info: { chapterId: string; paragraphIndex: number; x: number; y: number }) => void;
 }
 
 const ANALYSIS_PANEL_RESERVED_WIDTH = 410;
@@ -64,7 +72,8 @@ function resolveParagraphSlice(content: string, caret: number): ParagraphSlice {
 }
 
 export function Editor({
-  chapter, onContentChange, analysisResult, knownNames, entityNameMap, onEntityClick,
+  chapter,
+  onAskParagraph, onContentChange, analysisResult, knownNames, entityNameMap, onEntityClick,
   annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, sceneLabelOverrides,
   speechPredictions, actionPredictions, toolHighlights, typingSettleMs = 1000,
   sidePanelOpen = false,
@@ -298,6 +307,20 @@ export function Editor({
           onClick={(e) => syncCaretPosition(e.currentTarget)}
           onKeyUp={(e) => syncCaretPosition(e.currentTarget)}
           onFocus={(e) => syncCaretPosition(e.currentTarget)}
+          onContextMenu={onAskParagraph ? (e) => {
+            // ★ Chromium moves the caret on the right-click's own mousedown
+            //   (that is how native spell-suggestions know their word), so by
+            //   the time contextmenu fires, selectionStart IS the clicked
+            //   offset. The e2e asserts this: the popover must preview the
+            //   paragraph under the pointer, not the one last edited.
+            e.preventDefault();
+            onAskParagraph({
+              chapterId: chapter.id,
+              paragraphIndex: paragraphIndexAt(chapter.content, e.currentTarget.selectionStart ?? 0),
+              x: e.clientX,
+              y: e.clientY,
+            });
+          } : undefined}
           spellCheck
           tabIndex={annotationMode ? -1 : undefined}
         />

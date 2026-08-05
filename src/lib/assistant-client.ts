@@ -46,6 +46,26 @@ export interface AssistantJSONRequest {
   schema: object;
   maxTokens?: number;
   timeoutMs?: number;
+  /**
+   * Which registry model runs this. Omitted = the runtime default (the 1.7B
+   * every existing task was measured against). "max" is the 4B thinking tier.
+   */
+  tier?: "small" | "max";
+  /**
+   * ★ Pass FALSE for the thinking tier and nothing otherwise. The runtime
+   *   appends "/no_think" by default, which is right for the 1.7B and wrong
+   *   for a thinking model; and a duplicate "/no_think" in a prompt is a
+   *   Qwen3 footgun, so this must stay a tri-state passthrough rather than a
+   *   boolean the client invents a value for.
+   */
+  noThink?: boolean;
+  /**
+   * Context length to load the model at. A caller that KNOWS its prompt is
+   * small should say so: the max tier defaults to 8192, and on a tight machine
+   * the difference between asking for 8k and 4k of KV cache is the difference
+   * between the guard refusing and the answer arriving (~132 KB per token).
+   */
+  contextSize?: number;
 }
 
 export type AssistantJSONResult<T> =
@@ -153,8 +173,13 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       schema: job.req.schema as Record<string, unknown>,
       maxTokens: job.req.maxTokens,
       timeoutMs,
-      // temperature 0 and noThink true are the runtime's defaults; a duplicate
-      // "/no_think" in a prompt is a Qwen3 footgun, so we never pass either.
+      // temperature 0 stays the runtime's default. noThink/tier travel only
+      // when the caller set them — the max tier passes noThink:false so the
+      // thinking model is allowed to think; everyone else inherits the
+      // runtime's "/no_think" default. See the request type's note.
+      ...(job.req.tier ? { tier: job.req.tier } : {}),
+      ...(job.req.noThink === false ? { noThink: false } : {}),
+      ...(job.req.contextSize ? { contextSize: job.req.contextSize } : {}),
     });
   } catch (err) {
     return { ok: false, reason: `ipc-failed:${message(err)}` };

@@ -15883,3 +15883,139 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 .assistant-mode-row .glass-mode { height: 28px; }
+
+/* ── MaxAskPopover — the right-click ask surface ─────────────────────────
+   Same glass recipe as .entity-popover (the liquid-glass class does the
+   material; this block does layout only). FLAT inside, per the tool/form
+   rule: the popover lifts, its contents do not. */
+.max-ask {
+  position: fixed;
+  z-index: 90;
+  border-radius: 20px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: widgetReveal 0.28s cubic-bezier(0.22, 0.9, 0.32, 1);
+}
+
+/* One line of the paragraph under the pointer, so the writer can confirm the
+   surface is about the paragraph they think it is. */
+.max-ask-context {
+  font-family: var(--font-body);
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-tertiary);
+  padding: 2px 8px 8px;
+  border-bottom: 1px solid var(--divider-line);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.max-ask-item {
+  appearance: none;
+  border: 0;
+  background: none;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.max-ask-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+
+.max-ask-item-label {
+  font-family: var(--font-ui);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.max-ask-item-hint {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+
+.max-ask-question { padding: 6px 4px 2px; }
+
+.max-ask-question-input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--divider-line);
+  background: rgba(0, 0, 0, 0.03);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  outline: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .max-ask-question-input { background: rgba(255, 255, 255, 0.04); }
+}
+
+.max-ask-question-input:focus { border-color: rgba(100, 140, 255, 0.45); }
+
+.max-ask-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.max-ask-wait-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: max-ask-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes max-ask-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+
+.max-ask-answer { padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 8px; }
+
+.max-ask-answer-text {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.max-ask-answer-text--muted { color: var(--text-secondary); font-size: 12px; }
+
+.max-ask-basis {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.max-ask-again {
+  align-self: flex-start;
+  appearance: none;
+  border: 1px solid var(--divider-line);
+  background: none;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.max-ask-again:hover { color: var(--text); border-color: var(--text-tertiary); }
