@@ -55,12 +55,25 @@
      frame and does not smear the colour the chroma gate works to keep sharp.
 
      Per the note above this alpha is ALSO the edge-colour glow's transmission
-     budget: 0.56 passes 44% where 0.44 passed 56%. --lqg-glow-boost-dense
-     restores the wash to the same strength on exactly these surfaces. The two
-     must move together — any surface taking this tint must also take the dense
-     boost, or its edge colour goes quiet. */
-  --bg-glass-dense: rgba(255, 255, 255, 0.56);
-  --lqg-glow-boost-dense: 1.72;
+     budget. --lqg-glow-boost-dense restores the wash to the same strength on
+     exactly these surfaces. The two must move together — any surface taking
+     this tint must also take the dense boost, or its edge colour goes quiet.
+
+     ★ THE BOOST IS NOT A TASTE VALUE, IT IS 1/TRANSMISSION. Derive it, never
+     eyeball it:
+
+         boost = base_boost × (base_transmission ÷ (1 − alpha))
+
+     which is exactly how the shipped pair was built: 1.35 × 0.56/0.44 = 1.72
+     at alpha 0.56. Change the alpha without redoing this and the edge colour
+     drifts silently — brighter if you thinned the tint, quieter if you
+     thickened it — and it reads as the glow engine being broken.
+
+     Now at 0.52 (thinned a step, since the chroma gate is carrying the
+     separation opacity used to have to provide): transmission 0.48, so
+     boost = 1.35 × 0.56/0.48 = 1.58. */
+  --bg-glass-dense: rgba(255, 255, 255, 0.52);
+  --lqg-glow-boost-dense: 1.58;
 
   /* Luminance (0-1) the glass fades neutral backdrop content toward — see the
      chroma flatten in liquid-glass-filter.ts. This is --bg-page's own
@@ -271,7 +284,10 @@
     --bg-glass: rgba(45, 45, 45, 0.415);
     --bg-glass-hover: rgba(50, 50, 48, 0.72);
     --bg-glass-strong: rgba(46, 46, 44, 0.72);
-    --bg-glass-dense: rgba(45, 45, 45, 0.53);
+    /* Thinned with light's, and the boost re-derived by the same rule (see the
+       light block): base 1 at transmission 0.585, so at alpha 0.49 the boost
+       is 1 × 0.585/0.51 = 1.15. */
+    --bg-glass-dense: rgba(45, 45, 45, 0.49);
     --bg-glass-unfocused: rgb(24, 24, 22);
     --tl-flat-fill: rgba(28, 28, 27, 0.66);
     --tl-flat-line: rgba(255, 255, 255, 0.13);
@@ -279,7 +295,7 @@
     /* Dark glass already gives a colour wash plenty to read against. */
     --lqg-glow-boost-base: 1;
     --lqg-glow-boost: var(--lqg-glow-boost-base);
-    --lqg-glow-boost-dense: 1.25;
+    --lqg-glow-boost-dense: 1.15;
     /* Dark glass has the headroom for additive light — these are the values
        the rim was tuned at, and they stay exactly as they were. */
     --lqg-rim-blend: screen;
