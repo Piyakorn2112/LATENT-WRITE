@@ -63,6 +63,35 @@
  *   this set the model's entire contribution was one true nickname and one
  *   cast-corrupting merge. Net negative.
  *
+ * ── ALSO MEASURED: THE WHOLE CHAPTER, WHICH IS THE OBVIOUS THING TO TRY ────
+ *
+ * The natural objection to the numbers above is that two clipped ~110-char
+ * windows are not enough to judge an identity, and that a person would simply
+ * hand the model the CHAPTER. Measured, on the alias stress chapter (2956
+ * chars, ~739 tokens, comfortably inside context), six pairs, three true:
+ *
+ *     right 2 · WRONG 2 · held 2      confidence right [0.9, 0.9]
+ *                                     confidence WRONG [0.9, 1.0]
+ *
+ * ★★ MORE CONTEXT DID NOT HELP, AND ON THE DANGEROUS CASE IT HURT. With the
+ *    whole chapter it merged "Nadia Okonkwo" with "Mr. Okonkwo" at confidence
+ *    1.0 — a woman and a man sharing a surname, the exact sister-merge
+ *    catastrophe this module was unwired for, now reproduced with MORE
+ *    evidence in front of it. More text means more surface similarity to latch
+ *    onto, not more discrimination.
+ *
+ * ★★ AND THE SAME DEFECT APPEARED A THIRD TIME. On "Kes" ~ "Kestrel" it wrote:
+ *
+ *      "Kestrel is mentioned as the name of a person, AND KES IS USED AS A
+ *       NICKNAME FOR HER"        → verdict: different
+ *
+ *    The reason states the answer and the label contradicts it. That is now
+ *    three framings — two snippets, one passage, a whole chapter — producing
+ *    the identical failure. It is not an information problem, so it cannot be
+ *    fixed by supplying more information. See alias-referent.ts for the same
+ *    thing on a different question ("Bah is an exclamation made by Scrooge"
+ *    → labelled Scrooge).
+ *
  * ★ WIRE IT BACK WHEN: wrong-and-surfaced is 0 on that probe, on a model that
  *   also finds at least two of the four real pairs. A better "right" alone is
  *   not the condition — zero wrong with zero right means the task does nothing.
