@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { KnobGlass } from "./KnobGlass";
 
-const MIN_GLASS_ACTIVE_MS = 140;
+/**
+ * ★ THE CLICK DWELL. 140ms (the toggle's figure) was measured too short here:
+ *   the swell itself takes 260ms, so on a plain click the canvas was unmounted
+ *   before the knob ever reached full size and the refraction never visibly
+ *   existed. 560 = the swell plus ~300ms of actually looking at the material.
+ *   A slow press-and-hold is unaffected — the dwell only pads SHORT presses.
+ */
+const MIN_GLASS_ACTIVE_MS = 560;
 /** Past this the pointer is dragging, not clicking. Same figure GlassToggle uses. */
 const DRAG_SLOP_PX = 4;
 
@@ -46,18 +53,35 @@ export function GlassModeSelector<T extends string>({
   value, options, onChange, ariaLabel,
 }: Props<T>) {
   const [glassActive, setGlassActive] = useState(false);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragging, setDragging] = useState(false);
   const glassActiveRef = useRef(false);
   const glassActivatedAtRef = useRef(0);
   const releaseTimerRef = useRef<number | null>(null);
   const pointerIdRef = useRef<number | null>(null);
   const startXRef = useRef(0);
+  const lastXRef = useRef(0);
   const movedRef = useRef(false);
   const trackRef = useRef<HTMLDivElement>(null);
+  const knobRef = useRef<HTMLSpanElement>(null);
 
   const index = Math.max(0, options.findIndex((o) => o.value === value));
-  const shownIndex = dragIndex ?? index;
-  const current = options[shownIndex];
+  const current = options[index];
+
+  /**
+   * ★ THE DRAG POSITION GOES STRAIGHT TO A CSS VARIABLE, NOT THROUGH setState.
+   *   A re-render per pointermove is jank waiting for a slower machine, and
+   *   the knob's position during a drag is presentation, not state — nothing
+   *   else needs to know it. React state changes only at the boundaries:
+   *   drag started, drag ended.
+   */
+  const setDragLeft = (clientX: number) => {
+    const track = trackRef.current, knob = knobRef.current;
+    if (!track || !knob) return;
+    const r = track.getBoundingClientRect();
+    const kw = knob.getBoundingClientRect().width;
+    const x = Math.min(r.width - kw + 2, Math.max(-2, clientX - r.left - kw / 2));
+    track.style.setProperty("--mode-drag-left", `${x.toFixed(1)}px`);
+  };
 
   const clearReleaseTimer = () => {
     if (releaseTimerRef.current === null) return;
@@ -132,9 +156,9 @@ export function GlassModeSelector<T extends string>({
         className={[
           "glass-mode",
           glassActive ? "glass-mode--glass-active" : "",
-          dragIndex !== null ? "glass-mode--dragging" : "",
+          dragging ? "glass-mode--dragging" : "",
         ].filter(Boolean).join(" ")}
-        style={{ "--mode-count": options.length, "--mode-index": shownIndex } as React.CSSProperties}
+        style={{ "--mode-count": options.length, "--mode-index": index } as React.CSSProperties}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
           pointerIdRef.current = e.pointerId;
@@ -150,26 +174,39 @@ export function GlassModeSelector<T extends string>({
         }}
         onPointerMove={(e) => {
           if (pointerIdRef.current !== e.pointerId) return;
+          lastXRef.current = e.clientX;
           if (!movedRef.current && Math.abs(e.clientX - startXRef.current) < DRAG_SLOP_PX) return;
-          movedRef.current = true;
-          const at = nearestEnabled(indexAt(e.clientX));
-          setDragIndex((prev) => (prev === at ? prev : at));
+          if (!movedRef.current) {
+            movedRef.current = true;
+            // Position BEFORE the class flips, or the knob spends one frame at
+            // its old stop with the override already live.
+            setDragLeft(e.clientX);
+            setDragging(true);
+            return;
+          }
+          setDragLeft(e.clientX);
         }}
         onPointerUp={(e) => {
           if (pointerIdRef.current !== e.pointerId) { releaseGlass(); return; }
           try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* never captured */ }
           pointerIdRef.current = null;
-          // A tap commits where it landed; a drag commits where it ended.
-          commit(movedRef.current ? (dragIndex ?? index) : indexAt(e.clientX));
+          // A tap commits where it landed; a drag commits where the KNOB ended
+          // (its centre tracks the pointer, so the last pointer X is the knob).
+          commit(indexAt(movedRef.current ? lastXRef.current : e.clientX));
           movedRef.current = false;
-          setDragIndex(null);
+          setDragging(false);
+          // The override goes with the class in the same commit: the base rule
+          // takes back `left`, and the spring carries the knob from wherever it
+          // was dropped to its stop. That is the snap-on-release.
+          trackRef.current?.style.removeProperty("--mode-drag-left");
           releaseGlass();
         }}
         onPointerCancel={(e) => {
           try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* never captured */ }
           pointerIdRef.current = null;
           movedRef.current = false;
-          setDragIndex(null);
+          setDragging(false);
+          trackRef.current?.style.removeProperty("--mode-drag-left");
           releaseGlass(true);
         }}
       >
@@ -198,7 +235,14 @@ export function GlassModeSelector<T extends string>({
           </button>
         ))}
 
-        <span className="glass-mode-knob" aria-hidden="true">
+        {/* ★ `--painted` while active, exactly as the toggle's knob: it clears
+            the element's own fill so the canvas IS the surface — without it the
+            knob's white sat on top of the material it was supposed to be. */}
+        <span
+          ref={knobRef}
+          className={`glass-mode-knob${glassActive ? " glass-mode-knob--painted" : ""}`}
+          aria-hidden="true"
+        >
           <KnobGlass active={glassActive} />
         </span>
         {/* Sibling, not child: the knob's growth cannot reach the type. */}

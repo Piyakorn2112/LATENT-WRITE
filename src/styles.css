@@ -15721,8 +15721,12 @@ body.electron-window-unfocused .wc-panel::after {
   width: calc((100% - 4px) / var(--mode-count, 3));
   border-radius: 999px;
   pointer-events: none;
+  /* ★ NOT the toggle's 0.34s/1.56 spring. That curve is tuned for a 28px
+     throw; this knob travels ~100px per stop, so the same overshoot parameter
+     lands ~4x further past the stop and arrives visibly faster. Longer and
+     flatter reads as the same material at this travel distance. */
   transition:
-    left 0.34s cubic-bezier(0.34, 1.56, 0.64, 1),
+    left 0.46s cubic-bezier(0.30, 1.12, 0.44, 1),
     top 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
     bottom 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
     width 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
@@ -15730,16 +15734,6 @@ body.electron-window-unfocused .wc-panel::after {
     background 0.18s ease,
     box-shadow 0.18s ease;
   will-change: left, top, bottom, width;
-}
-
-/* While dragging, the knob must track the finger with no spring at all —
-   a spring on `left` reads as lag, which is the one thing a drag cannot have. */
-.glass-mode--dragging .glass-mode-knob,
-.glass-mode--dragging .glass-mode-knob-cap {
-  transition: top 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
-              bottom 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
-              width 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
-              margin-left 0.26s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .glass-mode-knob {
@@ -15792,8 +15786,11 @@ body.electron-window-unfocused .wc-panel::after {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #1a1a1a;
-  /* Slower than the swell, so the handover is a cross-fade rather than a cut. */
-  transition: opacity 0.24s ease;
+  /* ★ INSTANT, deliberately — no transition. A fade here made the word lag
+     its own knob: on a click the solid label lingered over glass that had
+     already turned, so front word and refracted word were briefly BOTH
+     visible and read as two words. Same size, same stop, hard swap = one
+     word changing material. */
 }
 
 /* ★ THE FADE IS DRIVEN BY THE SAME CONDITION AS THE SWELL, in CSS, not by a
@@ -15820,10 +15817,16 @@ body.electron-window-unfocused .wc-panel::after {
    ★ MUCH TALLER, BARELY WIDER. 10px past the track top and bottom matches the
    toggle's own overflow; 4px each side is enough for the bevel to bite on the
    neighbouring words without swallowing them. */
+/* ★★ AND THE CLASS HALF MUST BEAT :hover TOO. `--glass-active` alone is
+   (0,2,0) and the hover lift above is (0,3,0) — so the instant the button came
+   UP, a mouse still sitting on the control collapsed the swell mid-dwell: JS
+   held the material state while CSS shrank the knob, which is exactly why a
+   plain click never showed the refraction. The class is doubled to (0,3,0)
+   and declared after hover, so the dwell actually holds the pose. */
 .glass-mode:active .glass-mode-knob,
 .glass-mode:active .glass-mode-knob-cap,
-.glass-mode--glass-active .glass-mode-knob,
-.glass-mode--glass-active .glass-mode-knob-cap {
+.glass-mode.glass-mode--glass-active .glass-mode-knob,
+.glass-mode.glass-mode--glass-active .glass-mode-knob-cap {
   top: -10px;
   bottom: -10px;
   margin-left: -4px;
@@ -15831,11 +15834,32 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 .glass-mode:active .glass-mode-knob,
-.glass-mode--glass-active .glass-mode-knob {
+.glass-mode.glass-mode--glass-active .glass-mode-knob {
   background: rgba(255, 255, 255, 0.18);
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.22),
     0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* ★★ FREE DRAG. While the finger is down and moving, the knob is GLUED to the
+   pointer — `left` comes straight from --mode-drag-left, set per move in px —
+   and only snaps to a stop on release, when the override is removed and the
+   base spring carries it home from wherever it was dropped. Snapping DURING
+   the drag was the bug: the knob teleported stop to stop under a moving
+   finger, which is three buttons wearing a knob, not a drag.
+
+   The tiny left transition smooths the grab when the press started away from
+   the knob, without reading as lag at finger speed. Declared LAST at (0,3,0)
+   so it beats both the hover lift and the :active margin. */
+.glass-mode.glass-mode--dragging .glass-mode-knob,
+.glass-mode.glass-mode--dragging .glass-mode-knob-cap {
+  left: var(--mode-drag-left, 2px);
+  margin-left: 0;
+  transition:
+    left 0.08s linear,
+    top 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    bottom 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    width 0.26s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
