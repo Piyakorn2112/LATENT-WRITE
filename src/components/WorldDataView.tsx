@@ -10,7 +10,14 @@ import type {
   WorldPlace,
 } from "../types";
 import { ensureWorldData, scanAndClassify, resolveSpeakerCandidates, autoExtractEntities, type ScanProgress, type ScanResult } from "../lib/world-data";
-import { proposeAliases, proposalsFor, type AliasProposal } from "../lib/alias-propose";
+import { proposeAliases, proposalsFor, coordinated, type AliasProposal } from "../lib/alias-propose";
+import { scanAliases, type AliasCandidate, type AliasScanResult } from "../lib/alias-scan";
+import {
+  REFERENT_CAP,
+  REFERENT_TASK,
+  reviewUnresolvedForms,
+} from "../lib/alias-referent";
+import { fnv1a } from "../lib/evidence-pack";
 import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
@@ -39,7 +46,7 @@ type Tab = "characters" | "places" | "factions" | "entities";
 type Entity = WorldCharacter | WorldPlace | WorldFaction | WorldGenericEntity;
 type ScanCategory = "characters" | "places" | "factions" | "entities";
 type ScanLabel = "character" | "place" | "faction" | "entity";
-type ScanPhase = "pick" | "scanning" | "review";
+type ScanPhase = "pick" | "scanning" | "review" | "alias-scanning" | "alias-review";
 
 type IntelMode = "off" | "fast" | "default" | "high" | "auto";
 
@@ -282,6 +289,17 @@ export function WorldDataView({
   const [scanPredictions, setScanPredictions] = useState<AdaptivePredictionTrace[]>([]);
   const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
 
+  // ── Alias scan state ────────────────────────────────────────────────────
+  //
+  // Separate from the entity scan because the two answer different questions
+  // and register different things: that one adds NEW entries, this one adds
+  // NAMES to entries that already exist (and, for a merge, removes one).
+  const [aliasScan, setAliasScan] = useState<AliasScanResult | null>(null);
+  const [aliasRows, setAliasRows] = useState<AliasCandidate[]>([]);
+  const [aliasSelected, setAliasSelected] = useState<Set<string>>(() => new Set());
+  const aliasKey = (c: { character: string; alias: string }) =>
+    `${c.character.toLowerCase()}|${c.alias.toLowerCase()}`;
+
   // Run heavy computation after the "scanning" loading state has painted
   useEffect(() => {
     if (scanPhase !== "scanning") return;
@@ -384,6 +402,114 @@ export function WorldDataView({
       cancelAnimationFrame(raf2);
     };
   }, [adaptiveContext, currentChapterId, hasElectronNarrativeLM, novel.chapters, onEntityPredictionBatch, scanMode, scanPhase, wd]);
+
+  // ── The alias scan ──────────────────────────────────────────────────────
+  //
+  // Deterministic pass first, and it is the pass that carries the feature:
+  // adjacency, attestation and vocatives, all vetoed by alias-propose's own
+  // rules. The local model then gets ONLY the forms that pass left unattached,
+  // with a shortlist those same vetoes have already pruned — measured at
+  // 0 wrong / 2 right over 8 passages, half of which have no answer in them.
+  useEffect(() => {
+    if (scanPhase !== "alias-scanning") return;
+    let cancelled = false;
+    let raf1 = 0, raf2 = 0;
+
+    setScanProgress({
+      stage: "extract", label: "Preparing scan", detail: "Reading the manuscript",
+      completed: 0, total: 4, fraction: 0,
+    });
+
+    raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        void (async () => {
+          try {
+            const result = scanAliases({
+              characters: wd.characters,
+              chapters: novel.chapters,
+              extraCandidates: autoExtractEntities(novel, 3, 60),
+              onProgress: (done, total, label) => setScanProgress({
+                stage: "extract", label, detail: `${done} / ${total}`,
+                completed: done, total,
+                fraction: (done / Math.max(1, total)) * REVIEW_PROGRESS_SPLIT,
+              }),
+            });
+            if (cancelled) return;
+
+            let rows = result.candidates;
+
+            // ── the model layer, on what is left over ──────────────────────
+            if (result.unresolved.length > 0 && await assistantAvailable() && !cancelled) {
+              const bookHash = fnv1a(novel.chapters.map((c) => c.content).join("\n").slice(0, 20_000));
+              const answers = await reviewUnresolvedForms(result.unresolved, {
+                run: assistantRunJSON,
+                // Nothing in this flow caches on the key, so there is no stale
+                // entry to invalidate; the field exists for callers that do.
+                modelId: "local",
+                bookHash,
+                cap: REFERENT_CAP,
+                onProgress: (done, total) => setScanProgress({
+                  stage: "classify", label: "Asking about unattached names",
+                  detail: `Name ${Math.min(done + 1, total)} / ${total}`,
+                  completed: done, total,
+                  fraction: REVIEW_PROGRESS_SPLIT
+                    + (1 - REVIEW_PROGRESS_SPLIT) * (done / Math.max(1, total)),
+                }),
+              });
+              if (cancelled) return;
+
+              const bookText = novel.chapters.map((c) => c.content).join("\n\n");
+              for (const answer of answers) {
+                if (!answer.surfaced) continue;
+                // ★ THE DETERMINISTIC VETOES RUN ON THE MODEL'S ANSWER TOO, not
+                //   only on the question. The shortlist was pruned before it was
+                //   asked, but a scan is one long chain of chances to let an
+                //   unchecked string through, and coordination is proof of two
+                //   people whoever proposed the link.
+                if (coordinated(bookText, answer.referent, answer.alias)) continue;
+                if (rows.some((r) => aliasKey(r) === `${answer.referent.toLowerCase()}|${answer.alias.toLowerCase()}`)) continue;
+                const form = result.unresolved.find((u) => u.alias === answer.alias);
+                rows = [...rows, {
+                  character: answer.referent,
+                  alias: answer.alias,
+                  kind: "alias",
+                  source: "model",
+                  confidence: answer.confidence,
+                  occurrences: form?.occurrences ?? 0,
+                  evidence: form?.snippets[0] ?? "",
+                  // Never pre-ticked, whatever the model's confidence says.
+                  attested: false,
+                  why: answer.reason,
+                }];
+              }
+            }
+
+            if (cancelled) return;
+            setAliasScan(result);
+            setAliasRows(rows);
+            // ★ ONLY WHAT THE TEXT ASSERTS ARRIVES TICKED. Everything inferred
+            //   is a question; pre-ticking a guess turns "Register" into a
+            //   button that applies work the writer never read.
+            setAliasSelected(new Set(rows.filter((r) => r.attested).map(aliasKey)));
+            setScanPhase("alias-review");
+          } catch (error) {
+            // Say so out loud — "no suggestions" and "it threw" must not look
+            // the same. This repo has lost months to that shape once already.
+            console.warn("[WorldData] alias scan failed —", error);
+            if (!cancelled) setScanPhase(null);
+          }
+        })();
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      cancelWhere((job) => job.task === REFERENT_TASK);
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanPhase, novel, wd.characters]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -518,6 +644,68 @@ export function WorldDataView({
     if (proposal.kind === "merge") setSelected(null);
   };
 
+  /**
+   * Apply every ticked row in ONE update.
+   *
+   * ★ NOT acceptAlias IN A LOOP. Each call there closes over `wd` and hands
+   *   onChange a whole WorldData built from it, so a loop would compute every
+   *   update from the SAME starting cast and the last write would win — nine
+   *   ticked rows landing as one. The fold has to happen here, on an
+   *   accumulator, and reach onChange once.
+   */
+  const registerAliases = () => {
+    const chosen = aliasRows.filter((r) => aliasSelected.has(aliasKey(r)));
+    if (chosen.length === 0) { setScanPhase(null); return; }
+
+    let characters: WorldCharacter[] = wd.characters.map((c) => ({ ...c }));
+    const findIdx = (name: string) =>
+      characters.findIndex((c) => c.name.trim().toLowerCase() === name.trim().toLowerCase());
+
+    // Aliases before merges: a merge removes an entry, and folding a name into
+    // an entry that a later merge then deletes loses the writer's tick.
+    for (const row of [...chosen].sort((a, b) => Number(a.kind === "merge") - Number(b.kind === "merge"))) {
+      const at = findIdx(row.character);
+      if (at < 0) continue;
+      characters[at] = {
+        ...characters[at],
+        aliases: mergeEntityAliases(characters[at].aliases, [row.alias]),
+      };
+      if (row.kind !== "merge") continue;
+      const doomedAt = findIdx(row.alias);
+      if (doomedAt < 0 || doomedAt === at) continue;
+      const doomed = characters[doomedAt];
+      characters[at] = {
+        ...characters[at],
+        aliases: mergeEntityAliases(characters[at].aliases, doomed.aliases, [doomed.name]),
+        description: characters[at].description?.trim() ? characters[at].description : doomed.description,
+        role: characters[at].role?.trim() ? characters[at].role : doomed.role,
+      };
+      characters = characters.filter((_, i) => i !== doomedAt);
+    }
+
+    onChange({ ...wd, characters });
+    setSelected(null);
+    setScanPhase(null);
+  };
+
+  const startAliasScan = () => {
+    setAliasScan(null);
+    setAliasRows([]);
+    setAliasSelected(new Set());
+    setScanProgress(null);
+    setScanPhase("alias-scanning");
+  };
+
+  const toggleAliasRow = (row: AliasCandidate) => {
+    setAliasSelected((prev) => {
+      const next = new Set(prev);
+      const key = aliasKey(row);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
   const dismissAlias = (proposal: AliasProposal) => {
     setDismissedAliases((prev) => {
       const nextSet = new Set(prev);
@@ -629,7 +817,7 @@ export function WorldDataView({
 
   const currentChapter = novel.chapters.find((c) => c.id === currentChapterId);
   const orbColor = ORB_COLOR[intelMode] ?? ORB_COLOR.default;
-  const orbActive = scanPhase === "scanning";
+  const orbActive = scanPhase === "scanning" || scanPhase === "alias-scanning";
 
   return (
     <div
@@ -648,12 +836,27 @@ export function WorldDataView({
         {/* ── Header ── */}
         <div className="world-header" style={{ position: "relative", zIndex: 1 }}>
           <h2 className="world-title">
-            {scanPhase === "pick"     ? "Auto-Scan"   :
-             scanPhase === "scanning" ? "Scanning…"   :
+            {scanPhase === "pick"           ? "Auto-Scan"   :
+             scanPhase === "scanning"       ? "Scanning…"   :
+             scanPhase === "alias-scanning" ? "Finding names…" :
+             scanPhase === "alias-review"   ? "Other names" :
              scanPhase === "review"   ? `Scan — ${scanMode === "chapter" ? "Chapter" : "Novel"}` :
              "World"}
           </h2>
           <div style={{ display: "flex", gap: 4 }}>
+            {scanPhase === null && tab === "characters" && (
+              <button
+                className="icon-btn"
+                onClick={startAliasScan}
+                disabled={wd.characters.length === 0 || novel.chapters.length === 0}
+                aria-label="Scan for other names these characters are called"
+                title={wd.characters.length === 0
+                  ? "Add a character first — the scan looks for other names for the cast you already have"
+                  : "Find nicknames, full names and titles the manuscript uses for this cast"}
+              >
+                <UsersIcon size={16} />
+              </button>
+            )}
             {scanPhase === null && (
               <button
                 className="icon-btn"
@@ -735,15 +938,102 @@ export function WorldDataView({
           </div>
         )}
 
+        {/* ── Alias scan: Review ──
+            One list, grouped by the character each name would join. Attested
+            rows are ticked because the manuscript states the link; every
+            inference arrives unticked, carrying the rule and a verbatim line,
+            so what the writer confirms is a fact they can check on the page. */}
+        {scanPhase === "alias-review" && (
+          <div className="world-scan-results" style={{ position: "relative", zIndex: 1 }}>
+            {aliasRows.length > 0 ? (
+              <>
+                <p className="world-scan-pick-title world-scan-pick-title--sm">
+                  {aliasRows.length} other name{aliasRows.length === 1 ? "" : "s"} for your cast.
+                  {" "}Ticked ones are stated in the text; the rest are guesses.
+                </p>
+                <div className="world-scan-list">
+                  {[...new Set(aliasRows.map((r) => r.character))].map((character) => (
+                    <div key={character} className="world-scan-section">
+                      <div className="world-scan-section-title">
+                        <UsersIcon size={12} />
+                        <span>{character}</span>
+                        <span className="world-tab-count">
+                          {aliasRows.filter((r) => r.character === character && aliasSelected.has(aliasKey(r))).length}
+                          /{aliasRows.filter((r) => r.character === character).length}
+                        </span>
+                      </div>
+                      {aliasRows.filter((r) => r.character === character).map((row) => (
+                        <label key={aliasKey(row)} className="world-scan-row world-scan-row--alias">
+                          <input
+                            type="checkbox"
+                            checked={aliasSelected.has(aliasKey(row))}
+                            onChange={() => toggleAliasRow(row)}
+                          />
+                          <span className="world-alias-cell">
+                            <span className="world-alias-head">
+                              <span className="world-scan-row-name">{row.alias}</span>
+                              {row.kind === "merge" && (
+                                <span className="world-alias-kind" title="Accepting removes the other cast entry">
+                                  duplicate
+                                </span>
+                              )}
+                              {row.source === "model" && (
+                                <span className="world-alias-kind world-alias-kind--guess" title="Read from a passage by the local model — check it">
+                                  guess
+                                </span>
+                              )}
+                              <span className="world-alias-why">{row.why}</span>
+                            </span>
+                            {row.evidence && (
+                              <span className="world-alias-evidence" title={row.evidence}>{row.evidence}</span>
+                            )}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="world-scan-empty-full">
+                No other names found for this cast.
+                {/* ★ SAY WHAT WAS REFUSED. A scan that found nothing and a scan
+                    that refused everything look identical otherwise, and the
+                    difference is the whole story on a book full of families. */}
+                {aliasScan && aliasScan.rejected.length > 0 && (
+                  <div className="world-alias-refused">
+                    {aliasScan.rejected.length} form{aliasScan.rejected.length === 1 ? " was" : "s were"} found and refused —
+                    {" "}{[...new Set(aliasScan.rejected.map((r) => r.veto))].join(", ")}.
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="world-scan-actions">
+              <button
+                className="world-scan-register-btn"
+                onClick={registerAliases}
+                disabled={aliasSelected.size === 0}
+              >
+                Add {aliasSelected.size > 0 ? `${aliasSelected.size} name${aliasSelected.size === 1 ? "" : "s"}` : ""}
+              </button>
+              <button className="world-scan-back-btn" onClick={() => setScanPhase(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* ── Scan: Loading ── */}
-        {scanPhase === "scanning" && (
+        {(scanPhase === "scanning" || scanPhase === "alias-scanning") && (
           <div className="world-scan-loading" style={{ position: "relative", zIndex: 1 }}>
             <div
               className="world-scan-spinner"
               style={{ "--spinner-color": orbColor } as CSSProperties}
             />
             <span className="world-scan-loading-label">
-              Scanning {scanMode === "chapter" ? "chapter" : "novel"}…
+              {scanPhase === "alias-scanning"
+                ? "Reading the novel for other names…"
+                : `Scanning ${scanMode === "chapter" ? "chapter" : "novel"}…`}
             </span>
             {scanProgress && (
               <div className="world-scan-progress-shell">

@@ -15423,6 +15423,56 @@ body.electron-window-unfocused .wc-panel::after {
   flex-shrink: 0;
 }
 
+/* ── Alias scan review rows ──────────────────────────────────────────────
+   The same checkbox row as the entity scan, given a second line: the rule
+   that produced the name, and a verbatim strip from the manuscript. A writer
+   confirming a name they can see in their own prose is confirming a fact; a
+   bare name with a tick box beside it is confirming the machine. */
+.world-scan-row--alias {
+  align-items: flex-start;
+  padding: 6px 6px 7px;
+}
+
+.world-scan-row--alias input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.world-alias-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.world-alias-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* An answer the local model read out of a passage, never one the text states.
+   It is the only badge that says "check this" rather than "this is what it is". */
+.world-alias-kind--guess {
+  color: var(--text-tertiary);
+  border-style: dashed;
+}
+
+.world-scan-row--alias .world-alias-evidence {
+  padding: 0;
+}
+
+/* A scan that found nothing and a scan that refused everything look identical
+   without this, and on a book full of families the difference is the story. */
+.world-alias-refused {
+  margin-top: 8px;
+  font-size: 10.5px;
+  font-style: normal;
+  color: var(--text-tertiary);
+  max-width: 34ch;
+}
+
 .world-alias-btn {
   padding: 3px 9px;
   border-radius: 7px;
