@@ -53,13 +53,52 @@
  *   nothing because the loop ran out — a stuck harness must degrade to its last
  *   good result, not to silence.
  */
+/**
+ * ── MEASURED · scripts/probe-max-ask.cjs · qwen3-4b-thinking-2507 · 5 packs ──
+ *
+ * contextSize 4096, noThink:false, grammar-constrained. First call 6.7s warm
+ * (~15s with a cold model load), then ~2.4s per answer — right-click viable.
+ *
+ *   explain   grounded, specific, basis=passage            REACHES THE WRITER
+ *   flag      "taking the short way conflicts with her     REACHES THE WRITER
+ *              refusal in chapter 8" — the planted
+ *              contradiction, found and named
+ *   control   no invented problem (a bland restatement,    ships, harmless
+ *              not a false positive)
+ *   widen-2   "forty marks … the name Elena Vasquez",      REACHES THE WRITER
+ *              basis=open-threads — correct rung cited
+ *
+ * ★★ ROUND 1 FAILED ON AN INSTRUMENT BUG, NOT THE MODEL: the pack's headings
+ *    said "THE STORY BEFORE THIS" while the enum said "story-so-far". Answers
+ *    drawn from the passage cited `passage` correctly; answers drawn from ANY
+ *    other rung fell back to the abstention, because the heading the model was
+ *    reading did not exist in the list it was allowed to answer with. Correct,
+ *    grounded answers shipped as "not in what I was given" — including the
+ *    flag case, whose text explicitly cited chapter 8 while its label said the
+ *    pack contained nothing. THE ENUM AND THE PAGE MUST BE THE SAME
+ *    VOCABULARY; every heading now begins with its rung token verbatim.
+ *    Also fixed on the same round: `check` on clean prose reported "the tin is
+ *    not mentioned before this" — novelty read as anomaly — so the ask now
+ *    states that absence is not a conflict. One re-run taken; the numbers
+ *    above are that run.
+ *
+ * ★ RESIDUAL, RECORDED NOT PATCHED: on a deliberately starved pack the model
+ *   phrases absence as an answer ("the notice does not specify the amount",
+ *   basis=passage) instead of abstaining — so the loop's widen signal
+ *   UNDER-fires and a step-1 answer that sounds like a claim about the story
+ *   can ship. In practice the default 1600-token budget holds every rung of a
+ *   realistic input (full packs measure ~320 tokens), so a dropped rung —
+ *   the only state where this matters — is close to unreachable outside a
+ *   harness. Do not fix this by iterating the prompt against the probe cases;
+ *   they are the measurement.
+ */
 import { fnv1a } from "./evidence-pack";
 import { tidyTruncatedText } from "./assistant-client";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { WorldData } from "../types";
 
 export const MAX_ASK_TASK = "max-ask";
-export const MAX_ASK_PROMPT_VERSION = 1;
+export const MAX_ASK_PROMPT_VERSION = 2;
 
 const CHARS_PER_TOKEN = 4;
 /** Evidence budget. The rest of a 4k window belongs to the model's thinking. */
@@ -141,7 +180,14 @@ const cap = (t: string, max = PARAGRAPH_CAP) => (t.length <= max ? t : `${t.slic
 const collapse = (t: string) => t.replace(/\s+/g, " ").trim();
 
 const ASK_LINE: Record<AskKind, string> = {
-  check: "What in this paragraph does not fit the story around it? If nothing does, say so.",
+  // ★ "ABSENCE IS NOT A CONFLICT" is load-bearing. Measured without it: on a
+  //   perfectly consistent paragraph the model reported "the tin is not
+  //   mentioned in the story before this" — the classic small-model check
+  //   failure, novelty read as anomaly. A check surface that flags clean prose
+  //   trains the writer to ignore it.
+  check: "What in this paragraph CONFLICTS with something another section "
+    + "establishes? Something merely not mentioned before is not a conflict. "
+    + "If nothing conflicts, say the paragraph fits.",
   suggest: "What could plausibly happen next here, given what the story has already established?",
   explain: "What is this paragraph doing in the story — what work is it performing?",
   question: "",
@@ -169,6 +215,16 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
     spent += cost;
   };
 
+  // ★★ EVERY HEADING BELOW STARTS WITH ITS RUNG TOKEN, VERBATIM, because the
+  //    heading is what the model reads and the rung token is what the schema
+  //    lets it say. Measured with prose headings ("THE STORY BEFORE THIS"
+  //    against an enum saying "story-so-far"): answers drawn from the passage
+  //    cited `passage` correctly, and answers drawn from ANY other rung fell
+  //    back to the abstention — the model could not find the heading it was
+  //    reading in the list it was allowed to answer with, so a correct,
+  //    grounded answer shipped as "not in what I was given". The enum and the
+  //    page must be the same vocabulary.
+
   // ── 1 · the passage ─────────────────────────────────────────────────────
   add("passage",
     `PASSAGE — chapter ${input.chapterNumber}`
@@ -180,7 +236,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   const ask = input.kind === "question"
     ? collapse(input.question ?? "").slice(0, 300)
     : ASK_LINE[input.kind];
-  add("ask", `THE QUESTION\n${ask || ASK_LINE.explain}`, true);
+  add("ask", `ASK\n${ask || ASK_LINE.explain}`, true);
 
   // ── 3 · who is here ─────────────────────────────────────────────────────
   const present = (input.present ?? []).slice(0, 6);
@@ -191,7 +247,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
       const bits = [c?.role, c?.description].filter(Boolean).join(". ");
       return bits ? `${name}: ${cap(bits, 160)}` : name;
     });
-    add("who", `WHO IS IN THIS SCENE\n${lines.join("\n")}`, true);
+    add("who", `WHO — is in this scene\n${lines.join("\n")}`, true);
   }
 
   // ── 4 · either side ─────────────────────────────────────────────────────
@@ -200,7 +256,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   const after = paras[input.paragraphIndex + 1];
   if (before || after) {
     add("neighbours",
-      `IMMEDIATELY AROUND IT\n`
+      `NEIGHBOURS — immediately around it\n`
       + (before ? `Before: ${cap(collapse(before), NEIGHBOUR_CAP)}\n` : "")
       + (after ? `After: ${cap(collapse(after), NEIGHBOUR_CAP)}` : ""));
   }
@@ -211,7 +267,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
     .slice(-4);
   if (summaries.length) {
     add("story-so-far",
-      `THE STORY BEFORE THIS\n`
+      `STORY-SO-FAR — what earlier chapters established\n`
       + summaries.map((s) => `Ch ${s.chapterNumber}: ${cap(collapse(s.summary), 220)}`).join("\n"));
   }
 
@@ -219,7 +275,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   const threads = (input.openThreads ?? []).slice(0, 4);
   if (threads.length) {
     add("open-threads",
-      `STILL OPEN\n`
+      `OPEN-THREADS — still unresolved\n`
       + threads.map((t) => `Ch ${t.chapterNumber}: ${cap(collapse(t.text), 180)}`).join("\n"));
   }
 
@@ -227,7 +283,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   const related = (input.related ?? []).slice(0, 3);
   if (related.length) {
     add("related",
-      `EARLIER, ABOUT THE SAME PEOPLE\n`
+      `RELATED — earlier passages about the same people\n`
       + related.map((r) => `Ch ${r.chapterNumber}: ${cap(collapse(r.text), 240)}`).join("\n"));
   }
 
@@ -280,7 +336,11 @@ and knows what it says. Do not give writing advice in general terms.
 
 Answer as JSON: {"answer","basis","confidence"} in that order.
 answer: FIRST. Two or three sentences. Say the useful thing straight away.
-basis: the heading your answer came out of, or "${NOT_IN_CONTEXT}".
+basis: the NAME of the section your answer relies on, in lower case — the word
+  before the dash in its heading, such as "story-so-far" or "passage". If you
+  answered the question from a section, that section is your basis. Use
+  "${NOT_IN_CONTEXT}" only when NO section contains what the question needs —
+  never on an answer you actually gave.
 confidence: a decimal between 0 and 1, such as 0.9 or 0.4. Never above 1.`;
 
 export interface MaxAskRequest {
