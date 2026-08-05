@@ -17,7 +17,7 @@
  */
 import {
   buildMaxAskPack, buildMaxAskRequest, normalizeMaxAsk, isUsefulAnswer, runMaxAsk,
-  normalizeReview, buildReviewRequest,
+  normalizeClaimCheck, buildReviewRequest, computeReviewVerdict,
   NOT_IN_CONTEXT, MAX_STEPS, DEFAULT_BUDGET_TOKENS,
   type MaxAskInput,
 } from "../src/lib/max-ask";
@@ -205,65 +205,87 @@ console.log("\nthe opening rung and the self-review");
   gate(!early.rungsIncluded.includes("opening"),
     "…and an early paragraph does not — the opening would just repeat a neighbour");
 
-  // review plumbing, model-free
   const ans = { answer: "x", basis: "passage", confidence: 0.9 };
   const req = buildReviewRequest(deep, ans);
   gate(req.userText.includes(deep.text) && req.userText.includes("THE ANSWER UNDER REVIEW"),
     "★ the reviewer sees EXACTLY what the answerer saw, plus the answer");
-  gate(normalizeReview({ reason: "r", verdict: "overreaches", confidence: 0.8 })?.verdict === "overreaches",
-    "a review verdict parses");
-  gate(normalizeReview({ reason: "r", verdict: "maybe", confidence: 0.8 }) === null,
-    "an off-enum verdict is refused");
 
-  // exactly one extra call, and its failure loses nothing
+  const PACK = deep.text;
+  gate(normalizeClaimCheck({ claims: [
+    { claim: "she counts twice", kind: "fact", quote: "counted what was left in the tin" },
+    { claim: 42, kind: "fact", quote: "x" },              // dropped
+    { claim: "y", kind: "perhaps", quote: "x" },          // dropped
+  ] })?.length === 1,
+    "malformed and off-enum claims are dropped, not trusted");
+  gate(normalizeClaimCheck({ notClaims: [] }) === null, "a shapeless reply is refused");
+
+  // ── the verdict is string arithmetic against the pack ──
+  const v1 = computeReviewVerdict([
+    { claim: "Elena counts what is left", kind: "fact",
+      quote: "counted what was left in the tin" },
+    { claim: "this shows patience", kind: "reading", quote: "" },
+  ], PACK);
+  gate(v1.verdict === "supported" && v1.facts === 1 && v1.readings === 1,
+    "★ a truly-quoted fact plus an unquoted READING is supported — interpretation exempt by TYPE");
+
+  // ★★ THE COMPOUND-CLAIM ESCAPE, PINNED. Round 2 measured the model locating
+  //    "counts coins to pay off Captain Vale" in the passage — the true half
+  //    anchoring the invented half. Under quotes, the borrowed tin-quote is
+  //    real text but cannot contain the claim's NAME, so the fact fails.
+  const v2 = computeReviewVerdict([
+    { claim: "Elena counts coins to pay Captain Vale", kind: "fact",
+      quote: "counted what was left in the tin" },
+  ], PACK);
+  gate(v2.verdict === "overreaches" && v2.note?.includes("Vale"),
+    "★★ a REAL quote cannot support a claim whose name it does not contain");
+  const v3 = computeReviewVerdict([
+    { claim: "Vale blackmails her", kind: "fact",
+      quote: "Vale had been blackmailing Elena for a season" },   // invented text
+  ], PACK);
+  gate(v3.verdict === "overreaches",
+    "★★ an INVENTED quote fails indexOf against the pack, however plausible");
+  gate(computeReviewVerdict([], PACK).verdict === "supported"
+    && computeReviewVerdict([], PACK).facts === 0,
+    "no claims = supported with facts:0, so the UI can refuse to say \"checked\"");
+
+  // ── loop wiring: one extra call, decoration only, ALL kinds ──
   {
     const s = scripted([
       { answer: "Elena counts twice.", basis: "passage", confidence: 0.9 },
-      { answer: "IGNORED", basis: "passage", confidence: 0.9 },   // consumed by review, wrong shape
+      { answer: "IGNORED", basis: "passage", confidence: 0.9 },   // wrong shape for review
     ]);
-    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" },
-      { run: s.run, selfReview: true });
+    const r = await runMaxAsk(INPUT, { run: s.run, selfReview: true });
     gate(s.calls() === 2, `★ self-review costs exactly one extra call (${s.calls()})`);
-    gate(r.stopped === "answered" && !!r.answer,
-      "…and a review that fails to parse loses NOTHING — the answer ships without decoration");
-    gate(r.review == null, "…with no review recorded");
+    gate(r.stopped === "answered" && !!r.answer && r.review == null,
+      "…and an unparseable review loses NOTHING — the answer ships undecorated");
   }
   {
     const s = scripted([
-      { answer: "Elena counts twice.", basis: "passage", confidence: 0.9 },
-      { reason: "the tin's total is never stated", verdict: "overreaches", confidence: 0.8 },
+      { answer: "conflicts with ch 8", basis: "story-so-far", confidence: 0.9 },
+      { claims: [
+        { claim: "the fire is out", kind: "fact", quote: "The fire had been out since midnight" },
+        { claim: "she refused the short way", kind: "fact", quote: "Elena refuses the short way" },
+      ] },
     ]);
-    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" },
+    const r = await runMaxAsk(INPUT, { run: s.run, selfReview: true });
+    gate(r.review?.verdict === "supported" && r.review.facts === 2,
+      "★ a CHECK answer now reviews cleanly — decomposition locates both facts of a " +
+      "correct flag instead of reading the flag as a contradiction of itself");
+  }
+  {
+    const s = scripted([
+      { answer: "she pays Vale", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "Vale blackmails her", kind: "fact", quote: "" }] },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
       { run: s.run, selfReview: true });
-    gate(r.review?.verdict === "overreaches", "a parsed review rides along as decoration");
-    gate(!!r.answer && r.stopped === "answered",
-      "★ …and NEVER vetoes: the answer still ships, the caution is the UI's job");
+    gate(r.review?.verdict === "overreaches" && !!r.answer,
+      "★ an overreach decorates and NEVER vetoes — the caution is the UI's lever");
   }
   {
     const s = scripted([{ answer: "x", basis: "passage", confidence: 0.9 }]);
     await runMaxAsk(INPUT, { run: s.run });
     gate(s.calls() === 1, "selfReview off (the default) adds no call");
-  }
-  {
-    // INPUT.kind is "check": the reviewer must not run on it even when asked —
-    // an answer that REPORTS a conflict reads to the reviewer as an answer
-    // CONTRADICTED by the sections, and the caution fires on a correct flag.
-    const s = scripted([{ answer: "conflicts with ch 8", basis: "story-so-far", confidence: 0.9 }]);
-    const r = await runMaxAsk(INPUT, { run: s.run, selfReview: true });
-    gate(s.calls() === 1 && r.review == null,
-      "★ a check answer is never self-reviewed — the reviewer reads a correct flag's conflict as a conflict WITH the flag");
-    const sExp = scripted([{ answer: "she is rationing", basis: "passage", confidence: 0.9 }]);
-    const rExp = await runMaxAsk({ ...INPUT, kind: "explain" }, { run: sExp.run, selfReview: true });
-    gate(sExp.calls() === 1 && rExp.review == null,
-      "★ …nor an explain — fair interpretation reads as overreach and the caution becomes noise");
-    const s2 = scripted([
-      { answer: "the tin holds coins", basis: "passage", confidence: 0.9 },
-      { reason: "stated", verdict: "supported", confidence: 0.9 },
-    ]);
-    const r2 = await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" },
-      { run: s2.run, selfReview: true });
-    gate(s2.calls() === 2 && r2.review?.verdict === "supported",
-      "…while a factual QUESTION is reviewed");
   }
 }
 
@@ -294,11 +316,19 @@ console.log("\nthe harness narrates its phases");
       `a widened ask narrates asking -> widening (got ${seen.join(",")})`);
   }
   {
-    const s = scripted([{ answer: "fits", basis: "passage", confidence: 0.9 }]);
+    const s = scripted([
+      { answer: "fits", basis: "passage", confidence: 0.9 },
+      { claims: [] },
+    ]);
     const { opts, seen } = phases({ run: s.run, selfReview: true });
-    await runMaxAsk(INPUT, opts);   // check-kind: review exempt
-    gate(seen.join(",") === "asking",
-      `★ every phase named is a call that HAPPENS — a check narrates only asking (got ${seen.join(",")})`);
+    await runMaxAsk(INPUT, opts);   // check-kind reviews too, under decomposition
+    gate(seen.join(",") === "asking,reviewing",
+      `a reviewed CHECK narrates asking -> reviewing (got ${seen.join(",")})`);
+    const s2 = scripted([{ answer: "fits", basis: "passage", confidence: 0.9 }]);
+    const { opts: o2, seen: seen2 } = phases({ run: s2.run });
+    await runMaxAsk(INPUT, o2);
+    gate(seen2.join(",") === "asking",
+      `★ every phase named is a call that HAPPENS — no review, no "reviewing" (got ${seen2.join(",")})`);
   }
 }
 

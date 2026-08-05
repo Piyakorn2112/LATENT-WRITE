@@ -233,7 +233,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
                   <span
                     key={wi}
                     className="max-ask-word"
-                    style={{ animationDelay: `${li * 110 + wi * 16}ms` }}
+                    style={{ animationDelay: `${li * 70 + wi * 9}ms` }}
                   >
                     {word}
                     {"\u00A0"}
@@ -243,10 +243,20 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
               </span>
             ))}
           </p>
-          {phase.result.review && phase.result.review.verdict !== "supported" && (
+          {/* The check's result is VISIBLE either way — the user asked where
+              it went, and the honest answer was "it never ran on this kind".
+              Now it runs on every kind, and: an unlocated FACT gets the
+              caution with the claim named; a clean check says so quietly, with
+              the count, so "checked" can never mean "checked nothing". */}
+          {phase.result.review?.verdict === "overreaches" && (
             <div className="max-ask-caution">
-              self-check: may {phase.result.review.verdict === "contradicted" ? "contradict" : "overreach"} the
-              story — {phase.result.review.reason}
+              self-check: "{phase.result.review.note}" is not in what it was given — verify
+              against the chapter
+            </div>
+          )}
+          {phase.result.review?.verdict === "supported" && phase.result.review.facts > 0 && (
+            <div className="max-ask-checked">
+              checked — {phase.result.review.facts} fact{phase.result.review.facts === 1 ? "" : "s"} located in the story
             </div>
           )}
           {phase.result.answer && RUNG_LABEL[phase.result.answer.basis] && (

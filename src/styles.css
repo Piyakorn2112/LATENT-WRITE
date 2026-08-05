@@ -16038,9 +16038,11 @@ body.electron-window-unfocused .wc-panel::after {
   display: inline-block;
   opacity: 0;
   transform: translateY(13px);
+  /* Tuned down once against the eye: at 0.22/0.6 with 16ms words the pour
+     read as a queue; at 0.15/0.42 with 9ms it reads as one breath. */
   animation:
-    max-ask-word-fade 0.22s ease-out forwards,
-    max-ask-word-rise 0.6s cubic-bezier(0.3, 1.36, 0.36, 1) forwards;
+    max-ask-word-fade 0.15s ease-out forwards,
+    max-ask-word-rise 0.42s cubic-bezier(0.3, 1.36, 0.36, 1) forwards;
   will-change: transform, opacity;
 }
 
@@ -16051,6 +16053,16 @@ body.electron-window-unfocused .wc-panel::after {
   .max-ask-word { animation: none; opacity: 1; transform: none; }
   .max-ask { transition: none; }
   .max-ask-orb { animation: none; opacity: 0.9; }
+}
+
+/* The clean self-check: quieter than the caution, but PRESENT — a check whose
+   only visible outcome is bad news reads as absent the rest of the time. */
+.max-ask-checked {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
 }
 
 /* The self-check caution: quiet, but not hidden — it names why it is unsure. */

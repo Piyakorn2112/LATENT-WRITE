@@ -409,72 +409,180 @@ export function isUsefulAnswer(a: MaxAskAnswer | null | undefined): boolean {
   return !!a && a.basis !== NOT_IN_CONTEXT && a.answer.length > 0;
 }
 
-// ── self-review ────────────────────────────────────────────────────────────
+// ── self-review: claim decomposition, verdict computed by code ─────────────
 //
-// ★★ THE REVIEWER SEES EXACTLY WHAT THE ANSWERER SAW, PLUS THE ANSWER. Same
-//    pack, verbatim — a reviewer with different context is measuring the
-//    difference in context, not the answer. And its verdict can only ever
-//    DECORATE: a `supported` adds nothing, anything else adds a caution line
-//    the writer sees beside the answer. It never deletes — this repo has
-//    measured what happens when a small model's judgement is given a
-//    destructive lever, and the answer is already advisory text.
+// ★★ THE MONOLITHIC JUDGE WAS MEASURED TWICE AND RETIRED. Asked "is this
+//    answer supported by the sections?", the 4B flagged a correct check for
+//    reporting the very conflict it was asked to find ("contradicted" @0.9),
+//    and flagged fair interpretation as overreach ("meticulous nature" @0.9)
+//    — so review was scoped down to typed questions, and the checking phase
+//    never appeared on the menu asks at all.
 //
-// ★ REASON FIRST, VERDICT AFTER, and `supported` is NOT described as the safe
-//   default — each verdict is a positive claim about what the sections state.
+// ★★ THE REDESIGN IS THE FIELD'S ANSWER, NOT A REWORDED PROMPT. Claim
+//    decomposition + per-claim verification against the source is the reliably
+//    automatable shape (SelfCheckGPT-family literature). Three measured rounds
+//    got it here, each fixing a mechanism:
+//
+//    ROUND 2 — decomposition with section LABELS: the interpretation exemption
+//    worked (readings exempt by type), but the poisoned compound escaped —
+//    "Elena counts coins to pay off Captain Vale" was located in `passage`,
+//    the true half anchoring the invented half. A label is sympathetic.
+//
+//    ROUND 3 — decomposition with verbatim QUOTES, verdict by string
+//    arithmetic (below). On the real 4B: the poisoned claim borrowed the tin
+//    quote and the enclosing-sentence name check failed it (overreaches, the
+//    claim named); the correct flag reviewed clean on a real quote ("Elena
+//    took the short way past the burn"); the explain answer decomposed to
+//    nothing checkable and stayed quiet (facts:0, no badge). The model
+//    extracts and quotes; the harness verifies with indexOf. Runs on EVERY
+//    kind.
 
-export const REVIEW_MAX_TOKENS = 200;
+export const REVIEW_MAX_TOKENS = 320;
+const CLAIM_MAX = 60;
+const QUOTE_MAX = 160;
 
-export type ReviewVerdict = "supported" | "overreaches" | "contradicted";
+export type ClaimKind = "fact" | "reading";
 
-export const MAX_ASK_REVIEW_SYSTEM = `You are checking an answer that was written about a passage from a novel,
-using only the sections provided. The sections are the whole truth here.
-
-Say which one of these the answer is:
-- "supported": everything the answer claims is stated by, or follows directly
-  from, the sections.
-- "overreaches": the answer includes something no section states — invented
-  detail, motive, or history.
-- "contradicted": a section states the opposite of something the answer claims.
-
-Answer as JSON: {"reason","verdict","confidence"} in that order.
-reason: FIRST, at most 20 words. Name the claim and the section that decides it.
-verdict: supported, overreaches, or contradicted.
-confidence: a decimal between 0 and 1, such as 0.9 or 0.4. Never above 1.`;
-
-export const REVIEW_SCHEMA = {
-  type: "object",
-  properties: {
-    reason: { type: "string", maxLength: 160 },
-    verdict: { enum: ["supported", "overreaches", "contradicted"] },
-    confidence: { type: "number" },
-  },
-} as const;
+export interface ReviewClaim {
+  claim: string;
+  kind: ClaimKind;
+  /** Verbatim words from a section that state the claim; "" when nothing does. */
+  quote: string;
+}
 
 export interface ReviewAnswer {
-  verdict: ReviewVerdict;
-  confidence: number;
-  reason: string;
+  verdict: "supported" | "overreaches";
+  /** The first unsupported fact, verbatim — what the caution shows. */
+  note?: string;
+  facts: number;
+  readings: number;
+}
+
+/**
+ * ★★ THE QUOTE IS THE LOCATION, AND THE HARNESS CHECKS IT WITH indexOf.
+ *    Round 2 of measuring this: asked to LOCATE each claim in a section, the
+ *    model located "Elena counts coins to pay off Captain Vale" in `passage`
+ *    — the true half of a compound claim anchored the invented half, and the
+ *    poisoned case escaped. A label is sympathetic; a QUOTE is checkable. The
+ *    model must now hand over the exact words that state each fact, and the
+ *    verdict verifies two things deterministically: the quote actually occurs
+ *    in the pack (normalised substring), and every capitalised name in the
+ *    claim appears in the quote — so a tin-counting quote can never support a
+ *    claim about Captain Vale. Extraction stays with the model; verification
+ *    is string arithmetic. (SelfCheckGPT-family decomposition, adapted to a
+ *    grammar-constrained 4B with the repo's verbatim-anchor tradition.)
+ */
+export const MAX_ASK_REVIEW_SYSTEM = `An answer was written about a passage from a novel, using only the sections
+provided. You break the answer into claims so each can be checked.
+
+At most 5 claims, ONE assertion each, at most 10 words — split compound
+statements ("she counts coins to pay Vale" is two claims). For each:
+- kind "fact": it asserts something about the story — an event, a detail, a
+  name, a stated reason.
+- kind "reading": interpretation — what the paragraph is doing, what something
+  suggests, advice, a possibility.
+- quote: the EXACT words, copied from a section, that state the claim. Copy
+  them verbatim. If no section states it, leave quote empty. A "reading"
+  usually has an empty quote and that is fine.
+
+Answer as JSON: {"claims":[{"claim","kind","quote"}]}.
+claim: FIRST, the single assertion.`;
+
+export function claimCheckSchema() {
+  return {
+    type: "object",
+    properties: {
+      claims: {
+        type: "array",
+        maxItems: 5,
+        items: {
+          type: "object",
+          properties: {
+            claim: { type: "string", maxLength: CLAIM_MAX },
+            kind: { enum: ["fact", "reading"] },
+            quote: { type: "string", maxLength: QUOTE_MAX },
+          },
+        },
+      },
+    },
+  } as const;
 }
 
 export function buildReviewRequest(pack: MaxAskPack, answer: MaxAskAnswer) {
   return {
     systemPrompt: MAX_ASK_REVIEW_SYSTEM,
     userText: `${pack.text}\n\nTHE ANSWER UNDER REVIEW\n${answer.answer}`,
-    schema: REVIEW_SCHEMA,
+    schema: claimCheckSchema(),
     maxTokens: REVIEW_MAX_TOKENS,
   };
 }
 
-export function normalizeReview(raw: unknown): ReviewAnswer | null {
+export function normalizeClaimCheck(raw: unknown): ReviewClaim[] | null {
   if (!raw || typeof raw !== "object") return null;
-  const v = raw as Record<string, unknown>;
-  if (typeof v.verdict !== "string" || typeof v.reason !== "string") return null;
-  if (typeof v.confidence !== "number" || !Number.isFinite(v.confidence)) return null;
-  const verdict = (["supported", "overreaches", "contradicted"] as const)
-    .find((x) => x === collapse(v.verdict as string).toLowerCase());
-  if (!verdict) return null;
-  const reason = collapse(v.reason).slice(0, 160);
-  return { verdict, confidence: Math.min(1, Math.max(0, v.confidence)), reason };
+  const arr = (raw as Record<string, unknown>).claims;
+  if (!Array.isArray(arr)) return null;
+  const out: ReviewClaim[] = [];
+  for (const item of arr.slice(0, 5)) {
+    if (!item || typeof item !== "object") continue;
+    const v = item as Record<string, unknown>;
+    if (typeof v.claim !== "string" || typeof v.kind !== "string") continue;
+    const claim = collapse(v.claim).slice(0, CLAIM_MAX);
+    const kind = v.kind === "fact" || v.kind === "reading" ? v.kind : null;
+    if (!claim || !kind) continue;
+    out.push({ claim, kind, quote: typeof v.quote === "string" ? collapse(v.quote).slice(0, QUOTE_MAX) : "" });
+  }
+  return out;
+}
+
+/** Quote-vs-text match that survives typography: whitespace collapsed, curly
+ *  quotes and ellipses straightened, case-insensitive. */
+const normText = (t: string) =>
+  t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"')
+    .replace(/\u2026/g, "...").replace(/\s+/g, " ").trim();
+
+/** The claim's NAMES — capitalised tokens minus ordinary sentence furniture.
+ *  These are what an invented entity smuggles in ("Captain Vale", "Fen
+ *  Cross"), and what a borrowed quote about the tin can never contain. */
+const CLAIM_STOPCAPS = new Set(["The", "A", "An", "She", "He", "It", "They",
+  "Her", "His", "Their", "In", "On", "At", "When", "After", "Before", "This", "That"]);
+const claimNames = (claim: string): string[] =>
+  (claim.match(/\b[A-Z][a-z'\u2019-]+/g) ?? [])
+    .filter((w) => !CLAIM_STOPCAPS.has(w))
+    .filter((w, i, a) => a.indexOf(w) === i);
+
+/**
+ * ★ THE VERDICT IS ARITHMETIC. A fact is SUPPORTED only when its quote really
+ *   occurs in the pack AND carries every name the claim carries. Readings are
+ *   exempt by type. No parsed claims = facts:0, so the UI can refuse to say
+ *   "checked" rather than saying it about nothing.
+ */
+export function computeReviewVerdict(claims: readonly ReviewClaim[], packText: string): ReviewAnswer {
+  const haystack = normText(packText);
+  let facts = 0, readings = 0;
+  let note: string | undefined;
+  for (const c of claims) {
+    if (c.kind !== "fact") { readings += 1; continue; }
+    facts += 1;
+    const quote = normText(c.quote);
+    const at = quote.length >= 8 ? haystack.indexOf(quote) : -1;
+    let ok = false;
+    if (at >= 0) {
+      // ★ NAMES ARE CHECKED AGAINST THE QUOTE'S ENCLOSING SENTENCE, not the
+      //   quote alone. A minimal quote often omits its own subject ("counted
+      //   what was left in the tin" — the sentence starts "Elena Vasquez
+      //   sat…"), and requiring "Elena" INSIDE the span failed a true claim.
+      //   The sentence around the located quote keeps the check deterministic
+      //   while still failing the compound escape: the tin sentence contains
+      //   no Captain Vale, wherever the claim smuggles him in.
+      let s0 = at, s1 = at + quote.length;
+      while (s0 > 0 && !".!?\n".includes(haystack[s0 - 1])) s0 -= 1;
+      while (s1 < haystack.length && !".!?\n".includes(haystack[s1])) s1 += 1;
+      const sentence = haystack.slice(s0, s1);
+      ok = claimNames(c.claim).every((n) => sentence.includes(n.toLowerCase()));
+    }
+    if (!ok && !note) note = c.claim;
+  }
+  return { verdict: note ? "overreaches" : "supported", note, facts, readings };
 }
 
 // ── the bounded loop ───────────────────────────────────────────────────────
@@ -577,24 +685,10 @@ export async function runMaxAsk(
 
     if (answer && isUsefulAnswer(answer)) {
       // ── self-review: exactly ONE extra call, and a failure loses nothing ──
-      //
-      // ★★ ONLY ON `question` ANSWERS, and both boundaries were MEASURED:
-      //    · a `check` answer ASSERTS a conflict, and the reviewer read the
-      //      very conflict a correct flag reports as a conflict WITH the flag
-      //      — "contradicted" @0.9 on a right answer. Incoherent at any prompt.
-      //    · an `explain` answer INTERPRETS ("counting twice indicates her
-      //      meticulous nature"), and the strict reviewer flags fair
-      //      interpretation as overreach @0.9 — a caution that fires on most
-      //      good explanations trains the writer to ignore cautions, which is
-      //      the one way this feature dies. `suggest` speculates by charter,
-      //      same problem.
-      //    What remains is the factual surface: a free QUESTION answered with
-      //    story facts, where the poisoned probe case ("blackmailing her since
-      //    the fire she started") is caught as overreach @0.9 with the exact
-      //    missing facts named. Review guards facts; interpretation is the
-      //    writer's to judge.
+      // Claim decomposition (see the section above): the model extracts and
+      // locates, the verdict is computed here, and it runs on every kind.
       let review: ReviewAnswer | null = null;
-      if (opts.selfReview && input.kind === "question" && now() < deadline) {
+      if (opts.selfReview && now() < deadline) {
         opts.onPhase?.("reviewing");
         const reviewRequest = buildReviewRequest(pack, answer);
         const reviewed = await opts.run<unknown>({
@@ -606,7 +700,10 @@ export async function runMaxAsk(
           maxTokens: reviewRequest.maxTokens,
           timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
         }).catch(() => null);
-        if (reviewed && reviewed.ok) review = normalizeReview(reviewed.json);
+        if (reviewed && reviewed.ok) {
+          const claims = normalizeClaimCheck(reviewed.json);
+          if (claims) review = computeReviewVerdict(claims, pack.text);
+        }
       }
       return { answer, review, steps, stopped: "answered", packHash: pack.packHash,
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };

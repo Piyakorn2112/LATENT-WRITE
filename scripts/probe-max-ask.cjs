@@ -160,50 +160,66 @@ async function main() {
     console.log(`  answer: ${String(r.j.answer).slice(0, 220)}`);
     console.log(`  shipped: ${v.a ? (v.useful ? 'REACHES THE WRITER' : 'held (abstention)') : 'REFUSED by validator'}\n`);
   });
-  // ── the self-reviewer, on real answers and one poisoned one ─────────────
+  // ── the self-reviewer: claim decomposition on real answers + one poisoned ─
   //
-  // ★ THE POISONED CASE IS THE ONE THAT DECIDES. A reviewer that stamps
-  //   "supported" on everything is decoration pretending to be a check; it has
-  //   to catch an answer that invents story facts the pack never stated.
-  console.log('self-review (verdicts on real answers + one poisoned):\n');
+  // ★ THE POISONED CASE DECIDES, and the EXPLAIN case is its control from the
+  //   other side: the old monolithic judge flagged fair interpretation as
+  //   overreach, which is the failure the claim/reading split exists to fix.
+  console.log('self-review by claim decomposition:\n');
   const reviewCases = [
-    // ★ BOTH boundary measurements, kept as the record of WHY review is scoped
-    //   to question-kind only (see max-ask.ts): a correct check flag reads as
-    //   "contradicted", and a fair explain interpretation reads as
-    //   "overreaches" — both @0.9. Interpretive kinds are exempt; the reviewer
-    //   guards factual asks, where the poisoned case below is the target.
-    { id: 'review-explain', packIdx: 0, answer: rows[0] && rows[0].j ? rows[0].j.answer
-        : 'Elena counts the tin twice, indicating her meticulous nature.',
-      expect: 'overreaches — fair strict reading; WHY explain-kind is exempt' },
-    { id: 'review-poisoned', packIdx: 0,
+    { id: 'rev-explain', packIdx: 0, expect: 'supported — readings exempt by type',
+      answer: rows[0] && rows[0].j ? rows[0].j.answer
+        : 'Elena counts the tin twice, indicating her meticulous nature.' },
+    { id: 'rev-flag', packIdx: 1, expect: 'supported — both facts locate',
+      answer: rows[1] && rows[1].j ? rows[1].j.answer
+        : 'Elena taking the short way conflicts with her refusal in chapter 8.' },
+    { id: 'rev-poisoned', packIdx: 0, expect: 'overreaches — blackmail is stated nowhere',
       answer: 'Elena is counting the coins to pay off Captain Vale, who has been '
-        + 'blackmailing her since the fire she started at Fen Cross.',
-      expect: 'overreaches or contradicted' },
+        + 'blackmailing her since the fire she started at Fen Cross.' },
   ];
   const builtReviews = JSON.parse(execFileSync(NODE, [TSX, '-e',
     'import {buildMaxAskPack, buildReviewRequest} from "./src/lib/max-ask";' +
     'const a = JSON.parse(process.argv[process.argv.length-1]);' +
     'console.log(JSON.stringify(a.cases.map((c)=>{' +
     '  const pack = buildMaxAskPack(a.inputs[c.packIdx].input, a.inputs[c.packIdx].budget);' +
-    '  return buildReviewRequest(pack, {answer:c.answer, basis:"passage", confidence:0.9});' +
+    '  return { packText: pack.text,' +
+    '           req: buildReviewRequest(pack, {answer:c.answer, basis:"passage", confidence:0.9}) };' +
     '})))',
     JSON.stringify({ cases: reviewCases, inputs: CASES }),
   ], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop());
 
+  const reviewRows = [];
   for (let i = 0; i < reviewCases.length; i++) {
-    const rc = reviewCases[i], req = builtReviews[i];
+    const rc = reviewCases[i], b = builtReviews[i];
     const t0 = Date.now();
     const res = await callBridge('assistantRun', {
       requestId: `maxrev-${rc.id}`, task: 'max-ask', tier: 'max', contextSize: 4096,
       noThink: false,
-      systemPrompt: req.systemPrompt, userText: req.userText,
-      schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 120000,
+      systemPrompt: b.req.systemPrompt, userText: b.req.userText,
+      schema: b.req.schema, maxTokens: b.req.maxTokens, timeoutMs: 120000,
     });
-    const j = res && res.ok ? res.json : null;
-    console.log(`${rc.id.padEnd(16)} expect ${rc.expect}`);
-    console.log(`  got: ${j ? `${j.verdict} @${j.confidence}` : 'NO ANSWER'}   ${Date.now() - t0}ms`);
-    console.log(`  reason: ${j ? String(j.reason).slice(0, 160) : '-'}\n`);
+    reviewRows.push({ rc, packText: b.packText, ms: Date.now() - t0, j: res && res.ok ? res.json : null });
   }
+
+  // The SHIPPED normalize + computed verdict, never a re-implementation.
+  const verdicts = JSON.parse(execFileSync(NODE, [TSX, '-e',
+    'import {normalizeClaimCheck, computeReviewVerdict} from "./src/lib/max-ask";' +
+    'const rows = JSON.parse(process.argv[process.argv.length-1]);' +
+    'console.log(JSON.stringify(rows.map((r)=>{' +
+    '  const claims = normalizeClaimCheck(r.json);' +
+    '  return claims ? { claims, verdict: computeReviewVerdict(claims, r.packText) } : null;})))',
+    JSON.stringify(reviewRows.map((r) => ({ json: r.j, packText: r.packText }))),
+  ], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop());
+
+  reviewRows.forEach((r, i) => {
+    const v = verdicts[i];
+    console.log(`${r.rc.id.padEnd(13)} expect: ${r.rc.expect}`);
+    if (!v) { console.log(`  NO PARSE   ${r.ms}ms\n`); return; }
+    console.log(`  verdict: ${v.verdict.verdict}  facts=${v.verdict.facts} readings=${v.verdict.readings}`
+      + `${v.verdict.note ? `  note="${v.verdict.note}"` : ''}   ${r.ms}ms`);
+    for (const c of v.claims) console.log(`    [${c.kind}] "${c.claim}" <- "${(c.quote || '').slice(0, 60)}"`);
+    console.log('');
+  });
 
   await callBridge('assistantUnload');
   app.exit(0);
