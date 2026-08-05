@@ -72,6 +72,41 @@
  *    passes would make the number meaningless — the cases are the measurement,
  *    not training data.
  *
+ * ── REFUTED: "IT WAS THE ANSWER SET" ───────────────────────────────
+ *
+ * entity-review asks "what TYPE is this word?" over [character, place,
+ * faction, object, not-a-name] and gets "Meanwhile" -> not-a-name right. This
+ * asked "WHICH PERSON is this?" over [Gatsby, Jordan, unclear, not-a-name] and
+ * answered "Bah" -> Scrooge @1.0. The obvious theory was that a list of PEOPLE
+ * reads as "pick a person" whatever escape hatches are attached, and that
+ * re-asking it as a type question would fix it.
+ *
+ * ★★ IT DOES NOT. The same four words, put through the REAL entity-review
+ *    prompt and schema, come back as `character` at 0.9:
+ *
+ *      Bah    -> character @0.9  "Bah is spoken to by Scrooge and is spoken by Scrooge"
+ *      Hullo  -> character @0.9  "Hullo is spoken to by someone else and is used as a greeting"
+ *      Yeah   -> character @0.9  "Yeah is spoken to by Gatsby and is spoken by Gatsby"
+ *      Ding   -> object    @0.5
+ *      Kes    -> character @0.9  OK   Ott OK   Tinder OK   (controls, 3 for 3)
+ *
+ *    "...and is used as a greeting" - it names the word's actual function and
+ *    labels it a person in the same breath, exactly as before.
+ *
+ * ★★ SO THE REAL FINDING IS SIMPLER AND WORSE: THE MODEL IS READING THE SLOT,
+ *    NOT THE WORD. Anything sitting in `"..., X,"` inside dialogue is a person
+ *    being addressed, as far as it is concerned. That is precisely what
+ *    alias-scan's VOCATIVE_RE already decides, for free - so on this class the
+ *    model is not a second opinion at all, it is the SAME opinion at a
+ *    thousand times the cost. "Meanwhile" classifies correctly in entity-review
+ *    because it sits at the head of a NARRATED sentence, a different position -
+ *    not because that task is better posed.
+ *
+ * ★ WHAT WOULD ACTUALLY BE NEEDED: evidence from OUTSIDE the vocative slot -
+ *   does this word ever appear where only a name can go - which is a question
+ *   about the corpus, not about a passage, and therefore not a model's job.
+ *   alias-scan's narration rules already ask it.
+ *
  * ★ AND IT MISSES THE APP'S OWN DEMO CASE. "Sparrow" from the stress chapter
  *   is one of the two answerable passages it left unattached. The deterministic
  *   scan finds seven aliases on that chapter; the model layer finds none of
