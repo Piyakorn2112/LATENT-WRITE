@@ -41,11 +41,44 @@
  *    Here the answer underneath is "the row stays unticked", which is what a
  *    writer who disagrees does by doing nothing.
  *
- * ★ WHAT TO MEASURE, AND WHEN TO PULL IT: scripts/probe-alias-referent.cjs.
- *   The deciding number is WRONG-AND-CONFIDENT — a passage where the model
- *   names a person the passage does not support, above the floor. Distractors
- *   are half the set. If that number is not 0, drop the model layer and ship
- *   the deterministic scan alone; it is the part that carries the feature.
+ * ── MEASURED · scripts/probe-alias-referent.cjs · qwen3-1.7b · 8 passages ───
+ *
+ *   right, and a row proposed        2
+ *   WRONG, and a row proposed        0    ← the deciding number
+ *   answerable, left unattached      2    ← costs a nickname, nothing more
+ *   unanswerable, correctly held     4
+ *   distinct answers produced        unclear, Weir, Ottoline
+ *
+ * Four of the eight passages have NO answer in them and carry the same surface
+ * shape as the four that do; the model held all four. Confidences: correct
+ * referents [1, 1], wrong referents [none].
+ *
+ * ★★ THE FIRST RUN SCORED 0 RIGHT AND 0 WRONG, AND THE CAUSE WAS THE HARNESS,
+ *    NOT THE MODEL. Two instrument defects, both visible only in the RAW text:
+ *
+ *    · `reason` was capped at 110 characters, and a grammar enforces maxLength
+ *      by CUTTING. Every answer opened with a preamble and was guillotined
+ *      mid-clause before reaching the evidence — then had to emit its label
+ *      having been interrupted. One such answer named the man who was SHOUTING
+ *      the nickname. Reason-before-label only helps if the reason can finish.
+ *      Fixed by 200 chars plus "start with the quoted words, no preamble".
+ *    · The abstention was written as an invitation — three ways to choose it
+ *      and "it costs nothing" — which is precisely what this repo's own note
+ *      says a catch-all must never be. It became the resting state and the
+ *      task did nothing. Now stated as one narrow condition.
+ *
+ *    Both were fixed on the mechanism, ONE re-run was taken, and the number
+ *    above is that run. Iterating a prompt against these eight cases until it
+ *    passes would make the number meaningless — the cases are the measurement,
+ *    not training data.
+ *
+ * ★ AND IT MISSES THE APP'S OWN DEMO CASE. "Sparrow" from the stress chapter
+ *   is one of the two answerable passages it left unattached. The deterministic
+ *   scan finds seven aliases on that chapter; the model layer finds none of
+ *   them. It earns its place on books where an epithet is never declared and
+ *   never spoken to a lone addressee — not as the part that carries the
+ *   feature. If a future run puts wrong-and-proposed above 0, delete the layer;
+ *   the scan stands without it.
  */
 import { fnv1a } from "./evidence-pack";
 import { tidyTruncatedText } from "./assistant-client";
@@ -68,7 +101,16 @@ export const REFERENT_MIN_CONFIDENCE = 0.85;
 export const UNCLEAR = "unclear";
 
 const SNIPPET_MAX = 420;
-const REASON_MAX = 110;
+/**
+ * ★★ MEASURED, AND IT WAS 110. A constrained grammar enforces `maxLength` by
+ *    CUTTING, so a model that opens with a preamble is guillotined mid-clause
+ *    and then has to emit its label having been interrupted. Both raw answers
+ *    in the first run began "The name 'Tinder' is used as a noun here,
+ *    referring to a person's name" and ran out of room before reaching the
+ *    evidence; one of them then named the man who was SHOUTING the nickname.
+ *    Reason-before-label only helps if the reason gets to finish.
+ */
+const REASON_MAX = 200;
 const DEFAULT_MAX_TOKENS = 128;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -105,21 +147,19 @@ people it refers to, using only what the passage shows.
 The passage is all the evidence there is. Do not use anything you know about
 books, history or real people.
 
-Choose a person only when the passage itself shows it — they are described
-doing what the name does, they answer to it, someone uses the name while
-speaking to them, or the passage puts the name and the person in the same role.
+Choose a person when the passage shows it — they answer to the name, they are
+described doing what the name does, or the passage puts the name and the person
+in the same role. One person reacting to the name while the others do not is
+enough. Nearness on its own is not.
 
-Choose "unclear" when the passage does not show it. That is the right answer
-whenever the name could belong to someone not listed, when two of the listed
-people fit equally, or when the passage merely mentions them nearby. Nearness
-is not evidence. "unclear" costs nothing: the name simply stays unattached,
-which is how it already is.
+Choose "unclear" only when nothing in the passage points at any of them.
 
 Answer as JSON: {"reason","referent","confidence"} in that order.
-reason: FIRST, one clause of at most 14 words naming what in the passage
-  decided it. Quote the deciding words if there are any.
+reason: FIRST, and START WITH THE QUOTED WORDS from the passage that decide it.
+  No preamble, no restating the question. If no words decide it, write "none".
 referent: exactly one of the listed names, or "unclear".
-confidence: 0 to 1. High only when the passage shows it outright. Never above 1.`;
+confidence: a decimal between 0 and 1, such as 0.9 or 0.4. Use 0.9 or more only
+  when the quoted words show it outright. Never above 1.`;
 
 // ── request ────────────────────────────────────────────────────────────────
 
