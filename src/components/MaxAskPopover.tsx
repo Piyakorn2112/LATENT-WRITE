@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { OrbEngine } from "./orb/OrbEngine";
 import { assistantRunJSON, cancelWhere } from "../lib/assistant-client";
 import {
   MAX_ASK_TASK,
@@ -188,11 +189,16 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
 
       {phase.name === "asking" && (
         <div className="max-ask-wait">
-          {/* The app's ambient orb, at loader scale, in SYSTEM BLUE — the
-              exact token the toggle's on-state and every active-blue control
-              uses (--control-value-fill), so light/dark handling is inherited
-              rather than reproduced. */}
-          <span className="max-ask-orb" aria-hidden="true" />
+          {/* THE app orb — the six-oval sheet-glass OrbEngine from the
+              toolbar's intel button, not a gradient stand-in — tinted to
+              SYSTEM BLUE via --control-value-fill, the token the toggle's
+              on-state uses, so the colour AND its light/dark handling are
+              inherited from the one place that defines them. `analyzing`
+              gives it the working motion. */}
+          <span className="max-ask-orb" aria-hidden="true">
+            <OrbEngine mode="default" analyzing size={18} flowScale={0.8}
+              aberration={0.45} tint="--control-value-fill" />
+          </span>
           {phase.label}
         </div>
       )}

@@ -15986,31 +15986,24 @@ body.electron-window-unfocused .wc-panel::after {
   color: var(--text-secondary);
 }
 
-/* The app's orb, at loader scale. Same recipe as .world-scan-orb — a blurred
-   radial core with the enter + breathe pair — recoloured to SYSTEM BLUE via
-   --control-value-fill, the token the toggle's on-state uses, so light/dark
-   handling is inherited from the one place that defines it. */
+/* Hosts the OrbEngine (the toolbar's six-oval sheet-glass orb) at loader
+   scale. Layout only — the orb draws itself, tinted via --control-value-fill
+   inside the engine; a gradient imitation lived here briefly and looked like
+   what it was. The enter fade is the one thing the host adds. */
 .max-ask-orb {
   position: relative;
   width: 18px;
   height: 18px;
   flex-shrink: 0;
-  border-radius: 50%;
-  background: radial-gradient(circle at center, var(--control-value-fill) 0%, transparent 68%);
-  filter: blur(3px);
-  animation:
-    max-ask-orb-enter 0.5s cubic-bezier(0.34, 1.2, 0.64, 1) forwards,
-    max-ask-orb-breathe 2.2s ease-in-out 0.5s infinite;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  animation: max-ask-orb-enter 0.4s cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
 }
 
 @keyframes max-ask-orb-enter {
-  0%   { opacity: 0; transform: scale(0.4); }
+  0%   { opacity: 0; transform: scale(0.5); }
   100% { opacity: 1; transform: scale(1); }
-}
-
-@keyframes max-ask-orb-breathe {
-  0%, 100% { transform: scale(1);    opacity: 0.75; }
-  50%      { transform: scale(1.22); opacity: 1; }
 }
 
 .max-ask-answer { padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 8px; }

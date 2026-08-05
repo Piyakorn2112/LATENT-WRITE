@@ -139,6 +139,21 @@ try {
   // ── ask, against the real 4B ────────────────────────────────────────────
   await page.locator(".max-ask-item", { hasText: "What is this doing?" }).click();
   console.log("[max-ask-e2e] asked; waiting on the 4B (cold load can take ~40s)…");
+  // A frame of the loading state, for the record: the six-oval orb must be a
+  // live WebGL canvas (not the legacy fallback), tinted and animating.
+  await page.waitForTimeout(1100);
+  const orb = await page.evaluate(() => {
+    const host = document.querySelector(".max-ask-orb");
+    const canvas = host?.querySelector("canvas");
+    return { present: !!host, webgl: !!canvas,
+      size: canvas ? `${canvas.width}x${canvas.height}` : "" };
+  });
+  console.log(`[max-ask-e2e] loading orb: present=${orb.present} webgl=${orb.webgl} ${orb.size}`);
+  try {
+    const shot = await page.screenshot();
+    const { writeFileSync: wf } = await import("node:fs");
+    wf("/private/tmp/claude-501/-Users-piyakorn-Desktop-Srang-Tech-Mai/8d196d80-68c2-461a-8fc6-9708388cc620/scratchpad/modeshots/maxask-loading.png", shot);
+  } catch { /* screenshot is a bonus */ }
   const t0 = Date.now();
   const answer = page.locator(".max-ask-answer-text");
   await answer.waitFor({ timeout: 180_000 });

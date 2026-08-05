@@ -55,8 +55,26 @@ const PAUSED_BODY_CLASS = "electron-window-unfocused-orb-paused";
 
 /** Fill `out` (6 × rgb floats). `off` eases 0 → 1 as intelligence is
  *  switched off, so the drain to grey is a transition, not a cut. */
-function petalPalette(off: number, dark: boolean, out: Float32Array) {
+function petalPalette(off: number, dark: boolean, out: Float32Array, tint?: [number, number, number] | null) {
   const greys = dark ? OFF_GREY_DARK : OFF_GREY_LIGHT;
+  // ★ A TINT KEEPS THE SIX-OVAL READ. Painting every petal the same flat
+  //   colour collapses the ring into one blob — what makes the shape legible
+  //   is the per-oval VALUE variation, which is exactly what off-mode's grey
+  //   arrays encode. So a tinted orb multiplies the tint by each theme's own
+  //   value curve, normalised by that theme's mean so the average brightness
+  //   IS the tint in both modes and only the variation pattern rides along.
+  if (tint) {
+    let mean = 0;
+    for (let i = 0; i < PETAL_COUNT; i++) mean += greys[i];
+    mean /= PETAL_COUNT;
+    for (let i = 0; i < PETAL_COUNT; i++) {
+      const k = greys[i] / mean;
+      out[i * 3] = Math.min(1, tint[0] * k);
+      out[i * 3 + 1] = Math.min(1, tint[1] * k);
+      out[i * 3 + 2] = Math.min(1, tint[2] * k);
+    }
+    return;
+  }
   for (let i = 0; i < PETAL_COUNT; i++) {
     const c = PETAL_RGB[i];
     const g = greys[i];
@@ -64,6 +82,26 @@ function petalPalette(off: number, dark: boolean, out: Float32Array) {
     out[i * 3 + 1] = c[1] + (g - c[1]) * off;
     out[i * 3 + 2] = c[2] + (g - c[2]) * off;
   }
+}
+
+/** `rgb()/rgba()/#hex` → 0..1 rgb. Null on anything else — the caller falls
+ *  back to the mode palette rather than guessing at a colour. */
+function parseCssColor(raw: string): [number, number, number] | null {
+  const v = raw.trim();
+  const m = v.match(/rgba?\(([^)]+)\)/);
+  if (m) {
+    const parts = m[1].split(",").map((x) => parseFloat(x));
+    if (parts.length >= 3 && parts.slice(0, 3).every((x) => Number.isFinite(x))) {
+      return [parts[0] / 255, parts[1] / 255, parts[2] / 255];
+    }
+    return null;
+  }
+  const h = v.match(/^#([0-9a-f]{6})$/i);
+  if (h) {
+    const n = parseInt(h[1], 16);
+    return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+  }
+  return null;
 }
 
 /* ── Shader ──────────────────────────────────────────────────────────── */
@@ -225,6 +263,13 @@ interface OrbEngineProps {
   vibrance?: number;
   /** 0..1 complementary chromatic-fringe strength. */
   aberration?: number;
+  /**
+   * A CSS custom property NAME (e.g. "--control-value-fill") whose colour
+   * tints all six petals, value-varied per oval so the ring still reads.
+   * Resolved from the live cascade at the host, re-read on theme flips — so
+   * "the same blue as the toggle" is inherited from the token, not copied.
+   */
+  tint?: string;
   className?: string;
 }
 
@@ -288,14 +333,17 @@ function initGL(canvas: HTMLCanvasElement): EngineGL | null {
 
 export function OrbEngine({
   mode, resolvedLevel, analyzing = false, size = 20, flowScale = 1,
-  resolutionScale = 2, maxFps = 30, vibrance = 0, aberration = 0, className,
+  resolutionScale = 2, maxFps = 30, vibrance = 0, aberration = 0, tint, className,
 }: OrbEngineProps) {
   const hostRef = useRef<HTMLSpanElement>(null);
   const [fallback, setFallback] = useState(false);
 
   // Live props readable from the render loop without restarting it.
-  const propsRef = useRef({ mode, resolvedLevel, analyzing, flowScale, maxFps, vibrance, aberration });
-  propsRef.current = { mode, resolvedLevel, analyzing, flowScale, maxFps, vibrance, aberration };
+  const propsRef = useRef({ mode, resolvedLevel, analyzing, flowScale, maxFps, vibrance, aberration, tint });
+  propsRef.current = { mode, resolvedLevel, analyzing, flowScale, maxFps, vibrance, aberration, tint };
+  /** Resolved tint, cached per (var, theme) — a computed-style read per frame
+   *  would be layout work the loop has no business doing. */
+  const tintCacheRef = useRef<{ key: string; rgb: [number, number, number] | null }>({ key: "", rgb: null });
 
   // Wake signal: bump on any prop change so a paused/static loop redraws.
   const wakeRef = useRef(0);
@@ -400,7 +448,18 @@ export function OrbEngine({
       // Fixed colours; the only easing is the drain to grey when
       // intelligence is switched off.
       offAmt += ((m === "off" ? 1 : 0) - offAmt) * Math.min(1, dt * 2.6);
-      petalPalette(offAmt, darkMq.matches, pc);
+      let tintRGB: [number, number, number] | null = null;
+      if (propsRef.current.tint && hostRef.current) {
+        const key = `${propsRef.current.tint}|${darkMq.matches}`;
+        if (tintCacheRef.current.key !== key) {
+          tintCacheRef.current = {
+            key,
+            rgb: parseCssColor(getComputedStyle(hostRef.current).getPropertyValue(propsRef.current.tint)),
+          };
+        }
+        tintRGB = tintCacheRef.current.rgb;
+      }
+      petalPalette(offAmt, darkMq.matches, pc, tintRGB);
       for (let i = 0; i < PETAL_COUNT; i++) {
         const t = world.petals[i];
         pa[i * 4] = t.x;
