@@ -43,11 +43,11 @@
   --bg-glass-hover: rgba(255, 255, 255, 0.82);
   --bg-glass-strong: rgba(255, 255, 255, 0.76);
 
-  /* ★ DENSE tint — cards, top bar, annotation bar, popovers, search modal:
-     everything carrying `.liquid-glass`, which by construction is every glass
-     surface EXCEPT the sidebar tab buttons (.analysis-tab and
-     .analysis-action-group set --bg-glass themselves and are deliberately
-     left out of this pass).
+  /* ★ DENSE tint — cards, top bar, annotation bar, popovers, search modal, and
+     (since they joined the pass) the sidebar tab buttons. Everything carrying
+     `.liquid-glass` gets it from the primitive; .analysis-tab and
+     .analysis-action-group do not carry that class, so they opt in by naming
+     this variable themselves.
 
      "More opaque" is one half of a pair — those same surfaces drop to a much
      lower blur (readBlur in liquid-glass-filter.ts). Opacity buys back the
@@ -56,9 +56,9 @@
 
      Per the note above this alpha is ALSO the edge-colour glow's transmission
      budget: 0.56 passes 44% where 0.44 passed 56%. --lqg-glow-boost-dense
-     restores the wash to the same strength on exactly these surfaces (the
-     tab buttons keep the plain boost, since their tint has not moved). The
-     two must move together. */
+     restores the wash to the same strength on exactly these surfaces. The two
+     must move together — any surface taking this tint must also take the dense
+     boost, or its edge colour goes quiet. */
   --bg-glass-dense: rgba(255, 255, 255, 0.56);
   --lqg-glow-boost-dense: 1.72;
 
@@ -414,14 +414,15 @@ body {
 /* Specular ring (::before) — masked 1px ring filled with the shared
    --border-glass-grad (white top/bottom, transparent sides, per scheme). */
 /* ★ A CUSTOM PROPERTY INHERITS, AND THESE ARE ALL DESCENDANTS OF GLASS.
-   The tab buttons live inside .settings-panel.liquid-glass and the control
-   knobs inside whatever panel owns them, so the dense boost set above would
-   cascade straight into surfaces that never got the dense TINT — over-driving
-   the glow on exactly the elements this pass promised to leave alone. Reset
-   them to the base explicitly rather than relying on where they happen to sit
-   in the DOM. */
-.analysis-tab,
-.analysis-action-group,
+   The control knobs live inside whatever panel owns them, so the dense boost
+   set on .liquid-glass would cascade into a surface that never took the dense
+   TINT — over-driving the glow on the one family still outside this pass. Reset
+   it to the base explicitly rather than relying on where the knob happens to
+   sit in the DOM.
+   The tab buttons are NOT in this list any more: they now take the dense tint,
+   so they need the dense boost with it (see the pair rule on --bg-glass-dense).
+   Their own declaration below sets it — this rule would have overridden it by
+   source order. */
 .liquid-glass-control-knob {
   --lqg-glow-boost: var(--lqg-glow-boost-base);
 }
@@ -1382,7 +1383,11 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   border-radius: 16px;
   cursor: pointer;
   color: var(--text-secondary);
-  background: var(--bg-glass);
+  /* Dense tint + dense glow boost — the two halves of the same pass, see
+     --bg-glass-dense. The blur that pays for this (0.9) and the chroma gate
+     that fades neutral text behind the rail live in liquid-glass-filter.ts. */
+  background: var(--bg-glass-dense);
+  --lqg-glow-boost: var(--lqg-glow-boost-dense);
   box-shadow: var(--shadow-glass);
   position: relative;
   transition: color 0.15s ease, background 0.15s ease;
@@ -1411,7 +1416,9 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   padding: 2px 0;
   border-radius: 16px;
   color: var(--text-secondary);
-  background: var(--bg-glass);
+  /* Same pass as .analysis-tab above — tint and boost move together. */
+  background: var(--bg-glass-dense);
+  --lqg-glow-boost: var(--lqg-glow-boost-dense);
   box-shadow: var(--shadow-glass);
   position: relative;
 }

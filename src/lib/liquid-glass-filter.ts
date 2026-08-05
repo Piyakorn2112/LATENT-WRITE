@@ -129,14 +129,12 @@ function tailMatrixValues(s: number, t: number, k: number): string {
   return rows.join("  ");
 }
 
-// The sidebar tab buttons sit OUT of this whole pass — same blur, same tint,
-// same saturation, no gate — so they keep reading exactly as they did while
-// every other surface changes around them. One predicate, so the three
-// exclusions cannot drift apart.
-const SATURATE_LEGACY = "1.8";  // pre-pass saturation, tab buttons only
-function isSidebarTab(el: Element): boolean {
-  return el.matches(".analysis-tab, .analysis-action-group");
-}
+// ★ The sidebar tab buttons were held OUT of this pass when it landed (their own
+// blur, tint, saturation and no gate) so one surface family stayed put while
+// everything else moved. They are now IN it: same 0.9 blur as the other small
+// controls, the dense tint, 2.15 saturation and the full chroma gate. There is
+// no `isSidebarTab` predicate any more, and there should not be one — every
+// reader below returns the shared value for them, which is the whole point.
 
 // Blue channel of the map's neutral margin: (BLUR_EDGE_MIN * 255 + 0.5) | 0
 // with BLUR_EDGE_MIN = 0.85 in liquid-glass-worker.ts. Keep in sync — feFlood
@@ -329,13 +327,12 @@ function readBlur(el: Element): number {
   // get a sharper result AND one less filter pass per frame.
   if (el.matches(".glass-range-knob, .glass-toggle-knob")) return 0;
   if (el.classList.contains("liquid-glass-control-knob")) return 0.2;
+  // Small controls — top bar, sidebar tab rail, status pill — share the light
+  // 0.9. On a 26px-wide button a heavy blur has nothing to work with anyway;
+  // separation comes from the dense tint and the chroma gate instead.
   if (el.classList.contains("toolbar")) return 0.9;
+  if (el.matches(".analysis-tab, .analysis-action-group")) return 0.9;
   if (el.classList.contains("settings-panel")) return 2;
-  // ★ The sidebar tab buttons keep 1.2 — they are deliberately EXCLUDED from
-  // the less-blur/more-opaque pass (they are also the only glass that does not
-  // carry `.liquid-glass`, so the denser tint in styles.css misses them by
-  // construction rather than by a second rule).
-  if (el.matches(".analysis-tab, .analysis-action-group")) return 1.2;
   if (el.classList.contains("status-pill")) return 0.9;
   // ★ The annotation POPOVER is deliberately absent here, so it falls through
   // to BLUR_DEFAULT and matches the entity popover exactly. The two are the
@@ -373,13 +370,11 @@ function readSuperSample(el: Element): number {
 // the global SATURATE, so it doesn't amplify mode-coloured content behind it.
 function readSaturate(el: Element): number {
   if (el.classList.contains("liquid-glass-lens")) return LENS_SATURATE;
-  if (isSidebarTab(el)) return parseFloat(SATURATE_LEGACY);
   return parseFloat(SATURATE);
 }
 
 /** How much of the neutral signal this element's chain fades out. */
 function readChromaGate(el: Element): number {
-  if (isSidebarTab(el)) return 0;
   // The lens is a clear reading lens, not a frosted card: fading its neutral
   // content would erase exactly the prose it exists to magnify.
   if (el.classList.contains("liquid-glass-lens")) return 0;
