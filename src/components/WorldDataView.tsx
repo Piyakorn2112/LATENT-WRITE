@@ -18,6 +18,7 @@ import {
   reviewUnresolvedForms,
 } from "../lib/alias-referent";
 import { fnv1a } from "../lib/evidence-pack";
+import { GlassCheck } from "./GlassCheck";
 import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
@@ -973,12 +974,14 @@ export function WorldDataView({
                         </span>
                       </div>
                       {aliasRows.filter((r) => r.character === character).map((row) => (
-                        <label key={aliasKey(row)} className="world-scan-row world-scan-row--alias">
-                          <input
-                            type="checkbox"
-                            checked={aliasSelected.has(aliasKey(row))}
-                            onChange={() => toggleAliasRow(row)}
-                          />
+                        <GlassCheck
+                          key={aliasKey(row)}
+                          className="world-scan-row world-scan-row--alias"
+                          checked={aliasSelected.has(aliasKey(row))}
+                          onChange={() => toggleAliasRow(row)}
+                          ariaLabel={`Add "${row.alias}" to ${row.character}`}
+                          alignTop
+                        >
                           <span className="world-alias-cell">
                             <span className="world-alias-head">
                               <span className="world-scan-row-name">{row.alias}</span>
@@ -998,7 +1001,7 @@ export function WorldDataView({
                               <span className="world-alias-evidence" title={row.evidence}>{row.evidence}</span>
                             )}
                           </span>
-                        </label>
+                        </GlassCheck>
                       ))}
                     </div>
                   ))}
@@ -1006,7 +1009,7 @@ export function WorldDataView({
               </>
             ) : (
               <div className="world-scan-empty-full">
-                No other names found for this cast.
+                <span>No other names found for this cast.</span>
                 {/* ★ SAY WHAT WAS REFUSED. A scan that found nothing and a scan
                     that refused everything look identical otherwise, and the
                     difference is the whole story on a book full of families. */}
@@ -1088,14 +1091,15 @@ export function WorldDataView({
                           <span className="world-tab-count">{scanSelected[cat].size}/{items.length}</span>
                         </div>
                         {items.map((name) => (
-                          <label key={name} className="world-scan-row">
-                            <input
-                              type="checkbox"
-                              checked={scanSelected[cat].has(name)}
-                              onChange={() => toggleScanItem(cat, name)}
-                            />
+                          <GlassCheck
+                            key={name}
+                            className="world-scan-row"
+                            checked={scanSelected[cat].has(name)}
+                            onChange={() => toggleScanItem(cat, name)}
+                            ariaLabel={`Register ${name}`}
+                          >
                             <span className="world-scan-row-name">{name}</span>
-                          </label>
+                          </GlassCheck>
                         ))}
                       </div>
                     );

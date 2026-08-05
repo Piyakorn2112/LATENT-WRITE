@@ -5693,12 +5693,19 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 }
 
 /* ─── Body: list (left) + edit form (right) ─── */
+/* ★ AND THE SAME ROOM ONE LEVEL UP, or the fix above is invisible: this is
+   `overflow: hidden`, so it would simply clip the ring 4px further out. Same
+   trick, same net-zero result — the padding shrinks the content box by 8px and
+   the negative margin widens the border box by 8px, so the two grid columns
+   keep their exact widths. It has 22px of panel padding to expand into. */
 .world-body {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(0, 1.5fr);
   gap: 18px;
   min-height: 360px;
   overflow: hidden;
+  padding: 0 4px;
+  margin: 0 -4px;
 }
 
 @media (max-width: 640px) {
@@ -5824,9 +5831,20 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 }
 
 /* ─── Edit form ─── */
+/* ★ THE FOCUS RING NEEDS ROOM INSIDE THE SCROLLER, AND THE LAYOUT MUST NOT
+   MOVE. `.world-input:focus` draws a 3px outer box-shadow, and an element with
+   `overflow-y: auto` clips on BOTH axes (setting one axis to a non-visible
+   value forces the other to `auto`), so the ring was sheared off flat against
+   the left and right edges.
+
+   Padding opens 4px of clip room on each side; an equal negative margin pulls
+   the box back out, so the content width, the column widths and every field
+   inside are pixel-identical to before. Net right padding stays 2px (6 − 4),
+   net left stays 0 (4 − 4). */
 .world-edit {
   overflow-y: auto;
-  padding: 0 2px 4px 0;
+  padding: 0 6px 4px 4px;
+  margin: 0 -4px;
 }
 
 .world-edit-empty {
@@ -6248,13 +6266,10 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   background: color-mix(in srgb, var(--panel-text) 5%, transparent);
 }
 
-.world-scan-row input[type="checkbox"] {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--text);
-  flex-shrink: 0;
-  cursor: pointer;
-}
+/* The native box and its `accent-color` are gone — GlassCheck draws the box, so
+   there is nothing left here to size or tint. Deleted rather than left as dead
+   rules: an `input[type="checkbox"]` selector still sitting in the sheet is an
+   invitation for the next primitive to slip back in looking styled. */
 
 .world-scan-row-name {
   font-family: var(--font-ui);
@@ -6265,6 +6280,11 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 .world-scan-empty-full {
   flex: 1;
   display: flex;
+  /* The refusal count is a SECOND block under the message, not a column beside
+     it. Without this the flex default (row) put "4 forms were found and
+     refused" alongside "No other names found", each squeezed to half width. */
+  flex-direction: column;
+  gap: 6px;
   align-items: center;
   justify-content: center;
   font-family: var(--font-ui);
@@ -15423,6 +15443,113 @@ body.electron-window-unfocused .wc-panel::after {
   flex-shrink: 0;
 }
 
+/* ── GlassCheck ──────────────────────────────────────────────────────────
+   A drawn checkbox. The real input is still in the DOM for focus, space-to-
+   toggle, assistive-tech state and label association; only its PAINTING is
+   removed, because that is the part that differs per platform and will not
+   take the app's greys. Everything visible below is this app's CSS. */
+.glass-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  cursor: pointer;
+  user-select: none;
+  min-width: 0;
+}
+
+.glass-check--top { align-items: flex-start; }
+.glass-check--top .glass-check-box { margin-top: 1px; }
+
+.glass-check--disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.glass-check-input {
+  /* Present and focusable, never painted. Not display:none — that would take
+     it out of the focus order and off assistive tech entirely. */
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.glass-check-box {
+  position: relative;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  /* ~1/3 of the side: enough to read as a soft square, not a pill. */
+  border-radius: 5px;
+  border: 1px solid var(--divider-line);
+  background: rgba(0, 0, 0, 0.035);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  .glass-check-box { background: rgba(255, 255, 255, 0.05); }
+}
+
+.glass-check:hover .glass-check-box {
+  border-color: var(--text-tertiary);
+}
+
+.glass-check-input:active + .glass-check-box {
+  transform: scale(0.92);
+}
+
+/* Checked: the greyscale inversion the rest of the panel uses — the box takes
+   the text colour and the tick is cut out of it in the panel's own ground. */
+.glass-check-input:checked + .glass-check-box {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.glass-check-tick {
+  width: 11px;
+  height: 11px;
+  fill: none;
+  /* --bg, not --panel-bg: the panel colour is translucent, and a translucent
+     stroke over the filled box shows the box through the tick. */
+  stroke: var(--bg);
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  /* Drawn on, not faded in: the stroke length is the animation, which reads as
+     a tick being made rather than a shape appearing. */
+  stroke-dasharray: 12;
+  stroke-dashoffset: 12;
+  opacity: 0;
+  transition: stroke-dashoffset 0.18s cubic-bezier(0.3, 0.9, 0.4, 1), opacity 0.1s ease;
+}
+
+.glass-check-input:checked + .glass-check-box .glass-check-tick {
+  stroke-dashoffset: 0;
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-check-tick { transition: opacity 0.1s ease; stroke-dashoffset: 0; }
+}
+
+/* Keyboard only — a mouse click must not leave a ring behind. */
+.glass-check-input:focus-visible + .glass-check-box {
+  border-color: var(--text-secondary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.glass-check-label {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 /* ── Alias scan review rows ──────────────────────────────────────────────
    The same checkbox row as the entity scan, given a second line: the rule
    that produced the name, and a verbatim strip from the manuscript. A writer
@@ -15433,9 +15560,8 @@ body.electron-window-unfocused .wc-panel::after {
   padding: 6px 6px 7px;
 }
 
-.world-scan-row--alias input[type="checkbox"] {
-  margin-top: 2px;
-}
+/* Top-alignment of the box against a two-line row is GlassCheck's `alignTop`,
+   not a margin reached in from outside. */
 
 .world-alias-cell {
   display: flex;
