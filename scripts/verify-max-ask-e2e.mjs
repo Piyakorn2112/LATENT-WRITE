@@ -157,12 +157,44 @@ try {
   const t0 = Date.now();
   const answer = page.locator(".max-ask-answer-text");
   await answer.waitFor({ timeout: 180_000 });
+  // Mid-pour frame + the padding assertion the height-measure bug ate: the
+  // last row must sit a full padding above the glass edge, not clipped under it.
+  await page.waitForTimeout(260);
+  try {
+    const shot2 = await page.screenshot();
+    const { writeFileSync: wf2 } = await import("node:fs");
+    wf2("/private/tmp/claude-501/-Users-piyakorn-Desktop-Srang-Tech-Mai/8d196d80-68c2-461a-8fc6-9708388cc620/scratchpad/modeshots/maxask-reveal.png", shot2);
+  } catch { /* bonus */ }
+  await page.waitForTimeout(900);
+  const pad = await page.evaluate(() => {
+    const box = document.querySelector(".max-ask");
+    const inner = document.querySelector(".max-ask-inner");
+    if (!box || !inner) return null;
+    const children = [...inner.children];
+    const last = children[children.length - 1];
+    return {
+      bottomGap: +(box.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom).toFixed(1),
+      boxH: +box.getBoundingClientRect().height.toFixed(1),
+      innerH: inner.offsetHeight,
+      words: document.querySelectorAll(".max-ask-word").length,
+    };
+  });
+  console.log(`[max-ask-e2e] container ${pad.boxH}px = inner ${pad.innerH}px; bottom gap ${pad.bottomGap}px; ${pad.words} word spans`);
+  if (pad.bottomGap < 8) throw new Error(`bottom padding missing: gap ${pad.bottomGap}px`);
+  if (pad.words === 0 && !(await page.locator(".max-ask-answer-text--muted").count())) {
+    throw new Error("an answer rendered without word spans — the reveal is not running");
+  }
   const text = (await answer.textContent()) ?? "";
   const basis = (await page.locator(".max-ask-basis").first().textContent().catch(() => "")) ?? "";
   console.log(`[max-ask-e2e] answered in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`[max-ask-e2e] answer: ${text}`);
   console.log(`[max-ask-e2e] ${basis}`);
-  if (!text.trim() || /No answer this time/.test(text)) {
+  // ★ FAILURE IS A CLASS, NOT A PHRASE. The first check matched the failure
+  //   copy by text, and the moment the low-memory path got its own words the
+  //   e2e waved a refusal through as an answer. The muted class is the one
+  //   thing every failure rendering shares.
+  const isFailure = await page.locator(".max-ask-answer-text--muted").count() > 0;
+  if (!text.trim() || isFailure) {
     // Post-mortem: what does the runtime say about each tier?
     for (const tier of ["max", "small"]) {
       const st = await page.evaluate((t) => window.electronAPI.assistantStatus({ tier: t }), tier);

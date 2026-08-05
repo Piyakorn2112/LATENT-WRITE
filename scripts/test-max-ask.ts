@@ -267,6 +267,41 @@ console.log("\nthe opening rung and the self-review");
   }
 }
 
+console.log("\nthe harness narrates its phases");
+{
+  const phases = (calls: Parameters<typeof runMaxAsk>[1]) => {
+    const seen: string[] = [];
+    return { opts: { ...calls, onPhase: (p: string) => seen.push(p) }, seen };
+  };
+  {
+    const s = scripted([
+      { answer: "coins", basis: "passage", confidence: 0.9 },
+      { reason: "stated", verdict: "supported", confidence: 0.9 },
+    ]);
+    const { opts, seen } = phases({ run: s.run, selfReview: true });
+    await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" }, opts);
+    gate(seen.join(",") === "asking,reviewing",
+      `a reviewed question narrates asking -> reviewing (got ${seen.join(",")})`);
+  }
+  {
+    const s = scripted([
+      { answer: "not enough", basis: NOT_IN_CONTEXT, confidence: 0.3 },
+      { answer: "found it in ch 8", basis: "story-so-far", confidence: 0.85 },
+    ]);
+    const { opts, seen } = phases({ run: s.run });
+    await runMaxAsk({ ...INPUT, budgetTokens: 60 }, opts);
+    gate(seen.join(",") === "asking,widening",
+      `a widened ask narrates asking -> widening (got ${seen.join(",")})`);
+  }
+  {
+    const s = scripted([{ answer: "fits", basis: "passage", confidence: 0.9 }]);
+    const { opts, seen } = phases({ run: s.run, selfReview: true });
+    await runMaxAsk(INPUT, opts);   // check-kind: review exempt
+    gate(seen.join(",") === "asking",
+      `★ every phase named is a call that HAPPENS — a check narrates only asking (got ${seen.join(",")})`);
+  }
+}
+
 console.log("\nthe defaults are sane for an 8 GB window");
 {
   const p = buildMaxAskPack(INPUT);

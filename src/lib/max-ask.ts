@@ -479,10 +479,23 @@ export function normalizeReview(raw: unknown): ReviewAnswer | null {
 
 // ── the bounded loop ───────────────────────────────────────────────────────
 
+/**
+ * What the model is doing RIGHT NOW, reported before each call — the same
+ * live-phase courtesy every long harness in this app extends (the entity scan
+ * narrates extract/classify, the download narrates bytes). "asking" is the
+ * first read; "widening" is the retry with more of the story; "reviewing" is
+ * the model checking its own answer. A surface that shows one spinner for all
+ * three is hiding the most reassuring fact it has: that different work is
+ * happening.
+ */
+export type MaxAskPhase = "asking" | "widening" | "reviewing";
+
 export interface MaxAskOptions {
   run: AssistantJSONRunner;
   /** Run the self-review pass on a useful answer. One extra call, bounded. */
   selfReview?: boolean;
+  /** Live phase, fired immediately BEFORE the call it names. */
+  onPhase?: (phase: MaxAskPhase) => void;
   maxTokens?: number;
   timeoutMs?: number;
   /** Wall-clock ceiling across every step. */
@@ -541,6 +554,7 @@ export async function runMaxAsk(
     const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS);
     steps = step;
     opts.onStep?.(step, step === 1 ? "first ask" : "context widened");
+    opts.onPhase?.(step === 1 ? "asking" : "widening");
 
     const result = await opts.run<unknown>({
       task: MAX_ASK_TASK,
@@ -581,6 +595,7 @@ export async function runMaxAsk(
       //    writer's to judge.
       let review: ReviewAnswer | null = null;
       if (opts.selfReview && input.kind === "question" && now() < deadline) {
+        opts.onPhase?.("reviewing");
         const reviewRequest = buildReviewRequest(pack, answer);
         const reviewed = await opts.run<unknown>({
           task: MAX_ASK_TASK,

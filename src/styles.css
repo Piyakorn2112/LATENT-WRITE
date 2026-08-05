@@ -15895,7 +15895,12 @@ body.electron-window-unfocused .wc-panel::after {
   position: fixed;
   z-index: 90;
   border-radius: 20px;
-  padding: 10px;
+  /* ★ NO padding here — the container's height is set to the INNER element's
+     offsetHeight, and with border-box that measurement swallowed the
+     container's own 20px of padding: the bottom row sat clipped under the
+     glass edge. The padding lives on the measured element instead, so the
+     measurement IS the height. */
+  padding: 0;
   animation: widgetReveal 0.28s cubic-bezier(0.22, 0.9, 0.32, 1);
   /* ★ The height is MEASURED by the component and eased here. Plain ease, per
      the ask — the bounce belongs to the text inside, not to the vessel; two
@@ -15911,6 +15916,7 @@ body.electron-window-unfocused .wc-panel::after {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  padding: 10px;
 }
 
 /* One line of the paragraph under the pointer, so the writer can confirm the
@@ -16018,26 +16024,31 @@ body.electron-window-unfocused .wc-panel::after {
 
 .max-ask-answer-text--muted { color: var(--text-secondary); font-size: 12px; }
 
-/* ★ THE REVEAL. Each sentence-line rises on a small-overshoot curve while its
-   text fades in FASTER than it travels — legible mid-rise, which is what makes
-   the words feel like they arrive first and the line settles under them.
-   Same curve family as widgetReveal, with the overshoot the knob uses, scaled
-   down; 90ms stagger keeps the lines inside one perceptual group. */
-.max-ask-line {
+/* ★ THE REVEAL, WORD BY WORD. A whole sentence moving as one slab is exactly
+   what "stiff" looks like — the block translates, nothing inside it lives.
+   Instead every WORD carries the animation, delayed 16ms after its neighbour
+   (plus 110ms per line), so each line pours in left-to-right while rising.
+   The fade (0.22s) lands well before the rise (0.6s, real overshoot — the
+   spring family the knob uses, softened), so the words are readable while
+   still settling: text first, motion finishing under it. Word spans are
+   inline-block so they wrap as normal text and carry their own transform. */
+.max-ask-line { display: inline; }
+
+.max-ask-word {
   display: inline-block;
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(13px);
   animation:
-    max-ask-line-fade 0.26s ease-out forwards,
-    max-ask-line-rise 0.5s cubic-bezier(0.26, 1.25, 0.4, 1) forwards;
-  animation-delay: calc(var(--i, 0) * 90ms);
+    max-ask-word-fade 0.22s ease-out forwards,
+    max-ask-word-rise 0.6s cubic-bezier(0.3, 1.36, 0.36, 1) forwards;
+  will-change: transform, opacity;
 }
 
-@keyframes max-ask-line-fade { to { opacity: 1; } }
-@keyframes max-ask-line-rise { to { transform: translateY(0); } }
+@keyframes max-ask-word-fade { to { opacity: 1; } }
+@keyframes max-ask-word-rise { to { transform: translateY(0); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .max-ask-line { animation: none; opacity: 1; transform: none; }
+  .max-ask-word { animation: none; opacity: 1; transform: none; }
   .max-ask { transition: none; }
   .max-ask-orb { animation: none; opacity: 0.9; }
 }

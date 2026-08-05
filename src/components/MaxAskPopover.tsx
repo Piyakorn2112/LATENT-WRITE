@@ -130,10 +130,17 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
     void runMaxAsk(input, {
       run: maxRunner,
       selfReview: true,
-      onStep: (step) => {
-        if (aliveRef.current && step === 2) {
-          setPhase({ name: "asking", label: "Reading more of the story…" });
-        }
+      // The harness narrates its phases; the popover just translates them.
+      // "reviewing" is the one worth naming — the answer exists at that point,
+      // and "checking its answer" is a different promise than "reading".
+      onPhase: (p) => {
+        if (!aliveRef.current) return;
+        setPhase({
+          name: "asking",
+          label: p === "asking" ? "Reading the passage…"
+            : p === "widening" ? "Reading more of the story…"
+            : "Checking its answer against the story…",
+        });
       },
     }).then((result) => {
       if (!aliveRef.current) return;
@@ -212,10 +219,27 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
               Curve family: the widgetReveal grammar with a touch of bounce;
               stagger 90ms, inside the 120ms grouping window so it reads as one
               paragraph arriving, not three events. */}
+          {/* ★ WORDS POUR, LINES RISE. Whole sentences moving as rigid slabs
+              read stiff — the life is in the words leading their line by a few
+              ms each, left to right, while the line settles under them. Delays
+              are absolute (line 110ms + word 16ms) so the cascade reads as one
+              gesture; the rise curve carries a real overshoot and the fade
+              lands first, which is what "the text arrives before the motion
+              finishes" feels like. */}
           <p className="max-ask-answer-text">
-            {(phase.result.answer?.answer ?? "").split(/(?<=[.!?…])\s+/).map((line, i) => (
-              <span key={i} className="max-ask-line" style={{ "--i": i } as React.CSSProperties}>
-                {line}{" "}
+            {(phase.result.answer?.answer ?? "").split(/(?<=[.!?…])\s+/).map((line, li, lines) => (
+              <span key={li} className="max-ask-line">
+                {line.split(/\s+/).map((word, wi) => (
+                  <span
+                    key={wi}
+                    className="max-ask-word"
+                    style={{ animationDelay: `${li * 110 + wi * 16}ms` }}
+                  >
+                    {word}
+                    {"\u00A0"}
+                  </span>
+                ))}
+                {li < lines.length - 1 ? " " : ""}
               </span>
             ))}
           </p>
