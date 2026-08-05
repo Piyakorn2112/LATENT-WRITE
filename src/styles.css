@@ -15619,10 +15619,23 @@ body.electron-window-unfocused .wc-panel::after {
 .world-alias-btn:hover { color: var(--text); border-color: var(--text-secondary); }
 
 /* ── GlassModeSelector ─────────────────────────────────────────────────────
-   A three-stop track with a glass knob. Borrows GlassToggle's MOTION grammar
-   — the same spring on the slide, the same swell to scale(2) with the knob
-   going translucent, the same press/release animation pairs — and nothing
-   else. Three named states are not a widened binary. */
+   A three-stop track with a glass knob. Borrows GlassToggle's motion grammar —
+   the same spring, the same press swell, the same alternating press/release
+   cycles — but NOT its transform.
+
+   ★★ THE SWELL IS GEOMETRY, NOT `transform: scale()`, and that one change
+      fixes four separate complaints at once. Scaling a knob scales everything
+      painted on it: the 1.2px specular ring becomes 2.4px, the round drop
+      shadow goes elliptical, and the label doubles in size so the word on the
+      knob and the word behind it are visibly two different words. The toggle
+      gets away with `scale(2)` because it is 32x24 and lives alone; a
+      three-stop knob is a third of a long track, so a uniform 2x makes it
+      swallow both neighbours.
+
+      Animating top/bottom/width/margin instead means the ring stays 1.2px, the
+      shadow stays round, and the text needs no counter-scale because it was
+      never scaled. It also lets the vertical and horizontal growth be set
+      independently, which is the actual ask: much taller, barely wider. */
 .glass-mode-wrap {
   display: flex;
   flex-direction: column;
@@ -15640,9 +15653,10 @@ body.electron-window-unfocused .wc-panel::after {
   border-radius: 999px;
   border: 1px solid var(--divider-line);
   background: rgba(0, 0, 0, 0.10);
-  /* The knob swells past the track on press, exactly as the toggle's does. */
+  /* The knob grows past the track top and bottom, as the toggle's does. */
   overflow: visible;
   user-select: none;
+  touch-action: none;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -15674,17 +15688,18 @@ body.electron-window-unfocused .wc-panel::after {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-tertiary);
-  transition: color 0.18s ease, opacity 0.18s ease;
+  transition: color 0.18s ease;
   white-space: nowrap;
+  pointer-events: none;
 }
 
 .glass-mode-option:hover:not(:disabled) .glass-mode-label { color: var(--text-secondary); }
 .glass-mode-option:disabled .glass-mode-label { opacity: 0.35; }
 
-/* ★ The SELECTED label is deliberately left visible underneath the knob rather
-   than hidden. At rest the knob is opaque and covers it; on press the knob
-   turns translucent and this is the text the glass is bending. Hiding it would
-   leave the material with nothing to refract, which is the entire effect. */
+/* ★ The SELECTED label stays visible underneath the knob rather than hidden.
+   At rest the knob covers it; on press the knob turns translucent and this is
+   the text the glass bends. Hiding it would leave the material with nothing to
+   refract, which is the whole effect. */
 .glass-mode-option--on .glass-mode-label { color: var(--text); }
 
 .glass-mode-option:focus-visible {
@@ -15692,31 +15707,47 @@ body.electron-window-unfocused .wc-panel::after {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 14%, transparent);
 }
 
-/* Knob — GlassToggle's knob, sized to one third of the track. Same spring on
-   `left`, same transform chain so hover/press scale around its own centre. */
-.glass-mode-knob {
+/* ★ POSITIONED FROM THE TRACK, NOT BY translateX(100% * index). A percentage
+   translate resolves against the KNOB's own width, so the moment the knob grows
+   on press the translation grows with it and the knob jumps sideways. `left`
+   percentages resolve against the track, which is the thing the stops are
+   actually measured in, so growth and position stop interfering. */
+.glass-mode-knob,
+.glass-mode-knob-cap {
   position: absolute;
-  z-index: 2;
   top: 2px;
   bottom: 2px;
-  left: 2px;
+  left: calc(2px + var(--mode-index, 0) * ((100% - 4px) / var(--mode-count, 3)));
   width: calc((100% - 4px) / var(--mode-count, 3));
-  transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
-  transform-origin: center;
   border-radius: 999px;
+  pointer-events: none;
+  transition:
+    left 0.34s cubic-bezier(0.34, 1.56, 0.64, 1),
+    top 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    bottom 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    width 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    margin-left 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+  will-change: left, top, bottom, width;
+}
+
+/* While dragging, the knob must track the finger with no spring at all —
+   a spring on `left` reads as lag, which is the one thing a drag cannot have. */
+.glass-mode--dragging .glass-mode-knob,
+.glass-mode--dragging .glass-mode-knob-cap {
+  transition: top 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+              bottom 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+              width 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
+              margin-left 0.26s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.glass-mode-knob {
+  z-index: 2;
   background: rgb(255, 255, 255);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.109),
     0 4px 10px rgba(0, 0, 0, 0.10);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  transition:
-    transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1),
-    background 0.18s ease,
-    box-shadow 0.18s ease;
-  will-change: transform;
   --knob-fill: rgba(255, 255, 255, 0.18);
   --knob-bezel-frac: 0.30;
 }
@@ -15740,97 +15771,75 @@ body.electron-window-unfocused .wc-panel::after {
   z-index: 3;
 }
 
-/* The knob's own copy of the current word — the only thing keeping it readable
-   while the knob is opaque. It fades as the material comes up, so the word
-   never blinks out; it changes material. */
+/* ★★ THE LABEL IS A SIBLING OF THE KNOB, NOT A CHILD, so nothing the knob does
+      to its own box can touch the type. It sits at the same stop and the same
+      width, never grows, and only fades — which is what makes the word on the
+      knob and the refracted word behind it read as ONE word changing material
+      rather than two words swapping. */
+.glass-mode-knob-cap {
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  box-shadow: none;
+}
+
 .glass-mode-knob-label {
-  position: relative;
-  z-index: 2;
   font-family: var(--font-ui);
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: #1a1a1a;
-  transition: opacity 0.16s ease;
-  pointer-events: none;
+  /* Slower than the swell, so the handover is a cross-fade rather than a cut. */
+  transition: opacity 0.24s ease;
 }
 
-.glass-mode-knob--painted .glass-mode-knob-label { opacity: 0; }
+/* ★ THE FADE IS DRIVEN BY THE SAME CONDITION AS THE SWELL, in CSS, not by a
+   React flag. Measured: during a drag that left the track the knob was swollen
+   (`:active` survives a captured pointer) while the label was still opaque,
+   because the flag and the pseudo-class disagreed about what "pressed" means.
+   Tying both to one pair means the word can never be sitting solid on a knob
+   that has already turned to glass. */
+.glass-mode:active .glass-mode-knob-label,
+.glass-mode--glass-active .glass-mode-knob-label,
+.glass-mode--dragging .glass-mode-knob-label { opacity: 0; }
 
-.glass-mode:hover .glass-mode-knob {
-  transform: translateX(calc(100% * var(--mode-index, 0))) scale(1.06);
+/* Hover — the same small lift the toggle has, and nothing else. */
+.glass-mode:hover .glass-mode-knob,
+.glass-mode:hover .glass-mode-knob-cap { top: 1px; bottom: 1px; }
+
+/* ★★ `:active` IS THE HALF THAT BEATS `:hover`. `.glass-mode:hover
+   .glass-mode-knob` is (0,3,0); a lone `--glass-active` rule is (0,2,0), so a
+   mouse that is pressing — and therefore also hovering — kept the knob at rest
+   size and the material never appeared. `:active` ties at (0,3,0) and is
+   declared later, so it wins; the class holds the state through the JS dwell
+   after the button comes up. Exactly the pair `.glass-toggle:active` uses.
+
+   ★ MUCH TALLER, BARELY WIDER. 10px past the track top and bottom matches the
+   toggle's own overflow; 4px each side is enough for the bevel to bite on the
+   neighbouring words without swallowing them. */
+.glass-mode:active .glass-mode-knob,
+.glass-mode:active .glass-mode-knob-cap,
+.glass-mode--glass-active .glass-mode-knob,
+.glass-mode--glass-active .glass-mode-knob-cap {
+  top: -10px;
+  bottom: -10px;
+  margin-left: -4px;
+  width: calc((100% - 4px) / var(--mode-count, 3) + 8px);
 }
 
-/* ★ THE HELD PRESS STATE, AND IT IS NOT OPTIONAL. `animation-fill-mode:
-   forwards` only holds while the animation class is on the element, and
-   onAnimationEnd removes it the moment the 0.3s press finishes — so without
-   this the knob swells and then snaps back flat while the finger is still
-   down. Measured: the knob read 98px (scale 1) 420ms into a press that should
-   have left it at 197px. Same rule, same values, as .glass-toggle--glass-active. */
-/* ★★ `:active` IS THE HALF THAT ACTUALLY WORKS, and shipping only the
-   `--glass-active` class was the bug. `.glass-mode:hover .glass-mode-knob` is
-   (0,3,0); a lone `.glass-mode--glass-active .glass-mode-knob` is (0,2,0), so
-   under a real mouse — which is hovering whenever it is pressing — hover won
-   and the knob sat at 1.06 and NEVER SWELLED. The glass simply never appeared.
-   `:active` ties hover at (0,3,0) and is declared later, so it wins; the class
-   is the companion that holds the state while the JS dwell runs on after the
-   button is released. Exactly the pair `.glass-toggle:active` uses, and the
-   reason the toggle does not have this bug.
-
-   ★ Measured with a REAL mouse (sendInputEvent), because synthetic
-   PointerEvents never set :hover — the first test could not see this at all. */
 .glass-mode:active .glass-mode-knob,
 .glass-mode--glass-active .glass-mode-knob {
-  transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
   background: rgba(255, 255, 255, 0.18);
   box-shadow:
     0 2px 6px rgba(0, 0, 0, 0.22),
     0 12px 28px rgba(0, 0, 0, 0.22);
 }
 
-/* Press / release — two alternating cycles so a repeated press restarts the
-   animation instead of being swallowed, exactly as the toggle does it. */
-.glass-mode--press-a .glass-mode-knob { animation: glass-mode-knob-press-a 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
-.glass-mode--press-b .glass-mode-knob { animation: glass-mode-knob-press-b 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
-.glass-mode--release-a .glass-mode-knob { animation: glass-mode-knob-release-a 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
-.glass-mode--release-b .glass-mode-knob { animation: glass-mode-knob-release-b 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
-
-@keyframes glass-mode-knob-press-a {
-  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
-         background: rgb(255, 255, 255);
-         box-shadow: 0 1px 2px rgba(0,0,0,0.109), 0 4px 10px rgba(0,0,0,0.10); }
-  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
-         background: rgba(255, 255, 255, 0.18);
-         box-shadow: 0 2px 6px rgba(0,0,0,0.22), 0 12px 28px rgba(0,0,0,0.22); }
-}
-@keyframes glass-mode-knob-press-b {
-  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
-         background: rgb(255, 255, 255);
-         box-shadow: 0 1px 2px rgba(0,0,0,0.109), 0 4px 10px rgba(0,0,0,0.10); }
-  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
-         background: rgba(255, 255, 255, 0.18);
-         box-shadow: 0 2px 6px rgba(0,0,0,0.22), 0 12px 28px rgba(0,0,0,0.22); }
-}
-@keyframes glass-mode-knob-release-a {
-  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
-         background: rgba(255, 255, 255, 0.18); }
-  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
-         background: rgb(255, 255, 255); }
-}
-@keyframes glass-mode-knob-release-b {
-  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
-         background: rgba(255, 255, 255, 0.18); }
-  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
-         background: rgb(255, 255, 255); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .glass-mode-knob { transition: none; }
-  .glass-mode--press-a .glass-mode-knob,
-  .glass-mode--press-b .glass-mode-knob,
-  .glass-mode--release-a .glass-mode-knob,
-  .glass-mode--release-b .glass-mode-knob { animation: none; }
+  .glass-mode-knob, .glass-mode-knob-cap { transition: none; }
 }
 
 .glass-mode-note {

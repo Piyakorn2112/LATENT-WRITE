@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { KnobGlass } from "./KnobGlass";
 
 const MIN_GLASS_ACTIVE_MS = 140;
-const PRESS_ANIMATION_MS = 300;
+/** Past this the pointer is dragging, not clicking. Same figure GlassToggle uses. */
+const DRAG_SLOP_PX = 4;
 
 export interface ModeOption<T extends string> {
   value: T;
@@ -24,44 +25,39 @@ interface Props<T extends string> {
 /**
  * GlassModeSelector — a three-stop track with a glass knob.
  *
- * ★ A NEW COMPONENT, NOT A WIDENED TOGGLE. It borrows GlassToggle's MOTION
- *   GRAMMAR — the same spring on the slide, the same press swell to scale(2)
- *   with the knob going translucent, the same minimum-glass-active dwell so a
- *   fast click still shows the material — and nothing else. A toggle is a
- *   binary with an implied "more is on"; this is three named states where the
- *   middle one is not half of anything, so it needs labels, a radiogroup role,
- *   and arrow keys, none of which a toggle has any business growing.
+ * ★ A NEW COMPONENT, NOT A WIDENED TOGGLE, but it borrows GlassToggle's whole
+ *   INTERACTION grammar: pointer capture, a slop threshold before a press
+ *   becomes a drag, a live preview that follows the finger, a minimum
+ *   glass-active dwell so a fast click still shows the material, and commit on
+ *   release. What it does not borrow is `transform: scale()` — see the CSS.
  *
- * ★★ THE LABELS ARE THE BACKDROP, AND THAT IS THE WHOLE EFFECT. Every label
- *    sits in the track and carries `glass-refract-text`, which KnobGlass reads
- *    from the live DOM and paints into its source buffer BEFORE the per-pixel
- *    resample. So on press the word under the knob is genuinely bent by the
- *    bevel — not a picture of a bent word, and not a duplicate kept in sync by
- *    hand. Slide the knob and the refraction follows the letterforms because
- *    it is reading them.
+ * ★★ THE KNOB IS DRAGGABLE, AND THE DRAG IS THE POINT. A three-stop control
+ *    that can only be clicked is three buttons wearing a knob. Pointer capture
+ *    is what makes it work off the edge of the track: without it the drag dies
+ *    the moment the finger leaves the 30px-tall strip, which on a real pointer
+ *    is immediately.
  *
- * ★ AND THE CURRENT LABEL IS LEGIBLE AT REST. At idle the knob is solid, which
- *   would bury the very label it is sitting on, so the knob carries its own
- *   copy in the inverse colour. On press that copy fades out as the knob turns
- *   translucent and the real one — refracted — takes over underneath. The
- *   reading is continuous: the word never disappears, it changes material.
+ * ★★ ONE COMMIT PATH. The options are real radios for keyboard and assistive
+ *    tech, but they carry no click handler — every pointer commit happens on
+ *    the track's pointerup, from the stop under the pointer. Two commit paths
+ *    is how a drag that ends over one option fires the click of another.
  */
 export function GlassModeSelector<T extends string>({
   value, options, onChange, ariaLabel,
 }: Props<T>) {
   const [glassActive, setGlassActive] = useState(false);
-  const [pressCycle, setPressCycle] = useState<"a" | "b">("a");
-  const [pressAnimating, setPressAnimating] = useState(false);
-  const [releaseCycle, setReleaseCycle] = useState<"a" | "b">("a");
-  const [releaseAnimating, setReleaseAnimating] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
   const glassActiveRef = useRef(false);
   const glassActivatedAtRef = useRef(0);
   const releaseTimerRef = useRef<number | null>(null);
+  const pointerIdRef = useRef<number | null>(null);
+  const startXRef = useRef(0);
+  const movedRef = useRef(false);
   const trackRef = useRef<HTMLDivElement>(null);
 
   const index = Math.max(0, options.findIndex((o) => o.value === value));
-  const current = options[index];
-  const visualGlassActive = glassActive || pressAnimating || releaseAnimating;
+  const shownIndex = dragIndex ?? index;
+  const current = options[shownIndex];
 
   const clearReleaseTimer = () => {
     if (releaseTimerRef.current === null) return;
@@ -73,47 +69,52 @@ export function GlassModeSelector<T extends string>({
     clearReleaseTimer();
     glassActivatedAtRef.current = performance.now();
     glassActiveRef.current = true;
-    setReleaseAnimating(false);
     setGlassActive(true);
-    setPressAnimating(true);
-    setPressCycle((p) => (p === "a" ? "b" : "a"));
   };
 
-  const startRelease = () => {
-    clearReleaseTimer();
-    glassActiveRef.current = false;
-    setGlassActive(false);
-    setPressAnimating(false);
-    setReleaseAnimating(true);
-    setReleaseCycle((p) => (p === "a" ? "b" : "a"));
-  };
-
-  /**
-   * ★ THE DWELL IS NOT DECORATION. A click can be shorter than the press
-   *   animation, and releasing the glass immediately would show a frame of
-   *   material and then snap — which reads as a glitch rather than a surface.
-   *   Same rule and same constants as GlassToggle.
-   */
+  /** ★ The dwell: a click can be shorter than the swell, and releasing the
+   *  material immediately reads as a glitch rather than a surface. */
   const releaseGlass = (immediate = false) => {
     clearReleaseTimer();
-    if (immediate || !glassActiveRef.current) {
-      if (visualGlassActive) startRelease();
-      return;
-    }
-    const elapsed = performance.now() - glassActivatedAtRef.current;
-    const remaining = Math.max(0, MIN_GLASS_ACTIVE_MS - elapsed, PRESS_ANIMATION_MS - elapsed);
-    if (remaining === 0) { startRelease(); return; }
+    const finish = () => { glassActiveRef.current = false; setGlassActive(false); };
+    if (immediate || !glassActiveRef.current) { finish(); return; }
+    const remaining = Math.max(0, MIN_GLASS_ACTIVE_MS - (performance.now() - glassActivatedAtRef.current));
+    if (remaining === 0) { finish(); return; }
     releaseTimerRef.current = window.setTimeout(() => {
       releaseTimerRef.current = null;
-      startRelease();
+      finish();
     }, remaining);
   };
 
   useEffect(() => clearReleaseTimer, []);
 
-  const pick = (next: ModeOption<T>) => {
-    if (next.disabled || next.value === value) return;
-    onChange(next.value);
+  /** Which stop is under this client X? Clamped, so a drag past either end
+   *  parks on the end rather than doing nothing. */
+  const indexAt = (clientX: number): number => {
+    const el = trackRef.current;
+    if (!el) return index;
+    const r = el.getBoundingClientRect();
+    const inner = r.width - 4;
+    if (inner <= 0) return index;
+    const frac = (clientX - (r.left + 2)) / inner;
+    return Math.min(options.length - 1, Math.max(0, Math.floor(frac * options.length)));
+  };
+
+  /** ★ A disabled stop is never landed on. The nearest enabled one below it is
+   *  taken instead, so dragging across a greyed option feels like it is simply
+   *  not there rather than like the control has stuck. */
+  const nearestEnabled = (want: number): number => {
+    if (!options[want]?.disabled) return want;
+    for (let d = 1; d < options.length; d += 1) {
+      if (!options[want - d]?.disabled && want - d >= 0) return want - d;
+      if (!options[want + d]?.disabled && want + d < options.length) return want + d;
+    }
+    return index;
+  };
+
+  const commit = (i: number) => {
+    const next = options[nearestEnabled(i)];
+    if (next && !next.disabled && next.value !== value) onChange(next.value);
   };
 
   const move = (delta: number) => {
@@ -131,16 +132,48 @@ export function GlassModeSelector<T extends string>({
         className={[
           "glass-mode",
           glassActive ? "glass-mode--glass-active" : "",
-          pressAnimating ? `glass-mode--press-${pressCycle}` : "",
-          releaseAnimating ? `glass-mode--release-${releaseCycle}` : "",
+          dragIndex !== null ? "glass-mode--dragging" : "",
         ].filter(Boolean).join(" ")}
-        style={{ "--mode-count": options.length, "--mode-index": index } as React.CSSProperties}
-        onPointerDown={(e) => { if (e.button === 0) activateGlass(); }}
-        onPointerUp={() => releaseGlass()}
-        onPointerCancel={() => releaseGlass(true)}
-        onPointerLeave={() => releaseGlass()}
+        style={{ "--mode-count": options.length, "--mode-index": shownIndex } as React.CSSProperties}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return;
+          pointerIdRef.current = e.pointerId;
+          startXRef.current = e.clientX;
+          movedRef.current = false;
+          // ★ Capture, or the drag dies the instant the finger leaves a 30px
+          //   strip. It THROWS when the pointer is not active (a synthetic
+          //   event, a pointer already released) — and an exception here would
+          //   abort the handler and leave the control dead for that press, so
+          //   the drag must survive capture being unavailable.
+          try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* no capture */ }
+          activateGlass();
+        }}
+        onPointerMove={(e) => {
+          if (pointerIdRef.current !== e.pointerId) return;
+          if (!movedRef.current && Math.abs(e.clientX - startXRef.current) < DRAG_SLOP_PX) return;
+          movedRef.current = true;
+          const at = nearestEnabled(indexAt(e.clientX));
+          setDragIndex((prev) => (prev === at ? prev : at));
+        }}
+        onPointerUp={(e) => {
+          if (pointerIdRef.current !== e.pointerId) { releaseGlass(); return; }
+          try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* never captured */ }
+          pointerIdRef.current = null;
+          // A tap commits where it landed; a drag commits where it ended.
+          commit(movedRef.current ? (dragIndex ?? index) : indexAt(e.clientX));
+          movedRef.current = false;
+          setDragIndex(null);
+          releaseGlass();
+        }}
+        onPointerCancel={(e) => {
+          try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* never captured */ }
+          pointerIdRef.current = null;
+          movedRef.current = false;
+          setDragIndex(null);
+          releaseGlass(true);
+        }}
       >
-        {options.map((o) => (
+        {options.map((o, i) => (
           <button
             key={o.value}
             type="button"
@@ -148,12 +181,12 @@ export function GlassModeSelector<T extends string>({
             aria-checked={o.value === value}
             disabled={o.disabled}
             title={o.title}
+            tabIndex={i === index ? 0 : -1}
             className={`glass-mode-option${o.value === value ? " glass-mode-option--on" : ""}`}
-            onClick={() => pick(o)}
             onKeyDown={(e) => {
               if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); move(1); }
               if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-              if (e.key === " " || e.key === "Enter") activateGlass();
+              if (e.key === " " || e.key === "Enter") { e.preventDefault(); activateGlass(); commit(i); }
             }}
             onKeyUp={(e) => { if (e.key === " " || e.key === "Enter") releaseGlass(); }}
             onBlur={() => releaseGlass(true)}
@@ -165,18 +198,12 @@ export function GlassModeSelector<T extends string>({
           </button>
         ))}
 
-        <span
-          className={`glass-mode-knob${visualGlassActive ? " glass-mode-knob--painted" : ""}`}
-          aria-hidden="true"
-          onAnimationEnd={(e) => {
-            if (e.animationName.startsWith("glass-mode-knob-press")) setPressAnimating(false);
-            if (e.animationName.startsWith("glass-mode-knob-release")) setReleaseAnimating(false);
-          }}
-        >
-          {/* The knob's own copy of the current word, so it stays readable
-              while the knob is opaque. Fades out as the material comes up. */}
+        <span className="glass-mode-knob" aria-hidden="true">
+          <KnobGlass active={glassActive} />
+        </span>
+        {/* Sibling, not child: the knob's growth cannot reach the type. */}
+        <span className="glass-mode-knob-cap" aria-hidden="true">
           <span className="glass-mode-knob-label">{current?.label}</span>
-          <KnobGlass active={visualGlassActive} />
         </span>
       </div>
       {current?.note && <div className="glass-mode-note">{current.note}</div>}
