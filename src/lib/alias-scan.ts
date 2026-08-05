@@ -59,23 +59,35 @@
  *
  * Pride, Sherlock, Dracula, Gatsby, Carol — cast taken as the top 12 extracted
  * names, which is harsher than a real writer's cast and puts junk like "God"
- * and "West Egg" in it. 52 rows offered, 444 forms refused, ~0.7–4.1s a book.
+ * and "West Egg" in it. 47 rows offered, ~450 forms refused, 0.7-4.1s a book.
  *
- * Adjacency, titled, attested and morphology rows are near-clean: "Mina ←
- * Madam Mina" (87×), "Van Helsing ← Professor Van Helsing", "Elizabeth ←
- * Lizzy", "Gatsby ← Jay Gatsby", "Lucy ← Lucy Westenra".
+ * Adjacency, titled, attested and morphology are near-clean: "Mina <- Madam
+ * Mina" (87x), "Van Helsing <- Professor Van Helsing", "Elizabeth <- Lizzy",
+ * "Gatsby <- Jay Gatsby", "Lucy <- Lucy Westenra", "Holmes <- Sherlock Holmes".
  *
- * ★ THE VOCATIVE LAYER IS THE WEAK ONE AND IT STAYS THAT WAY. Ten of the 52
- *   rows come from it and roughly half are wrong — "Van Helsing ← Jack",
- *   "Gatsby ← Yeah", "Watson ← Jones". Raising the floor from one resolution
- *   to two removed most of it (`Watson ← Hullo`, `Wilson ← Listen`, `Don ←
- *   Ah-h-h` all went); what survives is another CHARACTER'S name spoken in a
- *   scene where the wrong person was the only one left standing. Fixing it
- *   properly needs subject-hood — a name that also ACTS is a person in their
- *   own right, not a nickname — and that is a second full pass over the book.
- *   Left undone deliberately: these rows arrive unticked, carry the passage,
- *   and cost a glance. Do not "fix" it by deleting the layer; it is the only
- *   thing that finds a nickname which appears nowhere but dialogue.
+ * ★★ THE VOCATIVE LAYER SCORED ROUGHLY 0 FOR 9 ON REAL PROSE, and the two
+ *    rules that fixed most of it are both about NARRATION:
+ *
+ *    · A name the NARRATOR uses is its own character, not somebody's nickname.
+ *      `Watson <- Jones` (Athelney Jones), `Scrooge <- Fred` (his nephew) —
+ *      real people the engine attached to whoever its "present and not
+ *      speaking" guess landed on. If the narrator says the name in their own
+ *      voice, it belongs in the cast as an entry.
+ *    · Two DISJOINT names in one narrated sentence are two people. Not in a
+ *      quoted one: `"Kes," Elena said, and Kestrel looked up` is evidence they
+ *      are the SAME person, which is why the quoted half is blanked first.
+ *
+ *    Nine bad rows down to five. What survives is the class no positional or
+ *    frequency test can reach — a capitalised non-name in the vocative slot
+ *    ("Yeah", "Bah", "Ding"), which lives only inside quotation marks exactly
+ *    as a real nickname does. ★ THE LOCAL MODEL WAS TRIED ON PRECISELY THIS
+ *    AND MADE IT WORSE (0 wrong to 3 wrong); see the block in WorldDataView
+ *    where the layer is switched off, and probe-alias-referent.cjs.
+ *
+ *    These rows arrive unticked and carry the passage, so the cost is a glance.
+ *    Do not delete the layer to buy the precision: it is the only thing that
+ *    finds a nickname appearing nowhere but dialogue, which is the case the
+ *    feature exists for.
  */
 import { isCommonWordName } from "./action-detect";
 import { detectSpeechInChapter } from "./speech-detect";
@@ -184,6 +196,12 @@ export interface UnresolvedForm {
   snippets: string[];
   /** A vocative with more than one candidate addressee, if that is its origin. */
   fromVocative: boolean;
+  /**
+   * The answer the deterministic pass already reached, when it reached one.
+   * Present → the model's job is to REFUTE it, and the row survives an
+   * abstention. Absent → the model may attach the form, or leave it alone.
+   */
+  proposed?: string;
 }
 
 // ── constants ──────────────────────────────────────────────────────────────
@@ -196,8 +214,6 @@ const MIN_INFERRED = 2;
 const MAX_PER_CHARACTER = 8;
 /** Paragraph radius for "who else is in this scene". */
 const PRESENCE_WINDOW = 2;
-/** Below this many occurrences a stray form is not worth the model's time. */
-const MIN_UNRESOLVED = 4;
 /**
  * ★★ THE COLLOCATION TEST, and it is what separates a name-part from a word
  *    that merely stood next to a name. A surname BELONGS to its character:
@@ -223,6 +239,49 @@ const RB = "(?![A-Za-z0-9])";
 const collapse = (s: string) => s.replace(/\s+/g, " ").trim();
 
 const TITLE_SET = new Set(TITLES.map((t) => t.toLowerCase()));
+
+/**
+ * The manuscript with every quoted span blanked out, so NARRATION can be read
+ * on its own.
+ *
+ * ★★ THIS IS WHAT SEPARATES A NICKNAME FROM ANOTHER CHARACTER. Two names in one
+ *    sentence are usually two people — but a vocative breaks that rule by
+ *    construction, because `"Kes," Elena said, and Kestrel looked up` puts the
+ *    nickname and the person in one sentence as EVIDENCE THEY ARE THE SAME. The
+ *    quoted half and the narrated half are different kinds of claim, and the
+ *    test only works on the narrated one. In narration, "Jack" and "Van Helsing"
+ *    appearing together really are two men.
+ *
+ * ★ BLANKED LENGTH-PRESERVINGLY, not deleted: every offset into this string has
+ *   to keep matching the original, or evidence windows and sentence boundaries
+ *   drift silently against the real text.
+ */
+export function narrationOnly(text: string): string {
+  return text.replace(/["“«][^"”»]{0,3000}["”»]/g, (m) => " ".repeat(m.length));
+}
+
+/**
+ * Do two names appear in one sentence of NARRATION as SEPARATE mentions?
+ *
+ * ★★ THE JOINT FORM IS MASKED FIRST, and without that this test is worse than
+ *    useless. "Sherlock Holmes said" contains "Sherlock" and "Holmes" in one
+ *    sentence — and reading that as two people killed `Holmes ← Sherlock`,
+ *    `Mina ← Murray`, `Gatsby ← Jay`, `Arthur ← Holmwood` and `Van Helsing ←
+ *    Abraham` on the first run, every one of them correct. A given name beside
+ *    its own surname is ONE mention. What the veto is looking for is the two
+ *    names apart, in the same breath, doing different things.
+ */
+export function coOccursInNarration(narration: string, a: string, b: string): boolean {
+  const A = esc(a), B = esc(b);
+  const solo = narration.replace(
+    new RegExp(`${LB}(?:${A}\\s+${B}|${B}\\s+${A})${RB}`, "gi"),
+    (m) => " ".repeat(m.length),
+  );
+  return new RegExp(
+    `[^.!?]*${LB}${A}${RB}[^.!?]*${LB}${B}${RB}[^.!?]*`
+    + `|[^.!?]*${LB}${B}${RB}[^.!?]*${LB}${A}${RB}[^.!?]*`, "i",
+  ).test(solo);
+}
 
 /**
  * Tokens that are capitalised mid-sentence for reasons that are not names.
@@ -302,6 +361,13 @@ function plausibleName(
 
 const countOf = (text: string, form: string): number =>
   (text.match(new RegExp(`${LB}${esc(form)}${RB}`, "g")) ?? []).length;
+
+/** Case-insensitive, for callers holding a normalised key rather than a surface
+ *  form. ★ `countOf` is case-SENSITIVE, and passing it a lower-cased key
+ *  silently returns 0 for every capitalised name — which is how the narration
+ *  veto below read as "fires on nothing" for a whole measurement round. */
+const countOfI = (text: string, form: string): number =>
+  (text.match(new RegExp(`${LB}${esc(form)}${RB}`, "gi")) ?? []).length;
 
 function evidenceFor(text: string, form: string, radius = 70): string {
   const m = new RegExp(`${LB}${esc(form)}${RB}`).exec(text);
@@ -537,6 +603,8 @@ function buildParagraphs(
 
 export function scanAliases(input: AliasScanInput): AliasScanResult {
   const text = input.chapters.map((c) => c.content).join("\n\n");
+  // Computed once: every `offer` consults it, and it is a full pass over the book.
+  const narration = narrationOnly(text);
   const rejected: AliasScanRejection[] = [];
   const rawCandidates: AliasCandidate[] = [];
 
@@ -617,6 +685,27 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
     //   exchanged a look" settles it instantly and no other test would.
     if (coordinated(text, c.raw, alias)) {
       rejected.push({ character: c.raw, alias, veto: "coordination" });
+      return;
+    }
+    // ★★ THE CO-OCCURRENCE VETO, AND IT ONLY APPLIES TO A DISJOINT FORM. If the
+    //    alias and the cast name share no word — "Sparrow" for Vale, "Jack" for
+    //    Van Helsing — then two of them in one NARRATED sentence is two people.
+    //    Measured: this is what every surviving bad vocative row had in common
+    //    across four novels. It cannot be applied to overlapping forms, because
+    //    "Elena Vasquez" and "Elena" share a sentence constantly and are one
+    //    woman; containment is the evidence there, and co-occurrence here.
+    //
+    // ★★ AND AN ATTESTED ROW IS EXEMPT, because the sentence that declares the
+    //    link necessarily contains both names: "It named her in full — Elena
+    //    Vasquez, known as the Ash Marshal". Measured — the veto read the
+    //    strongest evidence FOR a link as evidence against it and deleted the
+    //    one pre-ticked row on the fixture. Same shape as the ratio test, which
+    //    an attested form also skips: an author saying it outranks a statistic
+    //    about how names usually behave.
+    const shareAToken = parts.tokens.some((t) =>
+      c.parts.tokens.some((ct) => ct.toLowerCase() === t.toLowerCase()));
+    if (!attested && !shareAToken && coOccursInNarration(narration, c.raw, alias)) {
+      rejected.push({ character: c.raw, alias, veto: "co-occurs" });
       return;
     }
     rawCandidates.push({
@@ -779,6 +868,25 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
       for (const [who] of ranked) rejected.push({ character: who, alias: key, veto: "ambiguous" });
       continue;
     }
+    // ★★ A NAME THAT APPEARS IN NARRATION IS ITS OWN CHARACTER, NOT SOMEBODY'S
+    //    NICKNAME. This is the rule the whole vocative layer was missing, and
+    //    without it the layer scored roughly 0 for 9 on five real novels:
+    //    `Watson ← Jones`, `Van Helsing ← Jack`, `Scrooge ← Fred`, `Daisy ←
+    //    Ewing`. Every one of those is a real person the narrator writes about
+    //    — Athelney Jones, Scrooge's nephew Fred — who happened to be addressed
+    //    in a scene where the engine's "who is present and not speaking" guess
+    //    landed on the wrong body.
+    //
+    //    A nickname the writer has NOT registered lives in dialogue. The moment
+    //    the narrator uses a name in their own voice, that name has an
+    //    independent existence and belongs in the cast as an entry, not folded
+    //    into someone else's alias list. Refusing here is the conservative
+    //    direction: the writer can still add them as a character.
+    const narrated = countOfI(narration, key);
+    if (narrated >= MIN_INFERRED) {
+      rejected.push({ character: ranked[0][0], alias: key, veto: "co-occurs" });
+      continue;
+    }
     const [who, hits] = ranked[0];
     // ★★ ONCE IS A COINCIDENCE — the rule adjacency already lives by, applied
     //    to the RIGHT counter. `offer` gates on how often the word occurs in
@@ -916,7 +1024,7 @@ export function scanAliases(input: AliasScanInput): AliasScanResult {
     || b.confidence - a.confidence
     || a.alias.localeCompare(b.alias));
 
-  const unresolved = collectUnresolved(text, paragraphs, cast, knownForms, vocativeAmbiguous, candidates);
+  const unresolved = collectUnresolved(text, paragraphs, cast, vocativeAmbiguous, candidates);
 
   const seen = new Set<string>();
   const uniqueRejections = rejected.filter((r) => {
@@ -951,37 +1059,52 @@ function collectUnresolved(
   text: string,
   paragraphs: readonly ScanParagraph[],
   cast: readonly { raw: string }[],
-  knownForms: ReadonlySet<string>,
   vocativeAmbiguous: ReadonlyMap<string, { count: number; snippets: string[]; speakers: Set<string>; candidates: Set<string> }>,
   resolved: readonly AliasCandidate[],
 ): UnresolvedForm[] {
-  const taken = new Set(resolved.map((c) => c.alias.toLowerCase()));
-  const forms = new Map<string, { count: number; fromVocative: boolean }>();
+  const forms = new Map<string, { count: number; fromVocative: boolean; proposed?: string }>();
 
   for (const [token, entry] of vocativeAmbiguous) {
-    if (entry.count >= MIN_INFERRED) forms.set(token, { count: countOf(text, token), fromVocative: true });
+    if (entry.count >= MIN_INFERRED) forms.set(token, { count: countOfI(text, token), fromVocative: true });
   }
-  // Title-Case forms that recur and belong to nobody. The same two evidence
-  // tests, so a capitalised sentence opener never reaches the model.
-  const TITLE_CASE = /(?<![A-Za-z0-9])([A-Z][A-Za-z'’-]{2,}(?:\s+(?:the\s+)?[A-Z][A-Za-z'’-]{2,}){0,2})(?![A-Za-z0-9])/g;
-  const tally = new Map<string, number>();
-  for (const m of text.matchAll(TITLE_CASE)) {
-    const form = m[1];
-    tally.set(form, (tally.get(form) ?? 0) + 1);
+  // ★★ THE VOCATIVES THAT DID RESOLVE COME TOO, CARRYING THEIR ANSWER. The
+  //    deterministic rule behind them — "the one person present who is not
+  //    speaking" — is a guess about stage geography, and on five real novels
+  //    every surviving row from it was wrong (`Van Helsing ← Jack`, `Gatsby ←
+  //    Yeah`, `Daisy ← Ewing`). They are the class most worth a second opinion,
+  //    and the model's job on them is REFUTATION, not discovery: the row ships
+  //    unless the passage says otherwise, so an abstention costs nothing.
+  for (const cand of resolved) {
+    if (cand.source !== "vocative") continue;
+    forms.set(cand.alias, {
+      count: cand.occurrences, fromVocative: true, proposed: cand.character,
+    });
   }
-  for (const [form, count] of tally) {
-    if (count < MIN_UNRESOLVED) continue;
-    const key = form.toLowerCase();
-    if (knownForms.has(key) || taken.has(key) || forms.has(form)) continue;
-    if (plausibleName(form.split(/\s+/)[0], text)) continue;
-    // A form that CONTAINS a cast name is morphology's business, not the
-    // model's — and alias-propose has already had its chance at it.
-    if (cast.some((c) => key.includes(c.raw.toLowerCase()) || c.raw.toLowerCase().includes(key))) continue;
-    forms.set(form, { count, fromVocative: false });
-  }
+  // ══════════════════════════════════════════════════════════════════════
+  // ★★ THE GENERIC TITLE-CASE SWEEP WAS DELETED HERE, AND DELETING IT IS THE
+  //    FIX. It collected every recurring capitalised form the cast did not
+  //    already own, on the theory that an epithet used alone would be among
+  //    them. Measured on five real novels, here is everything it ever handed
+  //    the model:
+  //
+  //      places        Longbourn, Netherfield, Meryton, Pemberley, London,
+  //                    England, Varna, Carfax, Piccadilly, New York
+  //      contractions  I’m, I’d, I’ve, I’ll
+  //      other people  McCarthy, Neville, Frank, Renfield, Martha, Topper
+  //
+  //    Not one usable alias in five books, and each one cost an inference and
+  //    a nonsense shortlist ("Longbourn → Illustration / Lizzy / Lady
+  //    Catherine"). A recurring form the NARRATOR uses is a separate entity
+  //    and belongs in the cast — that is the entity scan's job, not this one's.
+  //
+  //    What is left is the class that is actually ours: a form characters SAY
+  //    and the narrator never writes. That is where the undiscovered nickname
+  //    lives, it is the one class morphology provably cannot reach (Kitty ⊄
+  //    Catherine), and it is a question a model can answer from a passage.
+  // ══════════════════════════════════════════════════════════════════════
 
   const out: UnresolvedForm[] = [];
-  for (const [form, { count, fromVocative }] of forms) {
+  for (const [form, { count, fromVocative, proposed }] of forms) {
     const hits = paragraphs.map((p) =>
       new RegExp(`${LB}${esc(form)}${RB}`, "i").test(p.text));
     const spoke = vocativeAmbiguous.get(form)?.speakers;
@@ -999,12 +1122,18 @@ function collectUnresolved(
       .filter((s) => !coordinated(text, s.character, form))
       .sort((a, b) => b.complementary - a.complementary)
       .slice(0, 3);
+    // The deterministic answer must be ON the list the model chooses from, or
+    // "confirm or refute" degenerates into "pick from these other people".
+    if (proposed && !shortlist.some((s) => s.character === proposed)) {
+      shortlist.unshift({ character: proposed, complementary: 1 });
+      shortlist.length = Math.min(shortlist.length, 3);
+    }
     if (shortlist.length === 0) continue;
     const snippets = vocativeAmbiguous.get(form)?.snippets?.length
       ? vocativeAmbiguous.get(form)!.snippets
       : [evidenceFor(text, form, 120)].filter(Boolean);
     if (snippets.length === 0) continue;
-    out.push({ alias: form, occurrences: count, shortlist, snippets, fromVocative });
+    out.push({ alias: form, occurrences: count, shortlist, snippets, fromVocative, proposed });
   }
   return out
     .sort((a, b) => (b.shortlist[0]?.complementary ?? 0) - (a.shortlist[0]?.complementary ?? 0)

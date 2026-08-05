@@ -15,6 +15,7 @@ import { scanAliases, type AliasCandidate, type AliasScanResult } from "../lib/a
 import {
   REFERENT_CAP,
   REFERENT_TASK,
+  refutesProposal,
   reviewUnresolvedForms,
 } from "../lib/alias-referent";
 import { fnv1a } from "../lib/evidence-pack";
@@ -444,8 +445,47 @@ export function WorldDataView({
 
             let rows = result.candidates;
 
-            // ── the model layer, on what is left over ──────────────────────
-            if (result.unresolved.length > 0 && await assistantAvailable() && !cancelled) {
+            // ══════════════════════════════════════════════════════════════
+            // ★★ THE MODEL LAYER IS OFF. MEASURED OUT, LIKE alias-review.ts.
+            // ══════════════════════════════════════════════════════════════
+            //
+            // Two rounds, and the second is disqualifying.
+            //
+            // ROUND 1 — what it was actually handed on five real novels was
+            // places (Longbourn, Pemberley, Piccadilly, New York), contractions
+            // (I'm, I'd, I've, I'll), discourse words (Yes, Well, Why) and
+            // other people's names. Not one usable alias in five books, at six
+            // inferences a scan. The generic Title-Case sweep that produced
+            // that queue is deleted — see alias-scan.ts.
+            //
+            // ROUND 2 — repointed at the one class that is genuinely ours, the
+            // dialogue-only vocative, with a `not-a-name` option added so it
+            // could kill "Yeah" / "Bah" / "Ding". probe-alias-referent.cjs,
+            // qwen3-1.7b, 12 passages: wrong-and-proposed went from 0 to 3, and
+            // no threshold separates right from wrong (wrong at 1.0, right at
+            // 0.9). The reasons are the tell, and they are alias-review's
+            // failure exactly:
+            //
+            //     "Bah"   -> Scrooge  @1.0  "Bah is an exclamation made by Scrooge"
+            //     "Hullo" -> Lestrade @0.9  "Hullo is an exclamation used by Lestrade"
+            //
+            // It identifies the exclamation correctly IN THE REASON and then
+            // labels it a person. That is not a prompt to iterate on; it is the
+            // model reasoning correctly and assigning the opposite label.
+            //
+            // ★ AND ON VOCATIVES IT IS ACTIVELY HARMFUL, not merely useless: an
+            //   ambiguous vocative has no deterministic answer underneath it, so
+            //   a confident "Yeah -> Gatsby" becomes a ROW. The deterministic
+            //   narration rule fixed more of this class than the model ever did
+            //   (nine bad rows down to five, Sherlock's two worst gone) for free.
+            //
+            // ★ WIRE IT BACK WHEN: wrong-and-proposed is 0 on that probe
+            //   INCLUDING the four not-a-name cases, on a model that also still
+            //   gets "Kes" right. Re-run the probe; do not re-argue from the
+            //   prompt. The path below is kept intact and typechecked so that is
+            //   a one-line change.
+            const MODEL_LAYER_ENABLED = false;
+            if (MODEL_LAYER_ENABLED && result.unresolved.length > 0 && await assistantAvailable() && !cancelled) {
               const bookHash = fnv1a(novel.chapters.map((c) => c.content).join("\n").slice(0, 20_000));
               const answers = await reviewUnresolvedForms(result.unresolved, {
                 run: assistantRunJSON,
@@ -466,6 +506,25 @@ export function WorldDataView({
 
               const bookText = novel.chapters.map((c) => c.content).join("\n\n");
               for (const answer of answers) {
+                const form = result.unresolved.find((u) => u.alias === answer.alias);
+
+                // ── REFUTATION ────────────────────────────────────────────
+                // ★★ The model's most valuable job here is DELETION, not
+                //    discovery. The vocative layer's surviving errors are
+                //    non-names sitting in the vocative slot — "Yeah", "Bah",
+                //    "Ding" — which no positional or frequency test in
+                //    alias-scan can distinguish from a real nickname, because
+                //    both live only inside quotation marks. A row with a
+                //    deterministic answer behind it ships unless the model
+                //    actively contradicts it, so an abstention changes nothing.
+                if (form?.proposed) {
+                  if (refutesProposal(answer, form.proposed)) {
+                    rows = rows.filter((r) => !(r.source === "vocative"
+                      && r.alias.toLowerCase() === answer.alias.toLowerCase()));
+                  }
+                  continue;
+                }
+
                 if (!answer.surfaced) continue;
                 // ★ THE DETERMINISTIC VETOES RUN ON THE MODEL'S ANSWER TOO, not
                 //   only on the question. The shortlist was pruned before it was
@@ -474,7 +533,6 @@ export function WorldDataView({
                 //   people whoever proposed the link.
                 if (coordinated(bookText, answer.referent, answer.alias)) continue;
                 if (rows.some((r) => aliasKey(r) === `${answer.referent.toLowerCase()}|${answer.alias.toLowerCase()}`)) continue;
-                const form = result.unresolved.find((u) => u.alias === answer.alias);
                 rows = [...rows, {
                   character: answer.referent,
                   alias: answer.alias,

@@ -86,7 +86,7 @@ import type { AssistantJSONRunner } from "./assistant-client";
 import type { UnresolvedForm } from "./alias-scan";
 
 export const REFERENT_TASK = "alias-referent";
-export const REFERENT_PROMPT_VERSION = 1;
+export const REFERENT_PROMPT_VERSION = 2;
 
 /** Per scan. This runs once, when the writer presses the button. */
 export const REFERENT_CAP = 6;
@@ -99,6 +99,22 @@ export const REFERENT_MIN_CONFIDENCE = 0.85;
 
 /** The abstention, spelled the same on the wire and in the code. */
 export const UNCLEAR = "unclear";
+/**
+ * ★★ THE OPTION THE VOCATIVE LAYER NEEDS. Its remaining wrong rows are not
+ *    mis-attributions, they are non-names: `Gatsby ← Yeah`, `Christmas ← Bah`,
+ *    `Scrooge ← Ding`. Every one is a capitalised token sitting in the vocative
+ *    slot — `"Yeah, old sport,"` is the same shape as `"Careful, Kes,"` — and
+ *    no positional or frequency test in this file can tell them apart, because
+ *    both live only inside quotation marks and neither is ever narrated.
+ *    Whether a word is a person's name is a language question, which is the
+ *    one kind of question worth spending a model on.
+ *
+ * ★ It is NOT the abstention. `unclear` means "the passage does not say who";
+ *   this means "the passage says this is not anybody". Keeping them separate is
+ *   what lets an abstention leave the deterministic row alone while this one
+ *   kills it.
+ */
+export const NOT_A_NAME = "not-a-name";
 
 const SNIPPET_MAX = 420;
 /**
@@ -135,7 +151,7 @@ export function referentSchema(shortlist: readonly string[]) {
     type: "object",
     properties: {
       reason: { type: "string", maxLength: REASON_MAX },
-      referent: { enum: [...shortlist, UNCLEAR] },
+      referent: { enum: [...shortlist, UNCLEAR, NOT_A_NAME] },
       confidence: { type: "number" },
     },
   } as const;
@@ -152,12 +168,18 @@ described doing what the name does, or the passage puts the name and the person
 in the same role. One person reacting to the name while the others do not is
 enough. Nearness on its own is not.
 
-Choose "unclear" only when nothing in the passage points at any of them.
+Choose "unclear" only when the name belongs to a person but the passage does
+not show which of them it is.
+
+Choose "not-a-name" when the word is not a person's name at all — an
+exclamation, a greeting, a sound, an ordinary word that happens to be
+capitalised because it starts what someone says. "Yeah", "Well", "Bah" and
+"Hullo" are not names. A name is a word you could put on a list of people.
 
 Answer as JSON: {"reason","referent","confidence"} in that order.
 reason: FIRST, and START WITH THE QUOTED WORDS from the passage that decide it.
   No preamble, no restating the question. If no words decide it, write "none".
-referent: exactly one of the listed names, or "unclear".
+referent: exactly one of the listed names, or "unclear", or "not-a-name".
 confidence: a decimal between 0 and 1, such as 0.9 or 0.4. Use 0.9 or more only
   when the quoted words show it outright. Never above 1.`;
 
@@ -220,8 +242,8 @@ export function normalizeReferent(
   const referentRaw = value.referent;
   if (typeof referentRaw !== "string") return null;
   const wanted = collapse(referentRaw).toLowerCase();
-  const referent = wanted === UNCLEAR
-    ? UNCLEAR
+  const referent = wanted === UNCLEAR || wanted === NOT_A_NAME
+    ? wanted
     // ★ MATCHED BACK AGAINST THE LIST WE SENT, never taken as written. A
     //   grammar constrains the tokens, not the semantics: a model can still
     //   emit a listed name with different casing or spacing, and a string that
@@ -244,7 +266,28 @@ export function normalizeReferent(
 export function isSurfacedReferent(answer: ReferentAnswer | null | undefined): boolean {
   return !!answer
     && answer.referent !== UNCLEAR
+    && answer.referent !== NOT_A_NAME
     && answer.confidence >= REFERENT_MIN_CONFIDENCE;
+}
+
+/**
+ * Does this answer REFUTE a row the deterministic pass already produced?
+ *
+ * ★★ THE ASYMMETRY IS THE POINT, and it is the opposite of the one above. A row
+ *    with a deterministic answer behind it ships unless the model actively
+ *    contradicts it, so an abstention — which is what this model does most —
+ *    costs nothing and changes nothing. Only two answers kill a row: "that is
+ *    not a name" and "that is a different person", and both need the same high
+ *    confidence a fresh attachment needs.
+ */
+export function refutesProposal(
+  answer: ReferentAnswer | null | undefined,
+  proposed: string,
+): boolean {
+  if (!answer || answer.confidence < REFERENT_MIN_CONFIDENCE) return false;
+  if (answer.referent === UNCLEAR) return false;
+  if (answer.referent === NOT_A_NAME) return true;
+  return answer.referent.toLowerCase() !== proposed.trim().toLowerCase();
 }
 
 export function referentKeyFor(bookHash: string, alias: string, modelId: string): string {

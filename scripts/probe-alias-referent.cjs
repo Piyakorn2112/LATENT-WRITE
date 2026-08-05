@@ -99,6 +99,40 @@ const CASES = [
       'They came down out of Ashfell in the last of the light, Corun leading and Maddox a long way ' +
       'behind, and the road was worse than either of them had been promised.',
   },
+
+  // ── NOT NAMES AT ALL. Every one is a REAL row the vocative layer shipped on
+  //    a real novel, and the whole reason `not-a-name` was added. They sit in
+  //    the vocative slot exactly like a nickname does.
+  {
+    id: 'yeah', expect: 'not-a-name',
+    alias: 'Yeah', shortlist: ['Gatsby', 'Jordan'],
+    snippet:
+      '"Yeah," said Gatsby, and turned the wheel a little, and Jordan looked out of the window at '
+      + 'the ash-heaps going by. "Yeah, that is what I heard too."',
+  },
+  {
+    id: 'bah', expect: 'not-a-name',
+    alias: 'Bah', shortlist: ['Scrooge', 'Cratchit'],
+    snippet:
+      '"Bah!" said Scrooge. "Humbug!" Cratchit did not answer him, and went on copying letters '
+      + 'with his fingers half frozen.',
+  },
+  {
+    id: 'hullo-again', expect: 'not-a-name',
+    alias: 'Hullo', shortlist: ['Watson', 'Lestrade'],
+    snippet:
+      '"Hullo, Watson," said Lestrade from the doorway, shaking the rain from his hat. "You are '
+      + 'early for once."',
+  },
+  // ── AND ONE THAT IS a name, in the same slot, to prove the option is not
+  //    simply swallowing the whole class.
+  {
+    id: 'kes', expect: 'Kestrel',
+    alias: 'Kes', shortlist: ['Kestrel', 'Elena'],
+    snippet:
+      '"You are going to get us both killed, Kes," Elena said, without looking up. "You know that." '
+      + '"So don\'t come," Kestrel said. "It is a long walk and I would rather do it without the lecture."',
+  },
 ];
 
 let win = null;
