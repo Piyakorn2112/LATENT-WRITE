@@ -1,0 +1,450 @@
+/**
+ * max-ask.ts — "what about this paragraph?", answered from assembled context.
+ *
+ * The deterministic engines in this app can tell you WHERE things are: who is
+ * present, who speaks, which names recur, which sentence opens a thread. What
+ * they cannot do is say what a passage MEANS in the story around it. That gap
+ * is what max mode exists to fill, and it is the only thing this module is for.
+ *
+ * ── THE HARNESS CARRIES THE INTELLIGENCE, NOT THE MODEL ────────────────────
+ *
+ * Same thesis as evidence-pack.ts, and this is deliberately its sibling: a
+ * PURE function from already-derived story data to the exact text the model is
+ * allowed to see. The model never searches, never reads the manuscript, and
+ * never chooses what to look at. Everything measured in this repo says a 4B
+ * reasons well over evidence in front of it and fails the moment it has to go
+ * and FIND the evidence — so finding is the harness's job and reasoning is the
+ * model's, and the split is not negotiable.
+ *
+ * ── WHY A LADDER AND NOT A TEMPLATE ────────────────────────────────────────
+ *
+ * On 8 GB the context window is 4096 tokens, of which a thinking model needs a
+ * large slice for its own reasoning. So the budget for evidence is small and
+ * hard, and the only question that matters is WHAT GETS IN. Rungs fill
+ * top-down and whatever does not fit is dropped from the bottom, WHOLE — a
+ * half-included dossier is worse than an absent one, because the model cannot
+ * tell a truncated fact from a complete one.
+ *
+ *   1. the paragraph itself                          — always
+ *   2. the writer's question, if they asked one      — always
+ *   3. who is in this scene, and what they are       — always
+ *   4. the paragraphs either side                    — budget
+ *   5. what this chapter has established so far      — budget
+ *   6. open threads this passage could be touching   — budget
+ *   7. earlier passages about the same people        — budget
+ *
+ * ── THE LOOP, AND WHY IT CANNOT SPIN ───────────────────────────────────────
+ *
+ * ★★ THE LOOP ADVANCES ON ONE SIGNAL AND ONE ONLY: the model reporting that
+ *    what it was given does not contain the answer, while the ladder still has
+ *    an unspent rung. Not "am I confident enough", not "should I think more" —
+ *    those are judgements a small model makes badly and they are how an agent
+ *    gets stuck. Insufficiency is a fact about the PACK, which the harness can
+ *    check and act on.
+ *
+ * ★ FOUR INDEPENDENT BREAKS, so no single failure can hang it:
+ *      · MAX_STEPS               — a hard count, never conditional
+ *      · rungs exhausted         — nothing left to add, so retrying is a repeat
+ *      · a repeated answer       — same text twice means adding context changed
+ *                                  nothing, so more will not either
+ *      · a wall-clock deadline   — covers a model that is slow rather than stuck
+ *
+ *   Every break returns the best answer so far. There is no path that returns
+ *   nothing because the loop ran out — a stuck harness must degrade to its last
+ *   good result, not to silence.
+ */
+import { fnv1a } from "./evidence-pack";
+import { tidyTruncatedText } from "./assistant-client";
+import type { AssistantJSONRunner } from "./assistant-client";
+import type { WorldData } from "../types";
+
+export const MAX_ASK_TASK = "max-ask";
+export const MAX_ASK_PROMPT_VERSION = 1;
+
+const CHARS_PER_TOKEN = 4;
+/** Evidence budget. The rest of a 4k window belongs to the model's thinking. */
+export const DEFAULT_BUDGET_TOKENS = 1600;
+const PARAGRAPH_CAP = 900;
+const NEIGHBOUR_CAP = 420;
+const ANSWER_MAX = 700;
+const DEFAULT_MAX_TOKENS = 640;
+const DEFAULT_TIMEOUT_MS = 90_000;
+
+/** ★ TWO. One ask, one retry with more context. A third step has never had new
+ *  evidence to justify it, because the ladder is spent by then. */
+export const MAX_STEPS = 2;
+/**
+ * The widened budget can never exceed this.
+ *
+ * ★ 3200 leaves ~900 tokens of a 4k window for the model's own thinking and its
+ *   answer, which a THINKING model needs more of than an instruct one. Widening
+ *   to "whatever it takes" would let a long chapter's rungs push the prompt past
+ *   the window and get silently truncated at the far end — where the retrieved
+ *   passages are, which is the rung the retry was for.
+ */
+export const WIDEN_CEILING_TOKENS = 3200;
+/** Covers a model that is slow rather than stuck; the step count covers stuck. */
+export const DEFAULT_DEADLINE_MS = 150_000;
+
+/** The abstention, and the ONLY thing that makes the loop take another step. */
+export const NOT_IN_CONTEXT = "not-in-what-i-was-given";
+
+export type AskKind = "check" | "suggest" | "explain" | "question";
+
+export interface MaxAskInput {
+  /** The paragraph the writer right-clicked. */
+  paragraph: string;
+  paragraphIndex: number;
+  chapterNumber: number;
+  chapterTitle?: string;
+  /** What they want. `question` carries `question`. */
+  kind: AskKind;
+  question?: string;
+  /** Paragraphs of the current chapter, for the neighbours rung. */
+  chapterParagraphs?: readonly string[];
+  /** Cast members the engine says are in this scene. */
+  present?: readonly string[];
+  worldData?: WorldData | null;
+  /** One line per earlier chapter, in reading order. */
+  chapterSummaries?: ReadonlyArray<{ chapterNumber: number; summary: string }>;
+  /** Threads the story has opened and not closed. */
+  openThreads?: ReadonlyArray<{ chapterNumber: number; text: string }>;
+  /** Pre-retrieved passages about the same people. Retrieval is the CALLER's
+   *  job — this module stays synchronous so it can be tested without a model. */
+  related?: ReadonlyArray<{ chapterNumber: number; text: string }>;
+  budgetTokens?: number;
+}
+
+export interface MaxAskPack {
+  text: string;
+  tokensEstimate: number;
+  /** Which rungs made it in, in order. Reported so a thin answer can be told
+   *  apart from a thin PACK — they look identical from the outside. */
+  rungsIncluded: string[];
+  /** Rungs the budget refused. Non-empty means step 2 has something to add. */
+  rungsDropped: string[];
+  /**
+   * What the budget would have to be for NOTHING to be dropped.
+   *
+   * ★★ WITHOUT THIS THE WIDENING STEP IS A COIN FLIP. The first version simply
+   *    doubled the budget, and the gate caught it: the always-rungs alone cost
+   *    111 tokens, so doubling 60 to 120 still fitted nothing new and step 2
+   *    was a byte-identical second call. A retry that cannot change the prompt
+   *    is not a retry, it is a wasted inference and a slower answer.
+   */
+  tokensIfComplete: number;
+  packHash: string;
+}
+
+const estimateTokens = (t: string) => Math.ceil(t.length / CHARS_PER_TOKEN);
+const cap = (t: string, max = PARAGRAPH_CAP) => (t.length <= max ? t : `${t.slice(0, max - 1)}…`);
+const collapse = (t: string) => t.replace(/\s+/g, " ").trim();
+
+const ASK_LINE: Record<AskKind, string> = {
+  check: "What in this paragraph does not fit the story around it? If nothing does, say so.",
+  suggest: "What could plausibly happen next here, given what the story has already established?",
+  explain: "What is this paragraph doing in the story — what work is it performing?",
+  question: "",
+};
+
+/**
+ * Build the pack. `extraRungs` lets step 2 spend a bigger budget on the same
+ * input rather than re-deriving anything.
+ */
+export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): MaxAskPack {
+  const budget = budgetOverride ?? input.budgetTokens ?? DEFAULT_BUDGET_TOKENS;
+  const included: string[] = [];
+  const dropped: string[] = [];
+  const parts: string[] = [];
+  let spent = 0;
+
+  /** Add a rung if it fits WHOLE; otherwise record it as dropped. */
+  let ifComplete = 0;
+  const add = (name: string, body: string, always = false) => {
+    const cost = estimateTokens(body);
+    ifComplete += cost;
+    if (!always && spent + cost > budget) { dropped.push(name); return; }
+    parts.push(body);
+    included.push(name);
+    spent += cost;
+  };
+
+  // ── 1 · the passage ─────────────────────────────────────────────────────
+  add("passage",
+    `PASSAGE — chapter ${input.chapterNumber}`
+    + `${input.chapterTitle ? `, ${input.chapterTitle}` : ""}, paragraph ${input.paragraphIndex + 1}\n`
+    + cap(collapse(input.paragraph)),
+    true);
+
+  // ── 2 · the ask ─────────────────────────────────────────────────────────
+  const ask = input.kind === "question"
+    ? collapse(input.question ?? "").slice(0, 300)
+    : ASK_LINE[input.kind];
+  add("ask", `THE QUESTION\n${ask || ASK_LINE.explain}`, true);
+
+  // ── 3 · who is here ─────────────────────────────────────────────────────
+  const present = (input.present ?? []).slice(0, 6);
+  if (present.length) {
+    const lines = present.map((name) => {
+      const c = input.worldData?.characters.find(
+        (x) => x.name === name || x.aliases?.includes(name));
+      const bits = [c?.role, c?.description].filter(Boolean).join(". ");
+      return bits ? `${name}: ${cap(bits, 160)}` : name;
+    });
+    add("who", `WHO IS IN THIS SCENE\n${lines.join("\n")}`, true);
+  }
+
+  // ── 4 · either side ─────────────────────────────────────────────────────
+  const paras = input.chapterParagraphs ?? [];
+  const before = paras[input.paragraphIndex - 1];
+  const after = paras[input.paragraphIndex + 1];
+  if (before || after) {
+    add("neighbours",
+      `IMMEDIATELY AROUND IT\n`
+      + (before ? `Before: ${cap(collapse(before), NEIGHBOUR_CAP)}\n` : "")
+      + (after ? `After: ${cap(collapse(after), NEIGHBOUR_CAP)}` : ""));
+  }
+
+  // ── 5 · the story so far ────────────────────────────────────────────────
+  const summaries = (input.chapterSummaries ?? [])
+    .filter((s) => s.chapterNumber < input.chapterNumber)
+    .slice(-4);
+  if (summaries.length) {
+    add("story-so-far",
+      `THE STORY BEFORE THIS\n`
+      + summaries.map((s) => `Ch ${s.chapterNumber}: ${cap(collapse(s.summary), 220)}`).join("\n"));
+  }
+
+  // ── 6 · open threads ────────────────────────────────────────────────────
+  const threads = (input.openThreads ?? []).slice(0, 4);
+  if (threads.length) {
+    add("open-threads",
+      `STILL OPEN\n`
+      + threads.map((t) => `Ch ${t.chapterNumber}: ${cap(collapse(t.text), 180)}`).join("\n"));
+  }
+
+  // ── 7 · related passages ────────────────────────────────────────────────
+  const related = (input.related ?? []).slice(0, 3);
+  if (related.length) {
+    add("related",
+      `EARLIER, ABOUT THE SAME PEOPLE\n`
+      + related.map((r) => `Ch ${r.chapterNumber}: ${cap(collapse(r.text), 240)}`).join("\n"));
+  }
+
+  const text = parts.join("\n\n");
+  return {
+    text,
+    tokensEstimate: estimateTokens(text),
+    rungsIncluded: included,
+    rungsDropped: dropped,
+    tokensIfComplete: ifComplete,
+    packHash: fnv1a(`${MAX_ASK_PROMPT_VERSION}|${text}`),
+  };
+}
+
+// ── the request ────────────────────────────────────────────────────────────
+
+/**
+ * ★★ ANSWER FIRST, THEN THE LABEL ABOUT IT. A constrained grammar emits
+ *    properties in declaration order, and this repo has measured twice what
+ *    happens when a label comes first: the model commits and then writes
+ *    reasoning that contradicts it. `basis` is a classification OF the answer,
+ *    so it comes after the answer.
+ *
+ * ★ `basis` IS THE GROUNDING CHECK. It has to name the section the answer came
+ *   out of, and the sections are the rung names actually in the pack — so an
+ *   answer citing a rung that was never included is detectable, and an answer
+ *   that came from the model's own training has nowhere honest to point.
+ */
+export function maxAskSchema(rungs: readonly string[]) {
+  return {
+    type: "object",
+    properties: {
+      answer: { type: "string", maxLength: ANSWER_MAX },
+      basis: { enum: [...rungs, NOT_IN_CONTEXT] },
+      confidence: { type: "number" },
+    },
+  } as const;
+}
+
+export const MAX_ASK_SYSTEM = `You are reading one paragraph of a novel, with some of what the story has
+already established around it. Answer the question about that paragraph.
+
+Everything you are given is under a heading. Use only what is there. You have
+not read the rest of the book and must not pretend to — if the answer needs
+something you were not given, say so with basis "${NOT_IN_CONTEXT}".
+
+Be concrete and specific to this passage. Name the people and the things that
+are actually in it. Do not summarise the paragraph back — the writer wrote it
+and knows what it says. Do not give writing advice in general terms.
+
+Answer as JSON: {"answer","basis","confidence"} in that order.
+answer: FIRST. Two or three sentences. Say the useful thing straight away.
+basis: the heading your answer came out of, or "${NOT_IN_CONTEXT}".
+confidence: a decimal between 0 and 1, such as 0.9 or 0.4. Never above 1.`;
+
+export interface MaxAskRequest {
+  systemPrompt: string;
+  userText: string;
+  schema: ReturnType<typeof maxAskSchema>;
+  maxTokens: number;
+  rungs: readonly string[];
+}
+
+export function buildMaxAskRequest(pack: MaxAskPack, maxTokens = DEFAULT_MAX_TOKENS): MaxAskRequest {
+  return {
+    systemPrompt: MAX_ASK_SYSTEM,
+    userText: pack.text,
+    schema: maxAskSchema(pack.rungsIncluded),
+    maxTokens,
+    rungs: pack.rungsIncluded,
+  };
+}
+
+// ── validation ─────────────────────────────────────────────────────────────
+
+export interface MaxAskAnswer {
+  answer: string;
+  basis: string;
+  confidence: number;
+}
+
+export function normalizeMaxAsk(
+  raw: unknown,
+  rungs: readonly string[],
+): MaxAskAnswer | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.answer !== "string" || typeof v.basis !== "string") return null;
+  if (typeof v.confidence !== "number" || !Number.isFinite(v.confidence)) return null;
+
+  const answer = tidyTruncatedText(collapse(v.answer).slice(0, ANSWER_MAX), ANSWER_MAX);
+  if (!answer) return null;
+
+  // ★ Matched back against the rungs WE SENT, never taken as written. A grammar
+  //   constrains tokens, not meaning: a basis that is not one of ours is a
+  //   citation to something that was not in the pack.
+  const wanted = collapse(v.basis).toLowerCase();
+  const basis = wanted === NOT_IN_CONTEXT
+    ? NOT_IN_CONTEXT
+    : rungs.find((r) => r.toLowerCase() === wanted);
+  if (!basis) return null;
+
+  return { answer, basis, confidence: Math.min(1, Math.max(0, v.confidence)) };
+}
+
+/** Does this answer reach the writer? */
+export function isUsefulAnswer(a: MaxAskAnswer | null | undefined): boolean {
+  return !!a && a.basis !== NOT_IN_CONTEXT && a.answer.length > 0;
+}
+
+// ── the bounded loop ───────────────────────────────────────────────────────
+
+export interface MaxAskOptions {
+  run: AssistantJSONRunner;
+  maxTokens?: number;
+  timeoutMs?: number;
+  /** Wall-clock ceiling across every step. */
+  deadlineMs?: number;
+  maxSteps?: number;
+  now?: () => number;
+  onStep?: (step: number, why: string) => void;
+}
+
+export interface MaxAskResult {
+  answer: MaxAskAnswer | null;
+  /** How many model calls it actually took. */
+  steps: number;
+  /** Why the loop stopped — always one of a closed set, never "it just did". */
+  stopped: "answered" | "steps" | "rungs-exhausted" | "repeat" | "deadline" | "failed";
+  packHash: string;
+  tokensEstimate: number;
+  rungsIncluded: string[];
+}
+
+/**
+ * Ask, and if the model says the pack did not contain the answer, widen the
+ * budget once and ask again.
+ *
+ * ★★ EVERY EXIT IS NAMED AND EVERY EXIT RETURNS THE BEST ANSWER SO FAR. A
+ *    harness that can end in an unnamed state is one nobody can debug from a
+ *    bug report, and one that returns null on a break throws away a good step-1
+ *    answer because step 2 was unlucky.
+ */
+export async function runMaxAsk(
+  input: MaxAskInput,
+  opts: MaxAskOptions,
+): Promise<MaxAskResult> {
+  const now = opts.now ?? (() => Date.now());
+  const started = now();
+  const deadline = started + (opts.deadlineMs ?? DEFAULT_DEADLINE_MS);
+  const maxSteps = Math.max(1, opts.maxSteps ?? MAX_STEPS);
+
+  let budget = input.budgetTokens ?? DEFAULT_BUDGET_TOKENS;
+  let pack = buildMaxAskPack(input, budget);
+  let best: MaxAskAnswer | null = null;
+  let lastAnswerText = "";
+  let steps = 0;
+
+  for (let step = 1; step <= maxSteps; step += 1) {
+    if (now() >= deadline) {
+      return { answer: best, steps, stopped: "deadline", packHash: pack.packHash,
+        tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+    }
+
+    const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS);
+    steps = step;
+    opts.onStep?.(step, step === 1 ? "first ask" : "context widened");
+
+    const result = await opts.run<unknown>({
+      task: MAX_ASK_TASK,
+      tag: `${input.chapterNumber}:${input.paragraphIndex}`,
+      systemPrompt: request.systemPrompt,
+      userText: request.userText,
+      schema: request.schema,
+      maxTokens: request.maxTokens,
+      // Never let one call outlive the whole budget.
+      timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
+    });
+    if (!result.ok) {
+      return { answer: best, steps, stopped: "failed", packHash: pack.packHash,
+        tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+    }
+
+    const answer = normalizeMaxAsk(result.json, pack.rungsIncluded);
+    if (answer) best = answer;
+
+    if (answer && isUsefulAnswer(answer)) {
+      return { answer, steps, stopped: "answered", packHash: pack.packHash,
+        tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+    }
+
+    // ── the only reason to go round again ────────────────────────────────
+    if (pack.rungsDropped.length === 0) {
+      return { answer: best, steps, stopped: "rungs-exhausted", packHash: pack.packHash,
+        tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+    }
+    // ★ A REPEATED ANSWER MEANS MORE CONTEXT CHANGED NOTHING. Without this a
+    //   model that always says the same thing burns every remaining step.
+    if (answer && answer.answer === lastAnswerText) {
+      return { answer: best, steps, stopped: "repeat", packHash: pack.packHash,
+        tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+    }
+    if (answer) lastAnswerText = answer.answer;
+
+    // ★ WIDEN TO WHAT IS ACTUALLY NEEDED, capped. Doubling was the obvious
+    //   move and it was wrong: the pack knows exactly what everything costs, so
+    //   ask for that and let the ceiling — not arithmetic — be the limiter.
+    budget = Math.min(Math.max(budget * 2, pack.tokensIfComplete), WIDEN_CEILING_TOKENS);
+    const wider = buildMaxAskPack(input, budget);
+    // If widening changed nothing, another call is the same call.
+    if (wider.rungsIncluded.length === pack.rungsIncluded.length) {
+      return { answer: best, steps, stopped: "rungs-exhausted", packHash: pack.packHash,
+        tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+    }
+    pack = wider;
+  }
+
+  return { answer: best, steps, stopped: "steps", packHash: pack.packHash,
+    tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+}
