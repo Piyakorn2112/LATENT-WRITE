@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { paintKnobGlass, type KnobBackdropLayer } from "../lib/knob-glass-paint";
+import { paintKnobGlass, type KnobBackdropLayer, type KnobTextLayer } from "../lib/knob-glass-paint";
 
 /**
  * KnobGlass — the pressed knob's material, painted per pixel in float.
@@ -108,8 +108,9 @@ export function KnobGlass({ active }: { active: boolean }) {
       if (w < 2 || h < 2) { raf = requestAnimationFrame(paint); return; }
 
       // The track (or the slider's rail) is whatever glass control owns us.
-      const control = knob.closest(".glass-toggle, .glass-range-wrap");
+      const control = knob.closest(".glass-toggle, .glass-range-wrap, .glass-mode");
       const layers: KnobBackdropLayer[] = [];
+      const texts: KnobTextLayer[] = [];
       let base = "rgb(240,240,242)";
       if (control) {
         // ★ EVERY PAINTED THING IN THE CONTROL, in DOM order — not just the
@@ -151,6 +152,29 @@ export function KnobGlass({ active }: { active: boolean }) {
             continue;
           }
 
+          // ★★ LABELS ARE PART OF THE BACKDROP. The mode selector's whole
+          //    point is that the knob bends the option names underneath it, and
+          //    a label is a text node with a transparent background — invisible
+          //    to every colour read above, so the glass would slide over three
+          //    words and refract nothing at all. Marked in the DOM rather than
+          //    sniffed, so no ordinary label anywhere else is ever painted.
+          if (el.classList.contains("glass-refract-text")) {
+            const label = (el.textContent ?? "").trim();
+            if (label) {
+              texts.push({
+                cx: r.left - knobRect.left + r.width / 2,
+                cy: r.top - knobRect.top + r.height / 2,
+                text: label,
+                fontPx: parseFloat(cs.fontSize) || 10,
+                fontWeight: cs.fontWeight || "400",
+                fontFamily: cs.fontFamily || "sans-serif",
+                letterSpacingPx: parseFloat(cs.letterSpacing) || 0,
+                color: cs.color,
+              });
+            }
+            continue;
+          }
+
           const bg = cs.backgroundColor;
           const m = bg.match(/[\d.]+/g);
           if (!m || m.length < 3) continue;
@@ -181,6 +205,7 @@ export function KnobGlass({ active }: { active: boolean }) {
         dpr: Math.min(window.devicePixelRatio || 1, 3),
         base,
         layers,
+        texts,
         // The knob's own translucent surface. Read from --knob-fill, NOT from
         // backgroundColor: the painted knob sets its background transparent so
         // the canvas is the surface, which would otherwise read as "no tint".

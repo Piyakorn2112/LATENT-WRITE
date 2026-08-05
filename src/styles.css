@@ -15613,3 +15613,213 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 .world-alias-btn:hover { color: var(--text); border-color: var(--text-secondary); }
+
+/* ── GlassModeSelector ─────────────────────────────────────────────────────
+   A three-stop track with a glass knob. Borrows GlassToggle's MOTION grammar
+   — the same spring on the slide, the same swell to scale(2) with the knob
+   going translucent, the same press/release animation pairs — and nothing
+   else. Three named states are not a widened binary. */
+.glass-mode-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.glass-mode {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--mode-count, 3), 1fr);
+  align-items: stretch;
+  height: 30px;
+  padding: 2px;
+  border-radius: 999px;
+  border: 1px solid var(--divider-line);
+  background: rgba(0, 0, 0, 0.10);
+  /* The knob swells past the track on press, exactly as the toggle's does. */
+  overflow: visible;
+  user-select: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  .glass-mode { background: rgba(255, 255, 255, 0.10); }
+}
+
+.glass-mode-option {
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  min-width: 0;
+}
+
+.glass-mode-option:disabled { cursor: default; }
+
+.glass-mode-label {
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  transition: color 0.18s ease, opacity 0.18s ease;
+  white-space: nowrap;
+}
+
+.glass-mode-option:hover:not(:disabled) .glass-mode-label { color: var(--text-secondary); }
+.glass-mode-option:disabled .glass-mode-label { opacity: 0.35; }
+
+/* ★ The SELECTED label is deliberately left visible underneath the knob rather
+   than hidden. At rest the knob is opaque and covers it; on press the knob
+   turns translucent and this is the text the glass is bending. Hiding it would
+   leave the material with nothing to refract, which is the entire effect. */
+.glass-mode-option--on .glass-mode-label { color: var(--text); }
+
+.glass-mode-option:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+/* Knob — GlassToggle's knob, sized to one third of the track. Same spring on
+   `left`, same transform chain so hover/press scale around its own centre. */
+.glass-mode-knob {
+  position: absolute;
+  z-index: 2;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--mode-count, 3));
+  transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
+  transform-origin: center;
+  border-radius: 999px;
+  background: rgb(255, 255, 255);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.109),
+    0 4px 10px rgba(0, 0, 0, 0.10);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  transition:
+    transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+  will-change: transform;
+  --knob-fill: rgba(255, 255, 255, 0.18);
+  --knob-bezel-frac: 0.30;
+}
+
+@media (prefers-color-scheme: dark) {
+  .glass-mode-knob { background: rgb(236, 236, 234); }
+}
+
+.glass-mode-knob::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.2px;
+  background: var(--border-glass-grad);
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* The knob's own copy of the current word — the only thing keeping it readable
+   while the knob is opaque. It fades as the material comes up, so the word
+   never blinks out; it changes material. */
+.glass-mode-knob-label {
+  position: relative;
+  z-index: 2;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #1a1a1a;
+  transition: opacity 0.16s ease;
+  pointer-events: none;
+}
+
+.glass-mode-knob--painted .glass-mode-knob-label { opacity: 0; }
+
+.glass-mode:hover .glass-mode-knob {
+  transform: translateX(calc(100% * var(--mode-index, 0))) scale(1.06);
+}
+
+/* ★ THE HELD PRESS STATE, AND IT IS NOT OPTIONAL. `animation-fill-mode:
+   forwards` only holds while the animation class is on the element, and
+   onAnimationEnd removes it the moment the 0.3s press finishes — so without
+   this the knob swells and then snaps back flat while the finger is still
+   down. Measured: the knob read 98px (scale 1) 420ms into a press that should
+   have left it at 197px. Same rule, same values, as .glass-toggle--glass-active. */
+.glass-mode--glass-active .glass-mode-knob {
+  transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.22),
+    0 12px 28px rgba(0, 0, 0, 0.22);
+}
+
+/* Press / release — two alternating cycles so a repeated press restarts the
+   animation instead of being swallowed, exactly as the toggle does it. */
+.glass-mode--press-a .glass-mode-knob { animation: glass-mode-knob-press-a 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
+.glass-mode--press-b .glass-mode-knob { animation: glass-mode-knob-press-b 0.3s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
+.glass-mode--release-a .glass-mode-knob { animation: glass-mode-knob-release-a 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
+.glass-mode--release-b .glass-mode-knob { animation: glass-mode-knob-release-b 0.24s cubic-bezier(0.22, 0.61, 0.36, 1) forwards; }
+
+@keyframes glass-mode-knob-press-a {
+  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
+         background: rgb(255, 255, 255);
+         box-shadow: 0 1px 2px rgba(0,0,0,0.109), 0 4px 10px rgba(0,0,0,0.10); }
+  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
+         background: rgba(255, 255, 255, 0.18);
+         box-shadow: 0 2px 6px rgba(0,0,0,0.22), 0 12px 28px rgba(0,0,0,0.22); }
+}
+@keyframes glass-mode-knob-press-b {
+  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
+         background: rgb(255, 255, 255);
+         box-shadow: 0 1px 2px rgba(0,0,0,0.109), 0 4px 10px rgba(0,0,0,0.10); }
+  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
+         background: rgba(255, 255, 255, 0.18);
+         box-shadow: 0 2px 6px rgba(0,0,0,0.22), 0 12px 28px rgba(0,0,0,0.22); }
+}
+@keyframes glass-mode-knob-release-a {
+  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
+         background: rgba(255, 255, 255, 0.18); }
+  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
+         background: rgb(255, 255, 255); }
+}
+@keyframes glass-mode-knob-release-b {
+  0%   { transform: translateX(calc(100% * var(--mode-index, 0))) scale(2);
+         background: rgba(255, 255, 255, 0.18); }
+  100% { transform: translateX(calc(100% * var(--mode-index, 0))) scale(1);
+         background: rgb(255, 255, 255); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-mode-knob { transition: none; }
+  .glass-mode--press-a .glass-mode-knob,
+  .glass-mode--press-b .glass-mode-knob,
+  .glass-mode--release-a .glass-mode-knob,
+  .glass-mode--release-b .glass-mode-knob { animation: none; }
+}
+
+.glass-mode-note {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  line-height: 1.4;
+}

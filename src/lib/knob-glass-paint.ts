@@ -142,6 +142,33 @@ export interface KnobBackdropLayer {
   gradient?: { x0: number; y0: number; x1: number; y1: number; stops: Array<[number, string]> };
 }
 
+/**
+ * Text painted into the backdrop buffer, so the glass REFRACTS it.
+ *
+ * ★★ THIS IS WHAT MAKES THE MODE SELECTOR WORTH BUILDING. A knob sliding over
+ *    three labels with flat colour underneath is a knob with nothing to look
+ *    at — the material only reads as glass when it is bending something that
+ *    has structure. Letterforms are the ideal test object: high contrast, thin
+ *    strokes, a shape the eye already knows, so the bevel's pull is legible
+ *    rather than merely present.
+ *
+ * ★ SIZES ARE CSS px AND SCALED HERE, never baked into a font string by the
+ *   caller. The buffer is at DEVICE resolution, so a caller passing
+ *   "700 9.5px Inter" would draw the glyphs at a third of their size on a 3x
+ *   display and the refraction would have almost nothing to bite on.
+ */
+export interface KnobTextLayer {
+  /** Centre of the text box, knob-local CSS px. */
+  cx: number;
+  cy: number;
+  text: string;
+  fontPx: number;
+  fontWeight: string;
+  fontFamily: string;
+  letterSpacingPx?: number;
+  color: string;
+}
+
 export interface KnobGlassScene {
   /** The knob's DISPLAYED size in CSS px (i.e. after the press transform). */
   w: number;
@@ -152,6 +179,8 @@ export interface KnobGlassScene {
   base: string;
   /** Backdrop shapes, painted in order (typically just the track). */
   layers: KnobBackdropLayer[];
+  /** Text painted ON TOP of the shapes, before any refraction is applied. */
+  texts?: KnobTextLayer[];
   /** The knob's own surface tint, as rgba. */
   fill: string;
   /** Specular strength on the up/down-facing rim, and the dark side border.
@@ -239,6 +268,20 @@ export function paintKnobGlass(canvas: HTMLCanvasElement, scene: KnobGlassScene)
     }
     roundRect(ctx, l.x * dpr, l.y * dpr, l.w * dpr, l.h * dpr, l.r * dpr);
     ctx.fill();
+  }
+  // Text goes in LAST and before the resample, so the glass bends the glyphs
+  // and not just the plate they sit on.
+  for (const t of scene.texts ?? []) {
+    ctx.save();
+    ctx.font = `${t.fontWeight} ${t.fontPx * dpr}px ${t.fontFamily}`;
+    // Supported in Chromium; harmless where it is not, since the fallback is
+    // simply un-tracked text rather than a throw.
+    try { ctx.letterSpacing = `${(t.letterSpacingPx ?? 0) * dpr}px`; } catch { /* older engines */ }
+    ctx.fillStyle = t.color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(t.text, t.cx * dpr, t.cy * dpr);
+    ctx.restore();
   }
   const src = ctx.getImageData(0, 0, W, H);
   const s = src.data;
