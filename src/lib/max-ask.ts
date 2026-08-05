@@ -250,6 +250,17 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
     add("who", `WHO — is in this scene\n${lines.join("\n")}`, true);
   }
 
+  // ── 3b · how the chapter began ──────────────────────────────────────────
+  //
+  // ★ Situating context the neighbours cannot give: a paragraph deep in a
+  //   chapter is read against where the chapter STARTED (who arrived, what was
+  //   wrong, what the writer promised). Only added once the passage is far
+  //   enough in that the opening is not already a neighbour.
+  const paras0 = input.chapterParagraphs ?? [];
+  if (input.paragraphIndex > 2 && paras0[0]) {
+    add("opening", `OPENING — how this chapter begins\n${cap(collapse(paras0[0]), 300)}`);
+  }
+
   // ── 4 · either side ─────────────────────────────────────────────────────
   const paras = input.chapterParagraphs ?? [];
   const before = paras[input.paragraphIndex - 1];
@@ -398,10 +409,80 @@ export function isUsefulAnswer(a: MaxAskAnswer | null | undefined): boolean {
   return !!a && a.basis !== NOT_IN_CONTEXT && a.answer.length > 0;
 }
 
+// ── self-review ────────────────────────────────────────────────────────────
+//
+// ★★ THE REVIEWER SEES EXACTLY WHAT THE ANSWERER SAW, PLUS THE ANSWER. Same
+//    pack, verbatim — a reviewer with different context is measuring the
+//    difference in context, not the answer. And its verdict can only ever
+//    DECORATE: a `supported` adds nothing, anything else adds a caution line
+//    the writer sees beside the answer. It never deletes — this repo has
+//    measured what happens when a small model's judgement is given a
+//    destructive lever, and the answer is already advisory text.
+//
+// ★ REASON FIRST, VERDICT AFTER, and `supported` is NOT described as the safe
+//   default — each verdict is a positive claim about what the sections state.
+
+export const REVIEW_MAX_TOKENS = 200;
+
+export type ReviewVerdict = "supported" | "overreaches" | "contradicted";
+
+export const MAX_ASK_REVIEW_SYSTEM = `You are checking an answer that was written about a passage from a novel,
+using only the sections provided. The sections are the whole truth here.
+
+Say which one of these the answer is:
+- "supported": everything the answer claims is stated by, or follows directly
+  from, the sections.
+- "overreaches": the answer includes something no section states — invented
+  detail, motive, or history.
+- "contradicted": a section states the opposite of something the answer claims.
+
+Answer as JSON: {"reason","verdict","confidence"} in that order.
+reason: FIRST, at most 20 words. Name the claim and the section that decides it.
+verdict: supported, overreaches, or contradicted.
+confidence: a decimal between 0 and 1, such as 0.9 or 0.4. Never above 1.`;
+
+export const REVIEW_SCHEMA = {
+  type: "object",
+  properties: {
+    reason: { type: "string", maxLength: 160 },
+    verdict: { enum: ["supported", "overreaches", "contradicted"] },
+    confidence: { type: "number" },
+  },
+} as const;
+
+export interface ReviewAnswer {
+  verdict: ReviewVerdict;
+  confidence: number;
+  reason: string;
+}
+
+export function buildReviewRequest(pack: MaxAskPack, answer: MaxAskAnswer) {
+  return {
+    systemPrompt: MAX_ASK_REVIEW_SYSTEM,
+    userText: `${pack.text}\n\nTHE ANSWER UNDER REVIEW\n${answer.answer}`,
+    schema: REVIEW_SCHEMA,
+    maxTokens: REVIEW_MAX_TOKENS,
+  };
+}
+
+export function normalizeReview(raw: unknown): ReviewAnswer | null {
+  if (!raw || typeof raw !== "object") return null;
+  const v = raw as Record<string, unknown>;
+  if (typeof v.verdict !== "string" || typeof v.reason !== "string") return null;
+  if (typeof v.confidence !== "number" || !Number.isFinite(v.confidence)) return null;
+  const verdict = (["supported", "overreaches", "contradicted"] as const)
+    .find((x) => x === collapse(v.verdict as string).toLowerCase());
+  if (!verdict) return null;
+  const reason = collapse(v.reason).slice(0, 160);
+  return { verdict, confidence: Math.min(1, Math.max(0, v.confidence)), reason };
+}
+
 // ── the bounded loop ───────────────────────────────────────────────────────
 
 export interface MaxAskOptions {
   run: AssistantJSONRunner;
+  /** Run the self-review pass on a useful answer. One extra call, bounded. */
+  selfReview?: boolean;
   maxTokens?: number;
   timeoutMs?: number;
   /** Wall-clock ceiling across every step. */
@@ -413,6 +494,8 @@ export interface MaxAskOptions {
 
 export interface MaxAskResult {
   answer: MaxAskAnswer | null;
+  /** The self-review verdict, when it ran and parsed. Decoration, never a veto. */
+  review?: ReviewAnswer | null;
   /** How many model calls it actually took. */
   steps: number;
   /** Why the loop stopped — always one of a closed set, never "it just did". */
@@ -479,7 +562,38 @@ export async function runMaxAsk(
     if (answer) best = answer;
 
     if (answer && isUsefulAnswer(answer)) {
-      return { answer, steps, stopped: "answered", packHash: pack.packHash,
+      // ── self-review: exactly ONE extra call, and a failure loses nothing ──
+      //
+      // ★★ ONLY ON `question` ANSWERS, and both boundaries were MEASURED:
+      //    · a `check` answer ASSERTS a conflict, and the reviewer read the
+      //      very conflict a correct flag reports as a conflict WITH the flag
+      //      — "contradicted" @0.9 on a right answer. Incoherent at any prompt.
+      //    · an `explain` answer INTERPRETS ("counting twice indicates her
+      //      meticulous nature"), and the strict reviewer flags fair
+      //      interpretation as overreach @0.9 — a caution that fires on most
+      //      good explanations trains the writer to ignore cautions, which is
+      //      the one way this feature dies. `suggest` speculates by charter,
+      //      same problem.
+      //    What remains is the factual surface: a free QUESTION answered with
+      //    story facts, where the poisoned probe case ("blackmailing her since
+      //    the fire she started") is caught as overreach @0.9 with the exact
+      //    missing facts named. Review guards facts; interpretation is the
+      //    writer's to judge.
+      let review: ReviewAnswer | null = null;
+      if (opts.selfReview && input.kind === "question" && now() < deadline) {
+        const reviewRequest = buildReviewRequest(pack, answer);
+        const reviewed = await opts.run<unknown>({
+          task: MAX_ASK_TASK,
+          tag: `review:${input.chapterNumber}:${input.paragraphIndex}`,
+          systemPrompt: reviewRequest.systemPrompt,
+          userText: reviewRequest.userText,
+          schema: reviewRequest.schema,
+          maxTokens: reviewRequest.maxTokens,
+          timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
+        }).catch(() => null);
+        if (reviewed && reviewed.ok) review = normalizeReview(reviewed.json);
+      }
+      return { answer, review, steps, stopped: "answered", packHash: pack.packHash,
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
     }
 

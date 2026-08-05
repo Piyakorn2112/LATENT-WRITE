@@ -160,6 +160,51 @@ async function main() {
     console.log(`  answer: ${String(r.j.answer).slice(0, 220)}`);
     console.log(`  shipped: ${v.a ? (v.useful ? 'REACHES THE WRITER' : 'held (abstention)') : 'REFUSED by validator'}\n`);
   });
+  // ── the self-reviewer, on real answers and one poisoned one ─────────────
+  //
+  // ★ THE POISONED CASE IS THE ONE THAT DECIDES. A reviewer that stamps
+  //   "supported" on everything is decoration pretending to be a check; it has
+  //   to catch an answer that invents story facts the pack never stated.
+  console.log('self-review (verdicts on real answers + one poisoned):\n');
+  const reviewCases = [
+    // ★ BOTH boundary measurements, kept as the record of WHY review is scoped
+    //   to question-kind only (see max-ask.ts): a correct check flag reads as
+    //   "contradicted", and a fair explain interpretation reads as
+    //   "overreaches" — both @0.9. Interpretive kinds are exempt; the reviewer
+    //   guards factual asks, where the poisoned case below is the target.
+    { id: 'review-explain', packIdx: 0, answer: rows[0] && rows[0].j ? rows[0].j.answer
+        : 'Elena counts the tin twice, indicating her meticulous nature.',
+      expect: 'overreaches — fair strict reading; WHY explain-kind is exempt' },
+    { id: 'review-poisoned', packIdx: 0,
+      answer: 'Elena is counting the coins to pay off Captain Vale, who has been '
+        + 'blackmailing her since the fire she started at Fen Cross.',
+      expect: 'overreaches or contradicted' },
+  ];
+  const builtReviews = JSON.parse(execFileSync(NODE, [TSX, '-e',
+    'import {buildMaxAskPack, buildReviewRequest} from "./src/lib/max-ask";' +
+    'const a = JSON.parse(process.argv[process.argv.length-1]);' +
+    'console.log(JSON.stringify(a.cases.map((c)=>{' +
+    '  const pack = buildMaxAskPack(a.inputs[c.packIdx].input, a.inputs[c.packIdx].budget);' +
+    '  return buildReviewRequest(pack, {answer:c.answer, basis:"passage", confidence:0.9});' +
+    '})))',
+    JSON.stringify({ cases: reviewCases, inputs: CASES }),
+  ], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop());
+
+  for (let i = 0; i < reviewCases.length; i++) {
+    const rc = reviewCases[i], req = builtReviews[i];
+    const t0 = Date.now();
+    const res = await callBridge('assistantRun', {
+      requestId: `maxrev-${rc.id}`, task: 'max-ask', tier: 'max', contextSize: 4096,
+      noThink: false,
+      systemPrompt: req.systemPrompt, userText: req.userText,
+      schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 120000,
+    });
+    const j = res && res.ok ? res.json : null;
+    console.log(`${rc.id.padEnd(16)} expect ${rc.expect}`);
+    console.log(`  got: ${j ? `${j.verdict} @${j.confidence}` : 'NO ANSWER'}   ${Date.now() - t0}ms`);
+    console.log(`  reason: ${j ? String(j.reason).slice(0, 160) : '-'}\n`);
+  }
+
   await callBridge('assistantUnload');
   app.exit(0);
 }

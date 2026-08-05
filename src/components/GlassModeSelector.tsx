@@ -53,6 +53,19 @@ export function GlassModeSelector<T extends string>({
   value, options, onChange, ariaLabel,
 }: Props<T>) {
   const [glassActive, setGlassActive] = useState(false);
+  /**
+   * ★★ REVIEW FINDING, AND THE CAUSE OF THE "STATES NOT SMOOTH" COMPLAINT:
+   *    one flag drove BOTH the swell geometry and the material. When the dwell
+   *    ended, the canvas unmounted and the solid label popped back on the SAME
+   *    frame the 260ms shrink STARTED — a hard material pop mid-animation.
+   *    The toggle never had this because its `releaseAnimating` state keeps
+   *    the canvas mounted through the release. Same split here: geometry
+   *    follows `glassActive`; the material follows `glassActive || releasing`,
+   *    and the canvas repaints the shrinking knob each frame until the
+   *    geometry has landed.
+   */
+  const [releasing, setReleasing] = useState(false);
+  const releasingTimerRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const glassActiveRef = useRef(false);
   const glassActivatedAtRef = useRef(0);
@@ -60,6 +73,16 @@ export function GlassModeSelector<T extends string>({
   const pointerIdRef = useRef<number | null>(null);
   const startXRef = useRef(0);
   const lastXRef = useRef(0);
+  /**
+   * ★ REVIEW FINDING: dragging centred the knob on the pointer, so a press on
+   *   the knob's EDGE teleported it sideways the instant the slop was crossed
+   *   (and the :active margin swap added 4px of its own). The grip offset —
+   *   where inside the knob the finger landed — makes the first drag frame
+   *   byte-identical to the resting position, which also lets `left` track the
+   *   pointer with NO transition at all: nothing jumps, so nothing needs
+   *   smoothing, and the knob is simply glued to the finger.
+   */
+  const grabOffsetRef = useRef(0);
   const movedRef = useRef(false);
   const trackRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLSpanElement>(null);
@@ -79,9 +102,14 @@ export function GlassModeSelector<T extends string>({
     if (!track || !knob) return;
     const r = track.getBoundingClientRect();
     const kw = knob.getBoundingClientRect().width;
-    const x = Math.min(r.width - kw + 2, Math.max(-2, clientX - r.left - kw / 2));
+    const x = Math.min(r.width - kw + 2,
+      Math.max(-2, clientX - grabOffsetRef.current - r.left - kw / 2));
     track.style.setProperty("--mode-drag-left", `${x.toFixed(1)}px`);
   };
+
+  /** The knob's CENTRE picks the stop — not the pointer, which may be holding
+   *  the knob by its edge. */
+  const knobCentreX = (clientX: number) => clientX - grabOffsetRef.current;
 
   const clearReleaseTimer = () => {
     if (releaseTimerRef.current === null) return;
@@ -100,7 +128,18 @@ export function GlassModeSelector<T extends string>({
    *  material immediately reads as a glitch rather than a surface. */
   const releaseGlass = (immediate = false) => {
     clearReleaseTimer();
-    const finish = () => { glassActiveRef.current = false; setGlassActive(false); };
+    const finish = () => {
+      glassActiveRef.current = false;
+      setGlassActive(false);
+      setReleasing(true);
+      if (releasingTimerRef.current !== null) window.clearTimeout(releasingTimerRef.current);
+      // The shrink transition is 260ms; the material rides it out, then hands
+      // back to the solid knob and its label in the settled pose.
+      releasingTimerRef.current = window.setTimeout(() => {
+        releasingTimerRef.current = null;
+        setReleasing(false);
+      }, 280);
+    };
     if (immediate || !glassActiveRef.current) { finish(); return; }
     const remaining = Math.max(0, MIN_GLASS_ACTIVE_MS - (performance.now() - glassActivatedAtRef.current));
     if (remaining === 0) { finish(); return; }
@@ -110,7 +149,10 @@ export function GlassModeSelector<T extends string>({
     }, remaining);
   };
 
-  useEffect(() => clearReleaseTimer, []);
+  useEffect(() => () => {
+    clearReleaseTimer();
+    if (releasingTimerRef.current !== null) window.clearTimeout(releasingTimerRef.current);
+  }, []);
 
   /** Which stop is under this client X? Clamped, so a drag past either end
    *  parks on the end rather than doing nothing. */
@@ -156,6 +198,7 @@ export function GlassModeSelector<T extends string>({
         className={[
           "glass-mode",
           glassActive ? "glass-mode--glass-active" : "",
+          releasing ? "glass-mode--releasing" : "",
           dragging ? "glass-mode--dragging" : "",
         ].filter(Boolean).join(" ")}
         style={{ "--mode-count": options.length, "--mode-index": index } as React.CSSProperties}
@@ -163,6 +206,10 @@ export function GlassModeSelector<T extends string>({
           if (e.button !== 0) return;
           pointerIdRef.current = e.pointerId;
           startXRef.current = e.clientX;
+          const kr = knobRef.current?.getBoundingClientRect();
+          grabOffsetRef.current = kr && e.clientX >= kr.left && e.clientX <= kr.right
+            ? e.clientX - (kr.left + kr.width / 2)
+            : 0;
           movedRef.current = false;
           // ★ Capture, or the drag dies the instant the finger leaves a 30px
           //   strip. It THROWS when the pointer is not active (a synthetic
@@ -192,7 +239,7 @@ export function GlassModeSelector<T extends string>({
           pointerIdRef.current = null;
           // A tap commits where it landed; a drag commits where the KNOB ended
           // (its centre tracks the pointer, so the last pointer X is the knob).
-          commit(indexAt(movedRef.current ? lastXRef.current : e.clientX));
+          commit(indexAt(movedRef.current ? knobCentreX(lastXRef.current) : e.clientX));
           movedRef.current = false;
           setDragging(false);
           // The override goes with the class in the same commit: the base rule
@@ -240,10 +287,10 @@ export function GlassModeSelector<T extends string>({
             knob's white sat on top of the material it was supposed to be. */}
         <span
           ref={knobRef}
-          className={`glass-mode-knob${glassActive ? " glass-mode-knob--painted" : ""}`}
+          className={`glass-mode-knob${glassActive || releasing ? " glass-mode-knob--painted" : ""}`}
           aria-hidden="true"
         >
-          <KnobGlass active={glassActive} />
+          <KnobGlass active={glassActive || releasing} />
         </span>
         {/* Sibling, not child: the knob's growth cannot reach the type. */}
         <span className="glass-mode-knob-cap" aria-hidden="true">

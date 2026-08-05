@@ -15801,6 +15801,7 @@ body.electron-window-unfocused .wc-panel::after {
    that has already turned to glass. */
 .glass-mode:active .glass-mode-knob-label,
 .glass-mode--glass-active .glass-mode-knob-label,
+.glass-mode--releasing .glass-mode-knob-label,
 .glass-mode--dragging .glass-mode-knob-label { opacity: 0; }
 
 /* Hover — the same small lift the toggle has, and nothing else. */
@@ -15855,8 +15856,10 @@ body.electron-window-unfocused .wc-panel::after {
 .glass-mode.glass-mode--dragging .glass-mode-knob-cap {
   left: var(--mode-drag-left, 2px);
   margin-left: 0;
+  /* No transition on left: the grip offset makes the first drag frame equal
+     the resting position, so there is no jump to smooth and the knob can be
+     GLUED to the finger. A smoothing here reads as lag at finger speed. */
   transition:
-    left 0.08s linear,
     top 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
     bottom 0.26s cubic-bezier(0.34, 1.56, 0.64, 1),
     width 0.26s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -15893,10 +15896,21 @@ body.electron-window-unfocused .wc-panel::after {
   z-index: 90;
   border-radius: 20px;
   padding: 10px;
+  animation: widgetReveal 0.28s cubic-bezier(0.22, 0.9, 0.32, 1);
+  /* ★ The height is MEASURED by the component and eased here. Plain ease, per
+     the ask — the bounce belongs to the text inside, not to the vessel; two
+     springs at two scales fighting each other reads as wobble. overflow
+     hidden so mid-transition content clips instead of spilling under glass.
+     The liquid-glass engine's own ResizeObserver refreshes the refraction
+     during the resize, so the material stays live through the move. */
+  transition: height 0.32s ease;
+  overflow: hidden;
+}
+
+.max-ask-inner {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: widgetReveal 0.28s cubic-bezier(0.22, 0.9, 0.32, 1);
 }
 
 /* One line of the paragraph under the pointer, so the writer can confirm the
@@ -15972,17 +15986,31 @@ body.electron-window-unfocused .wc-panel::after {
   color: var(--text-secondary);
 }
 
-.max-ask-wait-dot {
-  width: 7px;
-  height: 7px;
+/* The app's orb, at loader scale. Same recipe as .world-scan-orb — a blurred
+   radial core with the enter + breathe pair — recoloured to SYSTEM BLUE via
+   --control-value-fill, the token the toggle's on-state uses, so light/dark
+   handling is inherited from the one place that defines it. */
+.max-ask-orb {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
   border-radius: 50%;
-  background: var(--text-tertiary);
-  animation: max-ask-pulse 1.1s ease-in-out infinite;
+  background: radial-gradient(circle at center, var(--control-value-fill) 0%, transparent 68%);
+  filter: blur(3px);
+  animation:
+    max-ask-orb-enter 0.5s cubic-bezier(0.34, 1.2, 0.64, 1) forwards,
+    max-ask-orb-breathe 2.2s ease-in-out 0.5s infinite;
 }
 
-@keyframes max-ask-pulse {
-  0%, 100% { opacity: 0.35; transform: scale(0.85); }
-  50%      { opacity: 1;    transform: scale(1); }
+@keyframes max-ask-orb-enter {
+  0%   { opacity: 0; transform: scale(0.4); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes max-ask-orb-breathe {
+  0%, 100% { transform: scale(1);    opacity: 0.75; }
+  50%      { transform: scale(1.22); opacity: 1; }
 }
 
 .max-ask-answer { padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 8px; }
@@ -15996,6 +16024,40 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 .max-ask-answer-text--muted { color: var(--text-secondary); font-size: 12px; }
+
+/* ★ THE REVEAL. Each sentence-line rises on a small-overshoot curve while its
+   text fades in FASTER than it travels — legible mid-rise, which is what makes
+   the words feel like they arrive first and the line settles under them.
+   Same curve family as widgetReveal, with the overshoot the knob uses, scaled
+   down; 90ms stagger keeps the lines inside one perceptual group. */
+.max-ask-line {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(10px);
+  animation:
+    max-ask-line-fade 0.26s ease-out forwards,
+    max-ask-line-rise 0.5s cubic-bezier(0.26, 1.25, 0.4, 1) forwards;
+  animation-delay: calc(var(--i, 0) * 90ms);
+}
+
+@keyframes max-ask-line-fade { to { opacity: 1; } }
+@keyframes max-ask-line-rise { to { transform: translateY(0); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .max-ask-line { animation: none; opacity: 1; transform: none; }
+  .max-ask { transition: none; }
+  .max-ask-orb { animation: none; opacity: 0.9; }
+}
+
+/* The self-check caution: quiet, but not hidden — it names why it is unsure. */
+.max-ask-caution {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  border-left: 2px solid color-mix(in srgb, var(--control-value-fill) 55%, transparent);
+  padding-left: 8px;
+}
 
 .max-ask-basis {
   font-family: var(--font-ui);

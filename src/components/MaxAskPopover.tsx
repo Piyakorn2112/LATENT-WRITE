@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { assistantRunJSON, cancelWhere } from "../lib/assistant-client";
 import {
   MAX_ASK_TASK,
@@ -66,7 +66,40 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
   const [phase, setPhase] = useState<Phase>({ name: "menu" });
   const [question, setQuestion] = useState("");
   const boxRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const [boxHeight, setBoxHeight] = useState<number | null>(null);
+  const armedRef = useRef(false);
   const aliveRef = useRef(true);
+
+  /**
+   * ★ THE GLASS CONTAINER ANIMATES ITS HEIGHT BY MEASUREMENT, because `height:
+   *   auto` cannot transition. The inner content renders at natural size; this
+   *   measures it on every phase change and eases the container to match. The
+   *   first paint is exempt (armedRef) — a popover that GROWS INTO existence
+   *   from 0 fights its own reveal animation.
+   *
+   *   The liquid-glass engine keeps up on its own: every tracked surface has a
+   *   ResizeObserver (liquid-glass-filter.ts) that reschedules the refraction
+   *   map as the box resizes, so the material stays correct THROUGH the
+   *   transition rather than snapping at the end.
+   */
+  useLayoutEffect(() => {
+    const inner = innerRef.current;
+    if (!inner) return;
+    const measure = () => {
+      const h = inner.offsetHeight;
+      if (!armedRef.current) {
+        armedRef.current = true;
+        setBoxHeight(h);
+        return;
+      }
+      setBoxHeight(h);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [phase.name]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -95,6 +128,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
     setPhase({ name: "asking", label: "Reading the passage…" });
     void runMaxAsk(input, {
       run: maxRunner,
+      selfReview: true,
       onStep: (step) => {
         if (aliveRef.current && step === 2) {
           setPhase({ name: "asking", label: "Reading more of the story…" });
@@ -117,10 +151,11 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
     <div
       ref={boxRef}
       className="max-ask liquid-glass"
-      style={{ left, top, width: W }}
+      style={{ left, top, width: W, height: boxHeight ?? undefined }}
       role="dialog"
       aria-label="Ask about this paragraph"
     >
+      <div ref={innerRef} className="max-ask-inner">
       <div className="max-ask-context" title={paragraphPreview}>{paragraphPreview}</div>
 
       {phase.name === "menu" && (
@@ -153,14 +188,37 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
 
       {phase.name === "asking" && (
         <div className="max-ask-wait">
-          <span className="max-ask-wait-dot" aria-hidden="true" />
+          {/* The app's ambient orb, at loader scale, in SYSTEM BLUE — the
+              exact token the toggle's on-state and every active-blue control
+              uses (--control-value-fill), so light/dark handling is inherited
+              rather than reproduced. */}
+          <span className="max-ask-orb" aria-hidden="true" />
           {phase.label}
         </div>
       )}
 
       {phase.name === "done" && (
         <div className="max-ask-answer">
-          <p className="max-ask-answer-text">{phase.result.answer?.answer}</p>
+          {/* ★ LINE-BY-LINE REVEAL. Sentences stand in for lines (answers are
+              two or three of them); each rises ~10px on a small-overshoot
+              curve while its TEXT fades in faster than it travels — the words
+              are legible mid-rise, which is the "characters go in first" read.
+              Curve family: the widgetReveal grammar with a touch of bounce;
+              stagger 90ms, inside the 120ms grouping window so it reads as one
+              paragraph arriving, not three events. */}
+          <p className="max-ask-answer-text">
+            {(phase.result.answer?.answer ?? "").split(/(?<=[.!?…])\s+/).map((line, i) => (
+              <span key={i} className="max-ask-line" style={{ "--i": i } as React.CSSProperties}>
+                {line}{" "}
+              </span>
+            ))}
+          </p>
+          {phase.result.review && phase.result.review.verdict !== "supported" && (
+            <div className="max-ask-caution">
+              self-check: may {phase.result.review.verdict === "contradicted" ? "contradict" : "overreach"} the
+              story — {phase.result.review.reason}
+            </div>
+          )}
           {phase.result.answer && RUNG_LABEL[phase.result.answer.basis] && (
             <div className="max-ask-basis">from {RUNG_LABEL[phase.result.answer.basis]}</div>
           )}
@@ -193,6 +251,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 }

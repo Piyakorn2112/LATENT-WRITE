@@ -17,6 +17,7 @@
  */
 import {
   buildMaxAskPack, buildMaxAskRequest, normalizeMaxAsk, isUsefulAnswer, runMaxAsk,
+  normalizeReview, buildReviewRequest,
   NOT_IN_CONTEXT, MAX_STEPS, DEFAULT_BUDGET_TOKENS,
   type MaxAskInput,
 } from "../src/lib/max-ask";
@@ -193,6 +194,77 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
   seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: "passage", confidence: 1 }]).run, deadlineMs: -1, now: () => 0 })).stopped);
   seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: NOT_IN_CONTEXT, confidence: 0 }]).run })).stopped);
   gate(seen.size >= 4, `★ ${seen.size} distinct stop reasons are reachable: ${[...seen].join(", ")}`);
+}
+
+console.log("\nthe opening rung and the self-review");
+{
+  const deep = buildMaxAskPack(INPUT, 10_000);
+  gate(deep.rungsIncluded.includes("opening"),
+    "a paragraph deep in the chapter carries the chapter's opening");
+  const early = buildMaxAskPack({ ...INPUT, paragraphIndex: 1 }, 10_000);
+  gate(!early.rungsIncluded.includes("opening"),
+    "…and an early paragraph does not — the opening would just repeat a neighbour");
+
+  // review plumbing, model-free
+  const ans = { answer: "x", basis: "passage", confidence: 0.9 };
+  const req = buildReviewRequest(deep, ans);
+  gate(req.userText.includes(deep.text) && req.userText.includes("THE ANSWER UNDER REVIEW"),
+    "★ the reviewer sees EXACTLY what the answerer saw, plus the answer");
+  gate(normalizeReview({ reason: "r", verdict: "overreaches", confidence: 0.8 })?.verdict === "overreaches",
+    "a review verdict parses");
+  gate(normalizeReview({ reason: "r", verdict: "maybe", confidence: 0.8 }) === null,
+    "an off-enum verdict is refused");
+
+  // exactly one extra call, and its failure loses nothing
+  {
+    const s = scripted([
+      { answer: "Elena counts twice.", basis: "passage", confidence: 0.9 },
+      { answer: "IGNORED", basis: "passage", confidence: 0.9 },   // consumed by review, wrong shape
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" },
+      { run: s.run, selfReview: true });
+    gate(s.calls() === 2, `★ self-review costs exactly one extra call (${s.calls()})`);
+    gate(r.stopped === "answered" && !!r.answer,
+      "…and a review that fails to parse loses NOTHING — the answer ships without decoration");
+    gate(r.review == null, "…with no review recorded");
+  }
+  {
+    const s = scripted([
+      { answer: "Elena counts twice.", basis: "passage", confidence: 0.9 },
+      { reason: "the tin's total is never stated", verdict: "overreaches", confidence: 0.8 },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" },
+      { run: s.run, selfReview: true });
+    gate(r.review?.verdict === "overreaches", "a parsed review rides along as decoration");
+    gate(!!r.answer && r.stopped === "answered",
+      "★ …and NEVER vetoes: the answer still ships, the caution is the UI's job");
+  }
+  {
+    const s = scripted([{ answer: "x", basis: "passage", confidence: 0.9 }]);
+    await runMaxAsk(INPUT, { run: s.run });
+    gate(s.calls() === 1, "selfReview off (the default) adds no call");
+  }
+  {
+    // INPUT.kind is "check": the reviewer must not run on it even when asked —
+    // an answer that REPORTS a conflict reads to the reviewer as an answer
+    // CONTRADICTED by the sections, and the caution fires on a correct flag.
+    const s = scripted([{ answer: "conflicts with ch 8", basis: "story-so-far", confidence: 0.9 }]);
+    const r = await runMaxAsk(INPUT, { run: s.run, selfReview: true });
+    gate(s.calls() === 1 && r.review == null,
+      "★ a check answer is never self-reviewed — the reviewer reads a correct flag's conflict as a conflict WITH the flag");
+    const sExp = scripted([{ answer: "she is rationing", basis: "passage", confidence: 0.9 }]);
+    const rExp = await runMaxAsk({ ...INPUT, kind: "explain" }, { run: sExp.run, selfReview: true });
+    gate(sExp.calls() === 1 && rExp.review == null,
+      "★ …nor an explain — fair interpretation reads as overreach and the caution becomes noise");
+    const s2 = scripted([
+      { answer: "the tin holds coins", basis: "passage", confidence: 0.9 },
+      { reason: "stated", verdict: "supported", confidence: 0.9 },
+    ]);
+    const r2 = await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" },
+      { run: s2.run, selfReview: true });
+    gate(s2.calls() === 2 && r2.review?.verdict === "supported",
+      "…while a factual QUESTION is reviewed");
+  }
 }
 
 console.log("\nthe defaults are sane for an 8 GB window");
