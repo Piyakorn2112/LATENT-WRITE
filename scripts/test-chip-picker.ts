@@ -31,6 +31,7 @@ import {
   decodeRichChipWire,
   eventFingerprint,
   normalizeChipPicks,
+  parsePartialChipPicks,
   type ChipCandidate,
 } from "../src/lib/chip-picker";
 import { selectDisplayChips, selectTimelineChips } from "../src/lib/narrative-events";
@@ -404,6 +405,23 @@ console.log("\n── 5 · the max-mode rich detail ─────────�
   gate(!("detail" in decoded.picks[1]), "a 2-tuple decodes with no detail key", "");
   const passthru = { picks: [{ rank: 0, label: "x" }] };
   gate(decodeRichChipWire(passthru) === passthru, "non-wire shapes pass through untouched", "");
+
+  // ★ THE STREAM PARSER RETURNS ONLY COMPLETE PICKS. Mid-generation text ends
+  //   inside a tuple; the finished ones surface, the torn one waits.
+  const streamCands: ChipCandidate[] = [
+    { rank: 0, label: "a", sentence: "s", agent: "Ovin" },
+    { rank: 2, label: "b", sentence: "s", agent: "Rell" },
+  ];
+  const partialTuple = parsePartialChipPicks(
+    '{ "p": [ [0, "Ovin fails the count", "before the bell"], [2, "She opens the slu',
+    streamCands, true);
+  gate(partialTuple.length === 1 && partialTuple[0].rank === 0 && partialTuple[0].detail === "before the bell",
+    "tuple stream: complete picks surface, the torn one waits", `got ${JSON.stringify(partialTuple)}`);
+  const partialKeyed = parsePartialChipPicks(
+    '{\n "picks": [\n  {"rank": 2, "label": "She opens the sluice"},\n  {"rank": 0, "label": "Ovin fa',
+    streamCands, false);
+  gate(partialKeyed.length === 1 && partialKeyed[0].rank === 2 && partialKeyed[0].label.startsWith("Rell"),
+    "keyed stream: complete pick surfaces with the pronoun repaired", `got ${JSON.stringify(partialKeyed)}`);
 
   const cands = rich.candidates;
   const r0 = cands[0].rank;

@@ -49,7 +49,7 @@ import { getCurrentProject, reopenLastProject, openProject, scanExternalProject,
 import type { ToolScanEntry } from "./lib/project-manager";
 import { ToolImportOverlay } from "./components/ToolImportOverlay";
 import type { ToolHighlight } from "./lib/tool-runner";
-import type { StoryGraph, ReviewResult, ChapterGraphEntry } from "./types";
+import type { StoryGraph, ReviewResult, ChapterGraphEntry, TimelineChipPick } from "./types";
 import { useAnalysis } from "./lib/use-analysis";
 import { emptyWorldData, isWorldDataEmpty, renameInBook, renameInText } from "./lib/world-data";
 import { CastConfirmOverlay } from "./components/CastConfirmOverlay";
@@ -1162,7 +1162,28 @@ export default function App() {
       const skipId = `${work.kind}|${work.entry.chapterId}|${work.key}`;
       try {
         if (work.kind === "chips") {
-          const outcome = await runChipPick(work.entry, { run, modelId, rich: maxMode, onRunFailure });
+          // ★ CHIPS LAND ONE BY ONE. Each pick the model finishes streaming
+          //   is stamped provisionally (lmChips only — never the key, so the
+          //   chapter still reads stale until the validated final answer).
+          //   Guarded by the same key check as the final stamp: a stream from
+          //   a superseded request cannot touch rebuilt events.
+          const provisional = (picks: TimelineChipPick[]) => {
+            if (!alive) return;
+            setStoryGraph((prev) => {
+              const current = prev.entries[work.entry.chapterId];
+              if (!current || chipKeyFor(current, modelId) !== work.key) return prev;
+              return {
+                ...prev,
+                entries: {
+                  ...prev.entries,
+                  [work.entry.chapterId]: { ...current, lmChips: picks },
+                },
+              };
+            });
+          };
+          const outcome = await runChipPick(work.entry, {
+            run, modelId, rich: maxMode, onRunFailure, onPartialPicks: provisional,
+          });
           if (!alive) return;
           if (!outcome) delay = noteFailure(skipId, fail.reason);
           else {
@@ -1181,7 +1202,10 @@ export default function App() {
             });
           }
         } else {
-          const summary = await runChapterSummary(work.entry, { run, modelId, onRunFailure });
+          const summary = await runChapterSummary(work.entry, {
+            run, modelId, onRunFailure,
+            ...(maxMode ? { jsonStyle: "compact" as const } : {}),
+          });
           if (!alive) return;
           if (!summary) delay = noteFailure(skipId, fail.reason);
           else {

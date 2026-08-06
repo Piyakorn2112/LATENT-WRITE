@@ -309,6 +309,8 @@ async function handleRun(msg) {
   let session = null;
   let tokens = 0;
   let firstTokenAt = 0;
+  let runText = '';
+  let lastTextSend = 0;
   const t0 = Date.now();
 
   try {
@@ -359,6 +361,18 @@ async function handleRun(msg) {
       onToken: (t) => {
         if (!firstTokenAt) firstTokenAt = Date.now();
         tokens += Array.isArray(t) ? t.length : 1;
+      },
+      // ★ PARTIAL TEXT STREAMS OUT so a caller can surface finished pieces of
+      //   a long answer (chips appear one by one) instead of waiting for the
+      //   whole completion. Throttled; the final result stays authoritative.
+      onTextChunk: (t) => {
+        if (!t) return;
+        runText += t;
+        const now = Date.now();
+        if (now - lastTextSend > 120) {
+          lastTextSend = now;
+          send({ type: 'run-text', id, task, text: runText });
+        }
       },
     });
 

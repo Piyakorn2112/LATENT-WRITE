@@ -72,6 +72,12 @@ export interface AssistantJSONRequest {
    * Only worth setting alongside a wire designed for it — see CHIP_SCHEMA_RICH.
    */
   jsonStyle?: "compact";
+  /**
+   * Streamed partial completion text (accumulated, throttled ~120ms) while
+   * this request generates. DISPLAY-ONLY: the resolved result is the single
+   * authoritative answer — never cache or judge from a partial.
+   */
+  onPartialText?: (text: string) => void;
 }
 
 export type AssistantJSONResult<T> =
@@ -175,6 +181,17 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
   // aborts rather than resolves.
   const watchdog = setTimeout(() => requestCancel(job.requestId), timeoutMs + CANCEL_GRACE_MS);
 
+  // Partial-text stream for THIS request, torn down with it.
+  const onPartial = job.req.onPartialText;
+  const offProgress = onPartial
+    ? a.onAssistantProgress((data) => {
+        const d = data as { phase?: string; requestId?: string; text?: string };
+        if (d.phase === "run-text" && d.requestId === job.requestId && typeof d.text === "string") {
+          onPartial(d.text);
+        }
+      })
+    : null;
+
   let res: AssistantRunResult<unknown>;
   try {
     res = await a.assistantRun<unknown>({
@@ -198,6 +215,7 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
     return { ok: false, reason: `ipc-failed:${message(err)}` };
   } finally {
     clearTimeout(watchdog);
+    offProgress?.();
   }
 
   if (res.cancelled) return { ok: false, reason: "cancelled" };

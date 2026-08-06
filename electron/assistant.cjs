@@ -116,7 +116,12 @@ const MODEL_REGISTRY = {
 };
 
 const DEFAULT_TIER = 'small';
-const DEFAULT_MEMORY_HEADROOM_MB = 512;
+// 512 → 384 (owner call, 2026-08-06): the guard was cutting too early. The
+// darwin "available" figure already counts inactive+purgeable pages the OS
+// reclaims on demand, and weights are mmapped (file-backed, evictable), so a
+// thinner explicit margin still leaves real slack. Context sizes unchanged —
+// only the refusal line moved.
+const DEFAULT_MEMORY_HEADROOM_MB = 384;
 const IDLE_TTL_MS = 5 * 60 * 1000;
 const PROGRESS_THROTTLE_MS = 500;
 const DEFAULT_RUN_TIMEOUT_MS = 120_000;
@@ -681,6 +686,17 @@ function onHostMessage(msg) {
     case 'unloaded':
       _hostLoaded = null;
       break;
+    case 'run-text': {
+      // Partial completion text for the in-flight run, straight to the
+      // renderer over the existing progress channel. Display-only: the
+      // 'result' message remains the single authoritative answer.
+      if (!_inflight || _inflight.requestId !== msg.id) return;
+      sendToRenderers('assistant:progress', {
+        phase: 'run-text', requestId: msg.id, task: msg.task || null,
+        text: String(msg.text || ''),
+      });
+      return;
+    }
     case 'result': {
       if (!_inflight || _inflight.requestId !== msg.id) return;
       const { resolve, timer } = _inflight;

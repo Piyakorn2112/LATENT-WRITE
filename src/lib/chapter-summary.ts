@@ -169,6 +169,8 @@ export interface SummaryOptions {
   /** Failure-reason outlet, same contract as ChipPickOptions.onRunFailure:
    *  the caller must not skip-key a chapter over a transient runtime failure. */
   onRunFailure?: (reason: string) => void;
+  /** "compact" = no pretty-printing in the grammar (max tier; ~12% of gen). */
+  jsonStyle?: "compact";
 }
 
 export interface SummaryOutcome {
@@ -192,6 +194,7 @@ export async function runChapterSummary(
     schema: request.schema,
     maxTokens: request.maxTokens,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    ...(opts.jsonStyle ? { jsonStyle: opts.jsonStyle } : {}),
   });
   if (!result.ok) {
     opts.onRunFailure?.(result.reason);

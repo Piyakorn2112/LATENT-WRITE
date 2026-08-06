@@ -38,8 +38,11 @@ export const CHIP_TASK = "timeline-chips";
  *  after the 4B copied near-whole sentences into `detail` and blew the token
  *  budget — see RICH_MAX_TOKENS.
  *  v4: the rich answer moved to the TUPLE WIRE (see CHIP_SCHEMA_RICH) — same
- *  content, half the generated tokens. */
-export const CHIP_PROMPT_VERSION = 4;
+ *  content, half the generated tokens.
+ *  v5: the detail rule states the bar (a self-contained clause of the FACT,
+ *  with a right/wrong example pair) after v3's fragments came back too vague
+ *  to read alone. */
+export const CHIP_PROMPT_VERSION = 5;
 
 /** How many candidates the model is shown. Above this the ranking is guessing
  *  anyway, and a longer list costs prefill for events that cannot be picked. */
@@ -166,6 +169,49 @@ export const CHIP_SCHEMA_RICH = {
 /** The paragraph that teaches the wire. Appended after the rich detail rule so
  *  the content instructions stay byte-identical to what was measured. */
 export const CHIP_RICH_WIRE = `\n\nWIRE FORMAT: answer as {"p":[[rank,"label","detail"], ...]} — each pick is\nan array of the rank number, then the label, then the detail (omit the third\nentry instead of an empty detail). Same content as described above, this shape.`;
+
+/**
+ * ★ PROVISIONAL PICKS FROM A PARTIAL COMPLETION — the "chips appear one by
+ *   one" stream. Parses every COMPLETE pick out of in-flight generation text
+ *   (both wires), with only the cheap repairs (pronoun, length): the final
+ *   normalize pass replaces the lot, so a briefly-imperfect provisional label
+ *   costs nothing and a chapter no longer waits for its whole answer.
+ *   Display-only by contract; never cache what this returns.
+ */
+export function parsePartialChipPicks(
+  text: string,
+  candidates: readonly ChipCandidate[],
+  rich: boolean,
+): TimelineChipPick[] {
+  const offered = new Map(candidates.map((c) => [c.rank, c]));
+  const seen = new Set<number>();
+  const picks: TimelineChipPick[] = [];
+  const re = rich
+    ? /\[\s*(\d+)\s*,\s*"((?:[^"\\]|\\.)*)"(?:\s*,\s*"((?:[^"\\]|\\.)*)")?\s*\]/g
+    : /\{\s*"rank"\s*:\s*(\d+)\s*,\s*"label"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/g;
+  for (const m of text.matchAll(re)) {
+    if (picks.length >= CHIP_PICK_CAP) break;
+    const rank = Number(m[1]);
+    const candidate = offered.get(rank);
+    if (!candidate || seen.has(rank)) continue;
+    seen.add(rank);
+    let label = "";
+    let detail = "";
+    try {
+      label = (JSON.parse(`"${m[2]}"`) as string).trim();
+      detail = m[3] ? (JSON.parse(`"${m[3]}"`) as string).trim() : "";
+    } catch { continue; }
+    if (!label) continue;
+    const repaired = trimToLength(repairLeadingPronoun(label, candidate), CHIP_LABEL_MAX);
+    if (!repaired) continue;
+    picks.push({
+      rank,
+      label: repaired,
+      ...(detail ? { detail: trimToLength(detail, CHIP_DETAIL_MAX) } : {}),
+    });
+  }
+  return picks;
+}
 
 /**
  * Tuple wire → canonical picks. Anything that is not the wire shape is passed
@@ -451,20 +497,23 @@ export function buildChipRequest(
   opts: BuildChipRequestOptions = {},
 ): ChipRequest {
   const cap = opts.candidateCap ?? CHIP_CANDIDATE_CAP;
-  // ★ THE DETAIL MUST BE ASKED FOR AS A FRAGMENT, NOT "FROM THE SENTENCE".
-  //   Measured (probe-chip-max.cjs): "drawn from the moment's own sentence"
-  //   made the 4B COPY the sentence — 90+ characters, cut by the grammar cap,
-  //   then dropped by the mid-clause check, so rich mode shipped no details at
-  //   all while paying ~25 generated tokens per pick for them. The rule now
-  //   names the shape (a fragment of 8 words or fewer, never a copy) and what
-  //   it is for (the concrete thing the label had no room for).
+  // ★ THE DETAIL RULE'S HISTORY, SO NOBODY RE-WALKS IT. v2 said "drawn from
+  //   the moment's own sentence" and the 4B COPIED the sentence — 90+ chars,
+  //   guillotined by the grammar, dropped by the validators, ~25 wasted
+  //   tokens per pick. v3 said "a FRAGMENT of 8 words or fewer" and got
+  //   grounded but VAGUE shards ("eleven years", "kettle boiling") that mean
+  //   nothing read alone. v5 names the actual bar: a self-contained clause
+  //   that states the FACT, with a paired right/wrong example — the shape a
+  //   small model follows where an adjective ("concrete") does nothing.
   const richLine = opts.rich
-    ? `\n\nAlso give each pick a "detail": a second line shown under the chip in small
-type. It is a FRAGMENT of 8 words or fewer — the concrete thing from that
-moment's sentence the label had no room for: the number, the object, the
-condition, the place. Never copy or rephrase the whole sentence, never repeat
-the label, no new names, no new facts. If the sentence adds nothing beyond the
-label, leave detail empty.`
+    ? `\n\nAlso give each pick a "detail": a second line shown under the chip in
+smaller type. It is ONE CLAUSE of at most 10 words stating the sharpest fact
+the label left out — and it must make sense read on its own. Write the fact,
+not a shard of it: "the count ran short for eleven years", never "eleven
+years"; "the wax ran off the iron", never "wax iron". Use the moment's own
+words where you can. Never copy the whole sentence, never restate the label,
+no new names, no new facts. If the sentence adds nothing beyond the label,
+leave detail empty.`
     : "";
 
   const candidates = entry.majorEvents
@@ -866,6 +915,8 @@ export interface ChipPickOptions {
    *   Not called for a repair-pass failure, which is tolerated by design.
    */
   onRunFailure?: (reason: string) => void;
+  /** Provisional picks as the answer streams — see parsePartialChipPicks. */
+  onPartialPicks?: (picks: TimelineChipPick[]) => void;
 }
 
 export interface ChipPickOutcome {
@@ -902,6 +953,14 @@ export async function runChipPick(
     // The measured fast path is tuple wire + compact grammar TOGETHER; see
     // the ★★ on CHIP_SCHEMA_RICH.
     ...(opts.rich ? { jsonStyle: "compact" as const } : {}),
+    ...(opts.onPartialPicks
+      ? {
+          onPartialText: (text: string) => {
+            const partial = parsePartialChipPicks(text, request.candidates, !!opts.rich);
+            if (partial.length > 0) opts.onPartialPicks!(partial);
+          },
+        }
+      : {}),
   });
   if (!result.ok) {
     opts.onRunFailure?.(result.reason);

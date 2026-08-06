@@ -112,7 +112,7 @@ async function main() {
   // is loaded and working.
   const b1 = await runCase('B-fix-chips-cold', rich, { maxTokens: rich.maxTokens, jsonStyle: 'compact' });
   const b2 = await runCase('B2-fix-chips-warm', rich, { maxTokens: rich.maxTokens, jsonStyle: 'compact' });
-  await runCase('B3-fix-summary', summary, { maxTokens: summary.maxTokens });
+  await runCase('B3-fix-summary', summary, { maxTokens: summary.maxTokens, jsonStyle: 'compact' });
 
   for (const [name, r] of [['B', b1], ['B2', b2]]) {
     if (!r.res.ok) continue;
