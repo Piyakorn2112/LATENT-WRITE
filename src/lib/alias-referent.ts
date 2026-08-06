@@ -72,6 +72,26 @@
  *    passes would make the number meaningless — the cases are the measurement,
  *    not training data.
  *
+ * ── ROUND 3 · THE SAME PROBE ON THE 4B · THE CONDITION IS MET ──────────────
+ *
+ * ALIAS_REFERENT_TIER=max, cases and prompt byte-identical to the 1.7B rounds:
+ *
+ *   right, and a row proposed        2     (Kes -> Kestrel @0.9)
+ *   WRONG, and a row proposed        0     <- the deciding number
+ *   "Yeah" / "Bah" / "Hullo"         not-a-name @1.0, all three — the class
+ *                                    the 1.7B failed 0-for-4, twice
+ *   unanswerable, correctly held     4 of 4
+ *
+ * The 1.7B read the SLOT (anything in `", X,"` is a person); the 4B reads the
+ * WORD. Wired into the alias scan for the MAX TIER ONLY — off/on modes stay
+ * fully deterministic, and the 1.7B is never asked this question again.
+ *
+ * ★ The first "4B run" reproduced the 1.7B's numbers with byte-identical
+ *   prose — because it WAS the 1.7B: the probe edit adding the tier silently
+ *   no-op'd on a 60_000-vs-60000 string mismatch. Caught by printing which
+ *   model the HOST had resident after the first call. Identical sentences
+ *   from "different models" is the fingerprint of an instrument bug.
+ *
  * ── REFUTED: "IT WAS THE ANSWER SET" ───────────────────────────────
  *
  * entity-review asks "what TYPE is this word?" over [character, place,

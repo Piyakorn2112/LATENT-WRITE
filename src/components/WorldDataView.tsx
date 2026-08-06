@@ -20,6 +20,7 @@ import {
 } from "../lib/alias-referent";
 import { fnv1a } from "../lib/evidence-pack";
 import { GlassCheck } from "./GlassCheck";
+import { assistantMode } from "../lib/preferences";
 import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
@@ -479,16 +480,35 @@ export function WorldDataView({
             //   narration rule fixed more of this class than the model ever did
             //   (nine bad rows down to five, Sherlock's two worst gone) for free.
             //
-            // ★ WIRE IT BACK WHEN: wrong-and-proposed is 0 on that probe
-            //   INCLUDING the four not-a-name cases, on a model that also still
-            //   gets "Kes" right. Re-run the probe; do not re-argue from the
-            //   prompt. The path below is kept intact and typechecked so that is
-            //   a one-line change.
-            const MODEL_LAYER_ENABLED = false;
-            if (MODEL_LAYER_ENABLED && result.unresolved.length > 0 && await assistantAvailable() && !cancelled) {
+            // ★ THE WIRE-BACK CONDITION WAS: wrong-and-proposed 0 on that
+            //   probe INCLUDING the not-a-name cases, on a model that still
+            //   gets "Kes" right. Re-run the probe, not the argument.
+            //
+            // ══════════════════════════════════════════════════════════════
+            // ★★ ROUND 3 — THE SAME PROBE, UNCHANGED, ON THE 4B (max tier):
+            //    wrong-and-proposed 0 · right 2 (Kes -> Kestrel @0.9) ·
+            //    "Yeah"/"Bah"/"Hullo" -> not-a-name @1.0 — the exact class the
+            //    1.7B failed 0-for-4 twice · all four unanswerables held.
+            //    The 1.7B read the SLOT; the 4B reads the WORD. Condition met,
+            //    so the layer is on — FOR THE MAX TIER ONLY. In off/on modes
+            //    the scan stays fully deterministic, and the 1.7B is never
+            //    asked this question again.
+            //
+            //    (The first "4B run" of that probe was byte-identical to the
+            //    1.7B round — because it WAS the 1.7B: the probe edit adding
+            //    the tier had silently no-op'd on a 60_000-vs-60000 mismatch.
+            //    Caught by printing which model the HOST had resident after
+            //    the first call, not by trusting the header. Identical prose
+            //    from "different models" is the fingerprint.)
+            // ══════════════════════════════════════════════════════════════
+            const useMaxModel = assistantMode(loadPrefs()) === "max";
+            if (useMaxModel && result.unresolved.length > 0 && await assistantAvailable() && !cancelled) {
               const bookHash = fnv1a(novel.chapters.map((c) => c.content).join("\n").slice(0, 20_000));
               const answers = await reviewUnresolvedForms(result.unresolved, {
-                run: assistantRunJSON,
+                // The tier that passed the probe, and only that tier. 4k
+                // context: the referent prompts are snippets, and the 8k
+                // default is ~530 MB of KV for nothing.
+                run: (req) => assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 4096 }),
                 // Nothing in this flow caches on the key, so there is no stale
                 // entry to invalidate; the field exists for callers that do.
                 modelId: "local",

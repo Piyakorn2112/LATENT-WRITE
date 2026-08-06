@@ -34,6 +34,14 @@ const NODE = '/opt/homebrew/bin/node';
 const TSX = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const assistant = require(path.join(ROOT, 'electron', 'assistant.cjs'));
 
+/**
+ * ★ ALIAS_REFERENT_TIER=max re-runs the identical cases on the 4B thinking
+ *   tier. Every number in alias-referent.ts's header is a 1.7B number, and the
+ *   module's own wire-back condition is "re-run the probe" — this is the knob
+ *   that does it without touching a single case or a word of the prompt.
+ */
+const TIER = process.env.ALIAS_REFERENT_TIER || null;
+
 const CASES = [
   // ── ANSWERABLE. The passage shows who answers to the name. ────────────────
   {
@@ -175,10 +183,18 @@ async function main() {
     const req = mod.built[i];
     const res = await callBridge('assistantRun', {
       requestId: `aliasref-${c.id}`, task: 'alias-referent',
+      ...(TIER ? { tier: TIER, noThink: false, contextSize: 4096 } : {}),
       systemPrompt: req.systemPrompt, userText: req.userText,
-      schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 60_000,
+      schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 120_000,
     });
     rows.push({ c, j: res && res.ok ? res.json : null });
+    if (i === 0) {
+      // ★ PROOF OF WHICH MODEL ANSWERED, not an assumption. The header's
+      //   status line predates the load; this reads what the host actually
+      //   has resident after the first call.
+      const live = await callBridge('assistantStatus', TIER ? { tier: TIER } : undefined);
+      console.log(`  [loaded after first call: ${live.host && live.host.loaded ? live.host.loaded.modelPath.split('/').pop() : 'nothing'}]\n`);
+    }
   }
 
   // Route every answer through the SHIPPED validator and surfacing rule.
