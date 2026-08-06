@@ -120,6 +120,7 @@ async function handleLoad(msg) {
   const contextSize = Number(msg.contextSize) || 4096;
   const gpuLayers = msg.gpuLayers === undefined ? 'max' : msg.gpuLayers;
   const kvCacheTypeRequested = msg.kvCacheType || null;
+  const flashAttentionRequested = msg.flashAttention === undefined ? null : msg.flashAttention;
 
   if (loaded && loaded.modelPath === modelPath && loaded.contextSize === contextSize) {
     send({ type: 'loaded', ...loaded, kvCacheTypeRequested, kvCacheTypeApplied: null, reused: true });
@@ -148,7 +149,31 @@ async function handleLoad(msg) {
     //   warm path — the one that actually dominates, since the scheduler works
     //   a burst of one task type at a time — is ~70ms either way. Not worth it.
     //   Re-measure with scripts/bench-assistant.cjs before revisiting.
-    context = await model.createContext({ contextSize, sequences: 1 });
+    // ★ KV QUANTIZATION IS EXPERIMENTAL IN node-llama-cpp AND SAYS SO — "may
+    //   crash, verify per hardware+model". It is therefore (a) registry-driven,
+    //   never user-configurable, (b) verified on THIS hardware for the one
+    //   pinned model that requests it, and (c) wrapped so a context that fails
+    //   to build with it retries plain and reports `kvCacheTypeApplied: null`
+    //   instead of pretending. Q8_0 on both K and V halves the KV cache —
+    //   which on the 8 GB floor is the difference between the guard refusing
+    //   the max tier and the answer arriving.
+    const extra = {};
+    if (flashAttentionRequested !== null) extra.flashAttention = flashAttentionRequested;
+    let kvApplied = null;
+    if (kvCacheTypeRequested) {
+      extra.experimentalKvCacheKeyType = kvCacheTypeRequested;
+      extra.experimentalKvCacheValueType = kvCacheTypeRequested;
+    }
+    try {
+      context = await model.createContext({ contextSize, sequences: 1, ...extra });
+      kvApplied = kvCacheTypeRequested || null;
+    } catch (err) {
+      if (!kvCacheTypeRequested) throw err;
+      // The experimental option refused — plain context, honestly reported.
+      delete extra.experimentalKvCacheKeyType;
+      delete extra.experimentalKvCacheValueType;
+      context = await model.createContext({ contextSize, sequences: 1, ...extra });
+    }
     sequence = context.getSequence();
     marks.contextMs = Date.now() - m2;
     loaded = {
@@ -156,6 +181,8 @@ async function handleLoad(msg) {
       contextSize: context.contextSize,
       gpuLayers: model.gpuLayers,
       gpu: llama.gpu,
+      flashAttention: context.flashAttention,
+      kvCacheTypeApplied: kvApplied,
       loadMs: Date.now() - t0,
       marks,
     };
@@ -169,8 +196,6 @@ async function handleLoad(msg) {
       type: 'loaded',
       ...loaded,
       kvCacheTypeRequested,
-      // node-llama-cpp 3.19.x exposes no KV-cache type option. Reported honestly.
-      kvCacheTypeApplied: null,
       reused: false,
     });
   } catch (err) {

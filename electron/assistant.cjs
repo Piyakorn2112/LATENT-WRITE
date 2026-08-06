@@ -98,7 +98,20 @@ const MODEL_REGISTRY = {
     minContextSize: 4096,
     /** A thinking model must be allowed to think — the toggle stays off. */
     noThink: false,
-    kvBytesPerToken: 132 * 1024,
+    /** Flash attention: stable in node-llama-cpp 3.19, faster and leaner. */
+    flashAttention: true,
+    /** Q8_0 on K and V HALVES the KV cache. Experimental in the binding —
+     *  registry-only, verified on this hardware, and the host falls back to a
+     *  plain context (reported, not silent) if the option refuses. */
+    kvCacheType: 'Q8_0',
+    /** Measured f16 was ~132 KB/token (layer-scaled from the 1.7B probe);
+     *  Q8_0 halves it. Derived, and deliberately left a little conservative
+     *  rather than re-measured to the byte. */
+    kvBytesPerToken: 70 * 1024,
+    /** 2.4 GB resident is the app's peak-RAM driver, and a warm reload is
+     *  ~1.3s (measured — the OS page cache holds the weights). Idle for 90s
+     *  and the memory goes back. */
+    idleTtlMs: 90_000,
   },
 };
 
@@ -124,6 +137,7 @@ let _lowMemory = null;         // { needBytes, availableBytes } while latched
 let _degraded = null;          // { tier, wanted, using } when context was trimmed to fit
 let _fatal = null;             // string
 let _idleTimer = null;
+let _idleTtlMs = IDLE_TTL_MS;   // per-tier: the loaded entry's own TTL
 let _lastProgressAt = 0;
 const _verifiedPaths = new Map(); // modelPath → `${size}:${mtimeMs}` known-good
 
@@ -644,7 +658,7 @@ function armIdleTimer() {
   clearIdleTimer();
   _idleTimer = setTimeout(() => {
     if (!_inflight) killHost('idle-ttl');
-  }, IDLE_TTL_MS);
+  }, _idleTtlMs);
   if (_idleTimer.unref) _idleTimer.unref();
 }
 
@@ -659,6 +673,9 @@ function onHostMessage(msg) {
         marks: { ...(msg.marks || {}), bootMs: _lastBootMs },
         kvCacheTypeRequested: msg.kvCacheTypeRequested,
         kvCacheTypeApplied: msg.kvCacheTypeApplied,
+        // The parent copies fields EXPLICITLY, so a new host field is invisible
+        // until named here — flash read as `undefined` for a whole bench round.
+        flashAttention: msg.flashAttention,
       };
       break;
     case 'unloaded':
@@ -815,11 +832,18 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
         type: 'load', modelPath, contextSize: fitContext,
         gpuLayers: process.env.ASSISTANT_GPU_LAYERS ? Number(process.env.ASSISTANT_GPU_LAYERS) : 'max',
         kvCacheType: entry.kvCacheType || null,
+        flashAttention: entry.flashAttention === undefined ? null : entry.flashAttention,
       });
     });
 
     _hostLoading = false;
     if (!loaded.ok) { _fatal = loaded.error; return loaded; }
+    // ★ AGGRESSIVE UNLOAD IS A PER-TIER POLICY. The 4B is 2.4 GB resident and
+    //   a warm reload costs ~1.3s (measured: the OS page cache keeps the
+    //   weights), so the max tier holds memory for 90s of idle, not five
+    //   minutes. The small tier keeps the long TTL — it is 1 GB and serves
+    //   background bursts where a reload per burst would thrash.
+    _idleTtlMs = Number(entry.idleTtlMs) || IDLE_TTL_MS;
     armIdleTimer();
     return { ok: true, ..._hostLoaded, verifyMs: verified.ms, degraded: _degraded };
   })().finally(() => { _loadPromise = null; });
