@@ -26,12 +26,18 @@ const page = `<!doctype html><html><head><style>${css}</style><style>
   :root { --control-value-fill: rgb(20, 90, 220); }
   body { margin: 0; background: rgb(250, 250, 248); }
 </style></head><body>
+<!-- padding:0 pinned on layer AND overlay: in the app both mirror the
+     textarea's padding (the layer via CSS vars, the overlay via computed
+     copy), so they align; the harness aligns them explicitly — a first
+     version left the layer's app padding in place, the two texts never
+     overlapped, and the control went blind. -->
 <div class="editor-wrap" style="width: 600px">
-  <div class="editor-highlight" style="font: 16px monospace; line-height: 24px">
-    <span style="color: rgb(200, 0, 0)">Mara walked to the boathouse and found the door unlocked today.</span>
-  </div>
-  <textarea class="document-editor document-editor--highlight" style="font: 16px monospace; line-height: 24px; width: 600px; height: 60px">Mara walked to the boathouse and found the door unlocked today.</textarea>
-  <div class="writing-wave-text" style="font: 16px monospace; line-height: 24px; top: 0; left: 0; width: 600px; --wave-cover: rgb(250, 250, 248)">Mara <span class="writing-wave-word" style="animation: none; color: var(--control-value-fill)">walked</span> to the boathouse</div>
+  <!-- span flush against the div: the layer is pre-wrap, so pretty-printed
+       newlines inside it RENDER and shove the text a line down — that
+       misalignment blinded two earlier versions of this control. -->
+  <div class="editor-highlight" style="font: 16px monospace; line-height: 24px; padding: 0"><span style="color: rgb(200, 0, 0)">Mara walked to the boathouse and found the door unlocked today.</span></div>
+  <textarea class="document-editor document-editor--highlight" style="font: 16px monospace; line-height: 24px; width: 600px; height: 60px; padding: 0">Mara walked to the boathouse and found the door unlocked today.</textarea>
+  <div class="writing-wave-text" style="font: 16px monospace; line-height: 24px; top: 0; left: 0; width: 600px; padding: 0; --wave-cover: rgb(250, 250, 248)">Mara <span class="writing-wave-word" style="animation: none; color: var(--control-value-fill)">walked</span> to the boathouse</div>
 </div>
 </body></html>`;
 
@@ -51,8 +57,11 @@ async function inkPixel(extraCss) {
     const c = new OffscreenCanvas(bmp.width, bmp.height);
     const ctx = c.getContext("2d");
     ctx.drawImage(bmp, 0, 0);
-    // Scan the word region for the darkest pixel (the glyph ink).
-    const data = ctx.getImageData(50, 2, 60, 22).data;
+    // Scan ONLY the covered word's region for the darkest pixel. The wrap
+    // centres at x=50 (700px viewport, 600px wrap); "Mara " spans x50–98 and
+    // is OUTSIDE the rewritten range — legitimately red — so sampling it
+    // false-flagged the sandwich. "walked" spans x≈98–155.
+    const data = ctx.getImageData(105, 2, 40, 22).data;
     let best = { r: 255, g: 255, b: 255, lum: 999 };
     for (let i = 0; i < data.length; i += 4) {
       const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
