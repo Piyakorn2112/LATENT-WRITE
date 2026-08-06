@@ -187,6 +187,8 @@ export interface AssistantRunRequest {
   tier?: AssistantTier;
   contextSize?: number;
   timeoutMs?: number;
+  /** "compact" = JSON grammar without pretty-printing; see assistant-client. */
+  jsonStyle?: "compact";
 }
 
 export interface AssistantTimings {

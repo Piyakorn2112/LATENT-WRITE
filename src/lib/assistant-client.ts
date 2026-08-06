@@ -66,6 +66,12 @@ export interface AssistantJSONRequest {
    * between the guard refusing and the answer arriving (~132 KB per token).
    */
   contextSize?: number;
+  /**
+   * "compact" builds the JSON grammar without pretty-printing, so the model
+   * cannot spend tokens on indentation (measured 14–17% of a chip answer).
+   * Only worth setting alongside a wire designed for it — see CHIP_SCHEMA_RICH.
+   */
+  jsonStyle?: "compact";
 }
 
 export type AssistantJSONResult<T> =
@@ -186,6 +192,7 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       ...(job.req.tier ? { tier: job.req.tier } : {}),
       ...(job.req.noThink === false ? { noThink: false } : {}),
       ...(job.req.contextSize ? { contextSize: job.req.contextSize } : {}),
+      ...(job.req.jsonStyle ? { jsonStyle: job.req.jsonStyle } : {}),
     });
   } catch (err) {
     return { ok: false, reason: `ipc-failed:${message(err)}` };

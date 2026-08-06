@@ -28,6 +28,7 @@ import {
   draftIsTrueOfSentence,
   buildChipRequest,
   chipKeyFor,
+  decodeRichChipWire,
   eventFingerprint,
   normalizeChipPicks,
   type ChipCandidate,
@@ -389,7 +390,20 @@ console.log("\n── 5 · the max-mode rich detail ─────────�
   const plain = buildChipRequest(ENTRY);
   gate(!JSON.stringify(plain.schema).includes("detail") && !plain.systemPrompt.includes("detail"), "without `rich`, prompt and schema carry no trace of the detail field", "");
   const rich = buildChipRequest(ENTRY, { rich: true });
-  gate(JSON.stringify(rich.schema).includes('"detail"') && rich.systemPrompt.includes("detail"), "with `rich`, the schema offers detail and the prompt explains it", "");
+  gate(JSON.stringify(rich.schema).includes("prefixItems") && rich.systemPrompt.includes("detail") && rich.systemPrompt.includes("WIRE FORMAT"),
+    "with `rich`, the schema is the tuple wire and the prompt teaches both detail and wire", "");
+
+  // ★ THE WIRE IS DECODED BEFORE ANY JUDGEMENT. Tuples map back to canonical
+  //   picks (2-tuple = no detail), and anything that is not the wire shape
+  //   passes through untouched so normalize stays the single judge.
+  const decoded = decodeRichChipWire({ p: [[0, "Ovin fails the count", "before the bell"], [2, "Rell opens the sluice"]] }) as {
+    picks: Array<{ rank: number; label: string; detail?: string }>;
+  };
+  gate(decoded.picks.length === 2 && decoded.picks[0].rank === 0 && decoded.picks[0].detail === "before the bell",
+    "tuple wire decodes to canonical picks", `got ${JSON.stringify(decoded)}`);
+  gate(!("detail" in decoded.picks[1]), "a 2-tuple decodes with no detail key", "");
+  const passthru = { picks: [{ rank: 0, label: "x" }] };
+  gate(decodeRichChipWire(passthru) === passthru, "non-wire shapes pass through untouched", "");
 
   const cands = rich.candidates;
   const r0 = cands[0].rank;

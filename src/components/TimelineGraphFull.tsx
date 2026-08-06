@@ -801,13 +801,14 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }
           >
             {box.label}
           </text>
-          {/* The max-mode second line: the pick's grounded detail, quieter
-              than the label so the chip still reads label-first. */}
+          {/* The max-mode second line: the pick's grounded detail. Same ink
+              as the label (owner call) — the smaller size alone keeps the
+              chip reading label-first. */}
           {box.detail2 && (
             <text
               x={box.x + BOX_SIDE_PAD} y={box.y + box.h - 9}
               textAnchor="start" dominantBaseline="central"
-              fill="var(--text-tertiary)"
+              fill="var(--text-secondary)"
               fontSize={7} fontFamily="var(--font-ui)"
               letterSpacing="0.01em"
             >

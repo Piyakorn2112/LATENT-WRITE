@@ -227,13 +227,59 @@ async function handleUnload({ silent = false } = {}) {
 
 // ── inference ───────────────────────────────────────────────────────────────
 
-async function getGrammar(schema) {
-  const key = JSON.stringify(schema);
+/**
+ * ★ COMPACT JSON IS A GRAMMAR OPTION THE PUBLIC API DOES NOT EXPOSE. The
+ *   default schema grammar lets the model pretty-print and it always does —
+ *   measured 14–17% of a chip answer spent on indentation, tokens that can
+ *   never be content. `getGbnfGrammarForGbnfJsonSchema(schema,
+ *   {allowNewLines:false})` is the library's own generator with newlines off,
+ *   reachable only via a file-URL import past the exports map. Version-pinned;
+ *   if the path ever moves the fallback is the pretty grammar — slower, never
+ *   wrong. Parse for the compact path is JSON.parse: the grammar already
+ *   enforced the schema during generation.
+ */
+let compactBuilder; // undefined = not tried, null = unavailable
+async function getCompactBuilder() {
+  if (compactBuilder !== undefined) return compactBuilder;
+  try {
+    const path = require('path');
+    const { pathToFileURL } = require('url');
+    const p = path.join(__dirname, '..', 'node_modules', 'node-llama-cpp',
+      'dist', 'utils', 'gbnfJson', 'getGbnfGrammarForGbnfJsonSchema.js');
+    const mod = await import(pathToFileURL(p).href);
+    compactBuilder = mod.getGbnfGrammarForGbnfJsonSchema || null;
+  } catch {
+    compactBuilder = null;
+  }
+  return compactBuilder;
+}
+
+/** → { gen, parse }: `gen` goes to promptWithMeta, `parse` judges the text. */
+async function getGrammar(schema, jsonStyle) {
+  const compact = jsonStyle === 'compact';
+  const key = (compact ? 'c|' : 'p|') + JSON.stringify(schema);
   const hit = grammarCache.get(key);
   if (hit) return hit;
-  const grammar = await llama.createGrammarForJsonSchema(schema);
-  grammarCache.set(key, grammar);
-  return grammar;
+
+  let entry = null;
+  if (compact) {
+    const build = await getCompactBuilder();
+    if (build) {
+      const gen = await llama.createGrammar({
+        grammar: build(schema, { allowNewLines: false }),
+        // Mirror LlamaJsonSchemaGrammar's own stop/trim settings.
+        stopGenerationTriggers: [nlc.LlamaText(['\n\n\n\n'])],
+        trimWhitespaceSuffix: true,
+      });
+      entry = { gen, parse: (text) => JSON.parse(text) };
+    }
+  }
+  if (!entry) {
+    const grammar = await llama.createGrammarForJsonSchema(schema);
+    entry = { gen: grammar, parse: (text) => grammar.parse(text) };
+  }
+  grammarCache.set(key, entry);
+  return entry;
 }
 
 async function handleRun(msg) {
@@ -268,7 +314,7 @@ async function handleRun(msg) {
   try {
     let grammar;
     try {
-      grammar = await getGrammar(msg.schema);
+      grammar = await getGrammar(msg.schema, msg.jsonStyle);
     } catch (err) {
       throw Object.assign(new Error(String((err && err.message) || err)), { kind: 'schema' });
     }
@@ -305,7 +351,7 @@ async function handleRun(msg) {
     });
 
     const meta = await session.promptWithMeta(String(msg.userText || ''), {
-      grammar,
+      grammar: grammar.gen,
       signal: abort.signal,
       stopOnAbortSignal: true,
       maxTokens,

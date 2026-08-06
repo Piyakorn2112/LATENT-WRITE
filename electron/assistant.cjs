@@ -939,6 +939,7 @@ async function run(opts = {}) {
         maxTokens: Number.isFinite(opts.maxTokens) ? opts.maxTokens : 128,
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
         noThink: opts.noThink !== false,
+        jsonStyle: opts.jsonStyle === 'compact' ? 'compact' : null,
       });
     } catch (err) {
       clearTimeout(timer);

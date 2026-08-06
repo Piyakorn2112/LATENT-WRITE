@@ -26,7 +26,7 @@ const assistant = require(path.join(ROOT, 'electron', 'assistant.cjs'));
 /** Module-side helper: requests and normalization both come from src/lib. */
 function mod(op, payload) {
   return JSON.parse(execFileSync(NODE, [TSX, '-e', `
-    import { buildChipRequest, normalizeChipPicks } from "./src/lib/chip-picker";
+    import { buildChipRequest, normalizeChipPicks, decodeRichChipWire } from "./src/lib/chip-picker";
     import { buildSummaryRequest } from "./src/lib/chapter-summary";
     import fixture from "./scripts/fixtures/assistant-tasks.json";
     const a = JSON.parse(process.argv[process.argv.length - 1]);
@@ -47,7 +47,7 @@ function mod(op, payload) {
       out = { rich: buildChipRequest(entry, { rich: true }), summary: buildSummaryRequest(entry) };
     } else if (a.op === "normalize") {
       const req = buildChipRequest(entry, { rich: true });
-      out = normalizeChipPicks(a.json, req.candidates, strong.cast);
+      out = normalizeChipPicks(decodeRichChipWire(a.json), req.candidates, strong.cast);
     }
     console.log(JSON.stringify(out ?? null));
   `, JSON.stringify({ op, ...payload })], { cwd: ROOT, encoding: 'utf8' }).trim().split('\n').pop());
@@ -96,21 +96,22 @@ async function main() {
   const { rich, summary } = mod('build', {});
   console.log(`chip request: maxTokens=${rich.maxTokens} sys=${rich.systemPrompt.length}ch user=${rich.userText.length}ch`);
 
-  // A — CANARY at the OLD 160 budget. Under the v2 rich prompt the model
-  // copied whole sentences into `detail`, blew 160 mid-JSON (stop=maxTokens,
+  // A — CANARY at a 160 budget. History: the v2 rich prompt made the model
+  // copy whole sentences into `detail`, blew 160 mid-JSON (stop=maxTokens,
   // parse error) and the tick skip-keyed every chapter — the original
-  // "max chips don't work". The v3 prompt asks for fragments and the same
-  // answer now measures ~139 tokens, so this run passing at 160 is the proof
-  // the rich answer stays SMALL. If this case ever fails again, the detail
-  // rule has regressed toward sentence-copying — fix the prompt, not the cap.
+  // "max chips don't work". v3 fragments measured ~139 tokens; the v4 tuple
+  // wire ~72. This run passing at 160 is the proof the rich answer stays
+  // SMALL. If it ever fails again, the wire or the detail rule has regressed
+  // toward ceremony or sentence-copying — fix the prompt, not the cap.
   await runCase('A-canary-160-budget', rich,
-    { noThink: false, contextSize: 4096, maxTokens: 160 });
+    { noThink: false, contextSize: 4096, maxTokens: 160, jsonStyle: 'compact' });
 
-  // B — the FIXED tick config: tier defaults only, RICH_MAX_TOKENS budget.
-  // With the resident-credit fix this must reuse or cleanly upgrade — never
-  // refuse low-memory while the same model is loaded and working.
-  const b1 = await runCase('B-fix-chips-cold', rich, { maxTokens: rich.maxTokens });
-  const b2 = await runCase('B2-fix-chips-warm', rich, { maxTokens: rich.maxTokens });
+  // B — the SHIPPED tick config: tier defaults, RICH_MAX_TOKENS budget, the
+  // tuple wire on the compact grammar. With the resident-credit fix this must
+  // reuse or cleanly upgrade — never refuse low-memory while the same model
+  // is loaded and working.
+  const b1 = await runCase('B-fix-chips-cold', rich, { maxTokens: rich.maxTokens, jsonStyle: 'compact' });
+  const b2 = await runCase('B2-fix-chips-warm', rich, { maxTokens: rich.maxTokens, jsonStyle: 'compact' });
   await runCase('B3-fix-summary', summary, { maxTokens: summary.maxTokens });
 
   for (const [name, r] of [['B', b1], ['B2', b2]]) {

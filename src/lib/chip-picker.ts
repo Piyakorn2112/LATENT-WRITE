@@ -36,8 +36,10 @@ export const CHIP_TASK = "timeline-chips";
 /** Bump on ANY change to the prompt text or the schema. Invalidates stored picks.
  *  v3: the rich detail rule was rewritten (short phrase, never a sentence copy)
  *  after the 4B copied near-whole sentences into `detail` and blew the token
- *  budget — see RICH_MAX_TOKENS. */
-export const CHIP_PROMPT_VERSION = 3;
+ *  budget — see RICH_MAX_TOKENS.
+ *  v4: the rich answer moved to the TUPLE WIRE (see CHIP_SCHEMA_RICH) — same
+ *  content, half the generated tokens. */
+export const CHIP_PROMPT_VERSION = 4;
 
 /** How many candidates the model is shown. Above this the ranking is guessing
  *  anyway, and a longer list costs prefill for events that cannot be picked. */
@@ -90,11 +92,11 @@ const DEFAULT_MAX_TOKENS = 160;
  *    the 4B (scripts/probe-chip-max.cjs): with `detail` in the schema the model
  *    hit maxTokens at pick two, the JSON arrived truncated, grammar.parse threw,
  *    and the tick skip-keyed the chapter — max-mode chips silently never
- *    updated. Four picks of label+detail plus scaffolding measure ~340 tokens
- *    worst case; 352 is that with a margin, and costs nothing when the grammar
- *    completes early.
+ *    updated. On the tuple wire the full answer measures ~72 tokens
+ *    (probe-decode-speed.ts); 224 is 3x slack and costs nothing when the
+ *    grammar completes early.
  */
-export const RICH_MAX_TOKENS = 352;
+export const RICH_MAX_TOKENS = 224;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const CHIP_SCHEMA = {
@@ -120,24 +122,72 @@ export const CHIP_SCHEMA = {
 export const CHIP_DETAIL_MAX = 72;
 const SCHEMA_DETAIL_MAX = 96;
 
-/** The rich variant: same picks, plus an optional grounded second line. */
+/**
+ * The rich variant: same picks, plus an optional grounded second line —
+ * carried on the TUPLE WIRE.
+ *
+ * ★★ THE WIRE IS HALF THE ANSWER'S TOKENS AND THE MODEL DOES NOT CARE.
+ *    Measured on the 4B (scripts/probe-decode-speed.ts, temperature 0, same
+ *    candidates): keyed objects spent 120 generated tokens, this tuple shape
+ *    72 — warm wall 3.6s → 2.2s, content judged equivalent by hand (labels
+ *    keep their articles, details stay grounded). Two rejected alternatives,
+ *    so nobody re-runs the sweep: 1-char KEYS (r/l/d) saved less and degraded
+ *    the register into telegraphese ("Ferren admits count short");
+ *    InputLookupTokenPredictor was output-identical but 18% SLOWER (short
+ *    compressed spans + scaffold are not in the prompt, so drafts mostly
+ *    miss and their validation overhead is pure cost).
+ *
+ * ★ RENAMED ON THE WIRE ONLY (the [[small-model-harness-lessons]] rule):
+ *   `decodeRichChipWire` maps the tuples straight back to {rank,label,detail}
+ *   picks, so validation, caching, display and tests never see the wire.
+ *   Pairs with jsonStyle:"compact" — the whitespace the pretty grammar
+ *   invites can never be content, only cost.
+ */
 export const CHIP_SCHEMA_RICH = {
   type: "object",
   properties: {
-    picks: {
+    p: {
       type: "array",
       maxItems: CHIP_PICK_CAP,
       items: {
-        type: "object",
-        properties: {
-          rank: { type: "integer" },
-          label: { type: "string", maxLength: SCHEMA_LABEL_MAX },
-          detail: { type: "string", maxLength: SCHEMA_DETAIL_MAX },
-        },
+        type: "array",
+        prefixItems: [
+          { type: "integer" },
+          { type: "string", maxLength: SCHEMA_LABEL_MAX },
+          { type: "string", maxLength: SCHEMA_DETAIL_MAX },
+        ],
+        minItems: 2,
+        maxItems: 3,
       },
     },
   },
 } as const;
+
+/** The paragraph that teaches the wire. Appended after the rich detail rule so
+ *  the content instructions stay byte-identical to what was measured. */
+export const CHIP_RICH_WIRE = `\n\nWIRE FORMAT: answer as {"p":[[rank,"label","detail"], ...]} — each pick is\nan array of the rank number, then the label, then the detail (omit the third\nentry instead of an empty detail). Same content as described above, this shape.`;
+
+/**
+ * Tuple wire → canonical picks. Anything that is not the wire shape is passed
+ * through untouched, so `normalizeChipPicks` stays the single judge of what a
+ * usable answer is.
+ */
+export function decodeRichChipWire(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const p = (raw as Record<string, unknown>).p;
+  if (!Array.isArray(p)) return raw;
+  return {
+    picks: p.map((item) => {
+      if (!Array.isArray(item)) return item;
+      const [rank, label, detail] = item as [unknown, unknown, unknown];
+      return {
+        rank,
+        label,
+        ...(typeof detail === "string" && detail !== "" ? { detail } : {}),
+      };
+    }),
+  };
+}
 
 /**
  * Frozen v1 system prompt.
@@ -363,7 +413,7 @@ export interface ChipRequest {
   candidates: ChipCandidate[];
   systemPrompt: string;
   userText: string;
-  schema: typeof CHIP_SCHEMA;
+  schema: typeof CHIP_SCHEMA | typeof CHIP_SCHEMA_RICH;
   maxTokens: number;
 }
 
@@ -489,7 +539,7 @@ label, leave detail empty.`
 
   return {
     candidates,
-    systemPrompt: CHIP_SYSTEM + richLine,
+    systemPrompt: CHIP_SYSTEM + richLine + (opts.rich ? CHIP_RICH_WIRE : ""),
     userText,
     schema: opts.rich ? CHIP_SCHEMA_RICH : CHIP_SCHEMA,
     maxTokens: opts.maxTokens ?? (opts.rich ? RICH_MAX_TOKENS : DEFAULT_MAX_TOKENS),
@@ -849,6 +899,9 @@ export async function runChipPick(
     schema: request.schema,
     maxTokens: request.maxTokens,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    // The measured fast path is tuple wire + compact grammar TOGETHER; see
+    // the ★★ on CHIP_SCHEMA_RICH.
+    ...(opts.rich ? { jsonStyle: "compact" as const } : {}),
   });
   if (!result.ok) {
     opts.onRunFailure?.(result.reason);
@@ -857,7 +910,8 @@ export async function runChipPick(
 
   const cast = entry.charactersPresent;
   const fallbacks = new Set<number>();
-  const lmChips = normalizeChipPicks(result.json, request.candidates, cast, fallbacks);
+  const answer = opts.rich ? decodeRichChipWire(result.json) : result.json;
+  const lmChips = normalizeChipPicks(answer, request.candidates, cast, fallbacks);
   if (!lmChips) return null;
 
   // A chip whose label came back as the ENGINE's own is one the first pass
