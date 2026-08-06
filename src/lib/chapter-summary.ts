@@ -166,6 +166,9 @@ export interface SummaryOptions {
   modelId: string;
   maxTokens?: number;
   timeoutMs?: number;
+  /** Failure-reason outlet, same contract as ChipPickOptions.onRunFailure:
+   *  the caller must not skip-key a chapter over a transient runtime failure. */
+  onRunFailure?: (reason: string) => void;
 }
 
 export interface SummaryOutcome {
@@ -190,7 +193,10 @@ export async function runChapterSummary(
     maxTokens: request.maxTokens,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  if (!result.ok) return null;
+  if (!result.ok) {
+    opts.onRunFailure?.(result.reason);
+    return null;
+  }
 
   const normalized = normalizeSummary(result.json);
   if (!normalized) return null;

@@ -1056,18 +1056,75 @@ export default function App() {
 
   // ── Timeline chip refinement ────────────────────────────────────────────
   // The model re-picks and re-labels each chapter's timeline chips in the
-  // background, one entry per tick, keyed by chipKeyFor so work only happens
-  // when the chapter's events actually changed. Self-healing by design: an
-  // enrichment pass that re-ranks events changes the fingerprint, which
-  // invalidates the chips, which re-runs the pick over the new events. The
-  // stamp is guarded by recomputing the key against the CURRENT entry, so a
-  // pick raced by a rebuild is dropped, never misapplied.
+  // background, keyed by chipKeyFor so work only happens when the chapter's
+  // events actually changed. Self-healing by design: an enrichment pass that
+  // re-ranks events changes the fingerprint, which invalidates the chips,
+  // which re-runs the pick over the new events. The stamp is guarded by
+  // recomputing the key against the CURRENT entry, so a pick raced by a
+  // rebuild is dropped, never misapplied.
+  //
+  // ★★ THE LOOP SELF-ARMS AND IS KICKED, NEVER DEP-DRIVEN. The old effect
+  //    depended on `storyGraph`, so it advanced only when a stamp happened to
+  //    change state — a chapter whose runs FAILED changed nothing and froze
+  //    the whole convergence right there — and every graph change tore the
+  //    effect down mid-run, cancelling the in-flight request, which was then
+  //    recorded as a permanent skip. The worker now owns its own timer chain
+  //    (350ms between units of work, 10s backoff after a transient failure)
+  //    and a separate one-line effect kicks it when the graph changes.
+  //
+  // ★ CHIPS DRAIN BEFORE SUMMARIES, ACROSS CHAPTERS. Chips are what the
+  //   timeline shows first — and runs of one task type carry a byte-identical
+  //   system prompt, so the host's prefix cache eats the prefill from the
+  //   second call on. Alternating chip/summary per chapter paid full prefill
+  //   (measured 1.1–3.6s) on every single call.
   const chipBusyRef = useRef(false);
-  const chipSkipRef = useRef(new Set<string>()); // `${chapterId}|${key}` failures, per session
+  const chipSkipRef = useRef(new Set<string>()); // `${kind}|${chapterId}|${key}`, per session
+  const chipStrikesRef = useRef(new Map<string, number>()); // transient failures per key
+  const chipKickRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (!prefs.assistant?.enabled || !window.electronAPI) return;
     let alive = true;
-    let retryTimer: number | null = null;
+    let timer: number | null = null;
+    const arm = (ms: number) => {
+      if (!alive) return;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => { timer = null; void tick(); }, ms);
+    };
+
+    interface Work { entry: ChapterGraphEntry; kind: "chips" | "sum"; key: string }
+    const findWork = (modelId: string): Work | null => {
+      const entries = Object.values(storyGraphRef.current.entries)
+        .filter((entry) => entry.majorEvents.length > 0)
+        .sort((a, b) => a.chapterNumber - b.chapterNumber);
+      for (const entry of entries) {
+        const key = chipKeyFor(entry, modelId);
+        if (entry.lmChipsKey !== key && !chipSkipRef.current.has(`chips|${entry.chapterId}|${key}`))
+          return { entry, kind: "chips", key };
+      }
+      for (const entry of entries) {
+        const key = summaryKeyFor(entry, modelId);
+        if (entry.lmSummaryKey !== key && !chipSkipRef.current.has(`sum|${entry.chapterId}|${key}`))
+          return { entry, kind: "sum", key };
+      }
+      return null;
+    };
+
+    // ★ ONLY A CONTENT-SHAPED FAILURE EARNS A PERMANENT SKIP. `busy`,
+    //   `cancelled`, `timeout`, `low-memory`, `no-model` are the runtime having
+    //   a moment, not the chapter being unanswerable — a session-long key on
+    //   those is exactly how max mode silently stopped updating chips. A
+    //   transient failure backs off and retries; three strikes converts it.
+    const CONTENT_FAILURES = new Set(["parse", "no-json", "schema"]);
+    const noteFailure = (skipId: string, reason: string | null): number => {
+      if (reason === null || CONTENT_FAILURES.has(reason)) {
+        chipSkipRef.current.add(skipId);
+        return 350;
+      }
+      const strikes = (chipStrikesRef.current.get(skipId) ?? 0) + 1;
+      chipStrikesRef.current.set(skipId, strikes);
+      if (strikes >= 3) { chipSkipRef.current.add(skipId); return 350; }
+      return 10_000;
+    };
 
     const tick = async () => {
       if (!alive || chipBusyRef.current) return;
@@ -1075,50 +1132,42 @@ export default function App() {
         document.addEventListener("visibilitychange", onVisible, { once: true });
         return;
       }
-      if (!(await assistantAvailable())) {
-        if (alive) retryTimer = window.setTimeout(() => { void tick(); }, 30_000);
+      // ★ MAX MODE UPGRADES THE WHOLE TICK: chips and summaries run on the 4B,
+      //   chips may carry a grounded second line, and the cache keys carry the
+      //   max model's id — so switching modes recomputes exactly once per
+      //   chapter and never cross-stamps tiers. No noThink/contextSize
+      //   overrides here: a grammar-constrained run never emits thinking
+      //   anyway (measured, probe-chip-max.cjs), and a tick-private context
+      //   size forced a full model reload whenever the ask popover (which uses
+      //   the tier default) ran next.
+      const maxMode = assistantMode(prefs) === "max";
+      if (!(await assistantAvailable(maxMode ? "max" : undefined))) {
+        arm(30_000);
         return;
       }
-      // ★ MAX MODE UPGRADES THE WHOLE TICK: chips and summaries run on the 4B
-      //   with thinking on, chips may carry a grounded second line, and the
-      //   cache keys carry the max model's id — so switching modes recomputes
-      //   exactly once per chapter and never cross-stamps tiers.
-      const maxMode = assistantMode(prefs) === "max";
       const run: typeof assistantRunJSON = maxMode
-        ? (req) => assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 4096 })
+        ? (req) => assistantRunJSON({ ...req, tier: "max" })
         : assistantRunJSON;
       const modelId = maxMode
         ? (await window.electronAPI?.assistantStatus({ tier: "max" }))?.model?.id ?? null
         : await assistantModelId();
       if (!modelId || !alive) return;
-
-      // One entry per tick, and within it chips before summary: chips are what
-      // the compact timeline shows, so they are what a writer sees first.
-      const entries = Object.values(storyGraphRef.current.entries)
-        .filter((entry) => entry.majorEvents.length > 0)
-        .sort((a, b) => a.chapterNumber - b.chapterNumber);
-      const stale = (entry: ChapterGraphEntry) => {
-        const chipKey = chipKeyFor(entry, modelId);
-        const sumKey = summaryKeyFor(entry, modelId);
-        const needsChips = entry.lmChipsKey !== chipKey &&
-          !chipSkipRef.current.has(`chips|${entry.chapterId}|${chipKey}`);
-        const needsSummary = entry.lmSummaryKey !== sumKey &&
-          !chipSkipRef.current.has(`sum|${entry.chapterId}|${sumKey}`);
-        return needsChips || needsSummary;
-      };
-      const target = entries.find(stale);
-      if (!target) return;
+      const work = findWork(modelId);
+      if (!work) return; // converged — the next kick reopens the loop
 
       chipBusyRef.current = true;
+      let delay = 350;
+      const fail: { reason: string | null } = { reason: null };
+      const onRunFailure = (reason: string) => { fail.reason = reason; };
+      const skipId = `${work.kind}|${work.entry.chapterId}|${work.key}`;
       try {
-        const chipKey = chipKeyFor(target, modelId);
-        if (target.lmChipsKey !== chipKey && !chipSkipRef.current.has(`chips|${target.chapterId}|${chipKey}`)) {
-          const outcome = await runChipPick(target, { run, modelId, rich: maxMode });
+        if (work.kind === "chips") {
+          const outcome = await runChipPick(work.entry, { run, modelId, rich: maxMode, onRunFailure });
           if (!alive) return;
-          if (!outcome) chipSkipRef.current.add(`chips|${target.chapterId}|${chipKey}`);
+          if (!outcome) delay = noteFailure(skipId, fail.reason);
           else {
             setStoryGraph((prev) => {
-              const current = prev.entries[target.chapterId];
+              const current = prev.entries[work.entry.chapterId];
               // Recomputed against the CURRENT entry: a result raced by a
               // rebuild is dropped rather than stamped onto new events.
               if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
@@ -1126,28 +1175,24 @@ export default function App() {
                 ...prev,
                 entries: {
                   ...prev.entries,
-                  [target.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
+                  [work.entry.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
                 },
               };
             });
           }
-        }
-
-        if (!alive) return;
-        const sumKey = summaryKeyFor(target, modelId);
-        if (target.lmSummaryKey !== sumKey && !chipSkipRef.current.has(`sum|${target.chapterId}|${sumKey}`)) {
-          const summary = await runChapterSummary(target, { run, modelId });
+        } else {
+          const summary = await runChapterSummary(work.entry, { run, modelId, onRunFailure });
           if (!alive) return;
-          if (!summary) chipSkipRef.current.add(`sum|${target.chapterId}|${sumKey}`);
+          if (!summary) delay = noteFailure(skipId, fail.reason);
           else {
             setStoryGraph((prev) => {
-              const current = prev.entries[target.chapterId];
+              const current = prev.entries[work.entry.chapterId];
               if (!current || summaryKeyFor(current, modelId) !== summary.lmSummaryKey) return prev;
               return {
                 ...prev,
                 entries: {
                   ...prev.entries,
-                  [target.chapterId]: {
+                  [work.entry.chapterId]: {
                     ...current,
                     lmSummary: summary.lmSummary,
                     lmThroughline: summary.lmThroughline,
@@ -1161,18 +1206,25 @@ export default function App() {
       } finally {
         chipBusyRef.current = false;
       }
+      if (alive && findWork(modelId)) arm(delay);
     };
     const onVisible = () => { if (!document.hidden && alive) void tick(); };
+    chipKickRef.current = () => arm(1200);
 
-    const timer = window.setTimeout(() => { void tick(); }, 4000);
+    arm(4000);
     return () => {
       alive = false;
-      window.clearTimeout(timer);
-      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      chipKickRef.current = () => {};
+      if (timer !== null) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
       cancelAssistantWhere(({ task }) => task === CHIP_TASK || task === SUMMARY_TASK);
     };
-  }, [storyGraph, prefs.assistant?.enabled, prefs.assistant?.mode]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [prefs.assistant?.enabled, prefs.assistant?.mode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A stamp, an analysis rebuild, a project switch — any graph change can make
+  // chapters stale after the worker went quiet. One debounced kick; the worker
+  // decides whether there is actually work.
+  useEffect(() => { chipKickRef.current(); }, [storyGraph]);
 
   // ── The review sweep (wave 2) ───────────────────────────────────────────
   // One pass: scene near-misses, then Chekhov. Five questions per chapter,

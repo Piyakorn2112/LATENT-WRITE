@@ -408,6 +408,25 @@ console.log("\n── 5 · the max-mode rich detail ─────────�
     cands, [], undefined);
   gate(!!drift && drift[0] && !("detail" in drift[0] && drift[0].detail), "★ an ungrounded detail is DROPPED — and the pick survives without it", "");
 
+  // ★★ FRAGMENT SHAPES THE LABEL RULES USED TO KILL (probe-chip-max.cjs):
+  //    a plural-noun fragment is not a dangling verb, and a tense shift is
+  //    not an invention. Both were good details the 4B actually wrote.
+  const inline2 = [{ rank: 0, label: "Ferren admits the count is short",
+    sentence: "Ferren Ash told the room that the count had been short for eleven years, and that she had signed every page of it.", agent: "Ferren Ash" }];
+  const plural = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Ferren admits the count is short", detail: "eleven years" }] }, inline2, [], undefined);
+  gate(plural?.[0]?.detail === "eleven years", "★ a plural-noun fragment survives (not read as a dangling verb)",
+    `got ${JSON.stringify(plural?.[0])}`);
+  const inline3 = [{ rank: 0, label: "Marda melts the office seal",
+    sentence: "Marda put the office seal in the fire and the wax ran off the iron.", agent: "Marda" }];
+  const tense = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Marda melts the office seal", detail: "wax runs off iron" }] }, inline3, [], undefined);
+  gate(tense?.[0]?.detail === "wax runs off iron", "★ one inflection-shifted word is allowed when the rest is grounded",
+    `got ${JSON.stringify(tense?.[0])}`);
+  const dangle = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Marda melts the office seal", detail: "melted when the seal was" }] }, inline3, [], undefined);
+  gate(!!dangle && !dangle[0]?.detail, "…but a genuinely dangling auxiliary still rejects the detail", "");
+
   const multi = normalizeChipPicks(
     { picks: [{ rank: r0, label: cands[0].label, detail: "line one\nline two" }] }, cands, [], undefined);
   gate(!!multi && !multi[0]?.detail, "a multi-line detail is dropped, pick kept", "");

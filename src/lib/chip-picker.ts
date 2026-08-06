@@ -33,8 +33,11 @@ import type { AssistantJSONRunner } from "./assistant-client";
 import type { ChapterGraphEntry, MajorEvent, TimelineChipPick } from "../types";
 
 export const CHIP_TASK = "timeline-chips";
-/** Bump on ANY change to the prompt text or the schema. Invalidates stored picks. */
-export const CHIP_PROMPT_VERSION = 2;
+/** Bump on ANY change to the prompt text or the schema. Invalidates stored picks.
+ *  v3: the rich detail rule was rewritten (short phrase, never a sentence copy)
+ *  after the 4B copied near-whole sentences into `detail` and blew the token
+ *  budget — see RICH_MAX_TOKENS. */
+export const CHIP_PROMPT_VERSION = 3;
 
 /** How many candidates the model is shown. Above this the ranking is guessing
  *  anyway, and a longer list costs prefill for events that cannot be picked. */
@@ -81,6 +84,17 @@ const SCHEMA_LABEL_MAX = 72;
 
 /** 3 picks of ~15 tokens plus JSON scaffolding; ~90 observed, 160 is slack. */
 const DEFAULT_MAX_TOKENS = 160;
+
+/**
+ * ★★ THE RICH ANSWER IS A DIFFERENT SIZE AND 160 WAS A GUILLOTINE. Measured on
+ *    the 4B (scripts/probe-chip-max.cjs): with `detail` in the schema the model
+ *    hit maxTokens at pick two, the JSON arrived truncated, grammar.parse threw,
+ *    and the tick skip-keyed the chapter — max-mode chips silently never
+ *    updated. Four picks of label+detail plus scaffolding measure ~340 tokens
+ *    worst case; 352 is that with a margin, and costs nothing when the grammar
+ *    completes early.
+ */
+export const RICH_MAX_TOKENS = 352;
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export const CHIP_SCHEMA = {
@@ -387,8 +401,20 @@ export function buildChipRequest(
   opts: BuildChipRequestOptions = {},
 ): ChipRequest {
   const cap = opts.candidateCap ?? CHIP_CANDIDATE_CAP;
+  // ★ THE DETAIL MUST BE ASKED FOR AS A FRAGMENT, NOT "FROM THE SENTENCE".
+  //   Measured (probe-chip-max.cjs): "drawn from the moment's own sentence"
+  //   made the 4B COPY the sentence — 90+ characters, cut by the grammar cap,
+  //   then dropped by the mid-clause check, so rich mode shipped no details at
+  //   all while paying ~25 generated tokens per pick for them. The rule now
+  //   names the shape (a fragment of 8 words or fewer, never a copy) and what
+  //   it is for (the concrete thing the label had no room for).
   const richLine = opts.rich
-    ? `\n\nAlso give each pick a "detail": one phrase of at most 12 words drawn from\nthe moment's own sentence — what concretely happens. No new names, no new\nfacts; if the sentence gives nothing beyond the label, leave detail empty.`
+    ? `\n\nAlso give each pick a "detail": a second line shown under the chip in small
+type. It is a FRAGMENT of 8 words or fewer — the concrete thing from that
+moment's sentence the label had no room for: the number, the object, the
+condition, the place. Never copy or rephrase the whole sentence, never repeat
+the label, no new names, no new facts. If the sentence adds nothing beyond the
+label, leave detail empty.`
     : "";
 
   const candidates = entry.majorEvents
@@ -466,7 +492,7 @@ export function buildChipRequest(
     systemPrompt: CHIP_SYSTEM + richLine,
     userText,
     schema: opts.rich ? CHIP_SCHEMA_RICH : CHIP_SCHEMA,
-    maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
+    maxTokens: opts.maxTokens ?? (opts.rich ? RICH_MAX_TOKENS : DEFAULT_MAX_TOKENS),
   };
 }
 
@@ -690,17 +716,32 @@ export function normalizeChipPicks(
     const usable = sound && (repaired.length <= CHIP_LABEL_MAX || trimUsable);
     if (!usable) outFallbacks?.add(rankRaw);
     // ★ THE DETAIL IS OPTIONAL DECORATION AND FAILS ALONE. A bad second line
-    //   never costs the pick: it must be single-line, inside the cap after a
-    //   clean trim, and GROUNDED in the candidate's own sentence (two shared
-    //   content words) so a drifting elaboration is dropped rather than shown.
+    //   never costs the pick: single-line, inside the cap after a clean trim,
+    //   grounded in the candidate's own material, different from the label.
+    //
+    // ★★ FRAGMENT RULES, NOT LABEL RULES. Measured (probe-chip-max.cjs): the
+    //    label heuristics silently killed half the good details. `endsMidClause`
+    //    reads a plural noun as a dangling verb, so "eleven years" died; exact
+    //    word matching reads a tense shift as invention, so "wax runs off iron"
+    //    died against a sentence saying "ran". A detail is ASKED FOR as a
+    //    noun-ish fragment: only a genuinely dangling auxiliary rejects it,
+    //    grounding uses the same loose stem the draft check uses, and one
+    //    inflection-shifted word is allowed as long as at least half the
+    //    content words are the sentence's own.
     let detail: string | undefined;
     const detailRaw = typeof value.detail === "string" ? value.detail.trim() : "";
     if (detailRaw && !/[\r\n]/.test(detailRaw)) {
       const cut = trimToLength(detailRaw, CHIP_DETAIL_MAX);
+      const material = `${candidate.sentence} ${candidate.agent ?? ""}`.toLowerCase();
       const words = cut.toLowerCase().match(/[a-z']{4,}/g) ?? [];
-      const sentenceLc = candidate.sentence.toLowerCase();
-      const shared = words.filter((w) => sentenceLc.includes(w)).length;
-      if (cut && !endsMidClause(cut) && shared >= 2 && cut.toLowerCase() !== (usable ? trimmed : candidate.label).toLowerCase()) {
+      const grounded = words.filter((w) => {
+        const stem = w.replace(/(ing|ed|es|s)$/, "");
+        return stem.length >= 3 && material.includes(stem);
+      }).length;
+      const enough = grounded >= Math.max(1, Math.ceil(words.length / 2));
+      const lastWord = cut.split(/\s+/).pop() ?? "";
+      if (cut && !DANGLING_TAIL.test(lastWord) && enough &&
+          cut.toLowerCase() !== (usable ? trimmed : candidate.label).toLowerCase()) {
         detail = cut;
       }
     }
@@ -767,6 +808,14 @@ export interface ChipPickOptions {
   candidateCap?: number;
   /** Max mode: picks may carry a grounded second line. See BuildChipRequestOptions. */
   rich?: boolean;
+  /**
+   * ★ Called with the runner's failure reason when the PRIMARY run fails.
+   *   The caller needs it to tell a content-shaped failure (parse/schema —
+   *   re-asking is pointless) from a transient one (busy/timeout/low-memory —
+   *   a permanent skip key on those is how max-mode chips silently died).
+   *   Not called for a repair-pass failure, which is tolerated by design.
+   */
+  onRunFailure?: (reason: string) => void;
 }
 
 export interface ChipPickOutcome {
@@ -801,7 +850,10 @@ export async function runChipPick(
     maxTokens: request.maxTokens,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  if (!result.ok) return null;
+  if (!result.ok) {
+    opts.onRunFailure?.(result.reason);
+    return null;
+  }
 
   const cast = entry.charactersPresent;
   const fallbacks = new Set<number>();

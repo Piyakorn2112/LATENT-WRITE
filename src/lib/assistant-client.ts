@@ -114,12 +114,18 @@ export async function assistantModelId(): Promise<string | null> {
 /**
  * Can a run succeed right now? `no-model` is deliberately NOT available: a
  * 1.1 GB download is never an implicit side effect of asking a question.
+ *
+ * ★ TIER-AWARE: a caller about to run on the max tier must ask about the MAX
+ *   model. The parameterless form checks the default (small) tier, which in
+ *   max mode answers the wrong question in both directions — max-present/
+ *   small-absent blocked work that would succeed, and small-present/max-absent
+ *   green-lit runs that each failed and burned a skip key.
  */
-export async function assistantAvailable(): Promise<boolean> {
+export async function assistantAvailable(tier?: "small" | "max"): Promise<boolean> {
   const a = api();
   if (!a) return false;
   try {
-    const status = await a.assistantStatus();
+    const status = await a.assistantStatus(tier ? { tier } : undefined);
     if (!status?.model?.present) return false;
     return (
       status.state !== "error" &&

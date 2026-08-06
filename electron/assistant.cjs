@@ -766,14 +766,36 @@ function loadCostBytes(entry, modelPath, wantContext) {
  *   shortened context is a feature quietly getting worse for reasons nobody
  *   can see.
  */
-function fittingContext(entry, modelPath, wantContext) {
+function fittingContext(entry, modelPath, wantContext, available = availableMemoryBytes()) {
   const floor = Number(entry.minContextSize) || wantContext;
-  const available = availableMemoryBytes();
   for (let ctx = wantContext; ctx >= floor; ctx = Math.floor(ctx / 2)) {
     if (available >= loadCostBytes(entry, modelPath, ctx)) return ctx;
     if (ctx === floor) break;
   }
   return available >= loadCostBytes(entry, modelPath, floor) ? floor : null;
+}
+
+/**
+ * ★★ THE RESIDENT COPY OF THE SAME MODEL IS RECLAIMABLE, NOT SPENT. Measured
+ *    (probe-chip-max.cjs): with the 4B loaded at 4096, a request for its own
+ *    tier default of 8192 was REFUSED as low-memory in 8ms — the guard read
+ *    "available" with the model's own weights and KV counted as consumed, and
+ *    asked whether a SECOND copy would fit. A reload frees the old copy first,
+ *    so a same-model context change gets those bytes credited back. Cross-model
+ *    swaps stay uncredited: the accounting there is murkier (two sets of
+ *    weights transiently) and the conservative answer is the safe one.
+ */
+function residentCreditBytes(modelPath) {
+  if (!_hostLoaded || _hostLoaded.modelPath !== modelPath) return 0;
+  try {
+    const owner = Object.values(MODEL_REGISTRY).find(
+      (e) => modelPathFor(e.tier) === modelPath,
+    );
+    const perToken = owner ? Number(owner.kvBytesPerToken) || 0 : 0;
+    return fs.statSync(modelPath).size + perToken * (_hostLoaded.contextSize || 0);
+  } catch {
+    return 0;
+  }
 }
 
 /** Fork (if needed), guard memory, then load the model in the host. */
@@ -796,8 +818,22 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
       return { ok: false, error: _fatal };
     }
 
-    const availableBytes = availableMemoryBytes();
-    const fitContext = fittingContext(entry, modelPath, wantContext);
+    const availableBytes = availableMemoryBytes() + residentCreditBytes(modelPath);
+    const fitContext = fittingContext(entry, modelPath, wantContext, availableBytes);
+
+    // ★★ AN UPGRADE ATTEMPT MUST NEVER TEAR DOWN A WORKING LOAD. When the same
+    //    model is already resident and what FITS is no bigger than what is
+    //    loaded, reuse the loaded context and report the degrade — reloading
+    //    here bought nothing and cost a full model load PER REQUEST the moment
+    //    two surfaces asked for different context sizes.
+    if (_hostLoaded && _hostLoaded.modelPath === modelPath &&
+        (fitContext === null || fitContext <= _hostLoaded.contextSize)) {
+      _degraded = _hostLoaded.contextSize < wantContext
+        ? { tier: entry.tier, wanted: wantContext, using: _hostLoaded.contextSize, availableBytes }
+        : null;
+      _lowMemory = null;
+      return { ok: true, ..._hostLoaded, reused: true, degraded: _degraded };
+    }
     if (fitContext === null) {
       const needBytes = loadCostBytes(entry, modelPath, Number(entry.minContextSize) || wantContext);
       _lowMemory = { needBytes, availableBytes };
