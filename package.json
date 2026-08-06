@@ -88,7 +88,8 @@
     "print:alias-chapter": "tsx scripts/test-alias-scan.ts --chapter",
     "test:max-ask": "tsx scripts/test-max-ask.ts",
     "probe:max-ask": "electron scripts/probe-max-ask.cjs",
-    "verify:max-ask-e2e": "node scripts/verify-max-ask-e2e.mjs"
+    "verify:max-ask-e2e": "node scripts/verify-max-ask-e2e.mjs",
+    "probe:max-ask-golden": "electron scripts/probe-max-ask-golden.cjs"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",
