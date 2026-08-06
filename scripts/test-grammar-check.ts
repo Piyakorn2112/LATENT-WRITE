@@ -162,6 +162,69 @@ console.log('\n── Style: suppressed in-dialogue (context-aware) ──');
   expect('Narration around dialogue: no error-level flags', isClean(dialogueProse));
 }
 
+// ─── Manuscript slips (added with the writing tool, which gates on this) ──
+
+console.log('\n── Manuscript slips: fused compounds, past-tense, to/too ──');
+{
+  const slips: Array<[string, string]> = [
+    ['It was atleast a mile off.', 'at least'],
+    ['He flinched everytime it rang.', 'every time'],
+    ['Teo came aswell that night.', 'as well'],
+    ['She kept it incase he returned.', 'in case'],
+    ['He payed the mooring fee.', 'paid'],
+    ['It happend before dawn.', 'happened'],
+    ['She could not beleive it.', 'believe'],
+    ['Her freinds had gone home.', 'friends'],
+    ['It was definately locked.', 'definitely'],
+    ['They kept seperate ledgers.', 'separate'],
+    ['It occured to her slowly.', 'occurred'],
+    ['He would leave tommorow.', 'tomorrow'],
+    ['He was to tired to move.', 'too tired'],
+    ['It came to late for that.', 'too late'],
+  ];
+  for (const [text, expected] of slips) {
+    expect(`"${expected}" caught`, hasSuggestion(text, expected),
+      checkGrammar(text).map(s => s.suggestion).join(',') || '(nothing)');
+  }
+  // Guards: infinitives and literary noun readings must NOT fire.
+  expect('"to close the hatch" stays an infinitive', isClean('She bent to close the hatch.'));
+  expect('"to slow the boat" stays an infinitive', isClean('He tried to slow the boat.'));
+  expect('"their coming was foretold" keeps the noun reading',
+    !checkGrammar('Their coming was foretold.').some(s => s.kind === 'confusable'));
+  expect("\"their coming tonight\" flags as they're",
+    hasSuggestion('Their coming tonight, all of them.', "they're coming"));
+}
+
+// ─── Offsets and ordering (the writing tool splices by these) ─────────────
+
+console.log('\n── Offsets: every span slices out exactly its original ──');
+{
+  const text = 'He stoped at teh gate , and and waited. the rest payed up atleast twice.';
+  const found = checkGrammar(text);
+  expect('every span slices out its original text',
+    found.every(s => text.slice(s.start, s.end) === s.original),
+    found.map(s => `${s.original}@${s.start}`).join(','));
+  expect('suggestions are sorted and non-overlapping',
+    found.every((s, i) => i === 0 || s.start >= found[i - 1].end));
+  expect('a dense passage yields its findings (5+)', found.length >= 5,
+    String(found.length));
+}
+
+// ─── Dialogue: hard errors still fire inside speech spans ─────────────────
+
+console.log('\n── Dialogue: hard errors fire in speech, style stays out ──');
+{
+  const text = '"We stoped by the well," he said softly. The rope was pulled by Teo.';
+  const ctx = { speechSpans: [{ start: 0, end: text.indexOf('he said') }] };
+  const found = checkGrammar(text, { context: ctx });
+  expect('"stoped" flags inside the quotes', found.some(s => s.original.toLowerCase() === 'stoped'));
+  // "said softly" begins AFTER the span (attribution is narration), so the
+  // boundary is the span end itself, not a hand-picked offset.
+  expect('style rules stay out of the quoted span',
+    !found.some(s => ['filter', 'passive', 'adverb', 'wordy', 'cliche'].includes(s.kind) && s.start < ctx.speechSpans[0].end));
+  expect('narration outside the span keeps style checks', found.some(s => s.kind === 'passive'));
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────────
 
 const total = passed + failed;

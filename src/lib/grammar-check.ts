@@ -263,6 +263,25 @@ const SPELL_ENTRIES: SpellEntry[] = [
   [/\bbeging\b/gi, "begging", false],
   [/\bcuted\b/gi, "cut", false],
   [/\bputed\b/gi, "put", false],
+  // Fused compounds and past-tense slips — found missing by the manuscript-
+  // slip probe in scripts/test-grammar-check.ts §7. All unambiguous: none of
+  // these strings is a word.
+  [/\batleast\b/gi, "at least", false],
+  [/\beverytime\b/gi, "every time", false],
+  [/\baswell\b/gi, "as well", false],
+  [/\bincase\b/gi, "in case", false],
+  [/\bnevermind\b/gi, "never mind", false],
+  [/\bpayed\b/gi, "paid", false],
+  [/\bhappend\b/gi, "happened", false],
+  [/\bbeleive(s|d)?\b/gi, "believe", true],
+  [/\bfreind(s)?\b/gi, "friend", true],
+  [/\bwich\b/gi, "which", false],
+  [/\bthier\b/gi, "their", false],
+  [/\bbecuase\b/gi, "because", false],
+  [/\bdefinately\b/gi, "definitely", false],
+  [/\bseperate(s|d|ly)?\b/gi, "separate", true],
+  [/\boccured\b/gi, "occurred", false],
+  [/\btommorow\b/gi, "tomorrow", false],
 ];
 
 function makeSpellRules(): Rule[] {
@@ -825,6 +844,29 @@ const CONFUSABLE_RULES: Rule[] = [
     pattern: /\bits\s+(a|an|the|been|being|going|gonna|been|just|only)\b/gi,
     build: (m) => ({
       suggestion: matchCase(m[0], `it's ${m[1]}`),
+      kind: "confusable",
+      severity: "warning",
+    }),
+  },
+  // "to" for "too" before an adjective. The adjective list deliberately
+  // EXCLUDES verb homonyms (close, slow, clear, calm, empty, open, dry…)
+  // because "to close the door" is an infinitive — only words that cannot
+  // head an infinitive are safe to flag.
+  {
+    pattern: /\bto\s+(tired|late|early|heavy|hot|cold|big|small|loud|quiet|dark|old|young|deep|high|low|far|hard|expensive|important|dangerous|difficult|scared|afraid|angry|busy|serious|obvious|painful|risky|strong|weak|soon|much|many)\b(?=[\s.,;:!?]|$)/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `too ${m[1]}`),
+      kind: "confusable",
+      severity: "error",
+    }),
+  },
+  // "their" for "they're" before a gerund/locative. Guarded against the
+  // literary noun reading ("their coming was foretold") by refusing when a
+  // verb follows.
+  {
+    pattern: /\btheir\s+(coming|going|leaving|staying|waiting|trying|getting|being|here|not)\b(?!\s+(?:was|is|were|are|had|has|seemed|felt))/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `they're ${m[1]}`),
       kind: "confusable",
       severity: "warning",
     }),
