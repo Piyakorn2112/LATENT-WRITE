@@ -16108,3 +16108,30 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 .max-ask-again:hover { color: var(--text); border-color: var(--text-tertiary); }
+
+/* ── Writing tool: the in-flight span's pulse ────────────────────────────
+   A soft wave of the system accent travels the locked range while the model
+   revises it. Sibling overlay, never a filter on the text itself (the
+   backdrop-filter/ancestor-filter lessons); light and dark both derive from
+   the control token via color-mix. */
+.writing-wave-overlay {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: 6px;
+  background: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 8%, transparent) 20%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 22%, transparent) 50%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 8%, transparent) 80%
+  );
+  background-size: 220% 100%;
+  animation: writing-wave 1.7s ease-in-out infinite;
+}
+@keyframes writing-wave {
+  0%   { background-position: 130% 0; opacity: 0.55; }
+  50%  { opacity: 1; }
+  100% { background-position: -30% 0; opacity: 0.55; }
+}

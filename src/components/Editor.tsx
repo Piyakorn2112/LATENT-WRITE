@@ -42,6 +42,10 @@ interface Props {
    * right-click (in Electron: nothing).
    */
   onAskParagraph?: (info: { chapterId: string; paragraphIndex: number; x: number; y: number }) => void;
+  /** Right-click WITH a selection → the writing tool (max mode). */
+  onWriteSelection?: (info: { chapterId: string; start: number; end: number; x: number; y: number }) => void;
+  /** While the writing tool runs, this span refuses edits and pulses. */
+  lockedRange?: { start: number; end: number } | null;
 }
 
 const ANALYSIS_PANEL_RESERVED_WIDTH = 410;
@@ -73,7 +77,7 @@ function resolveParagraphSlice(content: string, caret: number): ParagraphSlice {
 
 export function Editor({
   chapter,
-  onAskParagraph, onContentChange, analysisResult, knownNames, entityNameMap, onEntityClick,
+  onAskParagraph, onWriteSelection, lockedRange, onContentChange, analysisResult, knownNames, entityNameMap, onEntityClick,
   annotationMode, onSpeechAnnotate, onActionAnnotate, annotationOverrides, sceneLabelOverrides,
   speechPredictions, actionPredictions, toolHighlights, typingSettleMs = 1000,
   sidePanelOpen = false,
@@ -307,24 +311,108 @@ export function Editor({
           onClick={(e) => syncCaretPosition(e.currentTarget)}
           onKeyUp={(e) => syncCaretPosition(e.currentTarget)}
           onFocus={(e) => syncCaretPosition(e.currentTarget)}
-          onContextMenu={onAskParagraph ? (e) => {
+          onContextMenu={(onAskParagraph || onWriteSelection) ? (e) => {
             // ★ Chromium moves the caret on the right-click's own mousedown
             //   (that is how native spell-suggestions know their word), so by
             //   the time contextmenu fires, selectionStart IS the clicked
             //   offset. The e2e asserts this: the popover must preview the
             //   paragraph under the pointer, not the one last edited.
+            //   EXCEPT when a real selection exists — a right-click INSIDE it
+            //   keeps it, and that selection is the writing tool's input.
+            const el = e.currentTarget;
+            const selStart = el.selectionStart ?? 0;
+            const selEnd = el.selectionEnd ?? 0;
+            if (onWriteSelection && selEnd > selStart) {
+              e.preventDefault();
+              onWriteSelection({ chapterId: chapter.id, start: selStart, end: selEnd, x: e.clientX, y: e.clientY });
+              return;
+            }
+            if (!onAskParagraph) return;
             e.preventDefault();
             onAskParagraph({
               chapterId: chapter.id,
-              paragraphIndex: paragraphIndexAt(chapter.content, e.currentTarget.selectionStart ?? 0),
+              paragraphIndex: paragraphIndexAt(chapter.content, selStart),
               x: e.clientX,
               y: e.clientY,
             });
           } : undefined}
+          onBeforeInput={lockedRange ? (e) => {
+            // ★ ONLY THE IN-FLIGHT SPAN IS LOCKED (owner call: not the whole
+            //   chapter). Any edit whose selection touches it is refused; the
+            //   rest of the chapter stays editable and the App shifts the
+            //   run's offsets for edits landing before it.
+            const el = e.currentTarget as HTMLTextAreaElement;
+            const s = el.selectionStart ?? 0;
+            const en = el.selectionEnd ?? s;
+            if (s < lockedRange.end && en >= lockedRange.start) e.preventDefault();
+          } : undefined}
+          onCut={lockedRange ? (e) => {
+            const el = e.currentTarget;
+            const s = el.selectionStart ?? 0;
+            const en = el.selectionEnd ?? s;
+            if (s < lockedRange.end && en >= lockedRange.start) e.preventDefault();
+          } : undefined}
           spellCheck
           tabIndex={annotationMode ? -1 : undefined}
         />
+        {lockedRange && (
+          <WritingWaveOverlay textareaRef={taRef} range={lockedRange} content={chapter.content} />
+        )}
       </div>
     </article>
+  );
+}
+
+/**
+ * The pulsing veil over the span the writing tool is revising. Positioned by
+ * a style-mirror of the textarea (the same trick the e2e uses): marker spans
+ * at the range's offsets give the WRAPPED line tops that character offsets
+ * alone cannot. Re-measured when the range or content changes; the textarea
+ * auto-grows rather than scrolls, so offsets hold between measurements.
+ */
+function WritingWaveOverlay({ textareaRef, range, content }: {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  range: { start: number; end: number };
+  content: string;
+}) {
+  const [rect, setRect] = useState<{ top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta || !ta.parentElement) return;
+    const cs = window.getComputedStyle(ta);
+    const mirror = document.createElement("div");
+    for (const prop of [
+      "font-family", "font-size", "font-weight", "line-height", "letter-spacing",
+      "padding-top", "padding-right", "padding-bottom", "padding-left",
+      "border-top-width", "border-left-width", "box-sizing", "tab-size",
+    ]) {
+      mirror.style.setProperty(prop, cs.getPropertyValue(prop));
+    }
+    mirror.style.position = "absolute";
+    mirror.style.visibility = "hidden";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "break-word";
+    mirror.style.width = `${ta.clientWidth}px`;
+    const a = document.createElement("span");
+    const b = document.createElement("span");
+    mirror.append(
+      document.createTextNode(content.slice(0, range.start)), a,
+      document.createTextNode(content.slice(range.start, range.end)), b,
+    );
+    ta.parentElement.appendChild(mirror);
+    const lineH = parseFloat(cs.lineHeight) || 24;
+    setRect({
+      top: ta.offsetTop + a.offsetTop,
+      height: Math.max(lineH, b.offsetTop - a.offsetTop + lineH),
+    });
+    mirror.remove();
+  }, [textareaRef, range.start, range.end, content]);
+  if (!rect) return null;
+  return (
+    <div
+      className="writing-wave-overlay"
+      style={{ top: rect.top, height: rect.height }}
+      aria-hidden
+    />
   );
 }

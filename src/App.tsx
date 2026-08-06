@@ -6,6 +6,8 @@ import { WorldDataView } from "./components/WorldDataView";
 import { SplitDivider } from "./components/SplitDivider";
 import { EntityPopover } from "./components/EntityPopover";
 import { MaxAskPopover } from "./components/MaxAskPopover";
+import { WritingToolPopover } from "./components/WritingToolPopover";
+import { runWritingTool, planWritingBatches, applyRevision, WRITING_TASK, type WritingOp } from "./lib/writing-tool";
 import { buildAskInput, splitEngineParagraphs } from "./lib/max-ask-context";
 import { AnnotationPopover } from "./components/AnnotationPopover";
 import { DebugPanel } from "./components/DebugPanel";
@@ -468,6 +470,90 @@ export default function App() {
   const handleAskParagraph = maxAskAvailable
     ? (info: { chapterId: string; paragraphIndex: number; x: number; y: number }) => setMaxAsk(info)
     : undefined;
+
+  // ── The writing tool (max mode): right-click WITH a selection ──────────
+  // The popover chooses the op; writing-tool.ts does the batching, context
+  // and the grammar gate; the splice back is offset arithmetic here. While a
+  // run is live only its span is locked (and pulses); edits elsewhere are
+  // tracked as splices and shift the span's offsets, so the final replace
+  // lands where the text actually is.
+  const [writingSel, setWritingSel] = useState<{ chapterId: string; start: number; end: number; x: number; y: number } | null>(null);
+  const [writingRun, setWritingRun] = useState<{ chapterId: string; start: number; end: number } | null>(null);
+  const writingJobRef = useRef<{ chapterId: string; start: number; spanLen: number; original: string } | null>(null);
+  const handleWriteSelection = maxAskAvailable
+    ? (info: { chapterId: string; start: number; end: number; x: number; y: number }) => {
+        writingJobRef.current = null;
+        setWritingSel(info);
+      }
+    : undefined;
+
+  /** Called with every editor content change so an edit ABOVE the in-flight
+   *  span shifts its offsets; an edit that touches the span (the lock should
+   *  make that impossible) abandons the run rather than mis-splicing. */
+  const noteWritingShift = (chapterId: string, prev: string, next: string) => {
+    const job = writingJobRef.current;
+    if (!job || job.chapterId !== chapterId || prev === next) return;
+    let p = 0;
+    const minLen = Math.min(prev.length, next.length);
+    while (p < minLen && prev[p] === next[p]) p++;
+    let tailPrev = prev.length;
+    let tailNext = next.length;
+    while (tailPrev > p && tailNext > p && prev[tailPrev - 1] === next[tailNext - 1]) { tailPrev--; tailNext--; }
+    const delta = next.length - prev.length;
+    if (tailPrev <= job.start) {
+      job.start += delta;
+      setWritingRun((r) => (r && r.chapterId === chapterId ? { ...r, start: r.start + delta, end: r.end + delta } : r));
+    } else if (p < job.start + job.spanLen) {
+      writingJobRef.current = null;
+      cancelAssistantWhere(({ task }) => task === WRITING_TASK);
+      setWritingRun(null);
+      setWritingSel(null);
+    }
+  };
+
+  const runWritingJob = async (
+    op: WritingOp,
+    instruction: string | undefined,
+    onProgress: (done: number, total: number) => void,
+  ) => {
+    const sel = writingSel;
+    if (!sel) return null;
+    const chapter = novel.chapters.find((c) => c.id === sel.chapterId);
+    if (!chapter) return null;
+    let job = writingJobRef.current;
+    if (!job || job.chapterId !== sel.chapterId) {
+      // "Write again" re-runs from the ORIGINAL selection, replacing whatever
+      // the previous pass put there — the job survives across popover runs.
+      job = {
+        chapterId: sel.chapterId,
+        start: sel.start,
+        spanLen: sel.end - sel.start,
+        original: chapter.content.slice(sel.start, sel.end),
+      };
+      writingJobRef.current = job;
+    }
+    setWritingRun({ chapterId: job.chapterId, start: job.start, end: job.start + job.spanLen });
+    const run: typeof assistantRunJSON = (req) => assistantRunJSON({ ...req, tier: "max" });
+    const before = chapter.content.slice(Math.max(0, job.start - 4000), job.start);
+    onProgress(0, planWritingBatches(job.original).length);
+    try {
+      const outcome = await runWritingTool(job.original, {
+        run, op, instruction, before,
+        onProgress: (p) => onProgress(p.batchIndex + 1, p.batchCount),
+      });
+      const j = writingJobRef.current;
+      if (j && !outcome.cancelled && outcome.batchOutcomes.some((o) => o === "revised")) {
+        updateChapterById(j.chapterId, (c) => ({
+          ...c,
+          content: applyRevision(c.content, j.start, j.start + j.spanLen, outcome.revised),
+        }));
+        j.spanLen = outcome.revised.length;
+      }
+      return outcome;
+    } finally {
+      setWritingRun(null);
+    }
+  };
 
   // Cold-start cast confirmation — shown at most once per manuscript, and
   // only at safe moments (app load, .txt import), never mid-typing.
@@ -2421,7 +2507,10 @@ export default function App() {
             <Editor
               key={current.id}
               chapter={current}
-              onContentChange={(content) => updateChapterById(current.id, (c) => ({ ...c, content }))}
+              onContentChange={(content) => {
+                noteWritingShift(current.id, current.content, content);
+                updateChapterById(current.id, (c) => ({ ...c, content }));
+              }}
               analysisResult={activeSide === "left" && intelMode !== "off" ? analysisResult : null}
               speechPredictions={activeSide === "left" && intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
               actionPredictions={activeSide === "left" && intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
@@ -2440,6 +2529,8 @@ export default function App() {
               layoutWidthKey={editorLayoutKey}
               splitMode
               onAskParagraph={handleAskParagraph}
+              onWriteSelection={handleWriteSelection}
+              lockedRange={writingRun && writingRun.chapterId === current.id ? writingRun : null}
             />
           </div>
           <SplitDivider ratio={splitRatio} onRatioChange={setSplitRatio} />
@@ -2451,7 +2542,10 @@ export default function App() {
             <Editor
               key={secondaryChapter.id}
               chapter={secondaryChapter}
-              onContentChange={(content) => updateChapterById(secondaryChapter.id, (c) => ({ ...c, content }))}
+              onContentChange={(content) => {
+                noteWritingShift(secondaryChapter.id, secondaryChapter.content, content);
+                updateChapterById(secondaryChapter.id, (c) => ({ ...c, content }));
+              }}
               analysisResult={activeSide === "right" && intelMode !== "off" ? analysisResult : null}
               speechPredictions={activeSide === "right" && intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
               actionPredictions={activeSide === "right" && intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
@@ -2470,6 +2564,8 @@ export default function App() {
               layoutWidthKey={editorLayoutKey}
               splitMode
               onAskParagraph={handleAskParagraph}
+              onWriteSelection={handleWriteSelection}
+              lockedRange={writingRun && writingRun.chapterId === secondaryChapter.id ? writingRun : null}
             />
           </div>
         </div>
@@ -2477,7 +2573,10 @@ export default function App() {
         <Editor
           key={current.id}
           chapter={current}
-          onContentChange={(content) => updateCurrent((c) => ({ ...c, content }))}
+          onContentChange={(content) => {
+            noteWritingShift(current.id, current.content, content);
+            updateCurrent((c) => ({ ...c, content }));
+          }}
           analysisResult={intelMode !== "off" ? analysisResult : null}
           speechPredictions={intelMode !== "off" ? analysisResult?.speechPredictions : undefined}
           actionPredictions={intelMode !== "off" ? analysisResult?.actionPredictions : undefined}
@@ -2495,6 +2594,8 @@ export default function App() {
           sidePanelCompensation={!!prefs.sidePanelCompensation}
           layoutWidthKey={editorLayoutKey}
           onAskParagraph={handleAskParagraph}
+          onWriteSelection={handleWriteSelection}
+          lockedRange={writingRun && writingRun.chapterId === current.id ? writingRun : null}
         />
       ) : (
         <div className="empty-state">
@@ -2556,6 +2657,27 @@ export default function App() {
               maxAsk.paragraphIndex, kind, question,
             )}
             onClose={() => setMaxAsk(null)}
+          />
+        );
+      })()}
+
+      {writingSel && (() => {
+        const ch = novel.chapters.find((c) => c.id === writingSel.chapterId);
+        if (!ch) return null;
+        const job = writingJobRef.current;
+        const original = job && job.chapterId === writingSel.chapterId
+          ? job.original
+          : ch.content.slice(writingSel.start, writingSel.end);
+        return (
+          <WritingToolPopover
+            x={writingSel.x}
+            y={writingSel.y}
+            selectionPreview={`${original.slice(0, 110)}${original.length > 110 ? "…" : ""}`}
+            selectionChars={original.length}
+            batchEstimate={planWritingBatches(original).length}
+            onRun={runWritingJob}
+            onCancel={() => cancelAssistantWhere(({ task }) => task === WRITING_TASK)}
+            onClose={() => { writingJobRef.current = null; setWritingSel(null); }}
           />
         );
       })()}
