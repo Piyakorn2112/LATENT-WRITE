@@ -80,6 +80,14 @@ console.log("\n── 3 · the grammar gate ────────────
   gate(!revisionAcceptable(original, "Completely different text.\n\nNow two paragraphs."),
     "a paragraph-count change is refused");
   gate(!revisionAcceptable(original, "He left."), "a wild shortening is refused");
+  // ★ THE LENGTH WINDOW IS PER OP: "make it longer" legitimately doubles a
+  //   passage; the proofread/rewrite window silently vetoed it and the
+  //   popover reported "nothing needed changing".
+  const doubled = "He walked slowly to the old door, breathing hard, and after a long moment of hesitation he finally opened it with both hands.";
+  gate(!revisionAcceptable("He walked to the door and opened it.", doubled, "rewrite"),
+    "rewrite still refuses a 2x expansion");
+  gate(revisionAcceptable("He walked to the door and opened it.", doubled, "custom"),
+    "custom accepts the expansion an instruction asked for");
   gate(!revisionAcceptable("She said it plainly.", "She duck said it it plainly plainly to to to the the man man who who."),
     "a revision that ADDS hard errors is refused");
 }

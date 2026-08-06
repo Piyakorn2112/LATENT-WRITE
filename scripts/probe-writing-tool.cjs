@@ -47,6 +47,11 @@ const CASES = [
     text: 'Mara heard a noise from the wheelhouse. She went up the steps and opened the door. The logbook was on the floor and the window was open.',
   },
   {
+    id: 'custom-longer', op: 'custom', instruction: 'make it longer',
+    before: 'The tide had turned an hour ago.',
+    text: 'Mara heard a noise from the wheelhouse. She went up the steps and opened the door. The logbook was on the floor and the window was open.',
+  },
+  {
     id: 'rewrite-2para', op: 'rewrite',
     before: '',
     text: 'The morning was grey and the rain was falling down from the sky above. Mara stood on the deck and she was drinking her coffee while she was standing there.\n\nTeo arrived at the dock at nine. He was late again and he had been late the day before as well and also the day before that.',
@@ -64,7 +69,7 @@ function mod(op, payload) {
     } else if (a.op === "judge") {
       // Decode exactly as the run loop does: wire restore, then style match.
       const restored = matchQuoteStyle(a.original, fromWire(a.revised));
-      out = { restored, acceptable: revisionAcceptable(a.original, restored),
+      out = { restored, acceptable: revisionAcceptable(a.original, restored, a.wop),
         errBefore: hardErrorCount(a.original), errAfter: hardErrorCount(restored) };
     }
     console.log(JSON.stringify(out ?? null));
@@ -105,7 +110,7 @@ async function main() {
     console.log(`── ${c.id}  (${c.op}${c.instruction ? `: "${c.instruction}"` : ''})  ${ms}ms`);
     if (!res.ok) { console.log(`   FAILED: ${res.error}\n`); continue; }
     const revised = typeof res.json?.text === 'string' ? res.json.text : '';
-    const judge = mod('judge', { original: c.text, revised });
+    const judge = mod('judge', { original: c.text, revised, wop: c.op });
     console.log(`   gate=${judge.acceptable ? 'ACCEPT' : 'REFUSE'} hardErrors ${judge.errBefore} -> ${judge.errAfter} · ${res.timings?.tokens} tok · ${res.timings?.genMs}ms gen · stop=${res.stopReason} rawHead=${JSON.stringify(String(res.raw || '').slice(0, 90))}`);
     console.log(`   BEFORE: ${c.text.replace(/\n/g, '\\n')}`);
     console.log(`   AFTER:  ${judge.restored.replace(/\n/g, '\\n')}\n`);

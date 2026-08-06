@@ -468,6 +468,7 @@ const SVA_VERBS: VerbPair[] = [
   ["fall", "falls"],       ["rise", "rises"],     ["move", "moves"],
   ["smile", "smiles"],     ["laugh", "laughs"],   ["sleep", "sleeps"],
   ["wake", "wakes"],       ["breathe", "breathes"], ["listen", "listens"],
+  ["shake", "shakes"],     ["tremble", "trembles"],
   ["reach", "reaches"],    ["grab", "grabs"],     ["push", "pushes"],
   ["pull", "pulls"],       ["throw", "throws"],   ["catch", "catches"],
   ["open", "opens"],       ["close", "closes"],   ["turn", "turns"],
@@ -873,6 +874,48 @@ const CONFUSABLE_RULES: Rule[] = [
   },
 ];
 
+// Added from the corpus benchmark's misses (scripts/bench-grammar-corpus.ts):
+// each is guarded against its own false-positive neighbourhood.
+const BENCH_RULES: Rule[] = [
+  // Plural noun + was → were. Closed noun list: unambiguous plurals only.
+  {
+    pattern: /\b(children|people|men|women|things|others)\s+(was)\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} were`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  },
+  // was/were/got/been + broke + direction → broken. The direction word is
+  // the guard: "she was broke" (penniless) is correct English and common in
+  // fiction, so a bare "was broke" never fires.
+  {
+    pattern: /\b(was|were|got|been)\s+broke\s+(by|off|in|into|open|apart|loose)\b/gi,
+    build: (m) => ({
+      suggestion: matchCase(m[0], `${m[1]} broken ${m[2]}`),
+      kind: "agreement",
+      severity: "error",
+    }),
+  },
+  // Sentence-start lowercase after ./!/? — WARNING, and heavily guarded:
+  // abbreviations and initials (Mr., Dr., J., etc., i.e.) legitimately
+  // precede lowercase; dialogue attribution ("Where?" she asked) never
+  // matches because the closing quote sits between the mark and the space.
+  {
+    pattern: /(?:^|\s)([A-Za-z']{2,}[.!?])\s+([a-z][A-Za-z']*)/g,
+    build: (m) => {
+      const before = m[1].slice(0, -1);
+      if (/^(Mr|Mrs|Ms|Dr|St|Mt|vs|etc|Jr|Sr|no|No|op|approx|min|max|misc)$/i.test(before)) return null;
+      if (/\./.test(before)) return null; // i.e. / e.g. / U.S.
+      return {
+        suggestion: `${m[1]} ${m[2][0].toUpperCase()}${m[2].slice(1)}`,
+        kind: "capital",
+        severity: "warning",
+      };
+    },
+  },
+];
+
 const CORE_RULES: Rule[] = [
   ...makeSpellRules(),
   ...TENSE_RULES,
@@ -882,6 +925,7 @@ const CORE_RULES: Rule[] = [
   ...PUNCT_RULES,
   DOUBLE_RULE,
   ...CONFUSABLE_RULES,
+  ...BENCH_RULES,
 ];
 
 const STYLE_RULES: Rule[] = [

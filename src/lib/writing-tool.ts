@@ -140,11 +140,16 @@ you are polishing their sentences, not writing your own.
 
 Answer as JSON: {"text": the revised passage}.`;
 
-// ★ MEASURED (probe-writing-tool.cjs): the first wording ("follow it within
-//   the hard rules; where it conflicts, the rule wins") made the 4B return
-//   the passage UNCHANGED — the caution swallowed the instruction. The rule
-//   split must be explicit: the instruction OWNS the style axis; the rules
-//   keep only facts/names/POV/breaks.
+// ★ MEASURED TWICE (probe-writing-tool.cjs). Round 1: "follow it within the
+//   hard rules; where it conflicts, the rule wins" made the 4B return the
+//   passage UNCHANGED — the caution swallowed the instruction. The explicit
+//   split below fixed it ("make it more tense" delivered). Round 2: ADDING a
+//   length paragraph + worked example to this prompt regressed BOTH custom
+//   cases back to verbatim copies — more rule text is less compliance, the
+//   same lesson the chip prompt sweep taught. This prompt is therefore
+//   FROZEN at the working wording; the length license rides the USER turn,
+//   and only when the instruction is actually about length (see
+//   buildWritingRequest).
 export const CUSTOM_SYSTEM = `${SHARED_RULES}
 
 The writer gives one INSTRUCTION for how this passage should read. REVISING
@@ -154,6 +159,46 @@ unless it already fully does what the instruction says. Only facts, names,
 point of view, tense and the paragraph breaks are off-limits.
 
 Answer as JSON: {"text": the revised passage}.`;
+
+/**
+ * ★ LENGTH IS ITS OWN PROMPT, NOT A CLAUSE ON CUSTOM. Measured ladder
+ *   (probe-writing-tool.cjs): the shared rule "nothing happens in your
+ *   version that does not happen in theirs" reads, to the 4B, as a ban on
+ *   adding ANY prose — "make it longer" came back verbatim through three
+ *   wordings, and bolting a length paragraph onto CUSTOM_SYSTEM regressed
+ *   the non-length cases too. So a length-shaped instruction routes to this
+ *   prompt instead, whose hard rules legitimize deepening from the first
+ *   line and whose worked example shows the move.
+ */
+export const LENGTH_SYSTEM = `You are a writing tool inside a novelist's editor. The writer asks you to
+change this passage's LENGTH. You return the revised passage — nothing else.
+Hard rules, all of them:
+- Return the WHOLE passage, revised to the asked length. Returning it
+  unchanged is a wrong answer.
+- Keep the paragraph breaks: same number of paragraphs, in the same order.
+- Keep the point of view, the tense, every name and every event. To make it
+  LONGER, deepen what is already there — sensation, image, a beat drawn
+  out, a pause inhabited — never a new event, arrival or decision. To make
+  it SHORTER, cut words; never summarise an event away.
+- Keep the writer's register. Dialogue keeps its voice.
+- If some CONTEXT lines are shown, they are for continuity only — never
+  revise or repeat them; revise only the PASSAGE.
+- The \` character is the editor's placeholder for a quotation mark. Keep
+  every \` exactly where it stands.
+
+Worked example for "make it longer" — a different story, never reuse its
+words:
+  passage: The kettle boiled and she poured the tea.
+  revised: The kettle rattled its way to the boil, and she stood over it a
+  moment longer than she needed to, letting the steam settle, before she
+  poured the tea and watched the leaves turn slowly in the water.
+
+Answer as JSON: {"text": the revised passage}.`;
+
+/** A length-shaped instruction gets the LENGTH_SYSTEM routing. */
+export function isLengthInstruction(instruction: string): boolean {
+  return /\b(long(er)?|short(er|en)?|expand|extend|lengthen|trim|cut|condense|double|half)\b/i.test(instruction);
+}
 
 export const WRITING_SCHEMA_BASE = {
   type: "object",
@@ -211,7 +256,10 @@ export function buildWritingRequest(
   context: { before: string; revisedTail: string; instruction?: string },
 ): WritingRequest {
   const systemPrompt =
-    op === "proofread" ? PROOFREAD_SYSTEM : op === "rewrite" ? REWRITE_SYSTEM : CUSTOM_SYSTEM;
+    op === "proofread" ? PROOFREAD_SYSTEM
+    : op === "rewrite" ? REWRITE_SYSTEM
+    : context.instruction && isLengthInstruction(context.instruction) ? LENGTH_SYSTEM
+    : CUSTOM_SYSTEM;
   const lines: string[] = [];
   if (context.before) {
     lines.push("CONTEXT — the manuscript just before this passage (do not revise):");
@@ -229,13 +277,25 @@ export function buildWritingRequest(
     systemPrompt,
     userText: lines.join("\n"),
     // maxLength headroom over the batch so the grammar never guillotines a
-    // legitimate revision; the length rule lives in the prompt.
+    // legitimate revision; the length rule lives in the prompt. A CUSTOM
+    // instruction may legitimately EXPAND ("make it longer"), so its ceiling
+    // is a multiple the others never need.
     schema: {
       ...WRITING_SCHEMA_BASE,
-      properties: { text: { type: "string", maxLength: Math.ceil(batch.text.length * 1.6) + 240 } },
+      properties: {
+        text: {
+          type: "string",
+          maxLength: op === "custom"
+            ? Math.ceil(batch.text.length * 3) + 400
+            : Math.ceil(batch.text.length * 1.6) + 240,
+        },
+      },
     },
-    // ~chars/3.2 tokens for English prose, 1.5x slack + scaffold.
-    maxTokens: Math.ceil((batch.text.length / 3.2) * 1.5) + 96,
+    // ~chars/3.2 tokens for English prose, slack + scaffold; custom gets
+    // expansion headroom for the same reason as the schema ceiling.
+    maxTokens: op === "custom"
+      ? Math.ceil((batch.text.length / 3.2) * 2.8) + 128
+      : Math.ceil((batch.text.length / 3.2) * 1.5) + 96,
   };
 }
 
@@ -249,14 +309,28 @@ export function hardErrorCount(text: string): number {
 /**
  * A revision ships only if it does not LOSE to the deterministic checker:
  * fewer-or-equal hard errors than the original, and non-trivially shaped
- * (non-empty, same paragraph count, not wildly shorter/longer).
+ * (non-empty, same paragraph count, length within the op's honest range).
+ *
+ * ★ THE LENGTH WINDOW IS PER OP. Proofread/rewrite promise roughly-the-same
+ *   text, so a wild length change means the model wandered. A CUSTOM
+ *   instruction is often ABOUT length ("make it longer", "cut this down") —
+ *   the tight window silently vetoed exactly what the writer asked for, and
+ *   the popover then reported "nothing needed changing". Custom keeps only
+ *   the never-sane bounds.
  */
-export function revisionAcceptable(original: string, revised: string): boolean {
+export function revisionAcceptable(original: string, revised: string, op: WritingOp = "rewrite"): boolean {
   const r = revised.trim();
   if (!r) return false;
   const paraCount = (t: string) => t.split(/\n[ \t]*\n/).length;
   if (paraCount(original) !== paraCount(r)) return false;
-  if (r.length < original.length * 0.5 || r.length > original.length * 1.8) return false;
+  // Ratios alone are twitchy on SHORT selections (a sentence doubled is a
+  // huge ratio and a modest edit), so custom's ceiling carries absolute
+  // slack alongside the multiple.
+  const max = op === "custom"
+    ? original.length * 3.2 + 240
+    : original.length * 1.8;
+  const min = original.length * (op === "custom" ? 0.3 : 0.5);
+  if (r.length < min || r.length > max) return false;
   return hardErrorCount(r) <= hardErrorCount(original);
 }
 
@@ -337,7 +411,7 @@ export async function runWritingTool(
     const text = matchQuoteStyle(batch.text, fromWire(raw));
     if (text === batch.text.trim() || text === "") {
       outcomes.push("unchanged");
-    } else if (revisionAcceptable(batch.text, text)) {
+    } else if (revisionAcceptable(batch.text, text, opts.op)) {
       texts[batch.index] = text;
       outcomes.push("revised");
     } else {

@@ -16109,29 +16109,40 @@ body.electron-window-unfocused .wc-panel::after {
 
 .max-ask-again:hover { color: var(--text); border-color: var(--text-tertiary); }
 
-/* ── Writing tool: the in-flight span's pulse ────────────────────────────
-   A soft wave of the system accent travels the locked range while the model
-   revises it. Sibling overlay, never a filter on the text itself (the
-   backdrop-filter/ancestor-filter lessons); light and dark both derive from
-   the control token via color-mix. */
-.writing-wave-overlay {
+/* ── Writing tool: the pulse rides the text itself ──────────────────────
+   A style-mirror re-renders the revising span's words over the textarea's
+   own glyphs; each word is an accent span whose opacity pulses on a
+   staggered delay, so a wave of colour travels the text while the original
+   glyphs keep it legible. The mirror never paints anything outside the
+   range (transparent text preserves wrapping) and never takes pointer
+   events. Sibling overlay, never a filter on the text (the ancestor-filter
+   lessons); light/dark both derive from the control token. */
+.writing-wave-text {
   position: absolute;
-  left: 6px;
-  right: 6px;
   z-index: 2;
   pointer-events: none;
-  border-radius: 6px;
-  background: linear-gradient(
-    100deg,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 8%, transparent) 20%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 22%, transparent) 50%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 8%, transparent) 80%
-  );
-  background-size: 220% 100%;
-  animation: writing-wave 1.7s ease-in-out infinite;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: transparent;
+  user-select: none;
 }
-@keyframes writing-wave {
-  0%   { background-position: 130% 0; opacity: 0.55; }
-  50%  { opacity: 1; }
-  100% { background-position: -30% 0; opacity: 0.55; }
+.writing-wave-word {
+  color: var(--control-value-fill, #3f79d8);
+  opacity: 0.12;
+  animation: writing-word-pulse 1.53s ease-in-out infinite;
+}
+@keyframes writing-word-pulse {
+  0%   { opacity: 0.1; }
+  35%  { opacity: 0.85; }
+  70%  { opacity: 0.1; }
+  100% { opacity: 0.1; }
+}
+
+/* The writing popover: same glass as max-ask, its own width and rows. */
+.writing-tool.max-ask { width: 296px; max-width: calc(100vw - 24px); }
+.writing-tool .writing-tool-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }

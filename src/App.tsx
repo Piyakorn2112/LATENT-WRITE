@@ -555,6 +555,18 @@ export default function App() {
     }
   };
 
+  // Switching chapters mid-run assumes the task is abandoned: cancel the
+  // batch chain, drop the job, hide the popover. Offsets into a chapter the
+  // writer is no longer looking at are not worth keeping alive.
+  useEffect(() => {
+    const sel = writingSel;
+    if (!sel || sel.chapterId === currentId) return;
+    cancelAssistantWhere(({ task }) => task === WRITING_TASK);
+    writingJobRef.current = null;
+    setWritingSel(null);
+    setWritingRun(null);
+  }, [currentId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cold-start cast confirmation — shown at most once per manuscript, and
   // only at safe moments (app load, .txt import), never mid-typing.
   const [castConfirmOpen, setCastConfirmOpen] = useState(false);

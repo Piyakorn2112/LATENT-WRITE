@@ -75,7 +75,11 @@ const BOX_H_TALL  = 34;
 const BOX_GAP     = 8;     // minimum gap between boxes
 const LAYOUT_ITER = 30;    // relaxation iterations — wider detail chips need more settling time
 const SPRING_K    = 0.11;  // slightly looser spring so wider chips can separate before snapping back
-const MIN_BOX_Y   = 24;    // boxes may not go above this Y
+// ★ 24 → 16 for the two-line era: four TALL chips over a high-tension node
+//   (y≈220) need ~180px and the old ceiling left ~178 — both clamps active,
+//   the column jammed, chips overlapped. Paired with the sideways escape in
+//   the separation pass below.
+const MIN_BOX_Y   = 16;    // boxes may not go above this Y
 const NODE_BOX_GAP = 10;   // min clearance between event boxes and chapter nodes
 const VIEW_OVERSCAN = 6;   // chapters rendered outside the current viewport
 const BOX_VIS_PAD   = 220; // px overscan for off-column event boxes
@@ -348,16 +352,25 @@ function layoutBoxes(
         if (ox > 0 && oy > 0) {
           // Overlap detected — separate along the smaller overlap axis
           const sameCol = Math.abs(a.chX - b.chX) < 1; // same chapter column?
-          if (sameCol) {
+          // ★ THE COLUMN RULE YIELDS WHEN THE COLUMN IS FULL. Two-line chips
+          //   can overrun the vertical budget between MIN_BOX_Y and a
+          //   high-tension node; with both clamps active a strictly-vertical
+          //   push only ping-pongs. Early iterations keep the stack columnar;
+          //   a pair still overlapping late is jammed and may step sideways.
+          if (sameCol && iter < 12) {
             // Same chapter: push strictly vertical (keep boxes in column)
             const dir = a.cy <= b.cy ? -1 : 1;
             a.cy += dir * oy / 2;
             b.cy -= dir * oy / 2;
-          } else if (ox < oy) {
-            // Different chapters, more horizontal overlap: push apart sideways
+          } else if (ox < oy || sameCol) {
+            // More horizontal overlap (or a jammed column): push apart
+            // sideways. A jammed same-column pair steps GENTLY — dx≈0 makes
+            // ox/2 nearly the full box width, and one violent step would
+            // throw the chip across its neighbours.
+            const push = sameCol ? Math.min(ox / 2, 9) : ox / 2;
             const dir = dx >= 0 ? 1 : -1;
-            a.cx += dir * ox / 2;
-            b.cx -= dir * ox / 2;
+            a.cx += dir * push;
+            b.cx -= dir * push;
           } else {
             // Different chapters, more vertical overlap: push up/down
             const dir = a.cy <= b.cy ? -1 : 1;

@@ -364,55 +364,60 @@ export function Editor({
 }
 
 /**
- * The pulsing veil over the span the writing tool is revising. Positioned by
- * a style-mirror of the textarea (the same trick the e2e uses): marker spans
- * at the range's offsets give the WRAPPED line tops that character offsets
- * alone cannot. Re-measured when the range or content changes; the textarea
- * auto-grows rather than scrolls, so offsets hold between measurements.
+ * The pulse over the span the writing tool is revising — ON THE TEXT ITSELF
+ * (owner call: not a rounded veil). A full style-mirror of the textarea
+ * re-renders the SAME glyphs in the same positions: everything outside the
+ * range is transparent, and each word inside it is an accent-coloured span
+ * whose opacity pulses on a staggered delay, so a wave of colour travels the
+ * words while the textarea's own glyphs keep the text legible underneath.
+ * Pointer-events none throughout — the textarea stays the editing surface.
  */
 function WritingWaveOverlay({ textareaRef, range, content }: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   range: { start: number; end: number };
   content: string;
 }) {
-  const [rect, setRect] = useState<{ top: number; height: number } | null>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
   useLayoutEffect(() => {
     const ta = textareaRef.current;
-    if (!ta || !ta.parentElement) return;
+    if (!ta) return;
     const cs = window.getComputedStyle(ta);
-    const mirror = document.createElement("div");
+    const copy: Record<string, string> = {};
     for (const prop of [
       "font-family", "font-size", "font-weight", "line-height", "letter-spacing",
       "padding-top", "padding-right", "padding-bottom", "padding-left",
       "border-top-width", "border-left-width", "box-sizing", "tab-size",
+      "text-rendering",
     ]) {
-      mirror.style.setProperty(prop, cs.getPropertyValue(prop));
+      copy[prop] = cs.getPropertyValue(prop);
     }
-    mirror.style.position = "absolute";
-    mirror.style.visibility = "hidden";
-    mirror.style.whiteSpace = "pre-wrap";
-    mirror.style.overflowWrap = "break-word";
-    mirror.style.width = `${ta.clientWidth}px`;
-    const a = document.createElement("span");
-    const b = document.createElement("span");
-    mirror.append(
-      document.createTextNode(content.slice(0, range.start)), a,
-      document.createTextNode(content.slice(range.start, range.end)), b,
-    );
-    ta.parentElement.appendChild(mirror);
-    const lineH = parseFloat(cs.lineHeight) || 24;
-    setRect({
-      top: ta.offsetTop + a.offsetTop,
-      height: Math.max(lineH, b.offsetTop - a.offsetTop + lineH),
+    setStyle({
+      ...(copy as CSSProperties),
+      top: ta.offsetTop,
+      left: ta.offsetLeft,
+      width: ta.clientWidth,
     });
-    mirror.remove();
   }, [textareaRef, range.start, range.end, content]);
-  if (!rect) return null;
+  if (!style) return null;
+
+  // Word-level spans inside the range; whitespace stays as plain (transparent)
+  // text so wrapping in the mirror matches the textarea exactly.
+  const inRange = content.slice(range.start, range.end);
+  const parts = inRange.split(/(\s+)/);
+  let wordIndex = 0;
   return (
-    <div
-      className="writing-wave-overlay"
-      style={{ top: rect.top, height: rect.height }}
-      aria-hidden
-    />
+    <div className="writing-wave-text" style={style} aria-hidden>
+      {content.slice(0, range.start)}
+      {parts.map((part, i) => {
+        if (part === "" || /^\s+$/.test(part)) return part;
+        const delay = (wordIndex++ * 90) % 1530;
+        return (
+          <span key={i} className="writing-wave-word" style={{ animationDelay: `${delay}ms` }}>
+            {part}
+          </span>
+        );
+      })}
+      {content.slice(range.end)}
+    </div>
   );
 }
