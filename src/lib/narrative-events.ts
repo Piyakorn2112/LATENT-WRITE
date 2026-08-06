@@ -309,7 +309,13 @@ export function selectDisplayChips<
     const label = typeof pick.label === "string" && pick.label.trim() !== ""
       ? pick.label
       : event.label;
-    resolved.push(label === event.label ? event : { ...event, label });
+    const detail = typeof (pick as { detail?: unknown }).detail === "string"
+      && (pick as { detail?: string }).detail!.trim() !== ""
+      ? (pick as { detail?: string }).detail
+      : undefined;
+    resolved.push(label === event.label && !detail
+      ? event
+      : { ...event, label, ...(detail ? { lmDetail: detail } : {}) });
   }
 
   if (resolved.length === 0) return selectTimelineChips(events, budget);

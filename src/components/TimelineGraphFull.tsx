@@ -69,7 +69,9 @@ const SPINE_BASE  = 280;   // baseline Y (no tension) — was 230
 const TERRAIN_AMP = 60;    // max upward displacement (full tension = y=220)
 // Event box collision layout constants
 const EVENT_LAYOUT_OVERSCAN = 3;
-const BOX_H       = 22;    // fixed box height
+const BOX_H       = 22;    // single-line box height
+/** Two-line box: label row + the max-mode grounded detail row underneath. */
+const BOX_H_TALL  = 34;
 const BOX_GAP     = 8;     // minimum gap between boxes
 const LAYOUT_ITER = 30;    // relaxation iterations — wider detail chips need more settling time
 const SPRING_K    = 0.11;  // slightly looser spring so wider chips can separate before snapping back
@@ -173,6 +175,13 @@ interface BoxState {
   detail: string | null;
   detailW: number;
   label: string;
+  /** Max-mode second line (the chip pick's grounded detail), pre-truncated to
+   *  fit the box; null on single-line chips. */
+  detail2: string | null;
+  /** Per-box height — BOX_H, or BOX_H_TALL when detail2 is present. The whole
+   *  relaxation reads THIS, never the constant, so tall and short boxes can
+   *  coexist without overlapping. */
+  h: number;
   /** The chapter the event belongs to — a chip click jumps INTO that chapter. */
   chapterId: string;
   /** The stored event, whole. The label is capped at 20-30 characters and
@@ -263,6 +272,7 @@ function layoutBoxes(
   const nodes = chData.map(({ x, y, nr }) => ({ x, y, nr }));
 
   for (const { ch, x: chX, y: nodeY, nr, events } of chData) {
+    let stackCursor = nodeY - nr - BOX_H / 2;
     for (let ei = 0; ei < events.length; ei++) {
       const evt   = events[ei];
       const detail = detailTag(evt);
@@ -280,12 +290,31 @@ function layoutBoxes(
       // Collision tuning was calibrated for narrower centered chips. Keep the
       // richer tag treatment, but size from explicit text paddings so the
       // solver sees roughly the same physical box footprint that gets rendered.
+      // ── the max-mode second line, truncated to what the box can hold ──
+      let detail2: string | null = evt.lmDetail?.trim() || null;
+      let detail2W = 0;
+      if (detail2) {
+        const maxW = BOX_MAX_W - BOX_SIDE_PAD * 2;
+        let t = detail2.length > 64 ? `${detail2.slice(0, 63).trimEnd()}…` : detail2;
+        detail2W = measureTextWidth(t, 7, { letterSpacingEm: 0.01 });
+        while (detail2W > maxW && t.length > 10) {
+          t = `${t.slice(0, -3).trimEnd()}…`;
+          detail2W = measureTextWidth(t, 7, { letterSpacingEm: 0.01 });
+        }
+        detail2 = t;
+      }
+      const h = detail2 ? BOX_H_TALL : BOX_H;
       const w = Math.min(
-        BOX_SIDE_PAD * 2 + detailW + (detail ? BOX_DETAIL_GAP : 0) + labelW,
+        Math.max(
+          BOX_SIDE_PAD * 2 + detailW + (detail ? BOX_DETAIL_GAP : 0) + labelW,
+          detail2 ? BOX_SIDE_PAD * 2 + detail2W : 0,
+        ),
         BOX_MAX_W,
       );
-      // Initial position: stack above node, closest event nearest node
-      const initCY = nodeY - nr - BOX_H / 2 - (ei + 1) * (BOX_H + BOX_GAP);
+      // Initial position: stack above node, closest event nearest node —
+      // a RUNNING cursor now that heights vary per box.
+      stackCursor -= h + BOX_GAP;
+      const initCY = stackCursor + h / 2;
       states.push({
         key: `${ch.id}-${ei}-${evt.type}`,
         chX, nodeY, nodeR: nr,
@@ -293,10 +322,12 @@ function layoutBoxes(
         detail,
         detailW,
         label, w,
+        detail2,
+        h,
         chapterId: ch.id,
         evt,
         cx: chX,
-        cy: Math.max(MIN_BOX_Y + BOX_H / 2, initCY),
+        cy: Math.max(MIN_BOX_Y + h / 2, initCY),
       });
     }
   }
@@ -310,7 +341,7 @@ function layoutBoxes(
         const dx = a.cx - b.cx;
         const dy = a.cy - b.cy;
         const minX = (a.w + b.w) / 2 + BOX_GAP;
-        const minY = BOX_H + BOX_GAP;
+        const minY = (a.h + b.h) / 2 + BOX_GAP;
         const ox = minX - Math.abs(dx);
         const oy = minY - Math.abs(dy);
 
@@ -347,24 +378,24 @@ function layoutBoxes(
       for (const node of nodes) {
         const maxDx = s.w / 2 + node.nr + BOX_GAP;
         if (Math.abs(s.cx - node.x) > maxDx) continue;
-        const maxCy = node.y - node.nr - NODE_BOX_GAP - BOX_H / 2;
+        const maxCy = node.y - node.nr - NODE_BOX_GAP - s.h / 2;
         if (s.cy > maxCy) s.cy = maxCy;
       }
     }
 
     // Boundary: don't go above MIN_BOX_Y
     for (const s of states) {
-      if (s.cy - BOX_H / 2 < MIN_BOX_Y) s.cy = MIN_BOX_Y + BOX_H / 2;
+      if (s.cy - s.h / 2 < MIN_BOX_Y) s.cy = MIN_BOX_Y + s.h / 2;
     }
   }
 
   // Build final placements with bezier branch paths
   return states.map(s => {
     const x = s.cx - s.w / 2;
-    const y = s.cy - BOX_H / 2;
+    const y = s.cy - s.h / 2;
     // Bezier from node top → box bottom-center (S-curve accommodates H offset)
     const srcX = s.chX, srcY = s.nodeY - s.nodeR;
-    const dstX = s.cx,  dstY = y + BOX_H;
+    const dstX = s.cx,  dstY = y + s.h;
     const midY  = (srcY + dstY) / 2;
     const branchPath = `M${srcX},${srcY} C${srcX},${midY} ${dstX},${midY} ${dstX},${dstY}`;
     return { ...s, x, y, branchPath };
@@ -734,7 +765,7 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }
           />
           <rect
             x={box.x} y={box.y}
-            width={box.w} height={BOX_H}
+            width={box.w} height={box.h}
             rx={BOX_H / 2}
             fill={box.color} fillOpacity={0.09}
             stroke={box.color} strokeWidth={0.9} strokeOpacity={0.5}
@@ -742,7 +773,7 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }
           {box.detail && (
             <>
               <text
-                x={box.x + BOX_SIDE_PAD} y={box.y + BOX_H / 2}
+                x={box.x + BOX_SIDE_PAD} y={box.y + (box.detail2 ? 11 : box.h / 2)}
                 textAnchor="start" dominantBaseline="central"
                 fill={box.color}
                 fontSize={6.4} fontFamily="var(--font-ui)"
@@ -753,7 +784,7 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }
               </text>
               <circle
                 cx={box.x + BOX_SIDE_PAD + box.detailW - 4}
-                cy={box.y + BOX_H / 2}
+                cy={box.y + (box.detail2 ? 11 : box.h / 2)}
                 r={1.2}
                 fill={box.color}
                 opacity={0.46}
@@ -761,7 +792,8 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }
             </>
           )}
           <text
-            x={box.x + BOX_SIDE_PAD + box.detailW + (box.detail ? BOX_DETAIL_GAP : 0)} y={box.y + BOX_H / 2}
+            x={box.x + BOX_SIDE_PAD + box.detailW + (box.detail ? BOX_DETAIL_GAP : 0)}
+            y={box.y + (box.detail2 ? 11 : box.h / 2)}
             textAnchor="start" dominantBaseline="central"
             fill="var(--text-secondary)"
             fontSize={8.5} fontFamily="var(--font-ui)"
@@ -769,6 +801,19 @@ const EventBoxesLayer = memo(function EventBoxesLayer({ boxes, onHover, onPick }
           >
             {box.label}
           </text>
+          {/* The max-mode second line: the pick's grounded detail, quieter
+              than the label so the chip still reads label-first. */}
+          {box.detail2 && (
+            <text
+              x={box.x + BOX_SIDE_PAD} y={box.y + box.h - 9}
+              textAnchor="start" dominantBaseline="central"
+              fill="var(--text-tertiary)"
+              fontSize={7} fontFamily="var(--font-ui)"
+              letterSpacing="0.01em"
+            >
+              {box.detail2}
+            </text>
+          )}
         </g>
       ))}
     </>
@@ -1298,7 +1343,7 @@ function TimelineGraphFullImpl({
                     data-below={below || undefined}
                     style={{
                       left: Math.min(Math.max(hoverBox.cx, 150), svgW - 150),
-                      top: below ? hoverBox.y + BOX_H + 10 : hoverBox.y - 10,
+                      top: below ? hoverBox.y + hoverBox.h + 10 : hoverBox.y - 10,
                     }}
                   >
                     <div className="timeline-hover-card-head">

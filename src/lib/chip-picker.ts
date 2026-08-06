@@ -100,6 +100,31 @@ export const CHIP_SCHEMA = {
   },
 } as const;
 
+/** Display cap for a chip's second line; schema allows headroom over it so a
+ *  runaway detail arrives whole and is DROPPED in normalize, never silently
+ *  clipped by the grammar into something that merely fits. */
+export const CHIP_DETAIL_MAX = 72;
+const SCHEMA_DETAIL_MAX = 96;
+
+/** The rich variant: same picks, plus an optional grounded second line. */
+export const CHIP_SCHEMA_RICH = {
+  type: "object",
+  properties: {
+    picks: {
+      type: "array",
+      maxItems: CHIP_PICK_CAP,
+      items: {
+        type: "object",
+        properties: {
+          rank: { type: "integer" },
+          label: { type: "string", maxLength: SCHEMA_LABEL_MAX },
+          detail: { type: "string", maxLength: SCHEMA_DETAIL_MAX },
+        },
+      },
+    },
+  },
+} as const;
+
 /**
  * Frozen v1 system prompt.
  *
@@ -331,7 +356,15 @@ export interface ChipRequest {
 export interface BuildChipRequestOptions {
   candidateCap?: number;
   maxTokens?: number;
+  /**
+   * ★ MAX MODE ONLY: each pick may carry a `detail` — one grounded phrase
+   *   under the label, so a chip can be two lines of accurate context instead
+   *   of one compressed clause. The small tier never sees this schema; its
+   *   prompts stay byte-identical to what was measured.
+   */
+  rich?: boolean;
 }
+
 
 const pct = (position: number) =>
   `${Math.round(Math.max(0, Math.min(1, position)) * 100)}% in`;
@@ -354,6 +387,9 @@ export function buildChipRequest(
   opts: BuildChipRequestOptions = {},
 ): ChipRequest {
   const cap = opts.candidateCap ?? CHIP_CANDIDATE_CAP;
+  const richLine = opts.rich
+    ? `\n\nAlso give each pick a "detail": one phrase of at most 12 words drawn from\nthe moment's own sentence — what concretely happens. No new names, no new\nfacts; if the sentence gives nothing beyond the label, leave detail empty.`
+    : "";
 
   const candidates = entry.majorEvents
     .map((event, index) => ({ event, rank: effectiveRank(event, index) }))
@@ -427,9 +463,9 @@ export function buildChipRequest(
 
   return {
     candidates,
-    systemPrompt: CHIP_SYSTEM,
+    systemPrompt: CHIP_SYSTEM + richLine,
     userText,
-    schema: CHIP_SCHEMA,
+    schema: opts.rich ? CHIP_SCHEMA_RICH : CHIP_SCHEMA,
     maxTokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
 }
@@ -653,9 +689,25 @@ export function normalizeChipPicks(
     const trimUsable = !draftUsable && !endsMidClause(trimmed);
     const usable = sound && (repaired.length <= CHIP_LABEL_MAX || trimUsable);
     if (!usable) outFallbacks?.add(rankRaw);
+    // ★ THE DETAIL IS OPTIONAL DECORATION AND FAILS ALONE. A bad second line
+    //   never costs the pick: it must be single-line, inside the cap after a
+    //   clean trim, and GROUNDED in the candidate's own sentence (two shared
+    //   content words) so a drifting elaboration is dropped rather than shown.
+    let detail: string | undefined;
+    const detailRaw = typeof value.detail === "string" ? value.detail.trim() : "";
+    if (detailRaw && !/[\r\n]/.test(detailRaw)) {
+      const cut = trimToLength(detailRaw, CHIP_DETAIL_MAX);
+      const words = cut.toLowerCase().match(/[a-z']{4,}/g) ?? [];
+      const sentenceLc = candidate.sentence.toLowerCase();
+      const shared = words.filter((w) => sentenceLc.includes(w)).length;
+      if (cut && !endsMidClause(cut) && shared >= 2 && cut.toLowerCase() !== (usable ? trimmed : candidate.label).toLowerCase()) {
+        detail = cut;
+      }
+    }
     out.push({
       rank: rankRaw,
       label: usable ? trimmed : candidate.label,
+      ...(detail ? { detail } : {}),
     });
   }
 
@@ -713,6 +765,8 @@ export interface ChipPickOptions {
   timeoutMs?: number;
   maxTokens?: number;
   candidateCap?: number;
+  /** Max mode: picks may carry a grounded second line. See BuildChipRequestOptions. */
+  rich?: boolean;
 }
 
 export interface ChipPickOutcome {
@@ -734,6 +788,7 @@ export async function runChipPick(
   const request = buildChipRequest(entry, {
     candidateCap: opts.candidateCap,
     maxTokens: opts.maxTokens,
+    rich: opts.rich,
   });
   if (request.candidates.length === 0) return null;
 

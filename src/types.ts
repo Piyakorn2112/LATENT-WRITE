@@ -295,6 +295,9 @@ export interface AdaptiveLearningStore {
 
 export interface MajorEvent {
   label: string;
+  /** Max-mode chip second line, attached at display time by selectDisplayChips
+   *  from the pick — never persisted on the event itself. */
+  lmDetail?: string;
   type: "climax" | "transition" | "introduction" | "confrontation" | "revelation" | "scene-break";
   detailType?: string;
   detailLabel?: string;
@@ -341,6 +344,9 @@ export interface MajorEvent {
 export interface TimelineChipPick {
   rank: number;
   label: string;
+  /** Max mode only: one grounded phrase shown under the label — a chip that is
+   *  two lines of accurate context instead of one compressed clause. */
+  detail?: string;
 }
 
 export interface ChapterGraphEntry {

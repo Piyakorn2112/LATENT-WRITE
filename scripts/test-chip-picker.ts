@@ -382,6 +382,45 @@ console.log("\n── 5. selectDisplayChips: the lm path ───────�
     `"${blankLabel[0]?.label}"`);
 }
 
+console.log("\n── 5 · the max-mode rich detail ────────────────────────────────");
+{
+  // The small path is BYTE-IDENTICAL to what was measured: no rich flag, no
+  // detail anywhere in prompt or schema.
+  const plain = buildChipRequest(ENTRY);
+  gate(!JSON.stringify(plain.schema).includes("detail") && !plain.systemPrompt.includes("detail"), "without `rich`, prompt and schema carry no trace of the detail field", "");
+  const rich = buildChipRequest(ENTRY, { rich: true });
+  gate(JSON.stringify(rich.schema).includes('"detail"') && rich.systemPrompt.includes("detail"), "with `rich`, the schema offers detail and the prompt explains it", "");
+
+  const cands = rich.candidates;
+  const r0 = cands[0].rank;
+  // A deterministic candidate whose detail obeys every rule: grounded (three
+  // shared content words), ends on a noun, differs from the label.
+  const inline = [{ rank: 0, label: "Ovin fails the count",
+    sentence: "Ovin tried the count and did not finish it before the bell.", agent: "Ovin" }];
+  const words = "Ovin did not finish the count";
+  const good = normalizeChipPicks(
+    { picks: [{ rank: 0, label: "Ovin fails the count", detail: words }] }, inline, [], undefined);
+  gate(good?.[0]?.detail === words, "a grounded detail (words from the sentence) rides the pick",
+    `got ${JSON.stringify(good?.[0])}`);
+
+  const drift = normalizeChipPicks(
+    { picks: [{ rank: r0, label: cands[0].label, detail: "meanwhile aboard the orbital station everything changed forever" }] },
+    cands, [], undefined);
+  gate(!!drift && drift[0] && !("detail" in drift[0] && drift[0].detail), "★ an ungrounded detail is DROPPED — and the pick survives without it", "");
+
+  const multi = normalizeChipPicks(
+    { picks: [{ rank: r0, label: cands[0].label, detail: "line one\nline two" }] }, cands, [], undefined);
+  gate(!!multi && !multi[0]?.detail, "a multi-line detail is dropped, pick kept", "");
+
+  // display attach: selectDisplayChips carries the detail as lmDetail
+  const shown = selectDisplayChips({ majorEvents: ENTRY.majorEvents,
+    lmChips: [{ rank: r0, label: "Marda burns the seal", detail: words }] });
+  gate((shown[0] as { lmDetail?: string }).lmDetail === words, "selectDisplayChips attaches the detail as lmDetail for the timeline", "");
+  const shownPlain = selectDisplayChips({ majorEvents: ENTRY.majorEvents,
+    lmChips: [{ rank: r0, label: "Marda burns the seal" }] });
+  gate(!("lmDetail" in (shownPlain[0] as object)), "…and a pick without detail attaches nothing", "");
+}
+
 console.log("\n── the prompt one chapter actually sends ───────────────────────\n");
 console.log(buildChipRequest(ENTRY).userText.split("\n").map((l) => `  ${l}`).join("\n"));
 

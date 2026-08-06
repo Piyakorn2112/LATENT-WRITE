@@ -1079,7 +1079,17 @@ export default function App() {
         if (alive) retryTimer = window.setTimeout(() => { void tick(); }, 30_000);
         return;
       }
-      const modelId = await assistantModelId();
+      // ★ MAX MODE UPGRADES THE WHOLE TICK: chips and summaries run on the 4B
+      //   with thinking on, chips may carry a grounded second line, and the
+      //   cache keys carry the max model's id — so switching modes recomputes
+      //   exactly once per chapter and never cross-stamps tiers.
+      const maxMode = assistantMode(prefs) === "max";
+      const run: typeof assistantRunJSON = maxMode
+        ? (req) => assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 4096 })
+        : assistantRunJSON;
+      const modelId = maxMode
+        ? (await window.electronAPI?.assistantStatus({ tier: "max" }))?.model?.id ?? null
+        : await assistantModelId();
       if (!modelId || !alive) return;
 
       // One entry per tick, and within it chips before summary: chips are what
@@ -1103,7 +1113,7 @@ export default function App() {
       try {
         const chipKey = chipKeyFor(target, modelId);
         if (target.lmChipsKey !== chipKey && !chipSkipRef.current.has(`chips|${target.chapterId}|${chipKey}`)) {
-          const outcome = await runChipPick(target, { run: assistantRunJSON, modelId });
+          const outcome = await runChipPick(target, { run, modelId, rich: maxMode });
           if (!alive) return;
           if (!outcome) chipSkipRef.current.add(`chips|${target.chapterId}|${chipKey}`);
           else {
@@ -1126,7 +1136,7 @@ export default function App() {
         if (!alive) return;
         const sumKey = summaryKeyFor(target, modelId);
         if (target.lmSummaryKey !== sumKey && !chipSkipRef.current.has(`sum|${target.chapterId}|${sumKey}`)) {
-          const summary = await runChapterSummary(target, { run: assistantRunJSON, modelId });
+          const summary = await runChapterSummary(target, { run, modelId });
           if (!alive) return;
           if (!summary) chipSkipRef.current.add(`sum|${target.chapterId}|${sumKey}`);
           else {
@@ -1162,7 +1172,7 @@ export default function App() {
       document.removeEventListener("visibilitychange", onVisible);
       cancelAssistantWhere(({ task }) => task === CHIP_TASK || task === SUMMARY_TASK);
     };
-  }, [storyGraph, prefs.assistant?.enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [storyGraph, prefs.assistant?.enabled, prefs.assistant?.mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── The review sweep (wave 2) ───────────────────────────────────────────
   // One pass: scene near-misses, then Chekhov. Five questions per chapter,

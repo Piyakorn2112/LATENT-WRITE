@@ -126,7 +126,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
   const ask = (kind: AskKind, q?: string) => {
     const input = build(kind, q);
     if (!input) { setPhase({ name: "failed", reason: "no-input" }); return; }
-    setPhase({ name: "asking", label: "Reading the passage…" });
+    setPhase({ name: "asking", label: "Reading passage…" });
     void runMaxAsk(input, {
       run: maxRunner,
       selfReview: true,
@@ -137,10 +137,12 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
         if (!aliveRef.current) return;
         setPhase({
           name: "asking",
-          label: p === "asking" ? "Reading the passage…"
+          // First-person working notes, not third-person narration: the
+          // surface says what it is DOING, tersely, as if thinking aloud.
+          label: p === "asking" ? "Reading passage…"
             : p === "widening" ? "Reading more of the story…"
-            : p === "refining" ? "Correcting its answer…"
-            : "Checking its answer against the story…",
+            : p === "refining" ? "Correcting answer…"
+            : "Reviewing answer…",
         });
       },
     }).then((result) => {
