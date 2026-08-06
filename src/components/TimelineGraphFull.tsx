@@ -62,11 +62,22 @@ function roleColor(r: string) { return ROLE_COLOR[r] ?? ROLE_COLOR.standard; }
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
-const CHAPTER_W   = 110;   // px between chapters (wider — more room for labels)
+// ★★ THE TWO-LINE ERA NEEDED A BIGGER BAND — this was CAPACITY, not
+//    algorithm. Measured (scripts/test-timeline-layout.ts): 48 tall chips
+//    occupy ~300k px² with gaps while the band above the old spine held
+//    ~345k — an 86% packing density no layout can reach. CHAPTER_W 110→126
+//    and SPINE_BASE 280→316 grow the band to ~65% density, where the
+//    legalizer places everything with zero overlaps. Labels, cast zone and
+//    svg size all derive from these two, so the chart stays coherent.
+const CHAPTER_W   = 126;   // px between chapters
 const PAD_X       = 120;   // horizontal padding
-// Spine terrain — baseline pushed to ~55% of SVG height for visual weight
-const SPINE_BASE  = 280;   // baseline Y (no tension) — was 230
-const TERRAIN_AMP = 60;    // max upward displacement (full tension = y=220)
+// Spine terrain — baseline low in the chart for visual weight
+const SPINE_BASE  = 316;   // baseline Y (no tension)
+const TERRAIN_AMP = 60;    // max upward displacement (full tension = y=256)
+
+/** Geometry the layout harness must mirror — exported so the test drives the
+ *  REAL numbers instead of a copy that drifts. */
+export const TIMELINE_GEOM = { CHAPTER_W, PAD_X, SPINE_BASE, TERRAIN_AMP } as const;
 // Event box collision layout constants
 const EVENT_LAYOUT_OVERSCAN = 3;
 const BOX_H       = 22;    // single-line box height
@@ -264,7 +275,10 @@ function detailTag(event: Pick<MajorEvent, "detailLabel">): string | null {
   return event.detailLabel ? event.detailLabel.toUpperCase() : null;
 }
 
-function layoutBoxes(
+// Exported for scripts/test-timeline-layout.ts — the layout is judged by
+// MEASURED overlap/intrusion counts on realistic mixed-height data, not by
+// eyeballing screenshots.
+export function layoutBoxes(
   chData: Array<{
     ch: { id: string };
     x: number; y: number; nr: number;
@@ -400,6 +414,87 @@ function layoutBoxes(
     for (const s of states) {
       if (s.cy - s.h / 2 < MIN_BOX_Y) s.cy = MIN_BOX_Y + s.h / 2;
     }
+  }
+
+  // ★★ THE FORCE PASS IS AESTHETIC; THE LEGALIZER IS THE GUARANTEE.
+  //    Measured (scripts/test-timeline-layout.ts): 30 relaxation iterations
+  //    left 6–32 overlapping pairs across realistic scenarios — soft pairwise
+  //    pushes against hard clamps simply never converge to zero, and chips
+  //    (up to 186px wide) are WIDER than the 110px column pitch, so
+  //    neighbouring columns must interleave vertically. This pass places
+  //    every box deterministically at the nearest position that provably
+  //    fits: column by column, nearest-the-node first, scanning upward with
+  //    small sideways candidates. Overlap-freedom holds by construction;
+  //    the force pass above just makes the starting points pretty.
+  const placedRects: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
+  const legalOrder = [...states].sort((a, b) => (a.chX - b.chX) || (b.cy - a.cy));
+  for (const s of legalOrder) {
+    const halfW = s.w / 2, halfH = s.h / 2;
+    const nodeCapFor = (cx: number) => {
+      let cap = Infinity;
+      for (const node of nodes) {
+        if (Math.abs(cx - node.x) <= halfW + node.nr + BOX_GAP) {
+          cap = Math.min(cap, node.y - node.nr - NODE_BOX_GAP - halfH);
+        }
+      }
+      return cap;
+    };
+    const fits = (cx: number, cy: number, gap: number) => {
+      if (cy - halfH < 0) return false;
+      if (cy > nodeCapFor(cx)) return false;
+      const x1 = cx - halfW, x2 = cx + halfW, y1 = cy - halfH, y2 = cy + halfH;
+      for (const r of placedRects) {
+        if (x1 < r.x2 + gap && x2 > r.x1 - gap && y1 < r.y2 + gap && y2 > r.y1 - gap) {
+          return false;
+        }
+      }
+      return true;
+    };
+    // Bottom-up first-fit (shelf packing): start at the LOWEST legal row for
+    // each sideways candidate and climb — nearest-the-node placement and
+    // maximal use of the band are the same thing here. A desperate second
+    // sweep shrinks the gap: cramped beats overlapping.
+    let placed = false;
+    for (const gap of [BOX_GAP, 2]) {
+      for (const dx of [0, -14, 14, -28, 28, -42, 42, -58, 58, -76, 76, -96, 96]) {
+        const cx = s.cx + dx;
+        let cy = nodeCapFor(cx);
+        for (let step = 0; step < 260 && cy - halfH >= 0; step++, cy -= 2) {
+          if (fits(cx, cy, gap)) {
+            s.cx = cx;
+            s.cy = cy;
+            placed = true;
+            break;
+          }
+        }
+        if (placed) break;
+      }
+      if (placed) break;
+    }
+    // Last resort: sweep the whole band width. The connector still points
+    // home, and a strayed chip reads; an overlapped one does not.
+    if (!placed) {
+      for (let mag = 112; mag <= CHAPTER_W * 3 && !placed; mag += 16) {
+        for (const dx of [-mag, mag]) {
+          const cx = s.cx + dx;
+          let cy = nodeCapFor(cx);
+          for (let step = 0; step < 260 && cy - halfH >= 0; step++, cy -= 2) {
+            if (fits(cx, cy, 2)) {
+              s.cx = cx;
+              s.cy = cy;
+              placed = true;
+              break;
+            }
+          }
+          if (placed) break;
+        }
+      }
+    }
+    // No slot found (a pathologically crowded band): the box stays where the
+    // force pass left it rather than vanishing — visible beats hidden.
+    placedRects.push({
+      x1: s.cx - halfW, y1: s.cy - halfH, x2: s.cx + halfW, y2: s.cy + halfH,
+    });
   }
 
   // Build final placements with bezier branch paths
