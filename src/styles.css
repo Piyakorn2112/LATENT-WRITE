@@ -16119,7 +16119,12 @@ body.electron-window-unfocused .wc-panel::after {
    lessons); light/dark both derive from the control token. */
 .writing-wave-text {
   position: absolute;
-  z-index: 2;
+  /* ★ MEASURED STACK: the highlight layer is z-index 10 (its entity tags
+     at 11 live inside its own isolation context and cannot escape it), the
+     textarea 1. The old z-index 2 left this overlay SANDWICHED UNDER the
+     layer — invisible whenever highlights were on, which is why the pulse
+     'didn't work'. 12 sits above everything the editor stacks. */
+  z-index: 12;
   pointer-events: none;
   white-space: pre-wrap;
   overflow-wrap: break-word;
