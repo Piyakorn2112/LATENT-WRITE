@@ -68,8 +68,19 @@ function splitLongParagraph(paragraph: string, maxChars: number): string[] {
 /**
  * Paragraph-boundary batches that reassemble to EXACTLY the input:
  * `batches.map(b => b.text + b.sep).join("") === selected`.
+ *
+ * ★ `pack` MERGES ADJACENT PARAGRAPHS INTO ONE BATCH — right for proofread
+ *   (mechanical, never restructures) and WRONG for rewrite/custom: given two
+ *   paragraphs in one prompt the 4B merges or re-splits them, the paragraph
+ *   gate refuses, and big selections "mostly break". Unpacked, each batch IS
+ *   one paragraph, so structure survives by construction and every paragraph
+ *   gets the model's full attention.
  */
-export function planWritingBatches(selected: string, maxChars = BATCH_MAX_CHARS): WritingBatch[] {
+export function planWritingBatches(
+  selected: string,
+  maxChars = BATCH_MAX_CHARS,
+  pack = true,
+): WritingBatch[] {
   // Tokenise into (paragraph, separator) pairs, separators kept verbatim.
   const pieces: Array<{ text: string; sep: string }> = [];
   const re = /\n[ \t]*\n[\s]*/g;
@@ -89,6 +100,7 @@ export function planWritingBatches(selected: string, maxChars = BATCH_MAX_CHARS)
   for (const piece of pieces) {
     const prev = batches[batches.length - 1];
     if (
+      pack &&
       prev &&
       prev.text.length + prev.sep.length + piece.text.length <= maxChars &&
       piece.text !== ""
@@ -195,9 +207,15 @@ words:
 
 Answer as JSON: {"text": the revised passage}.`;
 
-/** A length-shaped instruction gets the LENGTH_SYSTEM routing. */
+/**
+ * A length/expansion-shaped instruction gets the LENGTH_SYSTEM routing.
+ * "Add more detail about the storm" and "expand this with the sea" are
+ * expansion-with-focus — exactly what that prompt's deepening rules do —
+ * while "make it more playful" is a STYLE ask and must stay on CUSTOM
+ * (the bare word "more" is not enough; the phrases are).
+ */
 export function isLengthInstruction(instruction: string): boolean {
-  return /\b(long(er)?|short(er|en)?|expand|extend|lengthen|trim|cut|condense|double|half)\b/i.test(instruction);
+  return /\b(long(er)?|short(er|en)?|expand|extend|lengthen|trim|cut|condense|double|half|flesh out|elaborate|deepen|develop)\b|\badd (more|some|extra|a )|\bmore (detail|description|depth|texture)/i.test(instruction);
 }
 
 export const WRITING_SCHEMA_BASE = {
@@ -322,7 +340,12 @@ export function revisionAcceptable(original: string, revised: string, op: Writin
   const r = revised.trim();
   if (!r) return false;
   const paraCount = (t: string) => t.split(/\n[ \t]*\n/).length;
-  if (paraCount(original) !== paraCount(r)) return false;
+  // ★ CUSTOM MAY RESHAPE PARAGRAPHS A LITTLE. "Add more detail" legitimately
+  //   splits a grown paragraph in two; strict equality was refusing most
+  //   creative requests wholesale. Proofread/rewrite keep the strict rule —
+  //   they promise structure — while custom allows a drift of two.
+  const paraDelta = Math.abs(paraCount(original) - paraCount(r));
+  if (op === "custom" ? paraDelta > 2 : paraDelta !== 0) return false;
   // Ratios alone are twitchy on SHORT selections (a sentence doubled is a
   // huge ratio and a modest edit), so custom's ceiling carries absolute
   // slack alongside the multiple.
@@ -375,7 +398,9 @@ export async function runWritingTool(
   selected: string,
   opts: WritingToolOptions,
 ): Promise<WritingToolOutcome> {
-  const batches = planWritingBatches(selected);
+  // Proofread packs paragraphs per batch (mechanical, structure-safe);
+  // rewrite/custom take one paragraph per batch — see planWritingBatches.
+  const batches = planWritingBatches(selected, BATCH_MAX_CHARS, opts.op === "proofread");
   const texts: string[] = batches.map((b) => b.text);
   const outcomes: WritingToolOutcome["batchOutcomes"] = [];
   let cancelled = false;

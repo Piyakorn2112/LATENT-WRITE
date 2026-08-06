@@ -7,7 +7,7 @@
 import {
   planWritingBatches, buildWritingRequest, assembleRevision, applyRevision,
   revisionAcceptable, runWritingTool, BATCH_MAX_CHARS,
-  toWire, fromWire, matchQuoteStyle,
+  toWire, fromWire, matchQuoteStyle, isLengthInstruction,
 } from "../src/lib/writing-tool";
 import type { AssistantJSONRunner } from "../src/lib/assistant-client";
 
@@ -42,6 +42,11 @@ console.log("── 1 · batching is a partition of the selection ────�
   }
   const long = planWritingBatches(Array.from({ length: 12 }, (_, i) => para(i, 700)).join("\n\n"));
   gate(long.length > 1, "a long selection actually batches", `${long.length} batches`);
+  // Unpacked mode: one paragraph per batch, still a perfect partition.
+  const sel3 = `${para(1)}\n\n${para(2)}\n\n${para(3)}`;
+  const unpacked = planWritingBatches(sel3, BATCH_MAX_CHARS, false);
+  gate(unpacked.length === 3, "unpacked: one batch per paragraph", `${unpacked.length}`);
+  gate(unpacked.map((b) => b.text + b.sep).join("") === sel3, "unpacked: still reassembles exactly");
 }
 
 console.log("\n── 2 · request assembly ─────────────────────────────────────");
@@ -88,6 +93,24 @@ console.log("\n── 3 · the grammar gate ────────────
     "rewrite still refuses a 2x expansion");
   gate(revisionAcceptable("He walked to the door and opened it.", doubled, "custom"),
     "custom accepts the expansion an instruction asked for");
+  // ★ CUSTOM MAY RESHAPE PARAGRAPHS A LITTLE — a grown paragraph splitting
+  //   in two is what "add more detail" looks like; strict equality was
+  //   refusing most creative requests.
+  const grown = "He walked slowly to the old door, breathing hard.\n\nAfter a long moment of hesitation he finally opened it with both hands, and stood in the doorway.";
+  gate(revisionAcceptable("He walked to the door and opened it.", grown, "custom"),
+    "custom accepts a paragraph split the instruction caused");
+  gate(!revisionAcceptable("He walked to the door and opened it.", grown, "rewrite"),
+    "rewrite still refuses a paragraph-count change");
+
+  // Routing: expansion phrases go to the length prompt; style asks stay custom.
+  for (const [ins, expect] of [
+    ["make it longer", true], ["add more detail about the storm", true],
+    ["expand this with the sea's smell", true], ["flesh out the second beat", true],
+    ["make it more playful", false], ["make this moment feel more tense", false],
+    ["use simpler words", false],
+  ] as Array<[string, boolean]>) {
+    gate(isLengthInstruction(ins) === expect, `"${ins}" routes ${expect ? "LENGTH" : "CUSTOM"}`);
+  }
   gate(!revisionAcceptable("She said it plainly.", "She duck said it it plainly plainly to to to the the man man who who."),
     "a revision that ADDS hard errors is refused");
 }

@@ -391,11 +391,24 @@ function WritingWaveOverlay({ textareaRef, range, content }: {
     ]) {
       copy[prop] = cs.getPropertyValue(prop);
     }
+    // ★ THE COVER COLOUR IS THE REAL SURFACE, RESOLVED AT RUNTIME. Each
+    //   pulsing word paints a near-opaque swatch of the page behind itself,
+    //   which is what dims the ORIGINAL glyphs under it — the textarea's in
+    //   plain mode, the highlight layer's styled text in highlight mode
+    //   (where accent-over-opaque-text was invisible). Walking up for the
+    //   first non-transparent background beats guessing a token.
+    let cover = "";
+    for (let el: HTMLElement | null = ta; el; el = el.parentElement) {
+      const bg = window.getComputedStyle(el).backgroundColor;
+      if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") { cover = bg; break; }
+    }
+    if (!cover) cover = window.getComputedStyle(document.body).backgroundColor || "#fff";
     setStyle({
       ...(copy as CSSProperties),
       top: ta.offsetTop,
       left: ta.offsetLeft,
       width: ta.clientWidth,
+      ["--wave-cover" as never]: cover,
     });
   }, [textareaRef, range.start, range.end, content]);
   if (!style) return null;

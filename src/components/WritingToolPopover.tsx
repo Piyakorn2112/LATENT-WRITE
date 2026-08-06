@@ -169,10 +169,10 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
             <div className="max-ask-answer">
               <div className="max-ask-answer-text">
                 {revisedCount > 0
-                  ? `Done — ${revisedCount} ${revisedCount === 1 ? "part" : "parts"} revised${keptCount > 0 ? `, ${keptCount} kept as written` : ""}${failedCount > 0 ? `, ${failedCount} failed` : ""}. The text has been replaced; undo works as usual.`
+                  ? `Done — ${revisedCount} ${revisedCount === 1 ? "part" : "parts"} revised${keptCount > 0 ? `, ${keptCount} kept as written` : ""}${failedCount > 0 ? `, ${failedCount} failed` : ""}. The new text is in place — press ⌘Z to bring the old text back.`
                   : keptCount > 0
-                    ? "The revision didn't pass the safety check (it read worse than the original), so the text is untouched. Try rephrasing the request."
-                    : "Nothing needed changing — the text is untouched."}
+                    ? "The revision didn't pass the safety check (it read worse than the original), so nothing was replaced. Try rephrasing the request."
+                    : "Nothing needed changing — the text is exactly as it was."}
               </div>
             </div>
             <div className="writing-tool-actions">

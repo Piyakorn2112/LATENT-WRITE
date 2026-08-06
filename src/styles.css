@@ -16127,15 +16127,21 @@ body.electron-window-unfocused .wc-panel::after {
   user-select: none;
 }
 .writing-wave-word {
-  color: var(--control-value-fill, #3f79d8);
-  opacity: 0.12;
-  animation: writing-word-pulse 1.53s ease-in-out infinite;
+  /* The cover swatch dims whatever renders the original glyphs beneath —
+     textarea text in plain mode, the highlight layer's in highlight mode —
+     and stays CONSTANT: only the accent ink pulses, so the section reads
+     dimmed throughout with a wave of colour travelling the words. */
+  background: color-mix(in srgb, var(--wave-cover, #fff) 82%, transparent);
+  border-radius: 3px;
+  color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 30%, transparent);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--control-value-fill, #3f79d8) 35%, transparent);
+  animation: writing-word-pulse 1.35s ease-in-out infinite;
 }
 @keyframes writing-word-pulse {
-  0%   { opacity: 0.1; }
-  35%  { opacity: 0.85; }
-  70%  { opacity: 0.1; }
-  100% { opacity: 0.1; }
+  0%   { color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 30%, transparent); }
+  40%  { color: var(--control-value-fill, #3f79d8); }
+  80%  { color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 30%, transparent); }
+  100% { color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 30%, transparent); }
 }
 
 /* The writing popover: same glass as max-ask, its own width and rows. */

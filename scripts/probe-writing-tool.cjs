@@ -52,6 +52,16 @@ const CASES = [
     text: 'Mara heard a noise from the wheelhouse. She went up the steps and opened the door. The logbook was on the floor and the window was open.',
   },
   {
+    id: 'custom-playful', op: 'custom', instruction: 'make it more playful',
+    before: 'The estate agent had already called twice.',
+    text: 'Mara carried the boxes up the stairs one at a time. Each one was heavier than the last, and the landing light did not work.',
+  },
+  {
+    id: 'custom-add-detail', op: 'custom', instruction: 'add more detail about the smell and sound of the harbour',
+    before: 'The ferry had gone an hour before.',
+    text: 'Mara walked along the harbour wall. The boats knocked against their moorings and the morning market was opening.',
+  },
+  {
     id: 'rewrite-2para', op: 'rewrite',
     before: '',
     text: 'The morning was grey and the rain was falling down from the sky above. Mara stood on the deck and she was drinking her coffee while she was standing there.\n\nTeo arrived at the dock at nine. He was late again and he had been late the day before as well and also the day before that.',
