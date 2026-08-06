@@ -117,7 +117,10 @@ rules, all of them:
 - Preserve the writer's register. Dialogue keeps its voice — a character's
   grammar is characterisation, not an error.
 - If some CONTEXT lines are shown, they are for continuity only — never
-  revise or repeat them; revise only the PASSAGE.`;
+  revise or repeat them; revise only the PASSAGE.
+- The \` character is the editor's placeholder for a quotation mark. Keep
+  every \` exactly where it stands — never remove one, move one, or turn it
+  into any other character.`;
 
 export const PROOFREAD_SYSTEM = `${SHARED_RULES}
 
@@ -137,12 +140,18 @@ you are polishing their sentences, not writing your own.
 
 Answer as JSON: {"text": the revised passage}.`;
 
+// ★ MEASURED (probe-writing-tool.cjs): the first wording ("follow it within
+//   the hard rules; where it conflicts, the rule wins") made the 4B return
+//   the passage UNCHANGED — the caution swallowed the instruction. The rule
+//   split must be explicit: the instruction OWNS the style axis; the rules
+//   keep only facts/names/POV/breaks.
 export const CUSTOM_SYSTEM = `${SHARED_RULES}
 
-The writer gives one INSTRUCTION for how to revise the passage. Follow it
-within the hard rules above; where the instruction conflicts with a hard
-rule, the rule wins (you may change wording, never facts, names, POV or
-paragraph breaks).
+The writer gives one INSTRUCTION for how this passage should read. REVISING
+IS THE JOB: rework the wording, rhythm, sentence shapes and emphasis as far
+as the instruction asks — returning the passage unchanged is a wrong answer
+unless it already fully does what the instruction says. Only facts, names,
+point of view, tense and the paragraph breaks are off-limits.
 
 Answer as JSON: {"text": the revised passage}.`;
 
@@ -151,6 +160,43 @@ export const WRITING_SCHEMA_BASE = {
   properties: { text: { type: "string" } },
   required: ["text"],
 } as const;
+
+// ── the quote wire ────────────────────────────────────────────────────────
+//
+// ★★ DIALOGUE QUOTES END THE JSON STRING — AND A QUOTE-SHAPED SENTINEL DIES
+//    THE SAME DEATH. Measured twice (probe-writing-tool.cjs): with straight
+//    quotes the 4B truncated the passage at the first close-quote; swapped to
+//    U+FF02 (a quote-shaped glyph) it STILL dropped the glyph and closed the
+//    JSON at the same position, emitting complete well-formed JSON of one
+//    fragment — the raw output proved the grammar blocked nothing, the
+//    model's own quote-boundary instinct did it. The sentinel must not look
+//    like a quote at all: straight double quotes travel as backticks (ASCII,
+//    JSON-safe, absent from fiction prose), taught as an editor placeholder
+//    in the shared rules, and are restored on the way back. Apostrophes and
+//    curly quotes are JSON-safe and travel untouched.
+
+const WIRE_QUOTE = "`";
+
+export function toWire(text: string): string {
+  return text.replaceAll('"', WIRE_QUOTE);
+}
+
+export function fromWire(text: string): string {
+  return text.replaceAll(WIRE_QUOTE, '"');
+}
+
+/**
+ * ★ MATCH THE WRITER'S QUOTE STYLE. The 4B drifts toward typographic quotes
+ *   ("aunt's" came back "aunt’s") — a silent formatting change. If the
+ *   original selection uses no curly quotes, the revision's are folded back
+ *   to straight; a manuscript already in curly style is left alone.
+ */
+export function matchQuoteStyle(original: string, revised: string): string {
+  let out = revised;
+  if (!/[‘’]/.test(original)) out = out.replace(/[‘’]/g, "'");
+  if (!/[“”]/.test(original)) out = out.replace(/[“”]/g, '"');
+  return out;
+}
 
 export interface WritingRequest {
   systemPrompt: string;
@@ -169,16 +215,16 @@ export function buildWritingRequest(
   const lines: string[] = [];
   if (context.before) {
     lines.push("CONTEXT — the manuscript just before this passage (do not revise):");
-    lines.push(context.before, "");
+    lines.push(toWire(context.before), "");
   }
   if (context.revisedTail) {
     lines.push("CONTEXT — your own revision continues from here (do not repeat it):");
-    lines.push(context.revisedTail, "");
+    lines.push(toWire(context.revisedTail), "");
   }
   if (op === "custom" && context.instruction) {
     lines.push(`INSTRUCTION: ${context.instruction}`, "");
   }
-  lines.push("PASSAGE:", batch.text);
+  lines.push("PASSAGE:", toWire(batch.text));
   return {
     systemPrompt,
     userText: lines.join("\n"),
@@ -287,7 +333,8 @@ export async function runWritingTool(
       if (result.reason === "cancelled") { cancelled = true; break; }
       continue;
     }
-    const text = typeof result.json?.text === "string" ? result.json.text.trim() : "";
+    const raw = typeof result.json?.text === "string" ? result.json.text.trim() : "";
+    const text = matchQuoteStyle(batch.text, fromWire(raw));
     if (text === batch.text.trim() || text === "") {
       outcomes.push("unchanged");
     } else if (revisionAcceptable(batch.text, text)) {

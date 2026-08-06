@@ -7,6 +7,7 @@
 import {
   planWritingBatches, buildWritingRequest, assembleRevision, applyRevision,
   revisionAcceptable, runWritingTool, BATCH_MAX_CHARS,
+  toWire, fromWire, matchQuoteStyle,
 } from "../src/lib/writing-tool";
 import type { AssistantJSONRunner } from "../src/lib/assistant-client";
 
@@ -53,6 +54,21 @@ console.log("\n── 2 · request assembly ────────────
   gate(req.maxTokens > 60 && req.maxTokens < 400, "token budget scales with the batch", `${req.maxTokens}`);
   const custom = buildWritingRequest("custom", batch, { before: "", revisedTail: "", instruction: "make it tense" });
   gate(custom.userText.includes("INSTRUCTION: make it tense"), "custom instruction rides the user turn");
+}
+
+console.log("\n── 2b · the quote wire ──────────────────────────────────────");
+{
+  const dialogue = `"I ain't got nothin' to say," Teo said. "Ask me later."`;
+  gate(fromWire(toWire(dialogue)) === dialogue, "wire roundtrip is lossless on dialogue");
+  gate(!toWire(dialogue).includes('"'), "no straight double quote survives onto the wire");
+  const [b] = planWritingBatches(dialogue);
+  const req = buildWritingRequest("proofread", b, { before: 'She said "go".', revisedTail: "" });
+  gate(!req.userText.split("PASSAGE:")[1].includes('"') && !req.userText.includes('CONTEXT — the manuscript just before this passage (do not revise):\n She'),
+    "passage and context are wire-escaped in the request");
+  gate(matchQuoteStyle("plain 'text'", "curly ‘text’ and “quotes”") === `curly 'text' and "quotes"`,
+    "curly output folds back to straight when the original is straight");
+  gate(matchQuoteStyle("has ‘curly’ already", "kept ‘curly’") === "kept ‘curly’",
+    "an already-curly manuscript keeps curly");
 }
 
 console.log("\n── 3 · the grammar gate ─────────────────────────────────────");
