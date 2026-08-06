@@ -18,7 +18,8 @@
 import {
   buildMaxAskPack, buildMaxAskRequest, normalizeMaxAsk, isUsefulAnswer, runMaxAsk,
   normalizeClaimCheck, buildReviewRequest, computeReviewVerdict,
-  NOT_IN_CONTEXT, MAX_STEPS, DEFAULT_BUDGET_TOKENS,
+  coerceProseAbstention, buildMaxAskRequest as buildReq, maxAskSchema,
+  NOT_IN_CONTEXT, FITS, MAX_STEPS, DEFAULT_BUDGET_TOKENS, WIDEN_CEILING_TOKENS,
   type MaxAskInput,
 } from "../src/lib/max-ask";
 import type { AssistantJSONRunner } from "../src/lib/assistant-client";
@@ -289,6 +290,102 @@ console.log("\nthe opening rung and the self-review");
   }
 }
 
+console.log("\nthe fits outlet, the prose abstention, and the refine loop");
+{
+  // ── fits: a schema outlet, check-kind only ──
+  const deep = buildMaxAskPack(INPUT, 10_000);
+  const checkBases = (maxAskSchema(deep.rungsIncluded, "check").properties.basis as { enum: string[] }).enum;
+  const explainBases = (maxAskSchema(deep.rungsIncluded, "explain").properties.basis as { enum: string[] }).enum;
+  gate(checkBases.includes(FITS) && !explainBases.includes(FITS),
+    "★ \"fits\" is offered to a CHECK and to nothing else");
+  gate(buildReq(deep, 640, "check").systemPrompt.includes("OPPOSITE"),
+    "…and the check request carries the conflict-requires-opposites line");
+  const fitsAns = normalizeMaxAsk({ answer: "Nothing conflicts.", basis: FITS, confidence: 0.9 }, deep.rungsIncluded);
+  gate(!!fitsAns && isUsefulAnswer(fitsAns), "a fits verdict parses and reaches the writer");
+
+  // ── prose abstention is coerced, question-kind only ──
+  const prose = { answer: "The passage does not mention what Renner does with the money.", basis: "passage", confidence: 0.9 };
+  gate(coerceProseAbstention(prose, "question").basis === NOT_IN_CONTEXT,
+    "★ \"does not mention\" with basis=passage is an abstention in costume");
+  gate(coerceProseAbstention(prose, "check").basis === "passage",
+    "…and a CHECK is exempt — \"nothing conflicts\" is a verdict, not an abstention");
+  // ★ the golden set's surviving FAIL, pinned: a confident negative about the
+  //   story ("No, she never said…") is an unverifiable claim wearing an
+  //   answer's clothes — a negative has no quote, so the claim-check cannot
+  //   flag it and the refine never fires. It coerces like the rest.
+  const negative = { answer: "No, Solvei never said who she wanted the Petrel to go to.", basis: "passage", confidence: 0.9 };
+  gate(coerceProseAbstention(negative, "question").basis === NOT_IN_CONTEXT,
+    "★ a confident \"never said\" coerces to an abstention — unverifiable, so unshippable as fact");
+  {
+    // the coercion feeds the widen loop: prose-abstain at a tiny budget, then a real answer
+    const s = scripted([
+      { answer: "The sections do not mention the notice.", basis: "passage", confidence: 0.9 },
+      { answer: "Forty marks, from the notice.", basis: "story-so-far", confidence: 0.9 },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "how much?", budgetTokens: 60 },
+      { run: s.run });
+    gate(s.calls() === 2 && r.stopped === "answered",
+      `★ a prose abstention now WIDENS instead of shipping (${s.calls()} calls, ${r.stopped})`);
+  }
+
+  // ── refine: revise on the tool flag, re-verify, ship only if clean ──
+  {
+    const s = scripted([
+      { answer: "She pays Vale monthly.", basis: "passage", confidence: 0.9 },          // ask
+      { claims: [{ claim: "Vale collects payment", kind: "fact", quote: "" }] },          // review: overreach
+      { answer: "She counts what is left in the tin.", basis: "passage", confidence: 0.9 }, // refine
+      { claims: [{ claim: "she counts the tin", kind: "fact", quote: "counted what was left in the tin" }] }, // recheck: clean
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
+      { run: s.run, selfReview: true });
+    gate(s.calls() === 4 && r.refined === true,
+      `★ flagged -> refined -> re-verified -> ships (${s.calls()} calls, refined=${r.refined})`);
+    gate(r.answer?.answer.includes("counts") === true && r.review?.verdict === "supported",
+      "…and the SHIPPED answer is the revision, with the clean re-check riding along");
+  }
+  {
+    // the revision is WORSE — still flagged on recheck — so it is discarded
+    const s = scripted([
+      { answer: "She pays Vale monthly.", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "Vale collects payment", kind: "fact", quote: "" }] },
+      { answer: "Vale burned the ledger himself.", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "Vale burned the ledger", kind: "fact", quote: "" }] },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
+      { run: s.run, selfReview: true });
+    gate(r.refined !== true && r.answer?.answer.includes("pays Vale") === true,
+      "★ a revision that fails the re-check is DISCARDED — the original ships with its caution");
+    gate(r.review?.verdict === "overreaches",
+      "…and the caution survives, because nothing verified got better");
+  }
+  {
+    // low confidence triggers the refine even when the review is clean
+    const s = scripted([
+      { answer: "Maybe something about money.", basis: "passage", confidence: 0.4 },
+      { claims: [] },
+      { answer: "She counts what is left in the tin twice.", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "counts twice", kind: "fact", quote: "counted what was left in the tin" }] },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
+      { run: s.run, selfReview: true });
+    gate(s.calls() === 4 && r.refined === true,
+      `★ low confidence triggers the refine pass too (${s.calls()} calls, refined=${r.refined})`);
+  }
+  {
+    // hard cap: refine happens at most ONCE, whatever the model does
+    const s = scripted([
+      { answer: "She pays Vale.", basis: "passage", confidence: 0.3 },
+      { claims: [{ claim: "pays Vale", kind: "fact", quote: "" }] },
+      { answer: "She pays Vale weekly.", basis: "passage", confidence: 0.3 },
+      { claims: [{ claim: "pays Vale weekly", kind: "fact", quote: "" }] },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why?" },
+      { run: s.run, selfReview: true });
+    gate(s.calls() === 4,
+      `★ the refine loop is HARD-CAPPED at one revision + one re-check (${s.calls()} calls)`);
+  }
+}
+
 console.log("\nthe harness narrates its phases");
 {
   const phases = (calls: Parameters<typeof runMaxAsk>[1]) => {
@@ -298,12 +395,24 @@ console.log("\nthe harness narrates its phases");
   {
     const s = scripted([
       { answer: "coins", basis: "passage", confidence: 0.9 },
-      { reason: "stated", verdict: "supported", confidence: 0.9 },
+      { claims: [] },
     ]);
     const { opts, seen } = phases({ run: s.run, selfReview: true });
     await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" }, opts);
     gate(seen.join(",") === "asking,reviewing",
-      `a reviewed question narrates asking -> reviewing (got ${seen.join(",")})`);
+      `a clean reviewed question narrates asking -> reviewing (got ${seen.join(",")})`);
+  }
+  {
+    const s = scripted([
+      { answer: "she pays Vale", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "pays Vale", kind: "fact", quote: "" }] },
+      { answer: "she counts the tin", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "counts the tin", kind: "fact", quote: "counted what was left in the tin" }] },
+    ]);
+    const { opts, seen } = phases({ run: s.run, selfReview: true });
+    await runMaxAsk({ ...INPUT, kind: "question", question: "why?" }, opts);
+    gate(seen.join(",") === "asking,reviewing,refining,reviewing",
+      `★ a refined answer narrates the whole chain (got ${seen.join(",")})`);
   }
   {
     const s = scripted([
@@ -338,8 +447,8 @@ console.log("\nthe defaults are sane for an 8 GB window");
   gate(p.tokensEstimate <= DEFAULT_BUDGET_TOKENS + 200,
     `the default pack is ${p.tokensEstimate} tokens against a ${DEFAULT_BUDGET_TOKENS} budget`,
     "a pack that overruns its own default leaves a thinking model no room to think");
-  gate(DEFAULT_BUDGET_TOKENS * 2 < 4096,
-    "★ even a WIDENED pack fits a 4k window with room for reasoning");
+  gate(WIDEN_CEILING_TOKENS + 2000 < 8192,
+    "★ even a WIDENED pack fits the 8k window with ~2k left for thinking");
 }
 
 console.log("\n" + "=".repeat(74));

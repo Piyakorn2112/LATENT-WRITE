@@ -98,11 +98,13 @@ import type { AssistantJSONRunner } from "./assistant-client";
 import type { WorldData } from "../types";
 
 export const MAX_ASK_TASK = "max-ask";
-export const MAX_ASK_PROMPT_VERSION = 2;
+export const MAX_ASK_PROMPT_VERSION = 3;
 
 const CHARS_PER_TOKEN = 4;
-/** Evidence budget. The rest of a 4k window belongs to the model's thinking. */
-export const DEFAULT_BUDGET_TOKENS = 1600;
+/** Evidence budget. Q8_0 KV halved the cache, so the ask surface now runs an
+ *  8k window at the memory the old 4k f16 window cost — and the budget grows
+ *  with it. The rest of the window belongs to the model's thinking. */
+export const DEFAULT_BUDGET_TOKENS = 2400;
 const PARAGRAPH_CAP = 900;
 const NEIGHBOUR_CAP = 420;
 const ANSWER_MAX = 700;
@@ -115,18 +117,27 @@ export const MAX_STEPS = 2;
 /**
  * The widened budget can never exceed this.
  *
- * ★ 3200 leaves ~900 tokens of a 4k window for the model's own thinking and its
+ * ★ 5600 leaves ~2k of the 8k window for the model's own thinking and its
  *   answer, which a THINKING model needs more of than an instruct one. Widening
  *   to "whatever it takes" would let a long chapter's rungs push the prompt past
  *   the window and get silently truncated at the far end — where the retrieved
  *   passages are, which is the rung the retry was for.
  */
-export const WIDEN_CEILING_TOKENS = 3200;
+export const WIDEN_CEILING_TOKENS = 5600;
 /** Covers a model that is slow rather than stuck; the step count covers stuck. */
 export const DEFAULT_DEADLINE_MS = 150_000;
 
 /** The abstention, and the ONLY thing that makes the loop take another step. */
 export const NOT_IN_CONTEXT = "not-in-what-i-was-given";
+/**
+ * ★ THE CLEAN-BILL OUTLET FOR A CHECK, measured into existence: on the golden
+ *   control the model INVENTED a non-sequitur conflict rather than say
+ *   "nothing conflicts" — the ask-line offered the words but the schema
+ *   offered no label for them, and a schema outlet is what a grammar-bound
+ *   model actually reaches for (same lesson as the abstention). check-kind
+ *   only; everywhere else "fits" would be noise.
+ */
+export const FITS = "fits";
 
 export type AskKind = "check" | "suggest" | "explain" | "question";
 
@@ -275,7 +286,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   // ── 5 · the story so far ────────────────────────────────────────────────
   const summaries = (input.chapterSummaries ?? [])
     .filter((s) => s.chapterNumber < input.chapterNumber)
-    .slice(-4);
+    .slice(-8);
   if (summaries.length) {
     add("story-so-far",
       `STORY-SO-FAR — what earlier chapters established\n`
@@ -283,7 +294,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   }
 
   // ── 6 · open threads ────────────────────────────────────────────────────
-  const threads = (input.openThreads ?? []).slice(0, 4);
+  const threads = (input.openThreads ?? []).slice(0, 5);
   if (threads.length) {
     add("open-threads",
       `OPEN-THREADS — still unresolved\n`
@@ -291,7 +302,7 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
   }
 
   // ── 7 · related passages ────────────────────────────────────────────────
-  const related = (input.related ?? []).slice(0, 3);
+  const related = (input.related ?? []).slice(0, 4);
   if (related.length) {
     add("related",
       `RELATED — earlier passages about the same people\n`
@@ -323,12 +334,12 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
  *   answer citing a rung that was never included is detectable, and an answer
  *   that came from the model's own training has nowhere honest to point.
  */
-export function maxAskSchema(rungs: readonly string[]) {
+export function maxAskSchema(rungs: readonly string[], kind?: AskKind) {
   return {
     type: "object",
     properties: {
       answer: { type: "string", maxLength: ANSWER_MAX },
-      basis: { enum: [...rungs, NOT_IN_CONTEXT] },
+      basis: { enum: kind === "check" ? [...rungs, FITS, NOT_IN_CONTEXT] : [...rungs, NOT_IN_CONTEXT] },
       confidence: { type: "number" },
     },
   } as const;
@@ -362,11 +373,13 @@ export interface MaxAskRequest {
   rungs: readonly string[];
 }
 
-export function buildMaxAskRequest(pack: MaxAskPack, maxTokens = DEFAULT_MAX_TOKENS): MaxAskRequest {
+export function buildMaxAskRequest(pack: MaxAskPack, maxTokens = DEFAULT_MAX_TOKENS, kind?: AskKind): MaxAskRequest {
   return {
-    systemPrompt: MAX_ASK_SYSTEM,
+    systemPrompt: kind === "check"
+      ? `${MAX_ASK_SYSTEM}\n\nThis is a fits-or-conflicts question. If nothing in the passage conflicts\nwith what the other sections establish, say the paragraph fits and use basis\n"${FITS}". A conflict requires two sections to state OPPOSITE things — a\ndetail merely absent elsewhere is not a conflict.`
+      : MAX_ASK_SYSTEM,
     userText: pack.text,
-    schema: maxAskSchema(pack.rungsIncluded),
+    schema: maxAskSchema(pack.rungsIncluded, kind),
     maxTokens,
     rungs: pack.rungsIncluded,
   };
@@ -396,17 +409,32 @@ export function normalizeMaxAsk(
   //   constrains tokens, not meaning: a basis that is not one of ours is a
   //   citation to something that was not in the pack.
   const wanted = collapse(v.basis).toLowerCase();
-  const basis = wanted === NOT_IN_CONTEXT
-    ? NOT_IN_CONTEXT
+  const basis = wanted === NOT_IN_CONTEXT ? NOT_IN_CONTEXT
+    : wanted === FITS ? FITS
     : rungs.find((r) => r.toLowerCase() === wanted);
   if (!basis) return null;
 
   return { answer, basis, confidence: Math.min(1, Math.max(0, v.confidence)) };
 }
 
-/** Does this answer reach the writer? */
+/** Does this answer reach the writer? A clean bill ("fits") does. */
 export function isUsefulAnswer(a: MaxAskAnswer | null | undefined): boolean {
   return !!a && a.basis !== NOT_IN_CONTEXT && a.answer.length > 0;
+}
+
+/**
+ * ★ AN ABSTENTION WRITTEN AS PROSE IS STILL AN ABSTENTION. Measured twice —
+ *   the starved-pack probe and the golden unanswerable — the model answers
+ *   "the passage does not mention X" with basis=passage, which sails past the
+ *   abstention check, ships as an answer, and never lets the loop widen. The
+ *   coercion is deterministic, question-kind only (a check saying "nothing
+ *   conflicts" is a VERDICT, not an abstention), and shared by the loop and
+ *   every probe so the control flow cannot drift.
+ */
+const PROSE_ABSTAIN_RE = /\b(?:does not|do not|doesn't|don't|no section|none of the sections|never|not)\s+(?:mention|mentions|say|says|said|state|states|stated|specify|specifies|provide|provides|contain|contains|reveal|reveals|indicate|indicates)|no information\b/i;
+export function coerceProseAbstention(a: MaxAskAnswer, kind: AskKind): MaxAskAnswer {
+  if (kind !== "question" || a.basis === NOT_IN_CONTEXT) return a;
+  return PROSE_ABSTAIN_RE.test(a.answer) ? { ...a, basis: NOT_IN_CONTEXT } : a;
 }
 
 // ── self-review: claim decomposition, verdict computed by code ─────────────
@@ -585,6 +613,44 @@ export function computeReviewVerdict(claims: readonly ReviewClaim[], packText: s
   return { verdict: note ? "overreaches" : "supported", note, facts, readings };
 }
 
+// ── refine: revise on the verifier's feedback, once ────────────────────────
+//
+// ★★ THE SHAPE IS CRITIC, NOT SELF-REFLECTION. The literature is blunt that
+//    intrinsic self-correction is unreliable — a model asked "was that right?"
+//    with no new signal mostly says yes, or breaks a right answer. What works
+//    is revision on EXTERNAL feedback, and this harness has a genuinely
+//    external critic: the quote-check's string arithmetic. So the refine pass
+//    fires only on a tool-flagged claim or a low-confidence answer, carries
+//    the SPECIFIC flag into the prompt, and its output faces the same
+//    deterministic re-check before anyone sees it. One revision, one
+//    re-check, hard-capped.
+//
+// ★ A FLAGGED CLAIM IS NOT ALWAYS WRONG — the writer's own point: a fact can
+//   be correct while worded differently from the prose (synthesis across two
+//   sentences, a paraphrase). The refine prompt says exactly that, and the
+//   way out it offers is GROUNDING, not deletion: restate the fact closer to
+//   what a section says, or drop it if no section carries it.
+
+export const REFINE_CONF_FLOOR = 0.6;
+
+export function buildRefineRequest(
+  pack: MaxAskPack,
+  answer: MaxAskAnswer,
+  flag: { kind: "overreach"; note: string } | { kind: "low-confidence" },
+  kind?: AskKind,
+) {
+  const critique = flag.kind === "overreach"
+    ? `A verification pass could not find this claim stated in any section:\n  "${flag.note}"\nThe claim may still be true but worded differently from the prose. If a\nsection does state it, restate it CLOSER to the section's own words. If no\nsection carries it, remove or correct it.`
+    : `Your confidence was low. Make the answer concrete: name what the sections\nactually establish, and drop anything you were guessing at.`;
+  return {
+    systemPrompt: `${MAX_ASK_SYSTEM}\n\nYou already answered this once. Revise your answer using the note below.\nKeep it to two or three sentences. Do not mention the revision.`,
+    userText: `${pack.text}\n\nYOUR EARLIER ANSWER\n${answer.answer}\n\nREVISION NOTE\n${critique}`,
+    schema: maxAskSchema(pack.rungsIncluded, kind),
+    maxTokens: DEFAULT_MAX_TOKENS,
+    rungs: pack.rungsIncluded,
+  };
+}
+
 // ── the bounded loop ───────────────────────────────────────────────────────
 
 /**
@@ -596,7 +662,7 @@ export function computeReviewVerdict(claims: readonly ReviewClaim[], packText: s
  * three is hiding the most reassuring fact it has: that different work is
  * happening.
  */
-export type MaxAskPhase = "asking" | "widening" | "reviewing";
+export type MaxAskPhase = "asking" | "widening" | "reviewing" | "refining";
 
 export interface MaxAskOptions {
   run: AssistantJSONRunner;
@@ -617,6 +683,10 @@ export interface MaxAskResult {
   answer: MaxAskAnswer | null;
   /** The self-review verdict, when it ran and parsed. Decoration, never a veto. */
   review?: ReviewAnswer | null;
+  /** True when the shipped answer is the REVISED one and it re-verified clean.
+   *  The UI shows a small indicator, not a warning — the point of the refine
+   *  pass is that the writer rarely sees a caution at all. */
+  refined?: boolean;
   /** How many model calls it actually took. */
   steps: number;
   /** Why the loop stopped — always one of a closed set, never "it just did". */
@@ -659,7 +729,7 @@ export async function runMaxAsk(
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
     }
 
-    const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS);
+    const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS, input.kind);
     steps = step;
     opts.onStep?.(step, step === 1 ? "first ask" : "context widened");
     opts.onPhase?.(step === 1 ? "asking" : "widening");
@@ -680,17 +750,17 @@ export async function runMaxAsk(
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
     }
 
-    const answer = normalizeMaxAsk(result.json, pack.rungsIncluded);
+    let answer = normalizeMaxAsk(result.json, pack.rungsIncluded);
+    if (answer) answer = coerceProseAbstention(answer, input.kind);
     if (answer) best = answer;
 
     if (answer && isUsefulAnswer(answer)) {
-      // ── self-review: exactly ONE extra call, and a failure loses nothing ──
+      // ── self-review + refine: verify, revise on the flag, re-verify ──────
       // Claim decomposition (see the section above): the model extracts and
-      // locates, the verdict is computed here, and it runs on every kind.
-      let review: ReviewAnswer | null = null;
-      if (opts.selfReview && now() < deadline) {
+      // quotes, the verdict is computed here, and it runs on every kind.
+      const runClaimCheck = async (target: MaxAskAnswer): Promise<ReviewAnswer | null> => {
         opts.onPhase?.("reviewing");
-        const reviewRequest = buildReviewRequest(pack, answer);
+        const reviewRequest = buildReviewRequest(pack, target);
         const reviewed = await opts.run<unknown>({
           task: MAX_ASK_TASK,
           tag: `review:${input.chapterNumber}:${input.paragraphIndex}`,
@@ -700,12 +770,52 @@ export async function runMaxAsk(
           maxTokens: reviewRequest.maxTokens,
           timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
         }).catch(() => null);
-        if (reviewed && reviewed.ok) {
-          const claims = normalizeClaimCheck(reviewed.json);
-          if (claims) review = computeReviewVerdict(claims, pack.text);
+        if (!reviewed || !reviewed.ok) return null;
+        const claims = normalizeClaimCheck(reviewed.json);
+        return claims ? computeReviewVerdict(claims, pack.text) : null;
+      };
+
+      let review: ReviewAnswer | null = null;
+      let refined = false;
+      if (opts.selfReview && now() < deadline) {
+        review = await runClaimCheck(answer);
+
+        // ★ REFINE, ONCE, ON A TOOL FLAG OR LOW CONFIDENCE — then the revised
+        //   answer faces the SAME deterministic check. It ships only if it
+        //   passes; a revision that still fails is discarded and the original
+        //   ships with its caution, because "the model made it worse" is a
+        //   documented failure mode of small-model self-correction.
+        const flag = review?.verdict === "overreaches" && review.note
+          ? { kind: "overreach" as const, note: review.note }
+          : answer.confidence < REFINE_CONF_FLOOR
+            ? { kind: "low-confidence" as const }
+            : null;
+        if (flag && now() < deadline) {
+          opts.onPhase?.("refining");
+          const refineRequest = buildRefineRequest(pack, answer, flag, input.kind);
+          const revisedRaw = await opts.run<unknown>({
+            task: MAX_ASK_TASK,
+            tag: `refine:${input.chapterNumber}:${input.paragraphIndex}`,
+            systemPrompt: refineRequest.systemPrompt,
+            userText: refineRequest.userText,
+            schema: refineRequest.schema,
+            maxTokens: refineRequest.maxTokens,
+            timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
+          }).catch(() => null);
+          let revised = revisedRaw && revisedRaw.ok
+            ? normalizeMaxAsk(revisedRaw.json, pack.rungsIncluded) : null;
+          if (revised) revised = coerceProseAbstention(revised, input.kind);
+          if (revised && isUsefulAnswer(revised) && now() < deadline) {
+            const recheck = await runClaimCheck(revised);
+            if (recheck && recheck.verdict === "supported") {
+              answer = revised;
+              review = recheck;
+              refined = true;
+            }
+          }
         }
       }
-      return { answer, review, steps, stopped: "answered", packHash: pack.packHash,
+      return { answer, review, refined, steps, stopped: "answered", packHash: pack.packHash,
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
     }
 

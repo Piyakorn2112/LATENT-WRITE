@@ -120,7 +120,7 @@ async function main() {
     'const cs = JSON.parse(process.argv[process.argv.length-1]);' +
     'console.log(JSON.stringify(cs.map((c)=>{' +
     '  const pack = buildMaxAskPack(c.input, c.budget);' +
-    '  const req = buildMaxAskRequest(pack);' +
+    '  const req = buildMaxAskRequest(pack, undefined, c.input.kind);' +
     '  return { rungs: pack.rungsIncluded, dropped: pack.rungsDropped,' +
     '           tokens: pack.tokensEstimate, req };' +
     '})))',

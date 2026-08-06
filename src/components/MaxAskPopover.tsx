@@ -35,11 +35,11 @@ interface Props {
  *   entity reviewer for ten seconds. cancelWhere on unmount, by task.
  */
 const maxRunner: AssistantJSONRunner = (req) =>
-  // contextSize 4096: the widened pack caps at 3200 tokens + a 640-token
-  // answer, so the 8k default would spend ~530 MB of KV cache on nothing —
-  // and on an 8 GB machine that headroom is the difference between the
-  // memory guard refusing and the answer arriving.
-  assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 4096 });
+  // contextSize 8192: Q8_0 KV cache means the 8k window now costs what the
+  // old 4k f16 window did (~265 MB), so the ask surface takes the room — the
+  // evidence budget grew with it, and the memory guard still walks down on a
+  // machine that cannot hold it.
+  assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 8192 });
 
 const MENU: ReadonlyArray<{ kind: AskKind; label: string; hint: string }> = [
   { kind: "check", label: "Check against the story", hint: "does anything here conflict?" },
@@ -139,6 +139,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
           name: "asking",
           label: p === "asking" ? "Reading the passage…"
             : p === "widening" ? "Reading more of the story…"
+            : p === "refining" ? "Correcting its answer…"
             : "Checking its answer against the story…",
         });
       },
@@ -259,8 +260,16 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
               checked — {phase.result.review.facts} fact{phase.result.review.facts === 1 ? "" : "s"} located in the story
             </div>
           )}
-          {phase.result.answer && RUNG_LABEL[phase.result.answer.basis] && (
+          {phase.result.answer?.basis === "fits" ? (
+            <div className="max-ask-basis">fits the story — nothing conflicts</div>
+          ) : phase.result.answer && RUNG_LABEL[phase.result.answer.basis] ? (
             <div className="max-ask-basis">from {RUNG_LABEL[phase.result.answer.basis]}</div>
+          ) : null}
+          {/* ★ The small indicator, not a warning: the refine pass exists so
+              the writer RARELY sees a caution — a flagged answer was revised
+              and re-verified before it got here. */}
+          {phase.result.refined && (
+            <div className="max-ask-refined">self-corrected · re-checked against the story</div>
           )}
           {/* An answer the loop had to break out of is still shown — best
               effort beats silence — but says so rather than passing as full. */}

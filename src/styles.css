@@ -16055,6 +16055,17 @@ body.electron-window-unfocused .wc-panel::after {
   .max-ask-orb { animation: none; opacity: 0.9; }
 }
 
+/* The refined indicator: the quietest voice in the popover — a fact, not an
+   alarm. Blue-accented like the checked line's family, because a correction
+   that re-verified is GOOD news. */
+.max-ask-refined {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--control-value-fill) 70%, var(--text-tertiary));
+}
+
 /* The clean self-check: quieter than the caution, but PRESENT — a check whose
    only visible outcome is bad news reads as absent the rest of the time. */
 .max-ask-checked {
