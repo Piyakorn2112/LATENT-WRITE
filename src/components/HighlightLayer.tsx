@@ -464,6 +464,10 @@ interface Props {
   snapshotContent: string;
   paragraphs: string[];
   visible?: boolean;
+  /** Absolute span the writing tool is revising: intersecting paragraphs
+   *  render visibility:hidden (metrics kept, paint suppressed) while the
+   *  wave overlay repaints them. */
+  hideRange?: { start: number; end: number } | null;
   speechResults: ChapterAnalysisResult["speechResults"];
   knownNames?: string[];
   /** Type-structured entity names — used to apply distinct CSS classes per entity type. */
@@ -504,7 +508,7 @@ interface Props {
 function HighlightLayerImpl({
   content, snapshotContent, paragraphs, speechResults, knownNames, entityNameMap, liveKnownNames, liveParagraphRange, visible = true,
   grammarSuggestions = [], toolHighlights, onEntityClick, annotationMode, onSpeechAnnotate, onActionAnnotate,
-  annotationOverrides, speechPredictions, actionPredictions, pronounOwners, sceneLabelOverrides,
+  annotationOverrides, speechPredictions, actionPredictions, pronounOwners, sceneLabelOverrides, hideRange,
 }: Props) {
   // Build a lowercase-name → entity-type map for type-aware tag rendering.
   const entityTypeMap = useMemo<Map<string, "character" | "place" | "faction" | "entity">>(() => {
@@ -917,6 +921,21 @@ function HighlightLayerImpl({
       );
     };
 
+    // ★ THE WRITING TOOL'S RANGE IS HIDDEN INSIDE THE LAYER — visibility,
+    //   never display: glyphs keep their metrics so nothing reflows, they
+    //   just stop painting (entity pills included, whatever their size). The
+    //   wave overlay repaints the affected paragraphs in BASE_COLOR, so a
+    //   partially-selected paragraph never goes blank. Paragraph-level
+    //   granularity on purpose: the layer renders per paragraph, and a
+    //   sub-paragraph split of this span renderer is the risky change this
+    //   deliberately is not.
+    const intersectsHidden = (from: number, to: number) =>
+      !!hideRange && from < hideRange.end && to > hideRange.start;
+    const maybeHide = (node: ReactNode, from: number, to: number, key: string): ReactNode =>
+      intersectsHidden(from, to)
+        ? <span key={`${key}-hidden`} style={{ visibility: "hidden" }}>{node}</span>
+        : node;
+
     for (let pi = 0; pi < paragraphs.length; pi++) {
       const pos = positions[pi];
       const paraStart = pos.start;
@@ -925,12 +944,12 @@ function HighlightLayerImpl({
 
       if (paraStart > cursor) {
         const gap = renderLiveText(content.slice(cursor, paraStart), cursor, paraStart, `gap${pi}`);
-        if (gap) out.push(gap);
+        if (gap) out.push(maybeHide(gap, cursor, paraStart, `gap${pi}`));
       }
 
       if (!pos.matched) {
         const stale = renderLiveText(content.slice(paraStart, paraEnd), paraStart, paraEnd, `para${pi}-stale`);
-        if (stale) out.push(stale);
+        if (stale) out.push(maybeHide(stale, paraStart, paraEnd, `para${pi}-stale`));
         cursor = paraEnd;
         continue;
       }
@@ -938,7 +957,7 @@ function HighlightLayerImpl({
       const tension = meta?.sceneTension ?? "calm";
       // The engine's own label always wins; the model's only fills a silence.
       const sceneLabel = meta?.sceneLabel ?? sceneLabelOverrides?.get(pi);
-      out.push(
+      out.push(maybeHide(
         <span key={`para${pi}`}>
           {meta?.sceneStart && sceneLabel && (
             <span aria-hidden="true" style={SCENE_ANCHOR}>
@@ -946,14 +965,15 @@ function HighlightLayerImpl({
             </span>
           )}
           {snapshotPlan.paragraphNodes[pi]}
-        </span>
-      );
+        </span>,
+        paraStart, paraEnd, `para${pi}`,
+      ));
       cursor = paraEnd;
     }
 
     if (cursor < content.length) {
       const trail = renderLiveText(content.slice(cursor), cursor, content.length, "trail");
-      if (trail) out.push(trail);
+      if (trail) out.push(maybeHide(trail, cursor, content.length, "trail"));
     }
 
     return out;
@@ -962,7 +982,7 @@ function HighlightLayerImpl({
     //   changing; without the dep the label would appear only on the next
     //   keystroke, which reads as a flicker of arriving-late text rather than a
     //   result. The caller passes a stable `undefined` when there is nothing.
-  }, 4, { snapshotActive: snapshotContent !== content, paragraphs: paragraphs.length }), [content, snapshotContent, paragraphs, grammarSuggestions, onEntityClick, annotationMode, snapshotPlan, livePlan, liveParagraphRange, sceneLabelOverrides]);
+  }, 4, { snapshotActive: snapshotContent !== content, paragraphs: paragraphs.length }), [content, snapshotContent, paragraphs, grammarSuggestions, onEntityClick, annotationMode, snapshotPlan, livePlan, liveParagraphRange, sceneLabelOverrides, hideRange]);
 
   if (nodes.length === 0) return null;
 

@@ -287,6 +287,7 @@ export function Editor({
             grammarSuggestions={grammarSuggestions}
             toolHighlights={toolHighlights}
             visible={hasHighlight}
+            hideRange={lockedRange ?? null}
             onEntityClick={onEntityClick}
             annotationMode={annotationMode}
             onSpeechAnnotate={onSpeechAnnotate}
@@ -413,21 +414,37 @@ function WritingWaveOverlay({ textareaRef, range, content }: {
   }, [textareaRef, range.start, range.end, content]);
   if (!style) return null;
 
-  // ★ ONE CONTINUOUS RANGE SPAN, NOT WORD CHIPS. Per-word covers left the
-  //   layer visible in every gap; the range span's inline background covers
-  //   whole line boxes, spaces included. Inside it the ink span paints the
-  //   text with a WIDE travelling gradient clipped to the glyphs — a smooth
-  //   mesh-like wave instead of discrete word pulses.
+  // ★ CLEAN TEXT, NO COVER (owner call). The highlight layer hides its own
+  //   intersecting paragraphs (visibility, metrics kept), so nothing needs
+  //   covering and no rectangle can ever show. The overlay repaints those
+  //   whole paragraphs in BASE ink — a partially-selected paragraph keeps
+  //   its unselected words — and the revising range itself carries only a
+  //   soft wide sheen from the composited sweep.
+  const paraFrom = (() => {
+    let last = 0;
+    for (const hit of content.slice(0, range.start).matchAll(/\n[ \t]*\n[\s]*/g)) {
+      last = (hit.index ?? 0) + hit[0].length;
+    }
+    return last;
+  })();
+  const paraTo = (() => {
+    const sep = /\n[ \t]*\n/g;
+    sep.lastIndex = range.end;
+    const hit = sep.exec(content);
+    return hit ? hit.index : content.length;
+  })();
   return (
     <div className="writing-wave-text" style={style} aria-hidden>
-      {content.slice(0, range.start)}
+      {content.slice(0, paraFrom)}
+      <span className="writing-wave-plain">{content.slice(paraFrom, range.start)}</span>
       <span className="writing-wave-range">
         <span className="writing-wave-ink">{content.slice(range.start, range.end)}</span>
         {/* Motion lives here alone: transform-only animation = compositor
             thread, zero main-thread paint per frame (owner requirement). */}
         <span className="writing-wave-sweep" aria-hidden />
       </span>
-      {content.slice(range.end)}
+      <span className="writing-wave-plain">{content.slice(range.end, paraTo)}</span>
+      {content.slice(paraTo)}
     </div>
   );
 }

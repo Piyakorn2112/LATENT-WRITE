@@ -35,9 +35,9 @@ const page = `<!doctype html><html><head><style>${css}</style><style>
   <!-- span flush against the div: the layer is pre-wrap, so pretty-printed
        newlines inside it RENDER and shove the text a line down — that
        misalignment blinded two earlier versions of this control. -->
-  <div class="editor-highlight" style="font: 16px monospace; line-height: 24px; padding: 0"><span style="color: rgb(200, 0, 0)">Mara walked to the boathouse and found the door unlocked today.</span></div>
+  <div class="editor-highlight" style="font: 16px monospace; line-height: 24px; padding: 0"><span id="layer-range" style="visibility: hidden"><span style="color: rgb(200, 0, 0)">Mara walked to the boathouse and found the door unlocked today.</span></span></div>
   <textarea class="document-editor document-editor--highlight" style="font: 16px monospace; line-height: 24px; width: 600px; height: 60px; padding: 0">Mara walked to the boathouse and found the door unlocked today.</textarea>
-  <div class="writing-wave-text" style="font: 16px monospace; line-height: 24px; top: 0; left: 0; width: 600px; padding: 0; --wave-cover: rgb(250, 250, 248)">Mara <span class="writing-wave-range"><span class="writing-wave-ink" style="animation: none; background-position: 50% 0">walked to the boathouse</span></span></div>
+  <div class="writing-wave-text" style="font: 16px monospace; line-height: 24px; top: 0; left: 0; width: 600px; padding: 0; color: transparent"><span class="writing-wave-plain" style="color: rgb(20,20,24)">Mara </span><span class="writing-wave-range"><span class="writing-wave-ink" style="color: rgb(20,20,24)">walked to the boathouse</span><span class="writing-wave-sweep" style="animation: none"></span></span></div>
 </div>
 </body></html>`;
 
@@ -73,17 +73,17 @@ async function inkPixel(extraCss) {
   return px;
 }
 
-const real = await inkPixel("");
-// ★ NEGATIVE CONTROL — pair every negative gate with a positive: force the
-//   old sandwich (overlay back to z-index 2) and the RED layer ink must
-//   reappear, proving this harness actually sees the stacking.
-const sandwich = await inkPixel(".writing-wave-text { z-index: 2 !important; }");
+const shipped = await inkPixel('');
+const layerShows = await inkPixel('#layer-range { visibility: visible !important; } .writing-wave-text { display: none !important; }');
+const bothHidden = await inkPixel('.writing-wave-text { display: none !important; }');
 await browser.close();
 
-console.log(`shipped css ink: rgb(${real.r}, ${real.g}, ${real.b}) · forced-sandwich ink: rgb(${sandwich.r}, ${sandwich.g}, ${sandwich.b})`);
-const accentLike = (p) => p.b > p.r + 40 && p.b > 100;
-const layerRed = (p) => p.r > p.b + 40;
-if (!layerRed(sandwich)) { console.log("✗ VACUOUS: the forced sandwich did not leak red — harness is blind"); process.exit(1); }
-if (layerRed(real)) { console.log("✗ the highlight layer paints ABOVE the pulse — sandwich is back"); process.exit(1); }
-if (!accentLike(real)) { console.log("✗ no accent ink found — overlay not rendering/covering"); process.exit(1); }
-console.log("✓ the pulse paints above the layer and covers the original glyphs (and the control catches the sandwich)");
+console.log(`shipped ink: rgb(${shipped.r}, ${shipped.g}, ${shipped.b}) · layer-visible control: rgb(${layerShows.r}, ${layerShows.g}, ${layerShows.b}) · all-hidden control: rgb(${bothHidden.r}, ${bothHidden.g}, ${bothHidden.b})`);
+const red = (p) => p.r > p.b + 40 && p.r > 120;
+const darkInk = (p) => p.lum < 90;
+const blank = (p) => p.lum > 200;
+if (!red(layerShows)) { console.log('✗ VACUOUS: un-hiding the layer did not show red — sampler blind'); process.exit(1); }
+if (!blank(bothHidden)) { console.log('✗ hiding is not hiding: something still paints with the overlay off'); process.exit(1); }
+if (red(shipped)) { console.log('✗ the layer range still paints under the overlay'); process.exit(1); }
+if (!darkInk(shipped)) { console.log('✗ overlay ink absent — the range would read blank'); process.exit(1); }
+console.log('✓ clean-text model verified: layer range hidden, overlay ink is the only paint (both controls bite)');

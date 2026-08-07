@@ -16131,20 +16131,19 @@ body.electron-window-unfocused .wc-panel::after {
   color: transparent;
   user-select: none;
 }
+.writing-wave-plain {
+  /* Repaints the affected paragraphs the highlight layer is hiding —
+     BASE ink, indistinguishable from resting text. */
+  color: var(--text-body);
+}
 .writing-wave-range {
-  /* Continuous opaque cover (spaces included); position:relative hosts the
-     composited sweep. */
+  /* No background, no radius, no cover — the layer hides its own range
+     (owner call: clean text only). This span just hosts the sweep. */
   position: relative;
-  background: var(--wave-cover, #fff);
-  border-radius: 3px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
   overflow: hidden;
 }
 .writing-wave-ink {
-  /* STATIC faint accent — no per-frame paint. The motion lives entirely in
-     the sweep below, which animates transform only (compositor thread). */
-  color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 48%, transparent);
+  color: var(--text-body);
 }
 .writing-wave-sweep {
   position: absolute;
@@ -16152,16 +16151,18 @@ body.electron-window-unfocused .wc-panel::after {
   width: 300%;
   left: -100%;
   pointer-events: none;
+  /* Fainter and broader (owner call): low-alpha accent, long soft
+     shoulders, one wide crest gliding through. */
   background: linear-gradient(
     100deg,
-    transparent 38%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 16%, transparent) 46%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 22%, transparent) 50%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 16%, transparent) 54%,
-    transparent 62%
+    transparent 24%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 9%, transparent) 40%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 14%, transparent) 50%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 9%, transparent) 60%,
+    transparent 76%
   );
   will-change: transform;
-  animation: writing-sweep 2.4s linear infinite;
+  animation: writing-sweep 2.8s linear infinite;
 }
 @keyframes writing-sweep {
   0%   { transform: translateX(-33%); }
