@@ -49,7 +49,7 @@ const callBridge = (method, arg) => {
 const runBatch = (id, req) => callBridge('assistantRun', {
   requestId: id, task: 'timeline-chips', tier: 'max', lane: 'batch', jsonStyle: 'compact',
   systemPrompt: req.systemPrompt, userText: req.userText,
-  schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 120000,
+  schema: req.schema, gbnf: req.gbnf, maxTokens: req.maxTokens, timeoutMs: 120000,
 });
 
 async function main() {
@@ -65,7 +65,14 @@ async function main() {
   const status = await callBridge('assistantStatus', { tier: 'max' });
   if (!status.model.present) { console.log('SKIP — max model not on disk.'); app.exit(0); return; }
   console.log(`sidecar binary available: ${status.sidecar.available}`);
-  if (!status.sidecar.available) { console.log('SKIP — no llama-server on this machine.'); app.exit(0); return; }
+  if (!status.sidecar.available) {
+    // The self-contained path: provision the pinned engine (11MB, sha256-
+    // verified) exactly as a brew-less machine would in the background.
+    console.log('provisioning engine…');
+    const ok = await assistant.sidecar.ensureBinary();
+    console.log(`provisioned: ${ok} → ${assistant.sidecar.binaryPath()}`);
+    if (!ok) { console.log('SKIP — provisioning failed (offline?).'); app.exit(0); return; }
+  }
 
   const reqs = buildReqs();
 

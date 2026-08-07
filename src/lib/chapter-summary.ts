@@ -44,6 +44,16 @@ export const SUMMARY_SCHEMA = {
   },
 } as const;
 
+/** Precompiled compact grammar for the SIDECAR path — same generator, same
+ *  stripped stop-tail, same regeneration rule as CHIP_RICH_GBNF (see the ★
+ *  there). Regenerate whenever SUMMARY_SCHEMA changes. */
+export const SUMMARY_GBNF = `root ::= "{" whitespace-no-new-lines-rule "\\"summary\\"" ":" [ ]? string-0-420-rule comma-whitespace-no-new-lines-rule "\\"throughline\\"" ":" [ ]? string-0-140-rule whitespace-no-new-lines-rule "}"
+string-char-rule ::= [^"\\\\\\x7F\\x00-\\x1F] | "\\\\" ["\\\\/bfnrt] | "\\\\u" [0-9a-fA-F]{4}
+string-0-420-rule ::= "\\"" ( string-char-rule ){0,420} "\\""
+comma-whitespace-no-new-lines-rule ::= "," [ ]?
+string-0-140-rule ::= "\\"" ( string-char-rule ){0,140} "\\""
+whitespace-no-new-lines-rule ::= [ ]?`;
+
 export const SUMMARY_SYSTEM = `You write the short summary shown beside a novel chapter on its timeline.
 
 You are given the chapter's number and title, the moments an analysis engine
@@ -194,7 +204,7 @@ export async function runChapterSummary(
     schema: request.schema,
     maxTokens: request.maxTokens,
     timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    ...(opts.jsonStyle ? { jsonStyle: opts.jsonStyle } : {}),
+    ...(opts.jsonStyle ? { jsonStyle: opts.jsonStyle, gbnf: SUMMARY_GBNF } : {}),
   });
   if (!result.ok) {
     opts.onRunFailure?.(result.reason);

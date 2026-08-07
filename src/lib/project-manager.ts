@@ -201,6 +201,8 @@ export interface AssistantRunRequest {
   jsonStyle?: "compact";
   /** "batch" routes to the llama-server sidecar when available. */
   lane?: "batch";
+  /** Precompiled compact GBNF for the sidecar path; host path ignores it. */
+  gbnf?: string;
 }
 
 export interface AssistantTimings {

@@ -86,6 +86,13 @@ export interface AssistantJSONRequest {
    * the in-process host transparently (where it is serialised as before).
    */
   lane?: "batch";
+  /**
+   * Precompiled compact GBNF for the sidecar, whose own json_schema
+   * conversion allows pretty-printing (~35% of a chip answer measured).
+   * The in-process host ignores it (its jsonStyle path builds the same
+   * grammar itself). Must be generated from `schema` — see CHIP_RICH_GBNF.
+   */
+  gbnf?: string;
 }
 
 export type AssistantJSONResult<T> =
@@ -243,6 +250,7 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       ...(job.req.contextSize ? { contextSize: job.req.contextSize } : {}),
       ...(job.req.jsonStyle ? { jsonStyle: job.req.jsonStyle } : {}),
       ...(job.req.lane ? { lane: job.req.lane } : {}),
+      ...(job.req.gbnf ? { gbnf: job.req.gbnf } : {}),
     });
   } catch (err) {
     return { ok: false, reason: `ipc-failed:${message(err)}` };
@@ -343,9 +351,14 @@ export function cancelAll(reason = "cancelled"): number {
   return cancelWhere(() => true, reason);
 }
 
-/** Debug/status read-out — the queue is otherwise invisible to the UI. */
-export function assistantPending(): { queued: number; inFlight: string | null } {
-  return { queued: queue.length, inFlight: inflight ? inflight.requestId : null };
+/** Debug/status read-out — the queues are otherwise invisible to the UI. */
+export function assistantPending(): { queued: number; inFlight: string | null; batchQueued: number; batchInFlight: number } {
+  return {
+    queued: queue.length,
+    inFlight: inflight ? inflight.requestId : null,
+    batchQueued: batchQueue.length,
+    batchInFlight: batchInflight.size,
+  };
 }
 
 /**

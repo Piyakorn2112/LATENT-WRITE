@@ -60,13 +60,40 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { try { if (_child) _child.kill(); } catch { /* gone */ } process.exit(0); });
 }
 
-// ── binary discovery ────────────────────────────────────────────────────────
+// ── binary discovery + provisioning ─────────────────────────────────────────
+//
+// ★ SELF-CONTAINED AFTER BUILD (owner requirement). The engine follows the
+//   MODEL pattern: a pinned, sha256-verified download into userData on first
+//   need — the app already fetches 1–2.5GB of weights on demand, and the
+//   11MB engine rides the same philosophy. The official release tarball is
+//   verified standalone: llama-server + @rpath dylibs in one folder, no
+//   Homebrew anywhere. Discovery also honours a bundled copy under
+//   process.resourcesPath so a distribution build may pre-bundle the same
+//   folder with zero code change.
+const ENGINE = {
+  tag: 'b10298',
+  file: 'llama-b10298-bin-macos-arm64.tar.gz',
+  url: 'https://github.com/ggml-org/llama.cpp/releases/download/b10298/llama-b10298-bin-macos-arm64.tar.gz',
+  sha256: '45397a751a6931a65d600fadbeaddd103edef77d0b2e8465933fc6497aeb70ef',
+  dir: 'llama-b10298',
+  supported: process.platform === 'darwin' && process.arch === 'arm64',
+};
+
+function engineRoot() {
+  const { app } = require('electron');
+  return require('path').join(app.getPath('userData'), 'engine');
+}
 
 let _binaryPath; // undefined = not probed, null = unavailable
 function binaryPath() {
   if (_binaryPath !== undefined) return _binaryPath;
+  const path = require('path');
   const candidates = [
     process.env.ASSISTANT_LLAMA_SERVER,
+    // Provisioned (downloaded on demand, pinned + verified).
+    (() => { try { return path.join(engineRoot(), ENGINE.dir, 'llama-server'); } catch { return null; } })(),
+    // Bundled with a packaged build (electron-builder extraResources).
+    process.resourcesPath ? path.join(process.resourcesPath, 'llama-server', 'llama-server') : null,
     '/opt/homebrew/bin/llama-server',
     '/usr/local/bin/llama-server',
   ].filter(Boolean);
@@ -83,6 +110,60 @@ function binaryPath() {
 
 function available() {
   return binaryPath() !== null;
+}
+
+let _provisioning = null; // Promise while a download runs; resolves ok:boolean
+/**
+ * Download + verify + extract the pinned engine. Idempotent and background-
+ * safe: callers fire it and keep falling back in-process until it lands;
+ * the next tick simply finds the binary. Any failure leaves the machine
+ * exactly where it was (in-process only) — provisioning is never fatal.
+ */
+function ensureBinary() {
+  if (available()) return Promise.resolve(true);
+  if (!ENGINE.supported) return Promise.resolve(false);
+  if (_provisioning) return _provisioning;
+  const path = require('path');
+  _provisioning = (async () => {
+    const root = engineRoot();
+    const tarPath = path.join(root, `${ENGINE.file}.part`);
+    fs.mkdirSync(root, { recursive: true });
+    // Download (follow redirects — GitHub releases always redirect to a CDN).
+    await new Promise((resolve, reject) => {
+      const https = require('https');
+      const follow = (url, depth) => {
+        if (depth > 5) return reject(new Error('too many redirects'));
+        https.get(url, { headers: { 'user-agent': 'latent-write' } }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume();
+            return follow(new URL(res.headers.location, url).toString(), depth + 1);
+          }
+          if (res.statusCode !== 200) { res.resume(); return reject(new Error(`http ${res.statusCode}`)); }
+          const out = fs.createWriteStream(tarPath);
+          res.pipe(out);
+          out.on('finish', () => out.close(resolve));
+          out.on('error', reject);
+          res.on('error', reject);
+        }).on('error', reject);
+      };
+      follow(ENGINE.url, 0);
+    });
+    // Verify BEFORE extracting — same discipline as the model download.
+    const digest = await new Promise((resolve, reject) => {
+      const h = crypto.createHash('sha256');
+      fs.createReadStream(tarPath).on('data', (c) => h.update(c)).on('end', () => resolve(h.digest('hex'))).on('error', reject);
+    });
+    if (digest !== ENGINE.sha256) {
+      fs.unlinkSync(tarPath);
+      throw new Error(`engine sha256 mismatch: ${digest}`);
+    }
+    execFileSync('/usr/bin/tar', ['xzf', tarPath, '-C', root], { timeout: 60_000 });
+    fs.unlinkSync(tarPath);
+    _binaryPath = undefined; // re-probe: the provisioned path now exists
+    return available();
+  })().catch(() => { _binaryPath = undefined; return false; })
+    .finally(() => { _provisioning = null; });
+  return _provisioning;
 }
 
 // ── chat templates ──────────────────────────────────────────────────────────
@@ -248,7 +329,12 @@ async function run(opts, entry) {
       signal: controller.signal,
       body: JSON.stringify({
         prompt,
-        json_schema: opts.schema,
+        // A precompiled compact grammar beats json_schema: the server's own
+        // schema conversion allows pretty-printing and the model takes it
+        // (measured 111 vs ~70 tokens on a chip answer).
+        ...(typeof opts.gbnf === 'string' && opts.gbnf !== ''
+          ? { grammar: opts.gbnf }
+          : { json_schema: opts.schema }),
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
         n_predict: Number.isFinite(opts.maxTokens) ? opts.maxTokens : 128,
         cache_prompt: true,
@@ -367,6 +453,6 @@ function status() {
 function setEmitter(fn) { _emit = typeof fn === 'function' ? fn : null; }
 
 module.exports = {
-  available, ensureStarted, run, cancel, stop, status, setEmitter,
+  available, ensureBinary, ensureStarted, run, cancel, stop, status, setEmitter,
   binaryPath,
 };

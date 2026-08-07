@@ -1359,7 +1359,11 @@ export default function App() {
       const status = maxMode ? await window.electronAPI?.assistantStatus({ tier: "max" }) : null;
       const modelId = maxMode ? status?.model?.id ?? null : await assistantModelId();
       if (!modelId || !alive) return;
-      const sidecarReady = maxMode && !!(status as { sidecar?: { available?: boolean } } | null)?.sidecar?.available;
+      // available AND not errored: after a boot failure the pool must drop
+      // to 1, or three batch jobs fall through onto the single-slot host and
+      // two of them manufacture 'busy' strikes every tick.
+      const sc = (status as { sidecar?: { available?: boolean; error?: string } } | null)?.sidecar;
+      const sidecarReady = maxMode && !!sc?.available && !sc?.error;
       const run: typeof assistantRunJSON = maxMode
         ? (req) => assistantRunJSON({ ...req, tier: "max", ...(sidecarReady ? { lane: "batch" as const } : {}) })
         : assistantRunJSON;

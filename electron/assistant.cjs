@@ -930,7 +930,14 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
  *   ladder: halve the slots before giving up.
  */
 async function trySidecarRun(opts) {
-  if (!sidecar.available() || _customModel) return null;
+  if (_customModel) return null;
+  if (!sidecar.available()) {
+    // Kick provisioning in the background (pinned, verified, ~11MB — the
+    // model-download philosophy). This request falls back in-process; a
+    // later tick finds the engine ready. Never awaited, never fatal.
+    void sidecar.ensureBinary();
+    return null;
+  }
   const tier = opts.tier || DEFAULT_TIER;
   const entry = activeEntry(tier);
   if (!entry.sidecar || !entry.template) return null;
