@@ -303,23 +303,21 @@ export function buildWritingRequest(
   return {
     systemPrompt,
     userText: lines.join("\n"),
-    // maxLength headroom over the batch so the grammar never guillotines a
-    // legitimate revision; the length rule lives in the prompt. A CUSTOM
-    // instruction may legitimately EXPAND ("make it longer"), so its ceiling
-    // is a multiple the others never need.
-    schema: {
-      ...WRITING_SCHEMA_BASE,
-      properties: {
-        text: {
-          type: "string",
-          maxLength: op === "custom"
-            ? Math.ceil(batch.text.length * 3) + 400
-            : Math.ceil(batch.text.length * 1.6) + 240,
-        },
-      },
-    },
+    // ★★ NO maxLength ON THE REVISION STRING. A schema maxLength compiles to
+    //   a bounded GBNF repetition `(char){0,N}`, and llama.cpp's parser
+    //   rejects N past a "sane defaults" ceiling that SCALES WITH THE CHAR
+    //   RULE'S COMPLEXITY (measured: {0,1999} parses, {0,2000} throws, with a
+    //   2-alternative char rule — scripts/probe-grammar-repetition.cjs). The
+    //   old batch-scaled bound (3x+400 for custom) crossed it on ordinary
+    //   paragraphs, so every host-path batch died at grammar parse before the
+    //   model ran. Length is already enforced where it belongs: maxTokens caps
+    //   generation, and revisionAcceptable's per-op window refuses overruns.
+    //   Bonus: one shared schema means one cached grammar for every batch —
+    //   the per-batch maxLength made each request a grammar-cache miss.
+    schema: WRITING_SCHEMA_BASE,
     // ~chars/3.2 tokens for English prose, slack + scaffold; custom gets
-    // expansion headroom for the same reason as the schema ceiling.
+    // expansion headroom because the instruction may legitimately EXPAND
+    // ("make it longer").
     maxTokens: op === "custom"
       ? Math.ceil((batch.text.length / 3.2) * 2.8) + 128
       : Math.ceil((batch.text.length / 3.2) * 1.5) + 96,
