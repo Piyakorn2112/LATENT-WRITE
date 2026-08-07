@@ -37,7 +37,7 @@ const page = `<!doctype html><html><head><style>${css}</style><style>
        misalignment blinded two earlier versions of this control. -->
   <div class="editor-highlight" style="font: 16px monospace; line-height: 24px; padding: 0"><span id="layer-range" style="visibility: hidden"><span style="color: rgb(200, 0, 0)">Mara walked to the boathouse and found the door unlocked today.</span></span></div>
   <textarea class="document-editor document-editor--highlight" style="font: 16px monospace; line-height: 24px; width: 600px; height: 60px; padding: 0">Mara walked to the boathouse and found the door unlocked today.</textarea>
-  <div class="writing-wave-text" style="font: 16px monospace; line-height: 24px; top: 0; left: 0; width: 600px; padding: 0; color: transparent"><span class="writing-wave-plain" style="color: rgb(20,20,24)">Mara </span><span class="writing-wave-range"><span class="writing-wave-ink" style="color: rgb(20,20,24)">walked to the boathouse</span><span class="writing-wave-sweep" style="animation: none"></span></span></div>
+  <div class="writing-wave-text" style="font: 16px monospace; line-height: 24px; top: 0; left: 0; width: 600px; padding: 0; color: transparent"><span class="writing-wave-plain" style="color: rgb(20,20,24)">Mara </span><span class="writing-wave-range"><span class="writing-wave-ink" style="color: rgb(20,20,24)">walked to the boathouse</span></span></div>
 </div>
 </body></html>`;
 

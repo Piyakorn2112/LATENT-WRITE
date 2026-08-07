@@ -16136,37 +16136,31 @@ body.electron-window-unfocused .wc-panel::after {
      BASE ink, indistinguishable from resting text. */
   color: var(--text-body);
 }
-.writing-wave-range {
-  /* No background, no radius, no cover — the layer hides its own range
-     (owner call: clean text only). This span just hosts the sweep. */
-  position: relative;
-  overflow: hidden;
-}
 .writing-wave-ink {
-  color: var(--text-body);
-}
-.writing-wave-sweep {
-  position: absolute;
-  inset: 0;
-  width: 300%;
-  left: -100%;
-  pointer-events: none;
-  /* Fainter and broader (owner call): low-alpha accent, long soft
-     shoulders, one wide crest gliding through. */
-  background: linear-gradient(
+  /* ★ GLYPH-CLIPPED WAVE (owner call: only the text is blue and animates).
+     The gradient is the TEXT FILL: shoulders are the base ink so the words
+     stay readable, and a soft accent crest glides through the letters. No
+     band element exists, so nothing rectangular can ever paint. The
+     background-position animation does repaint the span's line boxes each
+     frame — accepted deliberately: a few lines during a loading state,
+     traded for glyph-only colour. */
+  color: transparent;
+  background-image: linear-gradient(
     100deg,
-    transparent 24%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 9%, transparent) 40%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 14%, transparent) 50%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 9%, transparent) 60%,
-    transparent 76%
+    var(--text-body) 32%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 38%, var(--text-body)) 44%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 62%, var(--text-body)) 50%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 38%, var(--text-body)) 56%,
+    var(--text-body) 68%
   );
-  will-change: transform;
-  animation: writing-sweep 2.8s linear infinite;
+  background-size: 340% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: writing-ink-slide 2.8s linear infinite;
 }
-@keyframes writing-sweep {
-  0%   { transform: translateX(-33%); }
-  100% { transform: translateX(33%); }
+@keyframes writing-ink-slide {
+  0%   { background-position: 130% 0; }
+  100% { background-position: -30% 0; }
 }
 
 /* The writing popover: same glass as max-ask, its own width and rows. */

@@ -437,12 +437,12 @@ function WritingWaveOverlay({ textareaRef, range, content }: {
     <div className="writing-wave-text" style={style} aria-hidden>
       {content.slice(0, paraFrom)}
       <span className="writing-wave-plain">{content.slice(paraFrom, range.start)}</span>
-      <span className="writing-wave-range">
-        <span className="writing-wave-ink">{content.slice(range.start, range.end)}</span>
-        {/* Motion lives here alone: transform-only animation = compositor
-            thread, zero main-thread paint per frame (owner requirement). */}
-        <span className="writing-wave-sweep" aria-hidden />
-      </span>
+      {/* ★ THE COLOUR LIVES IN THE GLYPH FILL — background-clip:text with a
+          travelling gradient. Only letters can ever carry the accent, so no
+          band, sheet or rectangle exists to be seen (owner call: only the
+          text is blue and animates). The gradient's shoulders are the base
+          ink colour, so text stays readable at every phase. */}
+      <span className="writing-wave-ink">{content.slice(range.start, range.end)}</span>
       <span className="writing-wave-plain">{content.slice(range.end, paraTo)}</span>
       {content.slice(paraTo)}
     </div>
