@@ -78,6 +78,14 @@ export interface AssistantJSONRequest {
    * authoritative answer — never cache or judge from a partial.
    */
   onPartialText?: (text: string) => void;
+  /**
+   * "batch" routes to the llama-server sidecar (true parallel slots) when
+   * available, and lets up to BATCH_CONCURRENCY of these run at once from
+   * this renderer. Background convergence work only — interactive requests
+   * keep the single-flight lane and its latency guarantees. Falls back to
+   * the in-process host transparently (where it is serialised as before).
+   */
+  lane?: "batch";
 }
 
 export type AssistantJSONResult<T> =
@@ -165,6 +173,30 @@ const queue: Job[] = [];
 let inflight: Job | null = null;
 let pumping = false;
 
+/**
+ * The batch lane: its own queue, pumped up to BATCH_CONCURRENCY at once.
+ * Sized one UNDER the sidecar's 4 slots, so the engine keeps a free slot
+ * instead of answering `busy` at exactly full load.
+ */
+const BATCH_CONCURRENCY = 3;
+const batchQueue: Job[] = [];
+const batchInflight = new Set<Job>();
+
+function pumpBatch(): void {
+  while (batchInflight.size < BATCH_CONCURRENCY && batchQueue.length > 0) {
+    const job = batchQueue.shift()!;
+    if (job.cancelled) { job.settle({ ok: false, reason: "cancelled" }); continue; }
+    batchInflight.add(job);
+    void execute(job)
+      .catch((err): AssistantJSONResult<unknown> => ({ ok: false, reason: `client-failed:${message(err)}` }))
+      .then((result) => {
+        batchInflight.delete(job);
+        job.settle(result);
+        pumpBatch();
+      });
+  }
+}
+
 function requestCancel(requestId: string): void {
   const a = api();
   if (!a) return;
@@ -210,6 +242,7 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       ...(job.req.noThink === false ? { noThink: false } : {}),
       ...(job.req.contextSize ? { contextSize: job.req.contextSize } : {}),
       ...(job.req.jsonStyle ? { jsonStyle: job.req.jsonStyle } : {}),
+      ...(job.req.lane ? { lane: job.req.lane } : {}),
     });
   } catch (err) {
     return { ok: false, reason: `ipc-failed:${message(err)}` };
@@ -254,15 +287,21 @@ async function pump(): Promise<void> {
 export function assistantRunJSON<T>(req: AssistantJSONRequest): Promise<AssistantJSONResult<T>> {
   if (!api()) return Promise.resolve({ ok: false, reason: "unavailable" });
   return new Promise<AssistantJSONResult<T>>((resolve) => {
-    queue.push({
+    const job: Job = {
       requestId: nextRequestId(req.task || "assistant"),
       task: req.task,
       tag: req.tag,
       req,
       cancelled: false,
       settle: resolve as unknown as (result: AssistantJSONResult<unknown>) => void,
-    });
-    void pump();
+    };
+    if (req.lane === "batch") {
+      batchQueue.push(job);
+      pumpBatch();
+    } else {
+      queue.push(job);
+      void pump();
+    }
   });
 }
 
@@ -277,17 +316,25 @@ export function cancelWhere(
   reason = "cancelled",
 ): number {
   let count = 0;
-  for (let i = queue.length - 1; i >= 0; i--) {
-    const job = queue[i];
-    if (!predicate({ task: job.task, tag: job.tag })) continue;
-    queue.splice(i, 1);
-    job.cancelled = true;
-    job.settle({ ok: false, reason });
-    count++;
+  for (const lane of [queue, batchQueue]) {
+    for (let i = lane.length - 1; i >= 0; i--) {
+      const job = lane[i];
+      if (!predicate({ task: job.task, tag: job.tag })) continue;
+      lane.splice(i, 1);
+      job.cancelled = true;
+      job.settle({ ok: false, reason });
+      count++;
+    }
   }
   if (inflight && predicate({ task: inflight.task, tag: inflight.tag })) {
     requestCancel(inflight.requestId);
     count++;
+  }
+  for (const job of batchInflight) {
+    if (predicate({ task: job.task, tag: job.tag })) {
+      requestCancel(job.requestId);
+      count++;
+    }
   }
   return count;
 }

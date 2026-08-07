@@ -158,6 +158,16 @@ export interface AssistantStatus {
     } | null;
   };
   lowMemory?: { needBytes: number; availableBytes: number };
+  /** The llama-server batch engine, when the binary exists on this machine. */
+  sidecar?: {
+    available: boolean;
+    alive: boolean;
+    port: number | null;
+    slots: number | null;
+    slotContext: number | null;
+    inflight: number;
+    error?: string;
+  };
   error?: string;
 }
 
@@ -189,6 +199,8 @@ export interface AssistantRunRequest {
   timeoutMs?: number;
   /** "compact" = JSON grammar without pretty-printing; see assistant-client. */
   jsonStyle?: "compact";
+  /** "batch" routes to the llama-server sidecar when available. */
+  lane?: "batch";
 }
 
 export interface AssistantTimings {

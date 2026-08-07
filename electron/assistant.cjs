@@ -42,6 +42,7 @@ const os = require('os');
 const https = require('https');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
+const sidecar = require('./assistant-sidecar.cjs');
 
 // ── model registry ──────────────────────────────────────────────────────────
 // Pinned to a specific Hugging Face revision so a repo re-upload can never
@@ -112,6 +113,19 @@ const MODEL_REGISTRY = {
      *  ~1.3s (measured — the OS page cache holds the weights). Idle for 90s
      *  and the memory goes back. */
     idleTtlMs: 90_000,
+    /** Chat-template family for the SIDECAR path (hand-built prompt; the
+     *  server's auto-template opens <think> and burns the budget). Only
+     *  families named in assistant-sidecar.cjs's table route there. */
+    template: 'qwen3',
+    /**
+     * ★ THE BATCH ENGINE (llama-server sidecar). 4 slots × 2048 tokens =
+     *   the same 8192-token KV budget as the single in-process context,
+     *   with TRUE continuous batching across the slots (measured 1.75x on
+     *   4 concurrent chip calls — scripts/probe-llama-server.ts). Slot size
+     *   fits every chip/summary prompt; interactive work (max-ask, writing
+     *   tool) needs one big context and stays on the in-process host.
+     */
+    sidecar: { slots: 4, slotContext: 2048 },
   },
 };
 
@@ -383,6 +397,8 @@ function assistantStatus({ tier } = {}) {
     },
     lowMemory: _lowMemory || undefined,
     error: _fatal || undefined,
+    /** The batch engine, when the binary exists on this machine. */
+    sidecar: sidecar.status(),
   };
 }
 
@@ -905,7 +921,54 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
 
 // ── run / cancel / unload ───────────────────────────────────────────────────
 
+/**
+ * ★ BATCH LANE → SIDECAR, WITH TRANSPARENT FALLBACK. Returns null when the
+ *   sidecar is not applicable (binary absent, custom model, tier without a
+ *   sidecar config, memory refusal, boot failure) — the caller falls through
+ *   to the in-process path, so a machine without llama-server behaves
+ *   exactly as before this module existed. Slot-degrade mirrors the context
+ *   ladder: halve the slots before giving up.
+ */
+async function trySidecarRun(opts) {
+  if (!sidecar.available() || _customModel) return null;
+  const tier = opts.tier || DEFAULT_TIER;
+  const entry = activeEntry(tier);
+  if (!entry.sidecar || !entry.template) return null;
+  const modelPath = modelPathFor(tier);
+  if (!fs.existsSync(modelPath)) return null;
+
+  // ★ A LIVE ENGINE IS NEVER RE-GUARDED — the running sidecar's own ~3.5GB
+  //   counts as "consumed" in availableMemoryBytes, so re-checking on every
+  //   request refuses the very engine that is already serving (the same
+  //   double-count residentCreditBytes fixes for the in-process host;
+  //   measured live by probe-sidecar-e2e). The guard gates STARTS only.
+  const live = sidecar.status();
+  if (live.alive && live.modelPath === modelPath) {
+    return sidecar.run(opts, entry);
+  }
+
+  const { slots: wantSlots, slotContext } = entry.sidecar;
+  const available = availableMemoryBytes();
+  let slots = wantSlots;
+  while (slots >= 1 && available < loadCostBytes(entry, modelPath, slots * slotContext)) {
+    slots = Math.floor(slots / 2);
+  }
+  if (slots < 1) return null;
+
+  const started = await sidecar.ensureStarted({
+    modelPath, slots, slotContext, tier: entry.tier,
+    idleTtlMs: entry.idleTtlMs,
+  });
+  if (!started.ok) return null;
+  return sidecar.run(opts, entry);
+}
+
 async function run(opts = {}) {
+  if (opts.lane === 'batch') {
+    const viaSidecar = await trySidecarRun(opts);
+    if (viaSidecar) return viaSidecar;
+    // fall through: the in-process path serves the request unchanged
+  }
   const requestId = opts.requestId || crypto.randomUUID();
   // Queue depth 1. `_claiming` closes the window between this check and
   // `_inflight` being set, which spans an await on ensureLoaded().
@@ -966,6 +1029,12 @@ async function run(opts = {}) {
 }
 
 function cancel({ requestId } = {}) {
+  // Sidecar runs first: its inflight map is keyed by requestId, and a batch
+  // cancel must not be misread as "idle" by the single-slot host below.
+  if (requestId) {
+    const viaSidecar = sidecar.cancel(requestId);
+    if (viaSidecar.ok) return viaSidecar;
+  }
   if (!_host || !_hostAlive) return { ok: false, error: 'no-host' };
   if (!_inflight) return { ok: false, error: 'idle' };
   if (requestId && _inflight.requestId !== requestId) return { ok: false, error: 'not-inflight' };
@@ -979,6 +1048,7 @@ async function unload() {
     try { _host.postMessage({ type: 'unload' }); } catch { /* noop */ }
   }
   killHost('unload');
+  sidecar.stop('unload');
   _lowMemory = null;
   _fatal = null;
   return { ok: true, pid };
@@ -1004,8 +1074,12 @@ function registerAssistant() {
   ipcMain.handle('assistant:presets', async () => ({ ok: true, presets: MODEL_PRESETS }));
   ipcMain.handle('assistant:unload', () => unload());
 
-  app.on('before-quit', () => killHost('app-quit'));
-  app.on('will-quit', () => killHost('app-quit'));
+  // The sidecar streams run-text through the same renderer channel the host
+  // uses; it gets the fan-out once, here.
+  sidecar.setEmitter(sendToRenderers);
+
+  app.on('before-quit', () => { killHost('app-quit'); sidecar.stop('app-quit'); });
+  app.on('will-quit', () => { killHost('app-quit'); sidecar.stop('app-quit'); });
 }
 
 module.exports = {
@@ -1028,5 +1102,6 @@ module.exports = {
   modelPathFor,
   availableMemoryBytes,
   MODEL_REGISTRY,
+  sidecar,
   __hostPid: () => (_host && _hostAlive ? _host.pid : null),
 };

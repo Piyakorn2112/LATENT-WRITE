@@ -1234,6 +1234,106 @@ export default function App() {
       return 10_000;
     };
 
+    /** Up to `max` stale units of ONE kind — chips before summaries, so a
+     *  pool shares its system prompt (prefix cache) and the sidecar batches
+     *  same-shaped work across its slots. */
+    const collectWork = (modelId: string, max: number): Work[] => {
+      const out: Work[] = [];
+      const entries = Object.values(storyGraphRef.current.entries)
+        .filter((entry) => entry.majorEvents.length > 0)
+        .sort((a, b) => a.chapterNumber - b.chapterNumber);
+      for (const entry of entries) {
+        if (out.length >= max) break;
+        const key = chipKeyFor(entry, modelId);
+        if (entry.lmChipsKey !== key && !chipSkipRef.current.has(`chips|${entry.chapterId}|${key}`))
+          out.push({ entry, kind: "chips", key });
+      }
+      if (out.length > 0) return out;
+      for (const entry of entries) {
+        if (out.length >= max) break;
+        const key = summaryKeyFor(entry, modelId);
+        if (entry.lmSummaryKey !== key && !chipSkipRef.current.has(`sum|${entry.chapterId}|${key}`))
+          out.push({ entry, kind: "sum", key });
+      }
+      return out;
+    };
+
+    /** One unit, run to stamp. Returns the re-arm delay it wants. */
+    const processWork = async (
+      work: Work,
+      run: typeof assistantRunJSON,
+      modelId: string,
+      maxMode: boolean,
+    ): Promise<number> => {
+      const fail: { reason: string | null } = { reason: null };
+      const onRunFailure = (reason: string) => { fail.reason = reason; };
+      const skipId = `${work.kind}|${work.entry.chapterId}|${work.key}`;
+      if (work.kind === "chips") {
+        // ★ CHIPS LAND ONE BY ONE. Each pick the model finishes streaming
+        //   is stamped provisionally (lmChips only — never the key, so the
+        //   chapter still reads stale until the validated final answer).
+        //   Guarded by the same key check as the final stamp: a stream from
+        //   a superseded request cannot touch rebuilt events. Concurrent
+        //   pool units stream to DIFFERENT chapters, each behind its own key.
+        const provisional = (picks: TimelineChipPick[]) => {
+          if (!alive) return;
+          setStoryGraph((prev) => {
+            const current = prev.entries[work.entry.chapterId];
+            if (!current || chipKeyFor(current, modelId) !== work.key) return prev;
+            return {
+              ...prev,
+              entries: {
+                ...prev.entries,
+                [work.entry.chapterId]: { ...current, lmChips: picks },
+              },
+            };
+          });
+        };
+        const outcome = await runChipPick(work.entry, {
+          run, modelId, rich: maxMode, onRunFailure, onPartialPicks: provisional,
+        });
+        if (!alive) return 350;
+        if (!outcome) return noteFailure(skipId, fail.reason);
+        setStoryGraph((prev) => {
+          const current = prev.entries[work.entry.chapterId];
+          // Recomputed against the CURRENT entry: a result raced by a
+          // rebuild is dropped rather than stamped onto new events.
+          if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
+          return {
+            ...prev,
+            entries: {
+              ...prev.entries,
+              [work.entry.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
+            },
+          };
+        });
+        return 350;
+      }
+      const summary = await runChapterSummary(work.entry, {
+        run, modelId, onRunFailure,
+        ...(maxMode ? { jsonStyle: "compact" as const } : {}),
+      });
+      if (!alive) return 350;
+      if (!summary) return noteFailure(skipId, fail.reason);
+      setStoryGraph((prev) => {
+        const current = prev.entries[work.entry.chapterId];
+        if (!current || summaryKeyFor(current, modelId) !== summary.lmSummaryKey) return prev;
+        return {
+          ...prev,
+          entries: {
+            ...prev.entries,
+            [work.entry.chapterId]: {
+              ...current,
+              lmSummary: summary.lmSummary,
+              lmThroughline: summary.lmThroughline,
+              lmSummaryKey: summary.lmSummaryKey,
+            },
+          },
+        };
+      });
+      return 350;
+    };
+
     const tick = async () => {
       if (!alive || chipBusyRef.current) return;
       if (document.hidden) {
@@ -1243,98 +1343,35 @@ export default function App() {
       // ★ MAX MODE UPGRADES THE WHOLE TICK: chips and summaries run on the 4B,
       //   chips may carry a grounded second line, and the cache keys carry the
       //   max model's id — so switching modes recomputes exactly once per
-      //   chapter and never cross-stamps tiers. No noThink/contextSize
-      //   overrides here: a grammar-constrained run never emits thinking
-      //   anyway (measured, probe-chip-max.cjs), and a tick-private context
-      //   size forced a full model reload whenever the ask popover (which uses
-      //   the tier default) ran next.
+      //   chapter and never cross-stamps tiers.
       const maxMode = assistantMode(prefs) === "max";
       if (!(await assistantAvailable(maxMode ? "max" : undefined))) {
         arm(30_000);
         return;
       }
-      const run: typeof assistantRunJSON = maxMode
-        ? (req) => assistantRunJSON({ ...req, tier: "max" })
-        : assistantRunJSON;
-      const modelId = maxMode
-        ? (await window.electronAPI?.assistantStatus({ tier: "max" }))?.model?.id ?? null
-        : await assistantModelId();
+      // ★ THE POOL: when the llama-server sidecar exists (max mode), three
+      //   chapters run at once through the batch lane and its slots decode
+      //   them in one batched GPU pass (measured 1.75x,
+      //   scripts/probe-llama-server.ts). Without the binary, pool size 1
+      //   and NO lane flag — the in-process path stays byte-identical, and
+      //   a pool would only manufacture 'busy' failures against its
+      //   single-slot queue.
+      const status = maxMode ? await window.electronAPI?.assistantStatus({ tier: "max" }) : null;
+      const modelId = maxMode ? status?.model?.id ?? null : await assistantModelId();
       if (!modelId || !alive) return;
-      const work = findWork(modelId);
-      if (!work) return; // converged — the next kick reopens the loop
+      const sidecarReady = maxMode && !!(status as { sidecar?: { available?: boolean } } | null)?.sidecar?.available;
+      const run: typeof assistantRunJSON = maxMode
+        ? (req) => assistantRunJSON({ ...req, tier: "max", ...(sidecarReady ? { lane: "batch" as const } : {}) })
+        : assistantRunJSON;
+      const works = collectWork(modelId, sidecarReady ? 3 : 1);
+      if (works.length === 0) return; // converged — the next kick reopens the loop
 
       chipBusyRef.current = true;
       let delay = 350;
-      const fail: { reason: string | null } = { reason: null };
-      const onRunFailure = (reason: string) => { fail.reason = reason; };
-      const skipId = `${work.kind}|${work.entry.chapterId}|${work.key}`;
       try {
-        if (work.kind === "chips") {
-          // ★ CHIPS LAND ONE BY ONE. Each pick the model finishes streaming
-          //   is stamped provisionally (lmChips only — never the key, so the
-          //   chapter still reads stale until the validated final answer).
-          //   Guarded by the same key check as the final stamp: a stream from
-          //   a superseded request cannot touch rebuilt events.
-          const provisional = (picks: TimelineChipPick[]) => {
-            if (!alive) return;
-            setStoryGraph((prev) => {
-              const current = prev.entries[work.entry.chapterId];
-              if (!current || chipKeyFor(current, modelId) !== work.key) return prev;
-              return {
-                ...prev,
-                entries: {
-                  ...prev.entries,
-                  [work.entry.chapterId]: { ...current, lmChips: picks },
-                },
-              };
-            });
-          };
-          const outcome = await runChipPick(work.entry, {
-            run, modelId, rich: maxMode, onRunFailure, onPartialPicks: provisional,
-          });
-          if (!alive) return;
-          if (!outcome) delay = noteFailure(skipId, fail.reason);
-          else {
-            setStoryGraph((prev) => {
-              const current = prev.entries[work.entry.chapterId];
-              // Recomputed against the CURRENT entry: a result raced by a
-              // rebuild is dropped rather than stamped onto new events.
-              if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
-              return {
-                ...prev,
-                entries: {
-                  ...prev.entries,
-                  [work.entry.chapterId]: { ...current, lmChips: outcome.lmChips, lmChipsKey: outcome.lmChipsKey },
-                },
-              };
-            });
-          }
-        } else {
-          const summary = await runChapterSummary(work.entry, {
-            run, modelId, onRunFailure,
-            ...(maxMode ? { jsonStyle: "compact" as const } : {}),
-          });
-          if (!alive) return;
-          if (!summary) delay = noteFailure(skipId, fail.reason);
-          else {
-            setStoryGraph((prev) => {
-              const current = prev.entries[work.entry.chapterId];
-              if (!current || summaryKeyFor(current, modelId) !== summary.lmSummaryKey) return prev;
-              return {
-                ...prev,
-                entries: {
-                  ...prev.entries,
-                  [work.entry.chapterId]: {
-                    ...current,
-                    lmSummary: summary.lmSummary,
-                    lmThroughline: summary.lmThroughline,
-                    lmSummaryKey: summary.lmSummaryKey,
-                  },
-                },
-              };
-            });
-          }
-        }
+        const delays = await Promise.all(works.map((w) => processWork(w, run, modelId, maxMode)));
+        // Progress anywhere keeps the fast cadence; all-failed backs off.
+        delay = delays.some((d) => d === 350) ? 350 : Math.max(...delays);
       } finally {
         chipBusyRef.current = false;
       }
