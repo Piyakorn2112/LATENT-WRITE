@@ -413,23 +413,17 @@ function WritingWaveOverlay({ textareaRef, range, content }: {
   }, [textareaRef, range.start, range.end, content]);
   if (!style) return null;
 
-  // Word-level spans inside the range; whitespace stays as plain (transparent)
-  // text so wrapping in the mirror matches the textarea exactly.
-  const inRange = content.slice(range.start, range.end);
-  const parts = inRange.split(/(\s+)/);
-  let wordIndex = 0;
+  // ★ ONE CONTINUOUS RANGE SPAN, NOT WORD CHIPS. Per-word covers left the
+  //   layer visible in every gap; the range span's inline background covers
+  //   whole line boxes, spaces included. Inside it the ink span paints the
+  //   text with a WIDE travelling gradient clipped to the glyphs — a smooth
+  //   mesh-like wave instead of discrete word pulses.
   return (
     <div className="writing-wave-text" style={style} aria-hidden>
       {content.slice(0, range.start)}
-      {parts.map((part, i) => {
-        if (part === "" || /^\s+$/.test(part)) return part;
-        const delay = (wordIndex++ * 90) % 1530;
-        return (
-          <span key={i} className="writing-wave-word" style={{ animationDelay: `${delay}ms` }}>
-            {part}
-          </span>
-        );
-      })}
+      <span className="writing-wave-range">
+        <span className="writing-wave-ink">{content.slice(range.start, range.end)}</span>
+      </span>
       {content.slice(range.end)}
     </div>
   );

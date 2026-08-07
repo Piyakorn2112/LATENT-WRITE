@@ -268,10 +268,14 @@ export interface WritingRequest {
   maxTokens: number;
 }
 
+/** A cast member appearing in the selection, with NON-BLANK info only —
+ *  the caller must not send empty roles/descriptions (see App). */
+export interface WritingCharacter { name: string; info: string }
+
 export function buildWritingRequest(
   op: WritingOp,
   batch: WritingBatch,
-  context: { before: string; revisedTail: string; instruction?: string },
+  context: { before: string; revisedTail: string; instruction?: string; characters?: WritingCharacter[] },
 ): WritingRequest {
   const systemPrompt =
     op === "proofread" ? PROOFREAD_SYSTEM
@@ -286,6 +290,11 @@ export function buildWritingRequest(
   if (context.revisedTail) {
     lines.push("CONTEXT — your own revision continues from here (do not repeat it):");
     lines.push(toWire(context.revisedTail), "");
+  }
+  if (context.characters && context.characters.length > 0) {
+    lines.push("CHARACTERS in this passage — reference only, never contradict:");
+    for (const c of context.characters) lines.push(`- ${c.name}: ${c.info}`);
+    lines.push("");
   }
   if (op === "custom" && context.instruction) {
     lines.push(`INSTRUCTION: ${context.instruction}`, "");
@@ -325,6 +334,18 @@ export function hardErrorCount(text: string): number {
 }
 
 /**
+ * ★ THE CUSTOM GATE COUNTS ONLY MECHANICAL ERRORS. "Make it funny" writes
+ *   informal grammar ON PURPOSE — "ain't", comma splices, agreement bends
+ *   are the voice the instruction asked for, and the full error count was
+ *   refusing them wholesale. Typos are never the voice: spelling, doubled
+ *   words and spacing still gate.
+ */
+const MECHANICAL_KINDS = new Set(["spelling", "double", "spacing"]);
+export function mechanicalErrorCount(text: string): number {
+  return checkGrammar(text).filter((s) => s.severity === "error" && MECHANICAL_KINDS.has(s.kind)).length;
+}
+
+/**
  * A revision ships only if it does not LOSE to the deterministic checker:
  * fewer-or-equal hard errors than the original, and non-trivially shaped
  * (non-empty, same paragraph count, length within the op's honest range).
@@ -354,7 +375,9 @@ export function revisionAcceptable(original: string, revised: string, op: Writin
     : original.length * 1.8;
   const min = original.length * (op === "custom" ? 0.3 : 0.5);
   if (r.length < min || r.length > max) return false;
-  return hardErrorCount(r) <= hardErrorCount(original);
+  return op === "custom"
+    ? mechanicalErrorCount(r) <= mechanicalErrorCount(original)
+    : hardErrorCount(r) <= hardErrorCount(original);
 }
 
 // ── the run ───────────────────────────────────────────────────────────────
@@ -372,6 +395,8 @@ export interface WritingToolOptions {
   instruction?: string;
   /** Manuscript text BEFORE the selection (context source). */
   before: string;
+  /** Cast present in the selection, non-blank info only. */
+  characters?: WritingCharacter[];
   onProgress?: (p: WritingProgress) => void;
   timeoutMs?: number;
 }
@@ -416,6 +441,9 @@ export async function runWritingTool(
       before: beforeThis,
       revisedTail,
       instruction: opts.instruction,
+      // Only the cast that actually appears in THIS batch — a paragraph
+      // without a character does not pay prefill for their bio.
+      characters: opts.characters?.filter((c) => batch.text.includes(c.name)),
     });
     const result = await opts.run<{ text?: unknown }>({
       task: WRITING_TASK,

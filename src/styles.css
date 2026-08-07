@@ -16131,21 +16131,36 @@ body.electron-window-unfocused .wc-panel::after {
   color: transparent;
   user-select: none;
 }
-.writing-wave-word {
-  /* A fully-opaque swatch of the page surface HIDES the original rendering
-     of the rewritten words (the highlight layer's styled glyphs, or the
-     textarea's own) — the pulsing accent text is then the only rendering.
-     No glow (owner call): the pulse is the colour travelling, nothing else. */
+.writing-wave-range {
+  /* A CONTINUOUS opaque swatch of the page surface over the whole range —
+     inline backgrounds cover full line boxes, spaces included, so the
+     highlight layer never peeks through a gap. */
   background: var(--wave-cover, #fff);
   border-radius: 3px;
-  color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 32%, transparent);
-  animation: writing-word-pulse 1.35s ease-in-out infinite;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
-@keyframes writing-word-pulse {
-  0%   { color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 32%, transparent); }
-  40%  { color: var(--control-value-fill, #3f79d8); }
-  80%  { color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 32%, transparent); }
-  100% { color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 32%, transparent); }
+.writing-wave-ink {
+  /* Fainter, wider, smoother (owner call): a broad travelling gradient
+     clipped to the glyphs — low-contrast accent mixes, one long soft crest
+     instead of per-word pulses. */
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 26%, transparent) 15%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 62%, transparent) 42%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 70%, transparent) 50%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 62%, transparent) 58%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 26%, transparent) 85%
+  );
+  background-size: 320% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: writing-ink-wave 2.4s ease-in-out infinite;
+}
+@keyframes writing-ink-wave {
+  0%   { background-position: 140% 0; }
+  100% { background-position: -80% 0; }
 }
 
 /* The writing popover: same glass as max-ask, its own width and rows. */

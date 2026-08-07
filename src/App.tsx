@@ -535,10 +535,20 @@ export default function App() {
     setWritingRun({ chapterId: job.chapterId, start: job.start, end: job.start + job.spanLen });
     const run: typeof assistantRunJSON = (req) => assistantRunJSON({ ...req, tier: "max" });
     const before = chapter.content.slice(Math.max(0, job.start - 4000), job.start);
+    // Cast present in the selection, world-data info only when NON-BLANK —
+    // an empty role/description is never sent.
+    const characters = (novel.worldData?.characters ?? [])
+      .filter((c) => c.name && job!.original.includes(c.name))
+      .map((c) => ({
+        name: c.name,
+        info: [c.role?.trim(), c.description?.trim()].filter(Boolean).join(" — "),
+      }))
+      .filter((c) => c.info !== "")
+      .slice(0, 5);
     onProgress(0, planWritingBatches(job.original).length);
     try {
       const outcome = await runWritingTool(job.original, {
-        run, op, instruction, before,
+        run, op, instruction, before, characters,
         onProgress: (p) => onProgress(p.batchIndex + 1, p.batchCount),
       });
       const j = writingJobRef.current;
