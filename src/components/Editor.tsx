@@ -423,6 +423,9 @@ function WritingWaveOverlay({ textareaRef, range, content }: {
       {content.slice(0, range.start)}
       <span className="writing-wave-range">
         <span className="writing-wave-ink">{content.slice(range.start, range.end)}</span>
+        {/* Motion lives here alone: transform-only animation = compositor
+            thread, zero main-thread paint per frame (owner requirement). */}
+        <span className="writing-wave-sweep" aria-hidden />
       </span>
       {content.slice(range.end)}
     </div>

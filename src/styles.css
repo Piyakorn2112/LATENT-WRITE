@@ -16132,35 +16132,40 @@ body.electron-window-unfocused .wc-panel::after {
   user-select: none;
 }
 .writing-wave-range {
-  /* A CONTINUOUS opaque swatch of the page surface over the whole range —
-     inline backgrounds cover full line boxes, spaces included, so the
-     highlight layer never peeks through a gap. */
+  /* Continuous opaque cover (spaces included); position:relative hosts the
+     composited sweep. */
+  position: relative;
   background: var(--wave-cover, #fff);
   border-radius: 3px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  overflow: hidden;
 }
 .writing-wave-ink {
-  /* Fainter, wider, smoother (owner call): a broad travelling gradient
-     clipped to the glyphs — low-contrast accent mixes, one long soft crest
-     instead of per-word pulses. */
-  color: transparent;
-  background-image: linear-gradient(
-    100deg,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 26%, transparent) 15%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 62%, transparent) 42%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 70%, transparent) 50%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 62%, transparent) 58%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 26%, transparent) 85%
-  );
-  background-size: 320% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: writing-ink-wave 2.4s ease-in-out infinite;
+  /* STATIC faint accent — no per-frame paint. The motion lives entirely in
+     the sweep below, which animates transform only (compositor thread). */
+  color: color-mix(in srgb, var(--control-value-fill, #3f79d8) 48%, transparent);
 }
-@keyframes writing-ink-wave {
-  0%   { background-position: 140% 0; }
-  100% { background-position: -80% 0; }
+.writing-wave-sweep {
+  position: absolute;
+  inset: 0;
+  width: 300%;
+  left: -100%;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 38%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 16%, transparent) 46%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 22%, transparent) 50%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 16%, transparent) 54%,
+    transparent 62%
+  );
+  will-change: transform;
+  animation: writing-sweep 2.4s linear infinite;
+}
+@keyframes writing-sweep {
+  0%   { transform: translateX(-33%); }
+  100% { transform: translateX(33%); }
 }
 
 /* The writing popover: same glass as max-ask, its own width and rows. */
