@@ -29,6 +29,18 @@ export interface WritingToolPopoverProps {
 
 type Phase = "choose" | "running" | "done" | "failed";
 
+/** Runner reasons → honest human copy. The old label reported every failure
+ *  as "nothing needed changing", including out-of-memory. */
+function humanFailure(reasons: string[]): string {
+  const r = reasons[0] ?? "";
+  if (r === "low-memory") return "not enough free memory right now";
+  if (r === "busy") return "the model is busy with another task";
+  if (r === "timeout") return "the model took too long";
+  if (r === "no-model") return "the Max model is not downloaded";
+  if (r === "unavailable" || r === "not-loaded" || r === "no-host") return "the model is not running";
+  return r ? `error: ${r}` : "an unknown error";
+}
+
 const OP_LABEL: Record<WritingOp, string> = {
   proofread: "Proofreading…",
   rewrite: "Revising…",
@@ -169,10 +181,12 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
             <div className="max-ask-answer">
               <div className="max-ask-answer-text">
                 {revisedCount > 0
-                  ? `Done — ${revisedCount} ${revisedCount === 1 ? "part" : "parts"} revised${keptCount > 0 ? `, ${keptCount} kept as written` : ""}${failedCount > 0 ? `, ${failedCount} failed` : ""}. The new text is in place — press ⌘Z to bring the old text back.`
-                  : keptCount > 0
-                    ? "The revision didn't pass the safety check (it read worse than the original), so nothing was replaced. Try rephrasing the request."
-                    : "Nothing needed changing — the text is exactly as it was."}
+                  ? `Done. ${revisedCount} ${revisedCount === 1 ? "part" : "parts"} revised${keptCount > 0 ? `, ${keptCount} kept as written` : ""}${failedCount > 0 ? `, ${failedCount} failed` : ""}. The new text is in place; press ⌘Z to bring the old text back.`
+                  : failedCount > 0
+                    ? `The run failed (${humanFailure(outcome?.failReasons ?? [])}), so the text is untouched. Try again in a moment.`
+                    : keptCount > 0
+                      ? "The revision didn't pass the safety check (it read worse than the original), so nothing was replaced. Try rephrasing the request."
+                      : "Nothing needed changing. The text is exactly as it was."}
               </div>
             </div>
             <div className="writing-tool-actions">

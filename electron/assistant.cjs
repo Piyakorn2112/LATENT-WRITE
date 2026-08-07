@@ -867,6 +867,26 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
       return { ok: true, ..._hostLoaded, reused: true, degraded: _degraded };
     }
     if (fitContext === null) {
+      // ★ INTERACTIVE WORK PREEMPTS THE BATCH ENGINE. Since the sidecar
+      //   shipped, BOTH engines can be warm at once and the in-process host
+      //   started losing this guard far more often (owner report: frequent
+      //   out-of-memory). The ask popover and writing tool must win: stop
+      //   the sidecar, let the OS reclaim, and re-fit once. Batch work
+      //   falls back in-process behind the single-flight queue and the
+      //   sidecar restarts on a later tick.
+      if (sidecar.status().alive) {
+        sidecar.stop('yield-to-interactive');
+        await new Promise((r) => setTimeout(r, 600));
+        const retryAvailable = availableMemoryBytes() + residentCreditBytes(modelPath);
+        const retryFit = fittingContext(entry, modelPath, wantContext, retryAvailable);
+        if (retryFit !== null) {
+          _degraded = retryFit < wantContext
+            ? { tier: entry.tier, wanted: wantContext, using: retryFit, availableBytes: retryAvailable }
+            : null;
+          _lowMemory = null;
+          return loadInHost(entry, modelPath, retryFit, verified);
+        }
+      }
       const needBytes = loadCostBytes(entry, modelPath, Number(entry.minContextSize) || wantContext);
       _lowMemory = { needBytes, availableBytes };
       return { ok: false, error: 'low-memory', needBytes, availableBytes };
@@ -875,48 +895,51 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
     _degraded = fitContext < wantContext
       ? { tier: entry.tier, wanted: wantContext, using: fitContext, availableBytes }
       : null;
-    const needBytes = loadCostBytes(entry, modelPath, fitContext);
     _lowMemory = null;
-
-    await ensureHost();
-    _hostLoading = true;
-
-    const loaded = await new Promise((resolve) => {
-      const timer = setTimeout(() => resolve({ ok: false, error: 'load timeout' }), LOAD_TIMEOUT_MS);
-      const onMsg = (msg) => {
-        if (!msg) return;
-        if (msg.type === 'loaded') {
-          clearTimeout(timer);
-          _host.removeListener('message', onMsg);
-          resolve({ ok: true });
-        } else if (msg.type === 'load-error') {
-          clearTimeout(timer);
-          _host.removeListener('message', onMsg);
-          resolve({ ok: false, error: msg.error });
-        }
-      };
-      _host.on('message', onMsg);
-      _host.postMessage({
-        type: 'load', modelPath, contextSize: fitContext,
-        gpuLayers: process.env.ASSISTANT_GPU_LAYERS ? Number(process.env.ASSISTANT_GPU_LAYERS) : 'max',
-        kvCacheType: entry.kvCacheType || null,
-        flashAttention: entry.flashAttention === undefined ? null : entry.flashAttention,
-      });
-    });
-
-    _hostLoading = false;
-    if (!loaded.ok) { _fatal = loaded.error; return loaded; }
-    // ★ AGGRESSIVE UNLOAD IS A PER-TIER POLICY. The 4B is 2.4 GB resident and
-    //   a warm reload costs ~1.3s (measured: the OS page cache keeps the
-    //   weights), so the max tier holds memory for 90s of idle, not five
-    //   minutes. The small tier keeps the long TTL — it is 1 GB and serves
-    //   background bursts where a reload per burst would thrash.
-    _idleTtlMs = Number(entry.idleTtlMs) || IDLE_TTL_MS;
-    armIdleTimer();
-    return { ok: true, ..._hostLoaded, verifyMs: verified.ms, degraded: _degraded };
+    return loadInHost(entry, modelPath, fitContext, verified);
   })().finally(() => { _loadPromise = null; });
 
   return _loadPromise;
+}
+
+/** The actual host load, shared by the normal path and the yield-retry. */
+async function loadInHost(entry, modelPath, fitContext, verified) {
+  await ensureHost();
+  _hostLoading = true;
+
+  const loaded = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve({ ok: false, error: 'load timeout' }), LOAD_TIMEOUT_MS);
+    const onMsg = (msg) => {
+      if (!msg) return;
+      if (msg.type === 'loaded') {
+        clearTimeout(timer);
+        _host.removeListener('message', onMsg);
+        resolve({ ok: true });
+      } else if (msg.type === 'load-error') {
+        clearTimeout(timer);
+        _host.removeListener('message', onMsg);
+        resolve({ ok: false, error: msg.error });
+      }
+    };
+    _host.on('message', onMsg);
+    _host.postMessage({
+      type: 'load', modelPath, contextSize: fitContext,
+      gpuLayers: process.env.ASSISTANT_GPU_LAYERS ? Number(process.env.ASSISTANT_GPU_LAYERS) : 'max',
+      kvCacheType: entry.kvCacheType || null,
+      flashAttention: entry.flashAttention === undefined ? null : entry.flashAttention,
+    });
+  });
+
+  _hostLoading = false;
+  if (!loaded.ok) { _fatal = loaded.error; return loaded; }
+  // ★ AGGRESSIVE UNLOAD IS A PER-TIER POLICY. The 4B is 2.4 GB resident and
+  //   a warm reload costs ~1.3s (measured: the OS page cache keeps the
+  //   weights), so the max tier holds memory for 90s of idle, not five
+  //   minutes. The small tier keeps the long TTL — it is 1 GB and serves
+  //   background bursts where a reload per burst would thrash.
+  _idleTtlMs = Number(entry.idleTtlMs) || IDLE_TTL_MS;
+  armIdleTimer();
+  return { ok: true, ..._hostLoaded, verifyMs: verified.ms, degraded: _degraded };
 }
 
 // ── run / cancel / unload ───────────────────────────────────────────────────

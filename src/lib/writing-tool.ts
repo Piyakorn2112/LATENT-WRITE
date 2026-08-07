@@ -407,6 +407,9 @@ export interface WritingToolOutcome {
    *  proofread found nothing), "kept-original" (gate refused the revision),
    *  or "failed" (run failed; original kept). */
   batchOutcomes: Array<"revised" | "unchanged" | "kept-original" | "failed">;
+  /** Runner reasons for every "failed" batch, in order — so the popover can
+   *  say "not enough memory" instead of pretending nothing needed changing. */
+  failReasons: string[];
   cancelled: boolean;
 }
 
@@ -428,6 +431,7 @@ export async function runWritingTool(
   const batches = planWritingBatches(selected, BATCH_MAX_CHARS, opts.op === "proofread");
   const texts: string[] = batches.map((b) => b.text);
   const outcomes: WritingToolOutcome["batchOutcomes"] = [];
+  const failReasons: string[] = [];
   let cancelled = false;
 
   for (const batch of batches) {
@@ -457,6 +461,7 @@ export async function runWritingTool(
     });
     if (!result.ok) {
       outcomes.push("failed");
+      failReasons.push(result.reason);
       if (result.reason === "cancelled") { cancelled = true; break; }
       continue;
     }
@@ -478,5 +483,5 @@ export async function runWritingTool(
   }
   while (outcomes.length < batches.length) outcomes.push(cancelled ? "failed" : "unchanged");
 
-  return { revised: assembleRevision(batches, texts), batchOutcomes: outcomes, cancelled };
+  return { revised: assembleRevision(batches, texts), batchOutcomes: outcomes, failReasons, cancelled };
 }

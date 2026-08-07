@@ -247,6 +247,12 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     '-c', String(slots * slotContext),
     '-np', String(slots),
     '-fa', 'on',
+    // ★ Q8_0 KV, same policy as the in-process host: 8192 tokens of f16 KV
+    //   is ~1.1GB the machine pays TWICE when both engines are warm — this
+    //   halves the sidecar's share. -ctv quantisation requires flash
+    //   attention, which is on above.
+    '-ctk', 'q8_0',
+    '-ctv', 'q8_0',
     '--host', '127.0.0.1',
     '--port', String(_port),
     '--no-webui',

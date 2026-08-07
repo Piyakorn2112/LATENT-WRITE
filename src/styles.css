@@ -16147,11 +16147,11 @@ body.electron-window-unfocused .wc-panel::after {
   color: transparent;
   background-image: linear-gradient(
     100deg,
-    var(--text-body) 32%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 38%, var(--text-body)) 44%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 62%, var(--text-body)) 50%,
-    color-mix(in srgb, var(--control-value-fill, #3f79d8) 38%, var(--text-body)) 56%,
-    var(--text-body) 68%
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 28%, var(--text-body)) 32%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 52%, var(--text-body)) 44%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 78%, var(--text-body)) 50%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 52%, var(--text-body)) 56%,
+    color-mix(in srgb, var(--control-value-fill, #3f79d8) 28%, var(--text-body)) 68%
   );
   background-size: 340% 100%;
   -webkit-background-clip: text;

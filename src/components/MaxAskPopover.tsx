@@ -253,17 +253,17 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
               the count, so "checked" can never mean "checked nothing". */}
           {phase.result.review?.verdict === "overreaches" && (
             <div className="max-ask-caution">
-              self-check: "{phase.result.review.note}" is not in what it was given — verify
+              self-check: "{phase.result.review.note}" is not in what it was given. Verify
               against the chapter
             </div>
           )}
           {phase.result.review?.verdict === "supported" && phase.result.review.facts > 0 && (
             <div className="max-ask-checked">
-              checked — {phase.result.review.facts} fact{phase.result.review.facts === 1 ? "" : "s"} located in the story
+              checked · {phase.result.review.facts} fact{phase.result.review.facts === 1 ? "" : "s"} located in the story
             </div>
           )}
           {phase.result.answer?.basis === "fits" ? (
-            <div className="max-ask-basis">fits the story — nothing conflicts</div>
+            <div className="max-ask-basis">fits the story · nothing conflicts</div>
           ) : phase.result.answer && RUNG_LABEL[phase.result.answer.basis] ? (
             <div className="max-ask-basis">from {RUNG_LABEL[phase.result.answer.basis]}</div>
           ) : null}
@@ -276,7 +276,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
           {/* An answer the loop had to break out of is still shown — best
               effort beats silence — but says so rather than passing as full. */}
           {phase.result.stopped !== "answered" && (
-            <div className="max-ask-basis">best effort — context ran out</div>
+            <div className="max-ask-basis">best effort · context ran out</div>
           )}
           <button type="button" className="max-ask-again" onClick={() => setPhase({ name: "menu" })}>
             Ask something else
@@ -292,10 +292,10 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
                 retry loop against a refusal that will not change until they
                 free the memory. */}
             {/low-memory/.test(phase.reason ?? "")
-              ? "Not enough free memory for the Max model right now — close some other apps and try again."
+              ? "Not enough free memory for the Max model right now. Close some other apps and try again."
               : /busy/.test(phase.reason ?? "")
-                ? "The assistant is busy with another task — try again in a few seconds."
-                : "No answer this time — the model may still be loading. Try again in a moment."}
+                ? "The assistant is busy with another task. Try again in a few seconds."
+                : "No answer this time. The model may still be loading; try again in a moment."}
           </p>
           <button type="button" className="max-ask-again" onClick={() => setPhase({ name: "menu" })}>
             Back
