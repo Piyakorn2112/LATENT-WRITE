@@ -45,7 +45,24 @@ const SWORD_PARA =
 const SUDDEN_PARA =
   'Suddenly the wind died. Mara looked up suddenly from the chart, and the lamp guttered suddenly in the still air.';
 
+const FILTERY_PARA =
+  'Mara felt the cold coming off the water. She heard the gulls before she saw them, and she noticed the tide had turned while they argued. It seemed later than it should have been.';
+
+const ADVERBY_PARA =
+  'Teo walked slowly along the quay and spoke softly to the harbourmaster. He carefully folded the manifest and quietly slipped it into his coat.';
+
+const PASSIVE_PARA =
+  'The rope was coiled by Teo before dawn. The manifest was signed by the harbourmaster, and the crates were counted twice. The missing box was never mentioned.';
+
+const RUNNY_PARA =
+  'She stood at the rail. She counted the boats twice. She said nothing about the count. She watched the light go out of the water.';
+
 const CASES = [
+  { id: 'filter-words', instruction: 'remove the filter words', text: FILTERY_PARA },
+  { id: 'ly-adverbs', instruction: 'cut the -ly adverbs and use stronger verbs', text: ADVERBY_PARA },
+  { id: 'passive', instruction: 'make this active voice', text: PASSIVE_PARA },
+  { id: 'opening-run', instruction: 'vary the sentence openings, every sentence starts with She', text: RUNNY_PARA },
+  { id: 'continuity', instruction: "she's holding a knife, not a gun", text: 'Mara backed toward the hatch with the gun level. The gun shook once in her hand, and she steadied it against her hip.' },
   { id: 'pronounize', instruction: 'replace John with a pronoun', text: JOHN_PARA },
   { id: 'substitute', instruction: 'replace the sword with a dagger', text: SWORD_PARA },
   { id: 'reduce', instruction: 'stop repeating the word suddenly', text: SUDDEN_PARA },

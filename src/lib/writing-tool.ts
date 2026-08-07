@@ -20,7 +20,7 @@
  *   in the same history as typing and is reversible like any user edit.
  */
 import { checkGrammar } from "./grammar-check";
-import { classifyInstruction, namesInInstruction, type IntentReading } from "./writing-intent";
+import { classifyInstruction, namesInInstruction, type IntentReading, type ScrubKind } from "./writing-intent";
 import type { AssistantJSONRunner } from "./assistant-client";
 
 export const WRITING_TASK = "writing-tool";
@@ -271,6 +271,57 @@ belongs. Hard rules, all of them:
 Answer as JSON: {"text": the passage with the new material}.`;
 
 /**
+ * ★ SCRUB IS ITS OWN PROMPT. Measured (probe-writing-intents): under
+ *   CUSTOM_SYSTEM the 4B returned filter-word and opening-run passages
+ *   VERBATIM three attempts running, even with the offenders listed — its
+ *   "preserve every fact" rule reads as a ban on recasting a sentence's
+ *   subject, which is exactly what de-filtering is. Same fix as STRUCTURE
+ *   and INSERT: a lean prompt where the recast IS the job, with a worked
+ *   example teaching the subject-flip move.
+ */
+export const SCRUB_SYSTEM = `You are a writing tool inside a novelist's editor. The writer asks you to
+REMOVE A CLASS OF WORDS from this passage — their INSTRUCTION names the
+class, and WHAT TO CHANGE lists the exact offenders. RECASTING IS THE JOB:
+rework each listed sentence so the offending word is gone while what happens
+stays — returning the passage unchanged is a wrong answer. Hard rules, all
+of them:
+- Return the WHOLE passage. Never a commentary, list, or summary.
+- Every event, name and fact stays; only the wording around the listed
+  words changes. Keep the paragraph breaks exactly where they are.
+- Keep the writer's register. Dialogue keeps its voice.
+- If some CONTEXT lines are shown, they are for continuity only — never
+  revise or repeat them; revise only the PASSAGE.
+- The \` character is the editor's placeholder for a quotation mark. Keep
+  every \` exactly where it stands.
+
+Worked example for removing filter words — a different story, never reuse
+its words:
+  passage: She heard the kettle boil. She felt the cold on her neck.
+  revised: The kettle boiled. The cold touched her neck.
+
+Answer as JSON: {"rewrites": each listed word and its one-line fix, "text": the revised passage}.`;
+
+/**
+ * ★★ THE PLAN FIELD BREAKS THE COPY ATTRACTOR. With the plain {"text"}
+ *   schema the 4B returned filter-word and opening-run passages VERBATIM —
+ *   three attempts, offender list and worked example in the prompt, sampled
+ *   retry included: the forced `{"text": "` opening drops it straight into
+ *   copying the passage sitting in context. Grammar fields emit in
+ *   DECLARATION ORDER (the chip pipeline's reason-before-label lesson), so
+ *   a leading "rewrites" field makes the model fix each offender BEFORE the
+ *   passage starts — measured: the same stuck case shipped immediately.
+ *   The field is decoded and discarded; only "text" ships.
+ */
+export const WRITING_SCHEMA_SCRUB = {
+  type: "object",
+  properties: {
+    rewrites: { type: "string", maxLength: 300 },
+    text: { type: "string" },
+  },
+  required: ["rewrites", "text"],
+} as const;
+
+/**
  * A length/expansion-shaped instruction gets the LENGTH_SYSTEM routing.
  * "Add more detail about the storm" and "expand this with the sea" are
  * expansion-with-focus — exactly what that prompt's deepening rules do —
@@ -365,6 +416,10 @@ export function buildWritingRequest(
     : intent === "merge" || intent === "split" || intent === "condense" ? STRUCTURE_SYSTEM
     : intent === "insert" ? INSERT_SYSTEM
     : intent === "expand" ? LENGTH_SYSTEM
+    : intent === "scrub" ? SCRUB_SYSTEM
+    // Target is surgical CUSTOM work — and must dodge the length fallback
+    // ("cut the word suddenly" contains "cut", which is length-shaped).
+    : intent === "target" ? CUSTOM_SYSTEM
     : context.instruction && isLengthInstruction(context.instruction) ? LENGTH_SYSTEM
     : CUSTOM_SYSTEM;
   const lines: string[] = [];
@@ -384,6 +439,10 @@ export function buildWritingRequest(
   if (op === "custom" && context.instruction) {
     lines.push(`INSTRUCTION: ${context.instruction}`, "");
   }
+  if (reading?.scrub) {
+    const hint = scrubHint(batch.text, reading.scrub.kind);
+    if (hint) lines.push(`WHAT TO CHANGE: ${hint}`, "");
+  }
   if (context.retryNote) {
     lines.push(`YOUR PREVIOUS ATTEMPT WAS REJECTED BY THE EDITOR'S CHECK: ${context.retryNote}. Revise again and fix exactly that.`, "");
   }
@@ -402,7 +461,7 @@ export function buildWritingRequest(
     //   generation, and revisionAcceptable's per-op window refuses overruns.
     //   Bonus: one shared schema means one cached grammar for every batch —
     //   the per-batch maxLength made each request a grammar-cache miss.
-    schema: WRITING_SCHEMA_BASE,
+    schema: intent === "scrub" ? WRITING_SCHEMA_SCRUB : WRITING_SCHEMA_BASE,
     // ~chars/3.2 tokens for English prose, slack + scaffold; custom gets
     // expansion headroom because the instruction may legitimately EXPAND
     // ("make it longer"). Structural ops cap near their gate ceiling (a
@@ -410,7 +469,10 @@ export function buildWritingRequest(
     // 2.8k-char selection run to 2.5k tokens for nothing), and insert gets
     // an absolute allowance for the NEW material instead of a multiple.
     maxTokens:
-      intent === "merge" || intent === "split" || intent === "condense" || intent === "target"
+      // Scrub pays ~96 extra tokens for its plan field (WRITING_SCHEMA_SCRUB).
+      intent === "scrub"
+        ? Math.ceil((batch.text.length / 3.2) * 1.6) + 296
+      : intent === "merge" || intent === "split" || intent === "condense" || intent === "target"
         ? Math.ceil((batch.text.length / 3.2) * 1.6) + 200
       : intent === "insert"
         ? Math.ceil((batch.text.length / 3.2) * 1.5) + 900
@@ -469,6 +531,9 @@ export interface GateProfile {
    *  with a pronoun" a script CAN check. WHICH mentions to change stays the
    *  model's judgment (soft bound); THAT the count moved is the hard gate. */
   target?: { term: string; mode: "pronounize" | "substitute" | "reduce"; replacement?: string };
+  /** Class-count contract for scrub edits (filter words, adverbs, passive,
+   *  opening runs): the class count must come DOWN. */
+  measure?: ScrubKind;
 }
 
 /** Word-boundary occurrences, case-INSENSITIVE: a common word appears as
@@ -488,6 +553,96 @@ export function findTermCased(text: string, term: string): string | null {
   return m ? m[2] : null;
 }
 
+// ── scrub measures ────────────────────────────────────────────────────────
+// Each is a COUNT a script can take before and after; the gate demands the
+// count come down and the diagnosis quotes it. Lists are deliberately
+// incomplete-but-precise: the contract is DECREASE, not zero, so a missed
+// word costs recall, never a false refusal.
+
+/** POV filter verbs (deep-POV checklists): perception narrated instead of
+ *  shown. Past-tense heavy because manuscripts are. */
+const FILTER_WORDS = new Set([
+  "saw", "sees", "heard", "hears", "felt", "feels", "noticed", "notices",
+  "watched", "watches", "seemed", "seems", "realized", "realised", "realizes",
+  "wondered", "wonders", "knew", "knows", "thought", "thinks", "decided", "decides",
+]);
+
+/** -ly words that are NOT the adverbs writers mean (adjectives, nouns). */
+const LY_WHITELIST = new Set([
+  "only", "family", "early", "belly", "jelly", "silly", "ugly", "holy",
+  "friendly", "lovely", "lonely", "deadly", "lively", "elderly", "orderly",
+  "curly", "burly", "surly", "chilly", "hilly", "jolly", "folly", "rally",
+  "ally", "bully", "assembly", "melancholy", "reply", "supply", "apply", "italy",
+]);
+
+export function countFilterWords(text: string): number {
+  return (text.match(/\b[\p{L}]+\b/gu) ?? []).filter((w) => FILTER_WORDS.has(w.toLowerCase())).length;
+}
+
+export function countLyAdverbs(text: string): number {
+  return (text.match(/\b[\p{L}]+ly\b/gu) ?? []).filter((w) => !LY_WHITELIST.has(w.toLowerCase())).length;
+}
+
+/** be-verb + participle-shaped word: a rough proxy, but DECREASE only needs
+ *  the proxy to move with the real thing. */
+export function countPassive(text: string): number {
+  return (text.match(/\b(?:was|were|is|are|am|been|being|be)\s+\w+(?:ed|wn|ne|en|orn)\b/gi) ?? []).length;
+}
+
+/** Longest run of consecutive sentences opening with the same word. */
+export function openingRun(text: string): { run: number; word: string } {
+  const firsts = text
+    .split(/(?<=[.!?…"”])\s+/)
+    .map((s) => /[\p{L}'’]+/u.exec(s)?.[0]?.toLowerCase() ?? "")
+    .filter(Boolean);
+  let best = { run: 0, word: "" };
+  let run = 0;
+  for (let i = 0; i < firsts.length; i++) {
+    run = i > 0 && firsts[i] === firsts[i - 1] ? run + 1 : 1;
+    if (run > best.run) best = { run, word: firsts[i] };
+  }
+  return best;
+}
+
+/** The measured value for a scrub kind — used by the gate AND by the batch
+ *  planner (a paragraph where the count is already zero never pays for a
+ *  model call). */
+export function scrubValue(text: string, kind: ScrubKind): number {
+  if (kind === "filter-words") return countFilterWords(text);
+  if (kind === "ly-adverbs") return countLyAdverbs(text);
+  if (kind === "passive") return countPassive(text);
+  return Math.max(0, openingRun(text).run - 2); // runs of ≤2 are fine prose
+}
+
+/**
+ * ★ THE HARNESS NAMES THE OFFENDERS. Measured (probe-writing-intents):
+ *   "remove the filter words" failed three attempts running — the 4B does
+ *   not know which words are filter words — while the kinds whose targets
+ *   are visible in the instruction shipped at attempt 0. The harness
+ *   already counted the offenders to gate them, so it hands the model the
+ *   exact list on the user turn. Provision, not blame.
+ */
+export function scrubHint(text: string, kind: ScrubKind): string | null {
+  if (kind === "filter-words") {
+    const found = (text.match(/\b[\p{L}]+\b/gu) ?? []).filter((w) => FILTER_WORDS.has(w.toLowerCase()));
+    if (found.length === 0) return null;
+    return `The filter words here are: ${[...new Set(found)].join(", ")}. Rewrite each perception directly (for example \`She heard the gulls\` becomes \`The gulls cried\`).`;
+  }
+  if (kind === "ly-adverbs") {
+    const found = (text.match(/\b[\p{L}]+ly\b/gu) ?? []).filter((w) => !LY_WHITELIST.has(w.toLowerCase()));
+    if (found.length === 0) return null;
+    return `The -ly adverbs here are: ${[...new Set(found)].join(", ")}.`;
+  }
+  if (kind === "passive") {
+    const found = text.match(/\b(?:was|were|is|are|am|been|being|be)\s+\w+(?:ed|wn|ne|en|orn)\b/gi) ?? [];
+    if (found.length === 0) return null;
+    return `The passive constructions here are: ${[...new Set(found)].join("; ")}.`;
+  }
+  const { run, word } = openingRun(text);
+  if (run <= 2) return null;
+  return `${run} sentences in a row start with \`${word}\`. Reword some so they open differently, by fronting a phrase or swapping the subject (for example \`She waited by the door\` becomes \`By the door, she waited\`).`;
+}
+
 /** Deterministic rename: every word-boundary mention (possessives ride the
  *  boundary), plus the ALL-CAPS shout variant. No model involved. */
 export function renameAll(text: string, from: string, to: string): string {
@@ -501,7 +656,7 @@ export function renameAll(text: string, from: string, to: string): string {
 }
 
 export interface RevisionFailure {
-  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "target" | "unchanged";
+  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "target" | "measure" | "unchanged";
   /** Plain-numbers sentence, written for BOTH consumers: the retry prompt
    *  quotes it to the model, the popover quotes it to the writer. */
   detail: string;
@@ -565,6 +720,12 @@ export function gateProfileFor(op: WritingOp, reading?: IntentReading): GateProf
           : {}),
       };
     }
+    case "scrub":
+      return {
+        paras: { kind: "drift", max: 0 },
+        lenMin: 0.7, lenMax: 1.2, lenSlack: 60, grammar: "mechanical",
+        ...(reading.scrub ? { measure: reading.scrub.kind } : {}),
+      };
     default:
       return LEGACY_CUSTOM;
   }
@@ -635,6 +796,22 @@ export function judgeRevision(original: string, revised: string, profile: GatePr
             : `"${term}" still appears ${after} time${plural(after)}, not fewer; cut some of them`,
         },
       };
+    }
+  }
+
+  if (profile.measure) {
+    const before = scrubValue(original, profile.measure);
+    const after = scrubValue(r, profile.measure);
+    if (after >= before && before > 0) {
+      const detail =
+        profile.measure === "filter-words"
+          ? `it still has ${after} filter word${plural(after)} (saw, felt, heard, seemed...), no fewer than before; rewrite them as direct perception`
+        : profile.measure === "ly-adverbs"
+          ? `it still has ${after} -ly adverb${plural(after)}, no fewer than before; cut them or fold them into stronger verbs`
+        : profile.measure === "passive"
+          ? `it still has ${after} passive construction${plural(after)}, no fewer than before; recast them in active voice`
+          : `${openingRun(r).run} sentences in a row still start with "${openingRun(r).word}"; vary the openings`;
+      return { ok: false, failure: { code: "measure", detail } };
     }
   }
 
@@ -809,6 +986,14 @@ export async function runWritingTool(
     // Separator-only batches (a leading blank line in the selection) carry
     // no prose; sending an empty PASSAGE to the model helps no one.
     if (batch.text === "") { outcomes.push("unchanged"); continue; }
+    // ★ SCRUBS SKIP CLEAN PARAGRAPHS. A paragraph whose measured count is
+    //   already zero has nothing to scrub — running the model there wastes
+    //   seconds AND invites the unchanged-retry loop to fight a paragraph
+    //   that is already right.
+    if (reading.scrub && scrubValue(batch.text, reading.scrub.kind) === 0) {
+      outcomes.push("unchanged");
+      continue;
+    }
     const beforeThis =
       batch.index === 0
         ? opts.before.slice(-CONTEXT_BEFORE_CHARS)

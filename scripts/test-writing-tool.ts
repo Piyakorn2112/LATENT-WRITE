@@ -8,6 +8,7 @@ import {
   planWritingBatches, buildWritingRequest, assembleRevision, applyRevision,
   revisionAcceptable, runWritingTool, BATCH_MAX_CHARS, STRUCTURAL_MAX_CHARS,
   gateProfileFor, judgeRevision, countTerm, findTermCased, renameAll,
+  countFilterWords, countLyAdverbs, countPassive, openingRun,
   toWire, fromWire, matchQuoteStyle, isLengthInstruction,
 } from "../src/lib/writing-tool";
 import { classifyInstruction, namesInInstruction } from "../src/lib/writing-intent";
@@ -436,6 +437,67 @@ await (async () => {
       "a lazy pronounize earns a diagnosed retry and then ships", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
     gate(seen[1].userText.includes("still appears 4"), "the count rides the retry note");
     gate(seen[0].userText.includes("PASSAGE:\nJohn pushed"), "the whole mention chain is one prompt");
+  }
+})();
+
+console.log("\n── 9 · scrub edits (self-editing checklist family) ──────────");
+await (async () => {
+  // Classification.
+  for (const [ins, kind] of [
+    ["remove the filter words", "filter-words"],
+    ["de-filter this, it's deep POV", "filter-words"],
+    ["cut the -ly adverbs and use stronger verbs", "ly-adverbs"],
+    ["fewer adverbs please", "ly-adverbs"],
+    ["make this active voice", "passive"],
+    ["too much passive voice, fix it", "passive"],
+    ["vary the sentence openings, everything starts with She", "opening-run"],
+    ["every sentence starts with I, fix that", "opening-run"],
+  ] as Array<[string, string]>) {
+    const r = classifyInstruction(ins);
+    gate(r.intent === "scrub" && r.scrub?.kind === kind, `"${ins}" → scrub/${kind}`, JSON.stringify(r));
+  }
+  // Continuity patches are reversed substitutions; bare comparatives are not.
+  const cont = classifyInstruction("she's holding a knife, not a gun");
+  gate(cont.intent === "target" && cont.target?.mode === "substitute" &&
+    cont.target.term === "gun" && cont.target.replacement === "knife",
+    "continuity patch reads as substitute gun→knife", JSON.stringify(cont));
+  gate(classifyInstruction("make it shorter, not longer").intent === "condense",
+    "'shorter, not longer' is still a condense, never a substitution");
+  gate(classifyInstruction("stop using the word just").target?.mode === "reduce",
+    "reduce still wins over scrub for a named word");
+
+  // Measures.
+  const filtery = "Mara felt the cold. She heard the gulls and noticed the tide. It seemed late.";
+  gate(countFilterWords(filtery) === 4, "filter words count", `${countFilterWords(filtery)}`);
+  gate(countLyAdverbs("He walked slowly and only spoke softly to his friendly family.") === 2,
+    "-ly adverbs count past the whitelist", `${countLyAdverbs("He walked slowly and only spoke softly to his friendly family.")}`);
+  gate(countPassive("The door was opened by Teo. The sail is torn. She ran.") === 2,
+    "passive proxy counts be+participle", `${countPassive("The door was opened by Teo. The sail is torn. She ran.")}`);
+  const runny = "She stood. She waited. She counted the boats. The tide turned.";
+  gate(openingRun(runny).run === 3 && openingRun(runny).word === "she",
+    "opening run finds 3xShe", JSON.stringify(openingRun(runny)));
+
+  // Judge: a scrub that does not move the count fails with the count.
+  const sp = gateProfileFor("custom", classifyInstruction("remove the filter words"));
+  const lazy = judgeRevision(filtery, filtery.replace("Mara", "She"), sp);
+  gate(!lazy.ok && lazy.failure.code === "measure" && lazy.failure.detail.includes("filter word"),
+    "a no-op scrub fails with the measure diagnosis", lazy.ok ? "passed" : lazy.failure.detail);
+  gate(judgeRevision(filtery, "The cold bit at Mara. Gulls cried over the turning tide. The light was already going.", sp).ok,
+    "a real de-filter passes");
+
+  // Run loop: clean paragraphs are skipped, dirty ones run.
+  {
+    const sel = `${filtery}\n\nThe rope lay coiled on the deck. Salt dried white on the rail.`;
+    const seen: AssistantJSONRequest[] = [];
+    const run: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
+      seen.push(req);
+      return { ok: true as const, json: { text: "The cold bit at Mara. Gulls cried over the turning tide. The light was already going." } as T, modelId: "m", timings: null };
+    };
+    const out = await runWritingTool(sel, { run, op: "custom", instruction: "remove the filter words", before: "" });
+    gate(seen.length === 1, "a paragraph with zero filter words never reaches the model", `${seen.length} calls`);
+    gate(out.batchOutcomes.join(",") === "revised,unchanged", "outcomes: dirty revised, clean untouched",
+      out.batchOutcomes.join(","));
+    gate(out.revised.includes("Salt dried white"), "the clean paragraph survives byte-identical");
   }
 })();
 

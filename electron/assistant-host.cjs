@@ -22,8 +22,9 @@
  *       Load exactly one model. `contextSize` defaults to 4096 (Metal tier);
  *       pass 2048 for the CPU tier. `gpuLayers` defaults to 'max' (the binding
  *       clamps to what the model has; 0 forces CPU-only).
- *       `kvCacheType` ('f16' | 'q8_0') is ACCEPTED AND RECORDED but node-llama-cpp
- *       3.19.x exposes no KV-cache quantisation knob — the reply reports
+ *       `kvCacheType` ('f16' | 'q8_0') applies via node-llama-cpp's
+ *       experimental KV-quantisation options; a context that refuses to
+ *       build with it retries plain and the reply reports
  *       `kvCacheTypeApplied: null` rather than silently pretending.
  *       Loading while a different model is resident unloads that one first.
  *       Loading the same {modelPath, contextSize} again is a no-op.

@@ -102,6 +102,49 @@ model run. Counting is case-insensitive ("Suddenly"/"suddenly"), word-
 bounded, possessive-inclusive. Measured: 10/10 probe cases ship
 (probe-writing-intents.cjs) including all three target modes at attempt 0.
 
+## Phase 6 (shipped 2026-08-08) — scrub family + continuity patches
+
+The self-editing-checklist tier of the field research: filter words,
+-ly adverbs, passive voice, sentence-opening runs (`ScrubKind`), plus
+continuity patches ("she's holding a knife, not a gun" reads as a REVERSED
+substitution, article required so "shorter, not longer" never matches).
+Three load-bearing mechanisms, all measured on the real 4B:
+- Clean paragraphs are SKIPPED by count before any model call (batch-level
+  provisioning; a zero-count paragraph would otherwise fight the
+  unchanged-retry loop).
+- The harness NAMES THE OFFENDERS on the user turn (it already counted
+  them for the gate) — kinds whose targets are visible ship at attempt 0.
+- ★★ WRITING_SCHEMA_SCRUB's leading "rewrites" field breaks the copy
+  attractor: with a plain {"text"} schema the 4B returned stuck passages
+  VERBATIM through prompt, offender list, worked example AND sampled
+  retry; a plan field emitted first (declaration order) fixed the same
+  case immediately.
+Result: 14/15 probe cases ship. KNOWN LIMIT: opening-run ("vary the
+sentence openings") survived four presentation variations unchanged =
+4B capability limit, withdrawn per the falsification discipline; the
+refusal still surfaces the counted diagnosis, which is useful on its own.
+
+## Performance pass measurements (2026-08-08)
+
+- REJECTED, measured: flashAttention + Q8_0 KV on the SMALL (1.7B) tier.
+  verify-assistant-tasks: baseline 30/30 at 78.6 tok/s; with FA+Q8 29/30
+  (a clear-break verdict flipped to unsure) at 66.0 tok/s. Slower AND a
+  quality flip; the max tier keeps its measured FA+Q8, the small tier
+  keeps f16. Do not re-litigate without new binding versions.
+- REJECTED, architectural: `-ub` chunked-prefill tuning — the report's
+  interactive-latency benefit assumes interactive and batch share one
+  server; ours do not (writing/ask are in-process, chips ride the
+  sidecar), so there is no head-of-line to bound.
+- REJECTED: `--defrag-thold` (deprecated in b10298), slot save/restore
+  before preemption (writing ~500MB to disk delays the interactive load
+  the preemption exists to serve), writing-tool contextSize 4096 (the
+  guard's context ladder already covers tight machines; on fit machines
+  it would force an 8192 reload when the ask surface follows).
+- Positive wins this pass: scrub skip-clean-paragraph batching (model
+  calls only where the count is nonzero), one shared scrub grammar
+  (cache hit per batch), scrub/target token budgets at 1.6x instead of
+  custom's 2.8x.
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.

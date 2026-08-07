@@ -25,7 +25,16 @@ export type WritingIntent =
   | "insert"
   | "tone"
   | "target"
+  | "scrub"
   | "unknown";
+
+/**
+ * A SCRUB edit — the self-editing-checklist family (field research:
+ * plans/writer-request-research.md, tier 1-2): a class of tokens must come
+ * DOWN, and the class is countable by script. Which rewrites replace them
+ * is the model's craft; the count moving is the gate.
+ */
+export type ScrubKind = "filter-words" | "ly-adverbs" | "passive" | "opening-run";
 
 /**
  * A TERM-TARGETED edit — the family where the gate can COUNT the thing the
@@ -58,6 +67,8 @@ export interface IntentReading {
   wantsShorter?: boolean;
   /** Set only when intent === "target". */
   target?: TargetSpec;
+  /** Set only when intent === "scrub". */
+  scrub?: { kind: ScrubKind };
 }
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -103,7 +114,30 @@ const META_TERMS = new Set([
   "adverbs", "adjectives", "words", "repetition", "dialogue",
 ]);
 
+/**
+ * Continuity patch: "she's holding a knife, not a gun" means the text says
+ * gun and should say knife — a substitution with the pair REVERSED. The
+ * article is load-bearing: "make it shorter, not longer" has no article and
+ * must never read as a substitution.
+ */
+const CONTINUITY_RE = /\b(?:holding|carrying|wearing|wields?|has|had|is|was|it's|are|were)\s+(?:a|an|the)\s+([A-Za-z][\w'’-]*),\s+not\s+(?:a|an|the)\s+([A-Za-z][\w'’-]*)/i;
+
+function readScrub(s: string): { kind: ScrubKind } | null {
+  const wantsLess = /\b(remove|cut|kill|drop|delete|fewer|less|no|without|de-?filter|fix|vary|stop|reduce|purge|clean)\b/i.test(s);
+  if (/\bfilter\s*words?\b|\bde-?filter\b/i.test(s)) return { kind: "filter-words" };
+  if (wantsLess && /\badverbs?\b|\b-?ly words?\b/i.test(s)) return { kind: "ly-adverbs" };
+  if (/\bactive voice\b/i.test(s) || (wantsLess && /\bpassive( voice)?\b/i.test(s))) return { kind: "passive" };
+  if (/\b(sentence\s+)?(openings?|starts?|beginnings?)\b/i.test(s) &&
+      /\b(vary|different|same|every|all|too many|repetitive)\b/i.test(s)) return { kind: "opening-run" };
+  if (/\b(every|too many|all( of the)?)\s+sentences?\s+(start|begin)s?\b/i.test(s)) return { kind: "opening-run" };
+  return null;
+}
+
 function readTarget(s: string): TargetSpec | null {
+  const cont = CONTINUITY_RE.exec(s);
+  if (cont && !META_TERMS.has(cont[2].toLowerCase()) && !META_TERMS.has(cont[1].toLowerCase())) {
+    return { term: cont[2], mode: "substitute", replacement: cont[1] };
+  }
   const reduce = REDUCE_RE.exec(s);
   if (reduce) {
     const term = reduce.slice(1).find(Boolean);
@@ -139,8 +173,11 @@ export function classifyInstruction(instruction: string): IntentReading {
   const s = instruction.trim();
   if (!s) return { intent: "unknown" };
 
-  // TERM-TARGETED first: "replace X with Y" is the most specific shape and
-  // shares no verbs with the structural rules.
+  // SCRUB before TARGET: "cut the -ly adverbs" must not read as a term edit
+  // (its object is a CLASS of words, not a word). Both before the
+  // structural rules — they are the most specific shapes.
+  const scrub = readScrub(s);
+  if (scrub) return { intent: "scrub", scrub };
   const target = readTarget(s);
   if (target) return { intent: "target", target };
 
@@ -163,9 +200,12 @@ export function classifyInstruction(instruction: string): IntentReading {
     return { intent: "insert" };
   }
 
-  // CONDENSE / EXPAND: length-shaped, no structural verb.
-  if (SHORTER.test(s) && !LONGER.test(s)) return { intent: "condense", targetParas: readParaTarget(s) };
-  if (LONGER.test(s) && !SHORTER.test(s)) return { intent: "expand" };
+  // CONDENSE / EXPAND: length-shaped, no structural verb. Negated clauses
+  // are stripped first — "make it shorter, not longer" names BOTH
+  // directions and only the unnegated one is the ask.
+  const dir = s.replace(/\bnot\s+[\w'’-]+/gi, "");
+  if (SHORTER.test(dir) && !LONGER.test(dir)) return { intent: "condense", targetParas: readParaTarget(s) };
+  if (LONGER.test(dir) && !SHORTER.test(dir)) return { intent: "expand" };
 
   // TONE: register/mood/voice words with no structural or length ask.
   if (/\b(tone|voice|mood|funn(y|ier)|playful|witt(y|ier)|tenser?|tension|darker|lighter|warmer|colder|formal|casual|poetic|lyrical|punchy|dramatic|humorous|serious|scar(y|ier)|creep(y|ier)|romantic|melanchol\w+|somber|cheerful)\b/i.test(s)) {
