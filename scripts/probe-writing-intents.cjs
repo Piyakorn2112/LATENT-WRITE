@@ -73,6 +73,12 @@ const CASES = [
   { id: 'condense-half', instruction: 'make it half as long', text: ONE_LONG },
   { id: 'insert-action', instruction: 'add a short action scene where Mara nearly falls from the ladder', text: TWO_PARA },
   { id: 'tone-funny', instruction: 'make it funny', text: TWO_PARA.split('\n\n')[1] },
+  // ── thinking cases: every one below routes through a think pass at
+  //    attempt 0 (tone/insert/unknown), the surfaces the reasoning pays for.
+  { id: 'tone-ominous', instruction: 'make it more ominous', text: TWO_PARA.split('\n\n')[0] },
+  { id: 'insert-dialogue', instruction: 'add a line of dialogue where Teo apologises', text: TWO_PARA },
+  { id: 'custom-rhythm', instruction: 'give this more rhythm, let it breathe', text: ONE_LONG },
+  { id: 'custom-transition', instruction: 'smooth the transition between the two paragraphs', text: TWO_PARA },
 ];
 
 /** Module-side helpers: requests, classification and judging are REAL code. */

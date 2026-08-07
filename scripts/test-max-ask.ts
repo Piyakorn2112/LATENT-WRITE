@@ -519,6 +519,30 @@ await (async () => {
   gate(r.stopped === "answered" && r.answer?.basis === "mentions", "the answer cites the mentions rung");
 })();
 
+console.log("\n── decision tiers + entity resolution edges ──────────────────");
+{
+  gate(decideAskThinking("question", "why did she leave", 0).budget === 256,
+    "causal-only gets the small budget");
+  gate(decideAskThinking("question", "what did Tim do to Annaha in this chapter", 2).budget === 1024,
+    "causal+multi-entity gets the 1024 regime");
+  gate(!decideAskThinking("question", "where is the tin", 1).think, "single-entity lookup stays fast");
+  // Aliases resolve; possessives do not block a match; the cap holds.
+  const aliasInput: MaxAskInput = { ...INPUT, kind: "question", question: "what does the ash marshal want" };
+  gate(questionEntities(aliasInput).some((e) => e.toLowerCase() === "ash marshal"),
+    "a cast ALIAS typed lowercase resolves as an entity");
+  const possInput: MaxAskInput = {
+    ...INPUT, kind: "question", question: "why did tim ignore annaha's warning",
+    chapterParagraphs: ["Tim frowned.", "Annaha warned him twice."],
+  };
+  const poss = questionEntities(possInput);
+  gate(poss.includes("Tim") && poss.includes("Annaha"),
+    "a possessive-wrapped name still resolves", poss.join(","));
+  const manyParas = Array.from({ length: 12 }, (_, i) => `Tim did thing number ${i} on the dock.`);
+  const capped = buildMaxAskPack({ ...INPUT, kind: "question", question: "what did tim do", chapterParagraphs: manyParas, paragraphIndex: 0 });
+  const rows = (capped.text.split("MENTIONS —")[1] ?? "").split("\n").filter((l) => /^P\d+:/.test(l));
+  gate(rows.length <= 6, "the mentions rung caps at 6 rows", `${rows.length}`);
+}
+
 console.log("\n" + "=".repeat(74));
 console.log(`${pass} passed, ${fail} failed`);
 console.log("=".repeat(74));

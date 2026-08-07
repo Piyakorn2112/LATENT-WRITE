@@ -184,6 +184,20 @@ from token zero), so noThink:false was cosmetic on every constrained run.
 - KNOWN LIMIT extended: opening-run fails even WITH thinking on retries
   (fifth presentation variation) — capability limit stands.
 
+## Phase 8 (shipped 2026-08-08) — the quality-per-token benchmark
+
+bench-think-ask.cjs: six question SHAPES (lookup, relation-arc, why,
+temporal, absent-fact honesty, reconcile-how) through the REAL decision
+ladder on the real 4B, with control/treated arms on every thinking case so
+each reasoning token has a measured justification. Results: 23/23 gates;
+thinking earned its tokens on 3/5 thinking cases (the relation and why
+shapes; the temporal and reconcile shapes were already within the fast
+path's reach on this fixture); the honesty case ABSTAINED even after a
+think pass — reasoning does not cause invention. Writing side grew four
+thinking cases (ominous, insert-dialogue, rhythm, transition): 19/19 ship
+at attempt 0 thought. Classifier gained the ominous/eerie/sinister tone
+vocabulary and possessive-stripped entity resolution ("annaha's warning").
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.

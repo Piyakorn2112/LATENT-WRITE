@@ -196,7 +196,7 @@ export function classifyInstruction(instruction: string): IntentReading {
 
   // INSERT: adding a NEW narrative unit, not more of the same texture.
   // Checked before expand — "add an action scene" must not read as length.
-  if (/\b(add|insert|write|include|work in|put in)\b[^.]*\b(a|an|another|new)\s+(\w+\s+){0,3}?(scene|beat|moment|exchange|paragraph|passage|flashback|interlude)\b/i.test(s)) {
+  if (/\b(add|insert|write|include|work in|put in)\b[^.]*\b(a|an|another|new)\s+(\w+\s+){0,3}?(scene|beat|moment|exchange|paragraph|passage|flashback|interlude|line of dialogue)\b/i.test(s)) {
     return { intent: "insert" };
   }
 
@@ -208,7 +208,7 @@ export function classifyInstruction(instruction: string): IntentReading {
   if (LONGER.test(dir) && !SHORTER.test(dir)) return { intent: "expand" };
 
   // TONE: register/mood/voice words with no structural or length ask.
-  if (/\b(tone|voice|mood|funn(y|ier)|playful|witt(y|ier)|tenser?|tension|darker|lighter|warmer|colder|formal|casual|poetic|lyrical|punchy|dramatic|humorous|serious|scar(y|ier)|creep(y|ier)|romantic|melanchol\w+|somber|cheerful)\b/i.test(s)) {
+  if (/\b(tone|voice|mood|funn(y|ier)|playful|witt(y|ier)|tenser?|tension|darker|lighter|warmer|colder|formal|casual|poetic|lyrical|punchy|dramatic|humorous|serious|scar(y|ier)|creep(y|ier)|romantic|melanchol\w+|somber|cheerful|ominous|eerie|unsettling|grim|bleak|sinister|menacing|foreboding|hopeful|tender|wistful)\b/i.test(s)) {
     return { intent: "tone" };
   }
 

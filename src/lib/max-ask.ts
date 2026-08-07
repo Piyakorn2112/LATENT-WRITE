@@ -231,7 +231,11 @@ export function questionEntities(input: MaxAskInput): string[] {
     if (new RegExp(`(^|[^\\p{L}])${escRe(name)}([^\\p{L}]|$)`, "iu").test(q)) push(name);
   }
   const chapterText = (input.chapterParagraphs ?? []).join("\n");
-  for (const word of q.match(/\b[\p{L}][\p{L}'’-]{2,}\b/gu) ?? []) {
+  for (const raw of q.match(/\b[\p{L}][\p{L}'’-]{2,}\b/gu) ?? []) {
+    // "annaha's warning" asks about Annaha — the possessive is not part of
+    // the name being resolved.
+    const word = raw.replace(/['’]s$/i, "");
+    if (word.length < 3) continue;
     const lower = word.toLowerCase();
     if (STOP_QWORDS.has(lower) || seen.has(lower)) continue;
     const capitalized = lower[0].toUpperCase() + lower.slice(1);
