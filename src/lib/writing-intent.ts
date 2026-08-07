@@ -24,7 +24,29 @@ export type WritingIntent =
   | "expand"
   | "insert"
   | "tone"
+  | "target"
   | "unknown";
+
+/**
+ * A TERM-TARGETED edit — the family where the gate can COUNT the thing the
+ * instruction names. Four modes:
+ *  - rename:     "rename Mara to Naomi", "replace John with Marcus" — both
+ *                sides are name-shaped; handled DETERMINISTICALLY, no model.
+ *  - pronounize: "replace John with a pronoun" — later mentions become
+ *                pronouns; which ones is the model's judgment (soft bound),
+ *                but the COUNT must come down (hard gate).
+ *  - substitute: "replace the sword with a dagger" — every mention becomes
+ *                the replacement; term count → 0, replacement must appear.
+ *  - reduce:     "use 'suddenly' less", "stop repeating just" — count must
+ *                strictly decrease.
+ */
+export interface TargetSpec {
+  /** The term as the instruction wrote it; the runner re-cases it against
+   *  the actual prose before anything else uses it. */
+  term: string;
+  mode: "rename" | "pronounize" | "substitute" | "reduce";
+  replacement?: string;
+}
 
 export interface IntentReading {
   intent: WritingIntent;
@@ -34,6 +56,8 @@ export interface IntentReading {
   /** The instruction also asks for shorter output (merge+condense combos
    *  like "merge these and make them shorter" widen the length gate down). */
   wantsShorter?: boolean;
+  /** Set only when intent === "target". */
+  target?: TargetSpec;
 }
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -50,6 +74,56 @@ function readParaTarget(instruction: string): number | undefined {
   return Number.isFinite(n) && n >= 1 && n <= 12 ? n : undefined;
 }
 
+// ── term-targeted extraction ──────────────────────────────────────────────
+
+const Q = `["'‘’“”]`; // any quote the writer might wrap a term in
+const TERM = `([A-Za-z][\\w'’-]*)`;
+// Article/qualifier before the term: "the word X", "the name X", or a bare
+// article ("replace the sword…"). Ordered longest-first so "the word" never
+// leaves "word" as the term.
+const LEAD = `(?:every\\s+|all\\s+)?(?:the\\s+(?:word|name)\\s+|the\\s+|a\\s+|an\\s+)?`;
+const REPLACE_RE = new RegExp(`\\b(?:replace|swap)\\s+${LEAD}${Q}?${TERM}${Q}?\\s+with\\s+(?:a\\s+|an\\s+|the\\s+)?${Q}?${TERM}${Q}?`, "i");
+const CHANGE_RE = new RegExp(`\\b(?:change|turn)\\s+${LEAD}${Q}?${TERM}${Q}?\\s+(?:to|into)\\s+(?:a\\s+|an\\s+|the\\s+)?${Q}?${TERM}${Q}?`, "i");
+const RENAME_RE = new RegExp(`\\brename\\s+${Q}?${TERM}${Q}?\\s+(?:to|as)\\s+${Q}?${TERM}${Q}?`, "i");
+const INSTEAD_RE = new RegExp(`\\buse\\s+${Q}?${TERM}${Q}?\\s+instead\\s+of\\s+${Q}?${TERM}${Q}?`, "i");
+const REDUCE_RE = new RegExp(
+  `\\buse\\s+(?:the\\s+word\\s+)?${Q}?${TERM}${Q}?\\s+less\\b` +
+  `|\\bstop\\s+(?:using|repeating|saying)\\s+(?:the\\s+word\\s+)?${Q}?${TERM}${Q}?` +
+  `|\\b(?:remove|cut|drop)\\s+(?:some\\s+of\\s+)?the\\s+word\\s+${Q}?${TERM}${Q}?` +
+  `|\\bfewer\\s+${Q}${TERM}${Q}`, "i");
+
+const PRONOUN_WORDS = new Set(["pronoun", "pronouns", "he", "she", "they", "him", "her", "them", "it"]);
+/** Meta words that name an ASPECT of the prose, not a term in it — "change
+ *  the tone to formal" is a tone ask, "turn this into two paragraphs" is not
+ *  a replacement of the word "this". */
+const META_TERMS = new Set([
+  "this", "it", "that", "them", "those", "these", "everything",
+  "tone", "voice", "tense", "pov", "mood", "style", "pacing", "ending",
+  "paragraph", "paragraphs", "sentence", "sentences", "passage", "text",
+  "adverbs", "adjectives", "words", "repetition", "dialogue",
+]);
+
+function readTarget(s: string): TargetSpec | null {
+  const reduce = REDUCE_RE.exec(s);
+  if (reduce) {
+    const term = reduce.slice(1).find(Boolean);
+    if (term && !META_TERMS.has(term.toLowerCase())) return { term, mode: "reduce" };
+    return null;
+  }
+  let term: string | undefined, replacement: string | undefined;
+  const instead = INSTEAD_RE.exec(s);
+  if (instead) { replacement = instead[1]; term = instead[2]; }
+  else {
+    const m = REPLACE_RE.exec(s) ?? CHANGE_RE.exec(s) ?? RENAME_RE.exec(s);
+    if (m) { term = m[1]; replacement = m[2]; }
+  }
+  if (!term || !replacement || META_TERMS.has(term.toLowerCase()) || META_TERMS.has(replacement.toLowerCase())) return null;
+  if (PRONOUN_WORDS.has(replacement.toLowerCase())) return { term, mode: "pronounize", replacement };
+  // Both sides name-shaped (capitalized): a rename, deterministic downstream.
+  if (/^[A-Z]/.test(term) && /^[A-Z]/.test(replacement)) return { term, mode: "rename", replacement };
+  return { term, mode: "substitute", replacement };
+}
+
 const SHORTER = /\b(short(er|en)?|tight(er|en)?|condense|trim|compress|concise|cut(\s+(it|this|them|down))?|fewer words|less wordy|half(\s+(the|its))?\s*(length)?)\b/i;
 // "longer", never bare "long": "make it half as long" is a CONDENSE ask and
 // the bare word made it read as both directions at once (→ unknown).
@@ -64,6 +138,11 @@ const LONGER = /\b(longer|expand|extend|lengthen|flesh out|elaborate|deepen|deve
 export function classifyInstruction(instruction: string): IntentReading {
   const s = instruction.trim();
   if (!s) return { intent: "unknown" };
+
+  // TERM-TARGETED first: "replace X with Y" is the most specific shape and
+  // shares no verbs with the structural rules.
+  const target = readTarget(s);
+  if (target) return { intent: "target", target };
 
   // MERGE: a joining verb near paragraph-shaped nouns, or "into one".
   if (

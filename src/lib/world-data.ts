@@ -623,55 +623,6 @@ async function maybeRefineInstitutionalLabel(
   return predictedLabel;
 }
 
-// ── World data → entity map ────────────────────────────────────────────────
-
-/**
- * Converts world data into a lookup map (lowercase key → entity) and a flat
- * list of all display names + aliases for regex building. Returns empty
- * structures for an empty/missing worldData.
- */
-export function buildEntityMap(worldData: WorldData | undefined): {
-  map: Map<string, WorldEntity>;
-  names: string[];
-} {
-  const map = new Map<string, WorldEntity>();
-  const names: string[] = [];
-  if (!worldData) return { map, names };
-
-  const push = (
-    type: WorldEntity["type"],
-    name: string,
-    role?: string,
-    description?: string,
-    aliases?: string[],
-  ) => {
-    if (!name) return;
-    const entity: WorldEntity = { name, type, role, description };
-    map.set(name.toLowerCase(), entity);
-    names.push(name);
-    for (const alias of aliases ?? []) {
-      if (!alias) continue;
-      map.set(alias.toLowerCase(), entity);
-      names.push(alias);
-    }
-  };
-
-  for (const c of worldData.characters ?? []) {
-    push("character", c.name, c.role, c.description, c.aliases);
-  }
-  for (const p of worldData.places ?? []) {
-    push("place", p.name, p.type, p.description, p.aliases);
-  }
-  for (const f of worldData.factions ?? []) {
-    push("faction", f.name, f.type, f.description, f.aliases);
-  }
-  for (const e of worldData.entities ?? []) {
-    push("entity", e.name, e.type, e.description, e.aliases);
-  }
-
-  return { map, names };
-}
-
 // ── Auto-extraction heuristic ──────────────────────────────────────────────
 
 /**
@@ -1545,26 +1496,18 @@ export function renameInText(text: string, oldName: string, newName: string): {
   if (!oldName || oldName === newName) return { text, count: 0 };
   let count = 0;
   // \b is unreliable around accented letters / Unicode; we anchor manually
-  // with character-class checks for word boundaries instead.
-  const re = new RegExp(`(^|[^A-Za-z0-9_'\\u00C0-\\u024F])(${escapeRe(oldName)})(?=$|[^A-Za-z0-9_'\\u00C0-\\u024F])`, "g");
+  // with character-class checks for word boundaries instead. The straight
+  // apostrophe stays a WORD character (it protects O'Brien-style compounds
+  // on both sides) — but that silently skipped possessives ("Sarah's coat"
+  // survived a rename to Maren, found 2026-08), so `'s` at a word end is
+  // allowed through explicitly. Curly-apostrophe possessives were already
+  // fine (’ was never in the word class).
+  const re = new RegExp(`(^|[^A-Za-z0-9_'\\u00C0-\\u024F])(${escapeRe(oldName)})(?=$|[^A-Za-z0-9_'\\u00C0-\\u024F]|'s(?:$|[^A-Za-z0-9_'\\u00C0-\\u024F]))`, "g");
   const next = text.replace(re, (_m, pre) => {
     count++;
     return pre + newName;
   });
   return { text: next, count };
-}
-
-/**
- * Rename across a single chapter's content. Returns the patched content
- * and the replacement count.
- */
-export function renameInChapter(
-  chapter: { content: string },
-  oldName: string,
-  newName: string,
-): { content: string; count: number } {
-  const { text, count } = renameInText(chapter.content, oldName, newName);
-  return { content: text, count };
 }
 
 /**

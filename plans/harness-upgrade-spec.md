@@ -87,6 +87,21 @@ prompt options) and sidecar (`min_p` on /completion). DEFAULTS UNCHANGED
 deterministic decoding has already failed twice. Full best-of-N on attempt 0
 is deferred until the sidecar serves interactive lanes.
 
+## Phase 5 (shipped 2026-08-08) — term-targeted intents
+
+The family where the gate can COUNT what the instruction names (field
+research: plans/writer-request-research.md). `readTarget` extracts
+(term, replacement) from replace/change/turn/rename/instead-of/reduce
+shapes; meta words (tone, tense, this...) never become targets. Four modes:
+rename (both sides name-shaped → DETERMINISTIC renameAll, no model, no
+length cap), pronounize (count must fall; WHICH mentions stay is the
+model's judgment, the soft bound), substitute (term → 0, replacement must
+appear), reduce (count strictly falls). Term is re-cased against the prose
+pre-flight; a typo or single-mention pronounize fails honestly before any
+model run. Counting is case-insensitive ("Suddenly"/"suddenly"), word-
+bounded, possessive-inclusive. Measured: 10/10 probe cases ship
+(probe-writing-intents.cjs) including all three target modes at attempt 0.
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.

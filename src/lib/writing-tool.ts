@@ -24,7 +24,6 @@ import { classifyInstruction, namesInInstruction, type IntentReading } from "./w
 import type { AssistantJSONRunner } from "./assistant-client";
 
 export const WRITING_TASK = "writing-tool";
-export const WRITING_PROMPT_VERSION = 1;
 
 export type WritingOp = "proofread" | "rewrite" | "custom";
 
@@ -411,7 +410,7 @@ export function buildWritingRequest(
     // 2.8k-char selection run to 2.5k tokens for nothing), and insert gets
     // an absolute allowance for the NEW material instead of a multiple.
     maxTokens:
-      intent === "merge" || intent === "split" || intent === "condense"
+      intent === "merge" || intent === "split" || intent === "condense" || intent === "target"
         ? Math.ceil((batch.text.length / 3.2) * 1.6) + 200
       : intent === "insert"
         ? Math.ceil((batch.text.length / 3.2) * 1.5) + 900
@@ -442,15 +441,15 @@ export function mechanicalErrorCount(text: string): number {
 
 /**
  * A revision ships only if it does not LOSE to the deterministic checker:
- * fewer-or-equal hard errors than the original, and non-trivially shaped
- * (non-empty, same paragraph count, length within the op's honest range).
+ * non-empty, the paragraph shape its intent promised, length inside the
+ * intent's honest window, the term-count contract when a target edit named
+ * one, and fewer-or-equal grammar errors than the original.
  *
- * ★ THE LENGTH WINDOW IS PER OP. Proofread/rewrite promise roughly-the-same
- *   text, so a wild length change means the model wandered. A CUSTOM
- *   instruction is often ABOUT length ("make it longer", "cut this down") —
- *   the tight window silently vetoed exactly what the writer asked for, and
- *   the popover then reported "nothing needed changing". Custom keeps only
- *   the never-sane bounds.
+ * ★ THE WINDOW IS PER INTENT (it used to be per op, and the single custom
+ *   window silently vetoed what instructions asked for — a merge "changed
+ *   the paragraph count", a big expand "wandered"). Each profile below is
+ *   the CONTRACT of one instruction class, and every bound doubles as the
+ *   retry diagnosis when it fails.
  */
 export type ParaRule =
   | { kind: "exact"; count: number }   // merge into 1, split into 3
@@ -466,10 +465,43 @@ export interface GateProfile {
   lenMax: number;
   lenSlack: number;
   grammar: "hard" | "mechanical";
+  /** Term-count contract for target edits: the one part of "replace John
+   *  with a pronoun" a script CAN check. WHICH mentions to change stays the
+   *  model's judgment (soft bound); THAT the count moved is the hard gate. */
+  target?: { term: string; mode: "pronounize" | "substitute" | "reduce"; replacement?: string };
+}
+
+/** Word-boundary occurrences, case-INSENSITIVE: a common word appears as
+ *  "Suddenly" at sentence starts and "suddenly" elsewhere, and both are the
+ *  writer's target. Only renameAll needs case fidelity. Lookahead right
+ *  edge so back-to-back mentions both count. */
+export function countTerm(text: string, term: string): number {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (text.match(new RegExp(`(^|[^\\p{L}\\p{N}])${esc}(?=$|[^\\p{L}\\p{N}])`, "giu")) ?? []).length;
+}
+
+/** The prose's own casing for an instruction-typed term ("jhon" finds
+ *  nothing; "john" finds "John"), or null when it never appears. */
+export function findTermCased(text: string, term: string): string | null {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const m = new RegExp(`(^|[^\\p{L}\\p{N}])(${esc})(?=$|[^\\p{L}\\p{N}])`, "iu").exec(text);
+  return m ? m[2] : null;
+}
+
+/** Deterministic rename: every word-boundary mention (possessives ride the
+ *  boundary), plus the ALL-CAPS shout variant. No model involved. */
+export function renameAll(text: string, from: string, to: string): string {
+  const rep = (f: string, t: string) => {
+    const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return (s: string) => s.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${esc}(?=$|[^\\p{L}\\p{N}])`, "gu"), `$1${t.replace(/\$/g, "$$$$")}`);
+  };
+  let out = rep(from, to)(text);
+  if (from.toUpperCase() !== from) out = rep(from.toUpperCase(), to.toUpperCase())(out);
+  return out;
 }
 
 export interface RevisionFailure {
-  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "unchanged";
+  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "target" | "unchanged";
   /** Plain-numbers sentence, written for BOTH consumers: the retry prompt
    *  quotes it to the model, the popover quotes it to the writer. */
   detail: string;
@@ -522,6 +554,17 @@ export function gateProfileFor(op: WritingOp, reading?: IntentReading): GateProf
       return { paras: { kind: "moreThan" }, lenMin: 1.15, lenMax: 8, lenSlack: 600, grammar: "mechanical" };
     case "tone":
       return { paras: { kind: "drift", max: 2 }, lenMin: 0.6, lenMax: 1.6, lenSlack: 120, grammar: "mechanical" };
+    case "target": {
+      const t = reading.target;
+      return {
+        // A surgical edit must not reshape: strict paragraphs, near-1x length.
+        paras: { kind: "drift", max: 0 },
+        lenMin: 0.7, lenMax: 1.25, lenSlack: 60, grammar: "mechanical",
+        ...(t && t.mode !== "rename"
+          ? { target: { term: t.term, mode: t.mode, replacement: t.replacement } }
+          : {}),
+      };
+    }
     default:
       return LEGACY_CUSTOM;
   }
@@ -569,6 +612,30 @@ export function judgeRevision(original: string, revised: string, profile: GatePr
   }
   if (r.length > max) {
     return { ok: false, failure: { code: "len-high", detail: `it came back at ${ratio}x the original length; it must stay under ${profile.lenMax}x` } };
+  }
+
+  if (profile.target) {
+    const { term, mode, replacement } = profile.target;
+    const before = countTerm(original, term);
+    const after = countTerm(r, term);
+    if (mode === "substitute") {
+      if (after > 0) {
+        return { ok: false, failure: { code: "target", detail: `"${term}" still appears ${after} time${plural(after)}; every mention must be replaced with "${replacement}"` } };
+      }
+      if (replacement && countTerm(r, replacement) === 0) {
+        return { ok: false, failure: { code: "target", detail: `the replacement "${replacement}" does not appear in the revision; it must actually be used` } };
+      }
+    } else if (after >= before) {
+      return {
+        ok: false,
+        failure: {
+          code: "target",
+          detail: mode === "pronounize"
+            ? `"${term}" still appears ${after} time${plural(after)}, same as before; replace the later mentions with a pronoun and keep at most the first`
+            : `"${term}" still appears ${after} time${plural(after)}, not fewer; cut some of them`,
+        },
+      };
+    }
   }
 
   const count = profile.grammar === "mechanical" ? mechanicalErrorCount : hardErrorCount;
@@ -674,19 +741,44 @@ export async function runWritingTool(
 ): Promise<WritingToolOutcome> {
   const reading: IntentReading =
     opts.op === "custom" ? classifyInstruction(opts.instruction ?? "") : { intent: "unknown" };
+  const preflightFail = (reason: string, why: string): WritingToolOutcome => ({
+    revised: selected, batchOutcomes: ["failed"], failReasons: [reason],
+    diagnosis: why, cancelled: false,
+  });
+
+  // ── term-targeted pre-flight: resolve, and do the deterministic part ──
+  // The gate can only count a term the prose actually contains, so the term
+  // is re-cased against the selection FIRST ("john" finds "John"; a typo
+  // finds nothing and fails with the honest reason instead of a model run).
+  if (opts.op === "custom" && reading.intent === "target" && reading.target) {
+    const cased = findTermCased(selected, reading.target.term);
+    if (!cased) {
+      return preflightFail("target-not-found", `"${reading.target.term}" does not appear in the selection`);
+    }
+    reading.target.term = cased;
+    if (reading.target.mode === "rename") {
+      // A rename is pure text arithmetic — no model, no length cap, exact.
+      const renamed = renameAll(selected, cased, reading.target.replacement!);
+      opts.onProgress?.({ batchIndex: 0, batchCount: 1, preview: renamed });
+      return { revised: renamed, batchOutcomes: ["revised"], failReasons: [], cancelled: false };
+    }
+    if (reading.target.mode === "pronounize" && countTerm(selected, cased) <= 1) {
+      return preflightFail("nothing-to-replace",
+        `"${cased}" appears only once in the selection; there are no later mentions to replace with a pronoun`);
+    }
+  }
+
+  // Target edits (like structural ones) need the WHOLE mention chain in one
+  // prompt — which mention is "the first" is a selection-level fact.
   const structural =
     opts.op === "custom" &&
     (reading.intent === "merge" || reading.intent === "split" || reading.intent === "insert" ||
+      reading.intent === "target" ||
       (reading.intent === "condense" && reading.targetParas !== undefined));
 
   if (structural && selected.length > STRUCTURAL_MAX_CHARS) {
-    return {
-      revised: selected,
-      batchOutcomes: ["failed"],
-      failReasons: ["selection-too-long"],
-      diagnosis: `reshaping works on selections up to ${STRUCTURAL_MAX_CHARS.toLocaleString()} characters and this one is ${selected.length.toLocaleString()}`,
-      cancelled: false,
-    };
+    return preflightFail("selection-too-long",
+      `reshaping works on selections up to ${STRUCTURAL_MAX_CHARS.toLocaleString()} characters and this one is ${selected.length.toLocaleString()}`);
   }
 
   // Proofread packs paragraphs per batch (mechanical, structure-safe);

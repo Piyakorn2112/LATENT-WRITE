@@ -36,7 +36,19 @@ const ONE_LONG =
 const SPLITTABLE =
   'Mara went down into the hold with the lamp held high. The light moved over the crates and the coiled rope, and she counted the boxes twice because the number felt wrong. When she came back up the ladder, Teo was waiting at the hatch with the manifest in his hand. She told him the count before he could ask, and neither of them said what they were both thinking.';
 
+const JOHN_PARA =
+  'John pushed the boat off the ramp and watched the tide take it. When the rope went taut, John waded in after it up to his knees. By the time the sail caught, John was laughing, and Mara had never once seen John laugh on the water.';
+
+const SWORD_PARA =
+  'Teo lifted the sword from the crate and turned it in the light. The sword was older than the manifest said, and the grip had been rewrapped twice. He set the sword down carefully and did not mention it to Mara.';
+
+const SUDDEN_PARA =
+  'Suddenly the wind died. Mara looked up suddenly from the chart, and the lamp guttered suddenly in the still air.';
+
 const CASES = [
+  { id: 'pronounize', instruction: 'replace John with a pronoun', text: JOHN_PARA },
+  { id: 'substitute', instruction: 'replace the sword with a dagger', text: SWORD_PARA },
+  { id: 'reduce', instruction: 'stop repeating the word suddenly', text: SUDDEN_PARA },
   { id: 'merge', instruction: 'merge these two paragraphs into one', text: TWO_PARA },
   { id: 'merge-shorter', instruction: 'merge these two paragraphs and make them shorter', text: TWO_PARA },
   { id: 'split', instruction: 'split this into two paragraphs', text: SPLITTABLE },

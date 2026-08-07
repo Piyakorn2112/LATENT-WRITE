@@ -7,7 +7,7 @@
 import {
   planWritingBatches, buildWritingRequest, assembleRevision, applyRevision,
   revisionAcceptable, runWritingTool, BATCH_MAX_CHARS, STRUCTURAL_MAX_CHARS,
-  gateProfileFor, judgeRevision,
+  gateProfileFor, judgeRevision, countTerm, findTermCased, renameAll,
   toWire, fromWire, matchQuoteStyle, isLengthInstruction,
 } from "../src/lib/writing-tool";
 import { classifyInstruction, namesInInstruction } from "../src/lib/writing-intent";
@@ -346,6 +346,96 @@ await (async () => {
     gate(seen[0].systemPrompt.includes("ADD something NEW"), "insert routes to the insert prompt");
     gate((seen[0].maxTokens ?? 0) > 900, "insert carries the new-material token allowance", `${seen[0].maxTokens}`);
     gate(out.batchOutcomes.join(",") === "revised", "a grounded insertion ships", out.batchOutcomes.join(","));
+  }
+})();
+
+console.log("\n── 8 · term-targeted edits ──────────────────────────────────");
+await (async () => {
+  const prose =
+    "John pushed the boat off the ramp. The water took it slowly, and John waded in after it up to his knees.\n\n" +
+    "By the time the sail caught, John was laughing. Mara had never seen John laugh like that.";
+
+  // Classification.
+  const p1 = classifyInstruction("replace John with a pronoun");
+  gate(p1.intent === "target" && p1.target?.mode === "pronounize" && p1.target.term === "John",
+    `"replace John with a pronoun" → target/pronounize`, JSON.stringify(p1));
+  const p2 = classifyInstruction("rename Mara to Naomi");
+  gate(p2.intent === "target" && p2.target?.mode === "rename" && p2.target.replacement === "Naomi",
+    `"rename Mara to Naomi" → target/rename`);
+  const p3 = classifyInstruction("replace the sword with a dagger");
+  gate(p3.intent === "target" && p3.target?.mode === "substitute" && p3.target.term === "sword",
+    `"replace the sword with a dagger" → target/substitute`, JSON.stringify(p3));
+  const p4 = classifyInstruction("stop repeating the word suddenly");
+  gate(p4.intent === "target" && p4.target?.mode === "reduce" && p4.target.term === "suddenly",
+    `"stop repeating the word suddenly" → target/reduce`, JSON.stringify(p4));
+  const p5 = classifyInstruction('use "just" less');
+  gate(p5.intent === "target" && p5.target?.mode === "reduce" && p5.target.term === "just",
+    `quoted reduce term extracts`, JSON.stringify(p5));
+  gate(classifyInstruction("change the tone to formal").intent === "tone",
+    "meta words never become targets (tone ask stays tone)");
+  gate(classifyInstruction("turn the sword into a dagger").target?.mode === "substitute",
+    `"turn X into Y" reads as substitution`);
+  gate(classifyInstruction("use dagger instead of sword").target?.term === "sword",
+    `"use Y instead of X" targets X`);
+
+  // Counting is word-bounded and case-sensitive; possessives count.
+  gate(countTerm(prose, "John") === 4, "countTerm counts every John", `${countTerm(prose, "John")}`);
+  gate(countTerm("John's boat. JOHNSON left.", "John") === 1, "possessive counts, Johnson does not");
+  gate(countTerm("Suddenly it died. It guttered suddenly.", "suddenly") === 2,
+    "counting is case-insensitive across sentence starts");
+  gate(findTermCased(prose, "john") === "John", "a lowercase-typed term re-cases from the prose");
+  gate(findTermCased(prose, "jhon") === null, "a typo resolves to nothing, not to a guess");
+
+  // Deterministic rename: exact, possessive-safe, model-free.
+  gate(renameAll("John took John's coat. JOHN!", "John", "Marcus") === "Marcus took Marcus's coat. MARCUS!",
+    "renameAll rewrites mentions, possessives and shouts", renameAll("John took John's coat. JOHN!", "John", "Marcus"));
+
+  // The pronounize gate: count must come down, which mentions is free.
+  const prof = gateProfileFor("custom", classifyInstruction("replace John with a pronoun"));
+  const good = prose.replace("John waded", "he waded").replace("John was laughing", "he was laughing").replace("seen John laugh", "seen him laugh");
+  gate(judgeRevision(prose, good, prof).ok, "keeping the first mention and pronounizing the rest passes");
+  const lazy = judgeRevision(prose, prose.replace("pushed", "shoved"), prof);
+  gate(!lazy.ok && lazy.failure.code === "target" && lazy.failure.detail.includes("still appears 4"),
+    "an unchanged count fails with the count in the diagnosis", lazy.ok ? "passed" : lazy.failure.detail);
+
+  // Run loop: rename never calls the model.
+  {
+    const seen: AssistantJSONRequest[] = [];
+    const run: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
+      seen.push(req);
+      return { ok: true as const, json: { text: "unused" } as T, modelId: "m", timings: null };
+    };
+    const out = await runWritingTool(prose, { run, op: "custom", instruction: "replace John with Marcus", before: "" });
+    gate(seen.length === 0 && out.batchOutcomes.join(",") === "revised",
+      "a rename ships deterministically with zero model calls", `${seen.length} calls`);
+    gate(countTerm(out.revised, "John") === 0 && countTerm(out.revised, "Marcus") === 4,
+      "every John became Marcus", out.revised.slice(0, 60));
+  }
+
+  // Run loop: honest pre-flight failures.
+  {
+    const run: AssistantJSONRunner = async () => { throw new Error("must not run"); };
+    const miss = await runWritingTool(prose, { run, op: "custom", instruction: "replace Renner with a pronoun", before: "" });
+    gate(miss.failReasons[0] === "target-not-found" && (miss.diagnosis ?? "").includes("Renner"),
+      "an absent term fails before any model run", miss.diagnosis ?? "none");
+    const single = await runWritingTool("Mara sat down.", { run, op: "custom", instruction: "replace Mara with a pronoun", before: "" });
+    gate(single.failReasons[0] === "nothing-to-replace",
+      "a single mention has no later mentions to replace", single.failReasons[0]);
+  }
+
+  // Run loop: pronounize runs the selection whole and retries on a lazy count.
+  {
+    const seen: AssistantJSONRequest[] = [];
+    const answers = [prose.replace("pushed", "shoved"), good];
+    const run: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
+      seen.push(req);
+      return { ok: true as const, json: { text: answers[Math.min(seen.length - 1, answers.length - 1)] } as T, modelId: "m", timings: null };
+    };
+    const out = await runWritingTool(prose, { run, op: "custom", instruction: "replace john with a pronoun", before: "" });
+    gate(seen.length === 2 && out.batchOutcomes.join(",") === "revised",
+      "a lazy pronounize earns a diagnosed retry and then ships", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
+    gate(seen[1].userText.includes("still appears 4"), "the count rides the retry note");
+    gate(seen[0].userText.includes("PASSAGE:\nJohn pushed"), "the whole mention chain is one prompt");
   }
 })();
 

@@ -38,9 +38,15 @@ function humanFailure(reasons: string[]): string {
   if (r === "timeout") return "the model took too long";
   if (r === "no-model") return "the Max model is not downloaded";
   if (r === "selection-too-long") return "the selection is too long for a reshaping request";
+  if (r === "target-not-found") return "the word to change was not found in the selection";
+  if (r === "nothing-to-replace") return "there was nothing left to replace";
   if (r === "unavailable" || r === "not-loaded" || r === "no-host") return "the model is not running";
   return r ? `error: ${r}` : "an unknown error";
 }
+
+/** Failures the harness diagnosed BEFORE any model ran — the popover shows
+ *  the diagnosis itself, since "try again in a moment" would be a lie. */
+const PREFLIGHT = new Set(["selection-too-long", "target-not-found", "nothing-to-replace"]);
 
 const OP_LABEL: Record<WritingOp, string> = {
   proofread: "Proofreading…",
@@ -184,8 +190,8 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
                 {revisedCount > 0
                   ? `Done. ${revisedCount} ${revisedCount === 1 ? "part" : "parts"} revised${keptCount > 0 ? `, ${keptCount} kept as written` : ""}${failedCount > 0 ? `, ${failedCount} failed` : ""}. The new text is in place; press ⌘Z to bring the old text back.`
                   : failedCount > 0
-                    ? outcome?.failReasons[0] === "selection-too-long" && outcome.diagnosis
-                      ? `The text is untouched: ${outcome.diagnosis}. Select a shorter passage for this request.`
+                    ? PREFLIGHT.has(outcome?.failReasons[0] ?? "") && outcome?.diagnosis
+                      ? `The text is untouched: ${outcome.diagnosis}. Adjust the selection or the request and try again.`
                       : `The run failed (${humanFailure(outcome?.failReasons ?? [])}), so the text is untouched. Try again in a moment.`
                     : keptCount > 0
                       ? outcome?.diagnosis
