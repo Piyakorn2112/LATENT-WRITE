@@ -1047,6 +1047,7 @@ async function run(opts = {}) {
         schema: opts.schema,
         maxTokens: Number.isFinite(opts.maxTokens) ? opts.maxTokens : 128,
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
+        minP: Number.isFinite(opts.minP) ? opts.minP : 0,
         noThink: opts.noThink !== false,
         jsonStyle: opts.jsonStyle === 'compact' ? 'compact' : null,
       });

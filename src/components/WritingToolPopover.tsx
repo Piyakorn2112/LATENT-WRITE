@@ -37,6 +37,7 @@ function humanFailure(reasons: string[]): string {
   if (r === "busy") return "the model is busy with another task";
   if (r === "timeout") return "the model took too long";
   if (r === "no-model") return "the Max model is not downloaded";
+  if (r === "selection-too-long") return "the selection is too long for a reshaping request";
   if (r === "unavailable" || r === "not-loaded" || r === "no-host") return "the model is not running";
   return r ? `error: ${r}` : "an unknown error";
 }
@@ -183,9 +184,13 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
                 {revisedCount > 0
                   ? `Done. ${revisedCount} ${revisedCount === 1 ? "part" : "parts"} revised${keptCount > 0 ? `, ${keptCount} kept as written` : ""}${failedCount > 0 ? `, ${failedCount} failed` : ""}. The new text is in place; press ⌘Z to bring the old text back.`
                   : failedCount > 0
-                    ? `The run failed (${humanFailure(outcome?.failReasons ?? [])}), so the text is untouched. Try again in a moment.`
+                    ? outcome?.failReasons[0] === "selection-too-long" && outcome.diagnosis
+                      ? `The text is untouched: ${outcome.diagnosis}. Select a shorter passage for this request.`
+                      : `The run failed (${humanFailure(outcome?.failReasons ?? [])}), so the text is untouched. Try again in a moment.`
                     : keptCount > 0
-                      ? "The revision didn't pass the safety check (it read worse than the original), so nothing was replaced. Try rephrasing the request."
+                      ? outcome?.diagnosis
+                        ? `The revision didn't pass the check (${outcome.diagnosis}), so nothing was replaced. Try rephrasing the request.`
+                        : "The revision didn't pass the safety check (it read worse than the original), so nothing was replaced. Try rephrasing the request."
                       : "Nothing needed changing. The text is exactly as it was."}
               </div>
             </div>

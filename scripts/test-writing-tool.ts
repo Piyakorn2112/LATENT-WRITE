@@ -6,10 +6,12 @@
  */
 import {
   planWritingBatches, buildWritingRequest, assembleRevision, applyRevision,
-  revisionAcceptable, runWritingTool, BATCH_MAX_CHARS,
+  revisionAcceptable, runWritingTool, BATCH_MAX_CHARS, STRUCTURAL_MAX_CHARS,
+  gateProfileFor, judgeRevision,
   toWire, fromWire, matchQuoteStyle, isLengthInstruction,
 } from "../src/lib/writing-tool";
-import type { AssistantJSONRunner } from "../src/lib/assistant-client";
+import { classifyInstruction, namesInInstruction } from "../src/lib/writing-intent";
+import type { AssistantJSONRequest, AssistantJSONRunner } from "../src/lib/assistant-client";
 
 let failures = 0;
 const gate = (ok: boolean, label: string, detail = "") => {
@@ -148,6 +150,203 @@ await (async () => {
   const partial = assembleRevision(batches, [batches[0].text, "Rewritten second."]);
   gate(partial.startsWith("First paragraph") && partial.endsWith("Rewritten second."),
     "assemble mixes revised and original batches");
+})();
+
+console.log("\n── 5 · intent classifier (minimal pairs) ────────────────────");
+{
+  const cases: Array<[string, string, number?]> = [
+    ["merge these two paragraphs", "merge", 1],
+    ["merge these 2 paragraphs and make them shorter", "merge", 1],
+    ["combine them into one", "merge", 1],
+    ["please combine the two paragraphs into a single paragraph", "merge", 1],
+    ["split this into two paragraphs", "split", 2],
+    ["break this up into three parts", "split", 3],
+    ["make it shorter", "condense", undefined],
+    ["make it half as long", "condense", undefined],
+    ["condense this into one paragraph", "condense", 1],
+    ["make it longer", "expand", undefined],
+    ["add more detail about the storm", "expand", undefined],
+    ["add an action scene to this", "insert", undefined],
+    ["insert a flashback about the war", "insert", undefined],
+    ["write a new scene where they argue", "insert", undefined],
+    ["make it funny", "tone", undefined],
+    ["make it more playful", "tone", undefined],
+    ["make this moment feel more tense", "tone", undefined],
+    ["fix the pacing", "unknown", undefined],
+    ["use simpler words", "unknown", undefined],
+  ];
+  for (const [ins, intent, target] of cases) {
+    const r = classifyInstruction(ins);
+    gate(r.intent === intent, `"${ins}" → ${intent}`, `got ${r.intent}`);
+    if (target !== undefined) gate(r.targetParas === target, `  …target ${target}`, `got ${r.targetParas}`);
+  }
+  gate(classifyInstruction("merge these 2 paragraphs and make them shorter").wantsShorter === true,
+    "merge+shorter carries wantsShorter");
+  // Provisioning name match is word-bounded and case-sensitive.
+  gate(namesInInstruction("add detail about Mira's action", ["Mira", "Teo"]).join(",") === "Mira",
+    "instruction names resolve against the cast");
+  gate(namesInInstruction("the rose garden at dusk", ["Rose"]).length === 0,
+    "a lowercase common noun never matches a proper name");
+}
+
+console.log("\n── 6 · gate profiles judge with a diagnosis ─────────────────");
+{
+  const twoParas = "The bell rang across the harbour.\n\nNobody moved from the quay.";
+  const merge = gateProfileFor("custom", { intent: "merge", targetParas: 1 });
+  gate(judgeRevision(twoParas, "The bell rang across the harbour and nobody moved from the quay.", merge).ok,
+    "merge: a genuine one-paragraph merge passes");
+  const mergeFail = judgeRevision(twoParas, "The bell rang across the harbour.\n\nNobody moved at all.", merge);
+  gate(!mergeFail.ok && mergeFail.failure.code === "para-count" && mergeFail.failure.detail.includes("exactly 1"),
+    "merge: two paragraphs back fails with the target in the diagnosis",
+    mergeFail.ok ? "passed" : mergeFail.failure.detail);
+
+  const onePara = "The bell rang across the harbour and nobody moved from the quay at all.";
+  const split = gateProfileFor("custom", { intent: "split" });
+  gate(judgeRevision(onePara, "The bell rang across the harbour.\n\nNobody moved from the quay at all.", split).ok,
+    "split: more paragraphs passes");
+  const splitFail = judgeRevision(onePara, onePara.replace("bell", "brass bell"), split);
+  gate(!splitFail.ok && splitFail.failure.code === "para-count",
+    "split: same paragraph count fails");
+
+  const condense = gateProfileFor("custom", { intent: "condense" });
+  gate(judgeRevision(onePara, "The bell rang; nobody moved.", condense).ok, "condense: a real cut passes");
+  const condenseFail = judgeRevision(onePara, onePara.replace("bell", "big bell"), condense);
+  gate(!condenseFail.ok && condenseFail.failure.code === "len-high",
+    "condense: same-length text fails the window");
+
+  const expand = gateProfileFor("custom", { intent: "expand" });
+  const expandFail = judgeRevision(onePara, "The bell rang.", expand);
+  gate(!expandFail.ok && expandFail.failure.code === "len-low",
+    "expand: a shrunken answer fails with len-low");
+
+  // The legacy profiles ARE today's gate — spot-check equivalence.
+  gate(revisionAcceptable("He walked to teh door.", "He walked to the door.") === true &&
+    revisionAcceptable("He walked to teh door.", "") === false,
+    "legacy delegation preserves the boolean gate");
+}
+
+console.log("\n── 7 · the diagnose-adjust-retry loop ───────────────────────");
+await (async () => {
+  const twoParas = "The bell rang across the harbour tonight.\n\nNobody moved from the quay at all.";
+  const merged = "The bell rang across the harbour tonight and nobody moved from the quay at all.";
+
+  // A scripted runner that records every request it sees.
+  const record = (answers: Array<string | { fail: string }>) => {
+    const seen: AssistantJSONRequest[] = [];
+    const run: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
+      seen.push(req);
+      const a = answers[Math.min(seen.length - 1, answers.length - 1)];
+      if (typeof a !== "string") return { ok: false as const, reason: a.fail };
+      return { ok: true as const, json: { text: a } as T, modelId: "m", timings: null };
+    };
+    return { run, seen };
+  };
+
+  // Gate failure → retry carries the diagnosis → second attempt ships.
+  {
+    const { run, seen } = record([twoParas.replace("bell", "brass bell"), merged]);
+    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    gate(seen.length === 2, "merge: gate failure earns exactly one retry", `${seen.length} calls`);
+    gate(seen[0].userText.includes("PASSAGE:") && !seen[0].userText.includes("REJECTED"),
+      "attempt 0 carries no retry note");
+    gate(seen[1].userText.includes("REJECTED BY THE EDITOR'S CHECK") && seen[1].userText.includes("exactly 1"),
+      "the retry quotes the gate's diagnosis with its numbers");
+    gate(seen[0].systemPrompt.includes("RESHAPING IS THE JOB"), "merge routes to the structure prompt");
+    gate(out.batchOutcomes.join(",") === "revised" && out.revised === merged,
+      "the repaired attempt ships", out.batchOutcomes.join(","));
+  }
+
+  // Structural ops run the selection as ONE batch.
+  {
+    const { run, seen } = record([merged]);
+    await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    gate(seen.length === 1 && seen[0].userText.includes("Nobody moved"),
+      "a merge sees both paragraphs in one prompt");
+  }
+
+  // Whitespace fringes survive the structural path byte-for-byte.
+  {
+    const fringed = `\n\n${twoParas}\n\n`;
+    const { run } = record([merged]);
+    const out = await runWritingTool(fringed, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    gate(out.revised === `\n\n${merged}\n\n`, "leading/trailing blank lines are preserved through a merge", JSON.stringify(out.revised.slice(0, 8)));
+  }
+
+  // Unchanged on custom is a refusal → retried; the LAST retry samples.
+  // (Single-paragraph selection: tone batches per paragraph, so only there
+  // does a verbatim answer equal the batch text.)
+  {
+    const onePlain = twoParas.split("\n\n")[0];
+    const playful = "The bell clanged its cheerful racket across the harbour tonight.";
+    const { run, seen } = record([onePlain, onePlain, playful]);
+    const out = await runWritingTool(onePlain, { run, op: "custom", instruction: "make it more playful", before: "" });
+    gate(seen.length === 3 && out.batchOutcomes.join(",") === "revised",
+      "unchanged custom answers are retried until a real revision ships", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
+    const last = seen[seen.length - 1];
+    gate(seen[0].temperature === undefined && last.temperature === 0.7 && last.minP === 0.05,
+      "attempt 0 is deterministic; the last custom retry samples",
+      `t0=${seen[0].temperature} tN=${last.temperature}`);
+    gate(seen[1].userText.includes("came back unchanged"), "the unchanged diagnosis rides the retry");
+  }
+
+  // Exhaustion keeps the original and surfaces the last diagnosis.
+  {
+    const stubborn = twoParas.replace("bell", "brass bell"); // always 2 paras on a merge ask
+    const { run, seen } = record([stubborn]);
+    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    gate(seen.length === 3 && out.batchOutcomes.join(",") === "kept-original",
+      "exhausted retries keep the original", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
+    gate((out.diagnosis ?? "").includes("exactly 1"), "the outcome carries the diagnosis", out.diagnosis ?? "none");
+    gate(out.revised === twoParas, "the selection is untouched after exhaustion");
+  }
+
+  // Runner failures never retry (they would fight the memory guard).
+  {
+    const { run, seen } = record([{ fail: "low-memory" }]);
+    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    gate(seen.length === 1 && out.batchOutcomes.join(",") === "failed" && out.failReasons[0] === "low-memory",
+      "a runner failure fails once, honestly", `${seen.length} calls`);
+  }
+
+  // Proofread unchanged is a good answer — one call, no retry.
+  {
+    const { run, seen } = record([twoParas.split("\n\n")[0]]);
+    const out = await runWritingTool(twoParas.split("\n\n")[0], { run, op: "proofread", before: "" });
+    gate(seen.length === 1 && out.batchOutcomes.join(",") === "unchanged",
+      "proofread accepts unchanged without retrying", `${seen.length} calls`);
+  }
+
+  // Too-long structural selections fail honestly, before any model call.
+  {
+    const big = Array.from({ length: 20 }, (_, i) => `Paragraph ${i} ${"with plenty of words here. ".repeat(10)}`).join("\n\n");
+    gate(big.length > STRUCTURAL_MAX_CHARS, "fixture actually exceeds the cap");
+    const { run, seen } = record([merged]);
+    const out = await runWritingTool(big, { run, op: "custom", instruction: "merge these paragraphs", before: "" });
+    gate(seen.length === 0 && out.failReasons[0] === "selection-too-long" && out.revised === big,
+      "an oversized merge is refused with zero model calls", `${seen.length} calls`);
+    gate((out.diagnosis ?? "").includes("2,800"), "the refusal names the cap", out.diagnosis ?? "none");
+  }
+
+  // Provisioning: an instruction-named character rides in even when absent
+  // from the passage; an unnamed one does not.
+  {
+    const { run, seen } = record([twoParas.replace("Nobody", "Mira says nobody")]);
+    await runWritingTool(twoParas, {
+      run, op: "custom", instruction: "add more detail about Mira",
+      before: "", characters: [{ name: "Mira", info: "a harbour pilot" }, { name: "Teo", info: "a clerk" }],
+    });
+    gate(seen[0].userText.includes("Mira: a harbour pilot"), "the instruction-named character is provisioned");
+    gate(!seen[0].userText.includes("Teo"), "an unmentioned character stays out of the prompt");
+  }
+
+  // INSERT routes to its own prompt with an absolute token allowance.
+  {
+    const { run, seen } = record([`${twoParas}\n\nSteel rang on steel as the first boarder came over the rail.`]);
+    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "add an action scene to this", before: "" });
+    gate(seen[0].systemPrompt.includes("ADD something NEW"), "insert routes to the insert prompt");
+    gate((seen[0].maxTokens ?? 0) > 900, "insert carries the new-material token allowance", `${seen[0].maxTokens}`);
+    gate(out.batchOutcomes.join(",") === "revised", "a grounded insertion ships", out.batchOutcomes.join(","));
+  }
 })();
 
 console.log(`\n${failures === 0 ? "✓ ALL GATES GREEN" : `✗ ${failures} GATE(S) FAILED`}`);

@@ -47,6 +47,14 @@ export interface AssistantJSONRequest {
   maxTokens?: number;
   timeoutMs?: number;
   /**
+   * Sampling overrides. Omitted = the runtime's deterministic default
+   * (temperature 0), which every measured baseline runs at. Set ONLY on
+   * paths where deterministic decoding has already failed — the writing
+   * tool's second retry samples at 0.7/minP 0.05 for a different candidate.
+   */
+  temperature?: number;
+  minP?: number;
+  /**
    * Which registry model runs this. Omitted = the runtime default (the 1.7B
    * every existing task was measured against). "max" is the 4B thinking tier.
    */
@@ -246,6 +254,8 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       // thinking model is allowed to think; everyone else inherits the
       // runtime's "/no_think" default. See the request type's note.
       ...(job.req.tier ? { tier: job.req.tier } : {}),
+      ...(typeof job.req.temperature === "number" ? { temperature: job.req.temperature } : {}),
+      ...(typeof job.req.minP === "number" ? { minP: job.req.minP } : {}),
       ...(job.req.noThink === false ? { noThink: false } : {}),
       ...(job.req.contextSize ? { contextSize: job.req.contextSize } : {}),
       ...(job.req.jsonStyle ? { jsonStyle: job.req.jsonStyle } : {}),

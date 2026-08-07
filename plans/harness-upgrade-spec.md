@@ -69,8 +69,9 @@ speak them.
   (the measured-safe channel; system prompts stay frozen). An `unchanged`
   answer on custom/structural intents counts as a failure ("returning it
   unchanged is a wrong answer") and retries once.
-- Retry 2: temp 0.7 + minP 0.05 resample; judge BOTH candidates, ship the
-  better (grammar errors, then distance to the length window's centre).
+- Retry 2 (custom only): temp 0.7 + minP 0.05 resample — a passing candidate
+  ships the moment it passes, so "judge both" reduces to first-pass-wins;
+  gate-failing candidates are never shippable.
 - Exhausted: keep original, surface the last diagnosis verbatim in the
   popover ("Both attempts came back at 2.3x; the limit for this is 1.8x").
 - Runner failures (low-memory, timeout, busy) never retry; they already have

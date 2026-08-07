@@ -358,6 +358,9 @@ async function handleRun(msg) {
       stopOnAbortSignal: true,
       maxTokens,
       temperature,
+      // minP only matters at temperature > 0; 0 (the default) disables it,
+      // so deterministic runs are bit-identical to before this option.
+      ...(Number.isFinite(msg.minP) && msg.minP > 0 ? { minP: msg.minP } : {}),
       onToken: (t) => {
         if (!firstTokenAt) firstTokenAt = Date.now();
         tokens += Array.isArray(t) ? t.length : 1;

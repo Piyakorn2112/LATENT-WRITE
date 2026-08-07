@@ -20,6 +20,7 @@
  *   in the same history as typing and is reversible like any user edit.
  */
 import { checkGrammar } from "./grammar-check";
+import { classifyInstruction, namesInInstruction, type IntentReading } from "./writing-intent";
 import type { AssistantJSONRunner } from "./assistant-client";
 
 export const WRITING_TASK = "writing-tool";
@@ -208,6 +209,69 @@ words:
 Answer as JSON: {"text": the revised passage}.`;
 
 /**
+ * ★ STRUCTURE IS ITS OWN PROMPT. CUSTOM_SYSTEM hard-rules "keep the
+ *   paragraph breaks exactly where they are" — which made merge/split/
+ *   condense-into-N ops inexpressible: the model obeyed the rule, the gate
+ *   enforced it, and the writer's ask was refused twice over. A structural
+ *   instruction routes here instead, where reshaping IS the job. Kept lean
+ *   on the measured lesson that more rule text is less compliance.
+ */
+export const STRUCTURE_SYSTEM = `You are a writing tool inside a novelist's editor. The writer gives one
+INSTRUCTION about this passage's SHAPE — merging, splitting or condensing
+paragraphs. RESHAPING IS THE JOB: change the paragraph breaks and rework the
+wording as far as the instruction asks — returning the passage unchanged is
+a wrong answer. Hard rules, all of them:
+- Return the WHOLE passage, reshaped. Never a commentary, list, or summary.
+- A paragraph break is a blank line between parts. To merge, remove the
+  blank lines. To split, put a blank line at the most natural turn. To
+  condense, cut words and clauses — the result must be clearly shorter.
+- Preserve the point of view, the tense, every name, and every event.
+  Nothing happens in your version that does not happen in theirs.
+- Preserve the writer's register. Dialogue keeps its voice.
+- If some CONTEXT lines are shown, they are for continuity only — never
+  revise or repeat them; revise only the PASSAGE.
+- The \` character is the editor's placeholder for a quotation mark. Keep
+  every \` exactly where it stands — never remove one, move one, or turn it
+  into any other character.
+
+Worked example for "split this into two paragraphs" — a different story,
+never reuse its words:
+  passage: The kettle boiled and she poured the tea. The cat watched her
+  from the sill and did not move.
+  reshaped: The kettle boiled and she poured the tea.
+
+The cat watched her from the sill and did not move.
+
+Answer as JSON: {"text": the reshaped passage}.`;
+
+/**
+ * ★ INSERT LICENSES NEW EVENTS. Both CUSTOM_SYSTEM ("nothing happens in
+ *   your version that does not happen in theirs") and LENGTH_SYSTEM ("never
+ *   a new event") deliberately forbid invention — right for revision, fatal
+ *   for "add an action scene". This prompt is the one place new material is
+ *   the job, still fenced by continuity.
+ */
+export const INSERT_SYSTEM = `You are a writing tool inside a novelist's editor. The writer asks you to
+ADD something NEW to this passage — a scene, a beat, a moment — described in
+their INSTRUCTION. Adding is the job: keep the writer's own sentences doing
+what they already do, and write the new material into the place where it
+belongs. Hard rules, all of them:
+- Return the WHOLE passage — the writer's text with your new material woven
+  in. Returning it without new material is a wrong answer.
+- The new material must fit what is established: same point of view, same
+  tense, characters behaving as the story has them behave. Invent action and
+  detail, never a contradiction.
+- Keep the writer's paragraphs; put the new material in its own paragraph or
+  paragraphs unless the instruction says otherwise.
+- Keep the writer's register. Dialogue keeps its voice.
+- If some CONTEXT lines are shown, they are for continuity only — never
+  revise or repeat them.
+- The \` character is the editor's placeholder for a quotation mark. Keep
+  every \` exactly where it stands.
+
+Answer as JSON: {"text": the passage with the new material}.`;
+
+/**
  * A length/expansion-shaped instruction gets the LENGTH_SYSTEM routing.
  * "Add more detail about the storm" and "expand this with the sea" are
  * expansion-with-focus — exactly what that prompt's deepening rules do —
@@ -275,11 +339,33 @@ export interface WritingCharacter { name: string; info: string }
 export function buildWritingRequest(
   op: WritingOp,
   batch: WritingBatch,
-  context: { before: string; revisedTail: string; instruction?: string; characters?: WritingCharacter[] },
+  context: {
+    before: string;
+    revisedTail: string;
+    instruction?: string;
+    characters?: WritingCharacter[];
+    /** Classified intent; computed here when the caller has none (probes). */
+    reading?: IntentReading;
+    /** A gate diagnosis from the previous attempt — the ONE line of external
+     *  feedback a retry carries (system prompts stay frozen; the user turn
+     *  is the measured-safe channel, the LENGTH_SYSTEM lesson). */
+    retryNote?: string;
+  },
 ): WritingRequest {
+  const reading =
+    op === "custom" ? context.reading ?? classifyInstruction(context.instruction ?? "") : undefined;
+  const intent = reading?.intent ?? "unknown";
   const systemPrompt =
     op === "proofread" ? PROOFREAD_SYSTEM
     : op === "rewrite" ? REWRITE_SYSTEM
+    // ★ ALL condense routes to STRUCTURE, not LENGTH: measured on the 4B
+    //   (probe-writing-intents), "make it half as long" through LENGTH came
+    //   back verbatim three attempts running — its worked example teaches
+    //   only the LONGER direction. The structure prompt names cutting as
+    //   the job and the condense gate enforces the window.
+    : intent === "merge" || intent === "split" || intent === "condense" ? STRUCTURE_SYSTEM
+    : intent === "insert" ? INSERT_SYSTEM
+    : intent === "expand" ? LENGTH_SYSTEM
     : context.instruction && isLengthInstruction(context.instruction) ? LENGTH_SYSTEM
     : CUSTOM_SYSTEM;
   const lines: string[] = [];
@@ -299,6 +385,9 @@ export function buildWritingRequest(
   if (op === "custom" && context.instruction) {
     lines.push(`INSTRUCTION: ${context.instruction}`, "");
   }
+  if (context.retryNote) {
+    lines.push(`YOUR PREVIOUS ATTEMPT WAS REJECTED BY THE EDITOR'S CHECK: ${context.retryNote}. Revise again and fix exactly that.`, "");
+  }
   lines.push("PASSAGE:", toWire(batch.text));
   return {
     systemPrompt,
@@ -317,10 +406,18 @@ export function buildWritingRequest(
     schema: WRITING_SCHEMA_BASE,
     // ~chars/3.2 tokens for English prose, slack + scaffold; custom gets
     // expansion headroom because the instruction may legitimately EXPAND
-    // ("make it longer").
-    maxTokens: op === "custom"
-      ? Math.ceil((batch.text.length / 3.2) * 2.8) + 128
-      : Math.ceil((batch.text.length / 3.2) * 1.5) + 96,
+    // ("make it longer"). Structural ops cap near their gate ceiling (a
+    // merge output is ≤1.15x source — the 2.8x custom budget would let a
+    // 2.8k-char selection run to 2.5k tokens for nothing), and insert gets
+    // an absolute allowance for the NEW material instead of a multiple.
+    maxTokens:
+      intent === "merge" || intent === "split" || intent === "condense"
+        ? Math.ceil((batch.text.length / 3.2) * 1.6) + 200
+      : intent === "insert"
+        ? Math.ceil((batch.text.length / 3.2) * 1.5) + 900
+      : op === "custom"
+        ? Math.ceil((batch.text.length / 3.2) * 2.8) + 128
+        : Math.ceil((batch.text.length / 3.2) * 1.5) + 96,
   };
 }
 
@@ -355,27 +452,134 @@ export function mechanicalErrorCount(text: string): number {
  *   the popover then reported "nothing needed changing". Custom keeps only
  *   the never-sane bounds.
  */
-export function revisionAcceptable(original: string, revised: string, op: WritingOp = "rewrite"): boolean {
+export type ParaRule =
+  | { kind: "exact"; count: number }   // merge into 1, split into 3
+  | { kind: "drift"; max: number }     // stay within ±max of the source
+  | { kind: "atMost" }                 // condensing must not add paragraphs
+  | { kind: "moreThan" };              // split/insert must end with more
+
+export interface GateProfile {
+  paras: ParaRule;
+  /** Length window as ratios of the source, with absolute slack on the max
+   *  (ratios alone are twitchy on short selections). */
+  lenMin: number;
+  lenMax: number;
+  lenSlack: number;
+  grammar: "hard" | "mechanical";
+}
+
+export interface RevisionFailure {
+  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "unchanged";
+  /** Plain-numbers sentence, written for BOTH consumers: the retry prompt
+   *  quotes it to the model, the popover quotes it to the writer. */
+  detail: string;
+}
+
+export type RevisionVerdict = { ok: true } | { ok: false; failure: RevisionFailure };
+
+// The two legacy profiles are today's gate expressed as data — byte-for-byte
+// the same decisions, which keeps every measured baseline intact.
+const LEGACY_STRICT: GateProfile = { paras: { kind: "drift", max: 0 }, lenMin: 0.5, lenMax: 1.8, lenSlack: 0, grammar: "hard" };
+const LEGACY_CUSTOM: GateProfile = { paras: { kind: "drift", max: 2 }, lenMin: 0.3, lenMax: 3.2, lenSlack: 240, grammar: "mechanical" };
+
+/**
+ * ★ THE GATE PROFILE IS CHOSEN FOR THE DECLARED INTENT (the report's
+ *   guards-provision-not-block lesson): a merge is no longer a paragraph-
+ *   count violation, it is a paragraph-count SPECIFICATION. Unknown intent
+ *   gets today's custom gates unchanged.
+ */
+export function gateProfileFor(op: WritingOp, reading?: IntentReading): GateProfile {
+  if (op !== "custom") return LEGACY_STRICT;
+  switch (reading?.intent) {
+    case "merge":
+      return {
+        paras: { kind: "exact", count: reading.targetParas ?? 1 },
+        // ★ wantsShorter is a SPECIFICATION, not a footnote: with the 1.15x
+        //   ceiling, "merge and make them shorter" shipped a pure
+        //   concatenation (measured, probe-writing-intents). 0.95x sits just
+        //   under a concat, so the gate demands actual cutting and its
+        //   diagnosis tells the model by how much.
+        lenMin: reading.wantsShorter ? 0.3 : 0.35,
+        lenMax: reading.wantsShorter ? 0.95 : 1.15,
+        lenSlack: reading.wantsShorter ? 0 : 60, grammar: "mechanical",
+      };
+    case "split":
+      return {
+        paras: reading.targetParas ? { kind: "exact", count: reading.targetParas } : { kind: "moreThan" },
+        lenMin: 0.8, lenMax: 1.4, lenSlack: 60, grammar: "mechanical",
+      };
+    case "condense":
+      return {
+        paras: reading.targetParas ? { kind: "exact", count: reading.targetParas } : { kind: "atMost" },
+        lenMin: 0.3, lenMax: 0.85, lenSlack: 0, grammar: "mechanical",
+      };
+    // lenMin 1.0, not higher: the old gate shipped even a SHORTENED text on
+    // "make it longer" (0.3x floor); refusing only actual shrinkage is
+    // strictly more aligned while never stricter than an honest expansion.
+    case "expand":
+      return { paras: { kind: "drift", max: 2 }, lenMin: 1.0, lenMax: 4.0, lenSlack: 240, grammar: "mechanical" };
+    case "insert":
+      return { paras: { kind: "moreThan" }, lenMin: 1.15, lenMax: 8, lenSlack: 600, grammar: "mechanical" };
+    case "tone":
+      return { paras: { kind: "drift", max: 2 }, lenMin: 0.6, lenMax: 1.6, lenSlack: 120, grammar: "mechanical" };
+    default:
+      return LEGACY_CUSTOM;
+  }
+}
+
+const paraCount = (t: string) => t.split(/\n[ \t]*\n/).length;
+const plural = (n: number) => (n === 1 ? "" : "s");
+
+/**
+ * The gate, with a DIAGNOSIS instead of a bare bit. Check order matches the
+ * old boolean gate exactly (empty, paragraphs, length, grammar) so the legacy
+ * profiles reproduce its decisions.
+ *
+ * ★ RETRIES ARE JUSTIFIED ONLY BECAUSE THIS FEEDBACK IS EXTERNAL AND
+ *   RELIABLE (Kamoi TACL 2024; RefineBench 2025: self-critique degrades
+ *   small models, verifier feedback helps). The failure detail is the entire
+ *   retry prompt's new information — never a "try harder".
+ */
+export function judgeRevision(original: string, revised: string, profile: GateProfile): RevisionVerdict {
   const r = revised.trim();
-  if (!r) return false;
-  const paraCount = (t: string) => t.split(/\n[ \t]*\n/).length;
-  // ★ CUSTOM MAY RESHAPE PARAGRAPHS A LITTLE. "Add more detail" legitimately
-  //   splits a grown paragraph in two; strict equality was refusing most
-  //   creative requests wholesale. Proofread/rewrite keep the strict rule —
-  //   they promise structure — while custom allows a drift of two.
-  const paraDelta = Math.abs(paraCount(original) - paraCount(r));
-  if (op === "custom" ? paraDelta > 2 : paraDelta !== 0) return false;
-  // Ratios alone are twitchy on SHORT selections (a sentence doubled is a
-  // huge ratio and a modest edit), so custom's ceiling carries absolute
-  // slack alongside the multiple.
-  const max = op === "custom"
-    ? original.length * 3.2 + 240
-    : original.length * 1.8;
-  const min = original.length * (op === "custom" ? 0.3 : 0.5);
-  if (r.length < min || r.length > max) return false;
-  return op === "custom"
-    ? mechanicalErrorCount(r) <= mechanicalErrorCount(original)
-    : hardErrorCount(r) <= hardErrorCount(original);
+  if (!r) return { ok: false, failure: { code: "empty", detail: "the revision came back empty" } };
+
+  const src = paraCount(original);
+  const got = paraCount(r);
+  const p = profile.paras;
+  let paraDetail: string | null = null;
+  if (p.kind === "exact" && got !== p.count) {
+    paraDetail = `it came back as ${got} paragraph${plural(got)} but must be exactly ${p.count} paragraph${plural(p.count)}`;
+  } else if (p.kind === "drift" && Math.abs(src - got) > p.max) {
+    paraDetail = p.max === 0
+      ? `it came back as ${got} paragraph${plural(got)} but must keep the original ${src}`
+      : `it moved from ${src} to ${got} paragraphs; at most ${p.max} apart is allowed`;
+  } else if (p.kind === "atMost" && got > src) {
+    paraDetail = `it grew from ${src} to ${got} paragraphs; condensing must not add paragraphs`;
+  } else if (p.kind === "moreThan" && got <= src) {
+    paraDetail = `it came back as ${got} paragraph${plural(got)}; it must end with more paragraphs than the original ${src}`;
+  }
+  if (paraDetail) return { ok: false, failure: { code: "para-count", detail: paraDetail } };
+
+  const min = original.length * profile.lenMin;
+  const max = original.length * profile.lenMax + profile.lenSlack;
+  const ratio = (r.length / Math.max(1, original.length)).toFixed(2);
+  if (r.length < min) {
+    return { ok: false, failure: { code: "len-low", detail: `it came back at ${ratio}x the original length; it must be at least ${profile.lenMin}x` } };
+  }
+  if (r.length > max) {
+    return { ok: false, failure: { code: "len-high", detail: `it came back at ${ratio}x the original length; it must stay under ${profile.lenMax}x` } };
+  }
+
+  const count = profile.grammar === "mechanical" ? mechanicalErrorCount : hardErrorCount;
+  if (count(r) > count(original)) {
+    return { ok: false, failure: { code: "grammar", detail: "it introduced writing errors the original does not have" } };
+  }
+  return { ok: true };
+}
+
+export function revisionAcceptable(original: string, revised: string, op: WritingOp = "rewrite"): boolean {
+  return judgeRevision(original, revised, op === "custom" ? LEGACY_CUSTOM : LEGACY_STRICT).ok;
 }
 
 // ── the run ───────────────────────────────────────────────────────────────
@@ -408,6 +612,9 @@ export interface WritingToolOutcome {
   /** Runner reasons for every "failed" batch, in order — so the popover can
    *  say "not enough memory" instead of pretending nothing needed changing. */
   failReasons: string[];
+  /** The first gate diagnosis that survived every retry — shown to the
+   *  writer verbatim, so a refusal names its reason instead of shrugging. */
+  diagnosis?: string;
   cancelled: boolean;
 }
 
@@ -420,66 +627,173 @@ export function applyRevision(fullText: string, selStart: number, selEnd: number
   return fullText.slice(0, selStart) + revised + fullText.slice(selEnd);
 }
 
+/** Structural ops (merge/split/insert/condense-into-N) run the WHOLE
+ *  selection as one batch — a merge across two batches is inexpressible.
+ *  Above this, the tool fails honestly instead of mis-batching. */
+export const STRUCTURAL_MAX_CHARS = 2800;
+/** Attempt cap per batch: attempt 0, one diagnosed retry, and (custom only)
+ *  one sampled retry. Self-Refine's own curves put most of the gain in the
+ *  first feedback round; past that, escalate or stop. */
+const MAX_ATTEMPTS_CUSTOM = 3;
+const MAX_ATTEMPTS_DEFAULT = 2;
+
+/** One batch holding the whole selection, whitespace fringes preserved so
+ *  `assembleRevision` still reproduces the selection byte-for-byte. */
+function structuralBatches(selected: string): WritingBatch[] {
+  const lead = /^\s*/.exec(selected)![0];
+  const rest = selected.slice(lead.length);
+  const trailAt = /\s*$/.exec(rest)!.index;
+  const batches: WritingBatch[] = [];
+  if (lead) batches.push({ index: 0, text: "", sep: lead });
+  batches.push({ index: batches.length, text: rest.slice(0, trailAt), sep: rest.slice(trailAt) });
+  return batches;
+}
+
+/** Long structural batches legitimately decode past the 60s patience —
+ *  scale the cap with the token budget instead of failing the honest path. */
+function timeoutFor(maxTokens: number): number {
+  return Math.max(60_000, Math.min(150_000, 20_000 + maxTokens * 55));
+}
+
+/**
+ * The retry line for a verbatim answer. Tone gets a LICENSE, not just a
+ * verdict — measured (probe-writing-intents): "make it funny" came back as a
+ * copy three attempts running under the bare note; the model needs to hear
+ * that reworking wording is allowed before it will touch a dry paragraph.
+ */
+export function unchangedRetryNote(reading?: IntentReading): string {
+  const base = "the passage came back unchanged; the instruction requires an actual revision";
+  return reading?.intent === "tone"
+    ? `${base}. Rework the wording and rhythm freely toward the asked tone; keep the events, names and facts`
+    : base;
+}
+
 export async function runWritingTool(
   selected: string,
   opts: WritingToolOptions,
 ): Promise<WritingToolOutcome> {
+  const reading: IntentReading =
+    opts.op === "custom" ? classifyInstruction(opts.instruction ?? "") : { intent: "unknown" };
+  const structural =
+    opts.op === "custom" &&
+    (reading.intent === "merge" || reading.intent === "split" || reading.intent === "insert" ||
+      (reading.intent === "condense" && reading.targetParas !== undefined));
+
+  if (structural && selected.length > STRUCTURAL_MAX_CHARS) {
+    return {
+      revised: selected,
+      batchOutcomes: ["failed"],
+      failReasons: ["selection-too-long"],
+      diagnosis: `reshaping works on selections up to ${STRUCTURAL_MAX_CHARS.toLocaleString()} characters and this one is ${selected.length.toLocaleString()}`,
+      cancelled: false,
+    };
+  }
+
   // Proofread packs paragraphs per batch (mechanical, structure-safe);
-  // rewrite/custom take one paragraph per batch — see planWritingBatches.
-  const batches = planWritingBatches(selected, BATCH_MAX_CHARS, opts.op === "proofread");
+  // rewrite/custom take one paragraph per batch; structural intents take the
+  // selection whole — see planWritingBatches / structuralBatches.
+  const batches = structural
+    ? structuralBatches(selected)
+    : planWritingBatches(selected, BATCH_MAX_CHARS, opts.op === "proofread");
   const texts: string[] = batches.map((b) => b.text);
   const outcomes: WritingToolOutcome["batchOutcomes"] = [];
   const failReasons: string[] = [];
+  let diagnosis: string | undefined;
   let cancelled = false;
 
+  // ★ PROVISION BEFORE GENERATING: a character the INSTRUCTION names gets
+  //   their info even when the batch paragraph never mentions them — "add
+  //   more detail about Mira's action" needs Mira's sheet exactly when she
+  //   is absent from the text.
+  const instructionNames = new Set(
+    opts.op === "custom" && opts.instruction
+      ? namesInInstruction(opts.instruction, (opts.characters ?? []).map((c) => c.name))
+      : [],
+  );
+  const profile = gateProfileFor(opts.op, reading);
+  const maxAttempts = opts.op === "custom" ? MAX_ATTEMPTS_CUSTOM : MAX_ATTEMPTS_DEFAULT;
+
   for (const batch of batches) {
+    // Separator-only batches (a leading blank line in the selection) carry
+    // no prose; sending an empty PASSAGE to the model helps no one.
+    if (batch.text === "") { outcomes.push("unchanged"); continue; }
     const beforeThis =
       batch.index === 0
         ? opts.before.slice(-CONTEXT_BEFORE_CHARS)
         : (opts.before + assembleRevision(batches.slice(0, batch.index), texts)).slice(-CONTEXT_BEFORE_CHARS);
     const revisedTail =
       batch.index === 0 ? "" : texts[batch.index - 1].slice(-REVISED_TAIL_CHARS);
-    const request = buildWritingRequest(opts.op, batch, {
-      before: beforeThis,
-      revisedTail,
-      instruction: opts.instruction,
-      // Only the cast that actually appears in THIS batch — a paragraph
-      // without a character does not pay prefill for their bio.
-      characters: opts.characters?.filter((c) => batch.text.includes(c.name)),
-    });
-    const result = await opts.run<{ text?: unknown }>({
-      task: WRITING_TASK,
-      tag: `batch-${batch.index}`,
-      systemPrompt: request.systemPrompt,
-      userText: request.userText,
-      schema: request.schema,
-      maxTokens: request.maxTokens,
-      timeoutMs: opts.timeoutMs ?? 60_000,
-      jsonStyle: "compact",
-    });
-    if (!result.ok) {
-      outcomes.push("failed");
-      failReasons.push(result.reason);
-      if (result.reason === "cancelled") { cancelled = true; break; }
-      continue;
-    }
-    const raw = typeof result.json?.text === "string" ? result.json.text.trim() : "";
-    const text = matchQuoteStyle(batch.text, fromWire(raw));
-    if (text === batch.text.trim() || text === "") {
-      outcomes.push("unchanged");
-    } else if (revisionAcceptable(batch.text, text, opts.op)) {
-      texts[batch.index] = text;
-      outcomes.push("revised");
-    } else {
-      outcomes.push("kept-original");
+    const characters = opts.characters?.filter(
+      (c) => batch.text.includes(c.name) || instructionNames.has(c.name),
+    );
+
+    // ── the bounded diagnose-adjust-retry loop ──
+    // Attempt 0 is today's behavior exactly. A gate failure retries with the
+    // diagnosis as one plain line of external feedback; the LAST custom
+    // retry resamples at temperature (a different candidate, not a plea).
+    // Runner failures (low-memory, timeout, busy) never retry — they have
+    // honest labels and a retry would fight the memory guard.
+    let attempt = 0;
+    let retryNote: string | undefined;
+    for (;;) {
+      const request = buildWritingRequest(opts.op, batch, {
+        before: beforeThis, revisedTail, instruction: opts.instruction,
+        characters, reading, retryNote,
+      });
+      const sampled = opts.op === "custom" && attempt === MAX_ATTEMPTS_CUSTOM - 1;
+      const result = await opts.run<{ text?: unknown }>({
+        task: WRITING_TASK,
+        tag: `batch-${batch.index}-a${attempt}`,
+        systemPrompt: request.systemPrompt,
+        userText: request.userText,
+        schema: request.schema,
+        maxTokens: request.maxTokens,
+        timeoutMs: opts.timeoutMs ?? timeoutFor(request.maxTokens),
+        jsonStyle: "compact",
+        ...(sampled ? { temperature: 0.7, minP: 0.05 } : {}),
+      });
+      if (!result.ok) {
+        outcomes.push("failed");
+        failReasons.push(result.reason);
+        if (result.reason === "cancelled") cancelled = true;
+        break;
+      }
+      const raw = typeof result.json?.text === "string" ? result.json.text.trim() : "";
+      const text = matchQuoteStyle(batch.text, fromWire(raw));
+      if (text === batch.text.trim() || text === "") {
+        // Unchanged is a GOOD proofread/rewrite answer and a REFUSAL on
+        // custom ("returning it unchanged is a wrong answer" is in every
+        // custom-family prompt) — so custom retries it, others accept it.
+        if (opts.op !== "custom") { outcomes.push("unchanged"); break; }
+        if (++attempt >= maxAttempts) {
+          outcomes.push("kept-original");
+          diagnosis ??= "every attempt came back unchanged";
+          break;
+        }
+        retryNote = unchangedRetryNote(reading);
+        continue;
+      }
+      const verdict = judgeRevision(batch.text, text, profile);
+      if (verdict.ok) {
+        texts[batch.index] = text;
+        outcomes.push("revised");
+        break;
+      }
+      if (++attempt >= maxAttempts) {
+        outcomes.push("kept-original");
+        diagnosis ??= verdict.failure.detail;
+        break;
+      }
+      retryNote = verdict.failure.detail;
     }
     opts.onProgress?.({
       batchIndex: batch.index,
       batchCount: batches.length,
       preview: assembleRevision(batches, texts),
     });
+    if (cancelled) break;
   }
   while (outcomes.length < batches.length) outcomes.push(cancelled ? "failed" : "unchanged");
 
-  return { revised: assembleRevision(batches, texts), batchOutcomes: outcomes, failReasons, cancelled };
+  return { revised: assembleRevision(batches, texts), batchOutcomes: outcomes, failReasons, diagnosis, cancelled };
 }

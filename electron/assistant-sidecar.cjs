@@ -350,6 +350,7 @@ async function run(opts, entry) {
           ? { grammar: opts.gbnf }
           : { json_schema: opts.schema }),
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
+        ...(Number.isFinite(opts.minP) && opts.minP > 0 ? { min_p: opts.minP } : {}),
         n_predict: Number.isFinite(opts.maxTokens) ? opts.maxTokens : 128,
         cache_prompt: true,
         stream: wantStream,
