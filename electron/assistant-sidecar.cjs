@@ -253,6 +253,14 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     //   attention, which is on above.
     '-ctk', 'q8_0',
     '-ctv', 'q8_0',
+    // ★★ THE HOST-RAM PROMPT CACHE DEFAULTS TO 8192 MiB, ON. b10298 keeps
+    //   evicted slot KV states in host memory (PR #16391) and re-matches
+    //   them by prefix — a real win for our byte-identical per-task system
+    //   prompts when task types interleave across slots, but the DEFAULT is
+    //   an 8GB tenant the memory guard knows nothing about. Cap it: 1GB
+    //   holds ~7 slot states at this config, enough to keep every task
+    //   type's prefix warm. --cache-idle-slots (default on) rides this.
+    '--cache-ram', '1024',
     '--host', '127.0.0.1',
     '--port', String(_port),
     '--no-webui',
