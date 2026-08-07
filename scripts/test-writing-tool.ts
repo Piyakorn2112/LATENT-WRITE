@@ -246,7 +246,7 @@ await (async () => {
   // Gate failure → retry carries the diagnosis → second attempt ships.
   {
     const { run, seen } = record([twoParas.replace("bell", "brass bell"), merged]);
-    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    const out = await runWritingTool(twoParas, { run, think: false, op: "custom", instruction: "merge these two paragraphs", before: "" });
     gate(seen.length === 2, "merge: gate failure earns exactly one retry", `${seen.length} calls`);
     gate(seen[0].userText.includes("PASSAGE:") && !seen[0].userText.includes("REJECTED"),
       "attempt 0 carries no retry note");
@@ -260,7 +260,7 @@ await (async () => {
   // Structural ops run the selection as ONE batch.
   {
     const { run, seen } = record([merged]);
-    await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    await runWritingTool(twoParas, { run, think: false, op: "custom", instruction: "merge these two paragraphs", before: "" });
     gate(seen.length === 1 && seen[0].userText.includes("Nobody moved"),
       "a merge sees both paragraphs in one prompt");
   }
@@ -269,7 +269,7 @@ await (async () => {
   {
     const fringed = `\n\n${twoParas}\n\n`;
     const { run } = record([merged]);
-    const out = await runWritingTool(fringed, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    const out = await runWritingTool(fringed, { run, think: false, op: "custom", instruction: "merge these two paragraphs", before: "" });
     gate(out.revised === `\n\n${merged}\n\n`, "leading/trailing blank lines are preserved through a merge", JSON.stringify(out.revised.slice(0, 8)));
   }
 
@@ -280,7 +280,7 @@ await (async () => {
     const onePlain = twoParas.split("\n\n")[0];
     const playful = "The bell clanged its cheerful racket across the harbour tonight.";
     const { run, seen } = record([onePlain, onePlain, playful]);
-    const out = await runWritingTool(onePlain, { run, op: "custom", instruction: "make it more playful", before: "" });
+    const out = await runWritingTool(onePlain, { run, think: false, op: "custom", instruction: "make it more playful", before: "" });
     gate(seen.length === 3 && out.batchOutcomes.join(",") === "revised",
       "unchanged custom answers are retried until a real revision ships", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
     const last = seen[seen.length - 1];
@@ -294,7 +294,7 @@ await (async () => {
   {
     const stubborn = twoParas.replace("bell", "brass bell"); // always 2 paras on a merge ask
     const { run, seen } = record([stubborn]);
-    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    const out = await runWritingTool(twoParas, { run, think: false, op: "custom", instruction: "merge these two paragraphs", before: "" });
     gate(seen.length === 3 && out.batchOutcomes.join(",") === "kept-original",
       "exhausted retries keep the original", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
     gate((out.diagnosis ?? "").includes("exactly 1"), "the outcome carries the diagnosis", out.diagnosis ?? "none");
@@ -304,7 +304,7 @@ await (async () => {
   // Runner failures never retry (they would fight the memory guard).
   {
     const { run, seen } = record([{ fail: "low-memory" }]);
-    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "merge these two paragraphs", before: "" });
+    const out = await runWritingTool(twoParas, { run, think: false, op: "custom", instruction: "merge these two paragraphs", before: "" });
     gate(seen.length === 1 && out.batchOutcomes.join(",") === "failed" && out.failReasons[0] === "low-memory",
       "a runner failure fails once, honestly", `${seen.length} calls`);
   }
@@ -312,7 +312,7 @@ await (async () => {
   // Proofread unchanged is a good answer — one call, no retry.
   {
     const { run, seen } = record([twoParas.split("\n\n")[0]]);
-    const out = await runWritingTool(twoParas.split("\n\n")[0], { run, op: "proofread", before: "" });
+    const out = await runWritingTool(twoParas.split("\n\n")[0], { run, think: false, op: "proofread", before: "" });
     gate(seen.length === 1 && out.batchOutcomes.join(",") === "unchanged",
       "proofread accepts unchanged without retrying", `${seen.length} calls`);
   }
@@ -322,7 +322,7 @@ await (async () => {
     const big = Array.from({ length: 20 }, (_, i) => `Paragraph ${i} ${"with plenty of words here. ".repeat(10)}`).join("\n\n");
     gate(big.length > STRUCTURAL_MAX_CHARS, "fixture actually exceeds the cap");
     const { run, seen } = record([merged]);
-    const out = await runWritingTool(big, { run, op: "custom", instruction: "merge these paragraphs", before: "" });
+    const out = await runWritingTool(big, { run, think: false, op: "custom", instruction: "merge these paragraphs", before: "" });
     gate(seen.length === 0 && out.failReasons[0] === "selection-too-long" && out.revised === big,
       "an oversized merge is refused with zero model calls", `${seen.length} calls`);
     gate((out.diagnosis ?? "").includes("2,800"), "the refusal names the cap", out.diagnosis ?? "none");
@@ -343,7 +343,7 @@ await (async () => {
   // INSERT routes to its own prompt with an absolute token allowance.
   {
     const { run, seen } = record([`${twoParas}\n\nSteel rang on steel as the first boarder came over the rail.`]);
-    const out = await runWritingTool(twoParas, { run, op: "custom", instruction: "add an action scene to this", before: "" });
+    const out = await runWritingTool(twoParas, { run, think: false, op: "custom", instruction: "add an action scene to this", before: "" });
     gate(seen[0].systemPrompt.includes("ADD something NEW"), "insert routes to the insert prompt");
     gate((seen[0].maxTokens ?? 0) > 900, "insert carries the new-material token allowance", `${seen[0].maxTokens}`);
     gate(out.batchOutcomes.join(",") === "revised", "a grounded insertion ships", out.batchOutcomes.join(","));
@@ -406,7 +406,7 @@ await (async () => {
       seen.push(req);
       return { ok: true as const, json: { text: "unused" } as T, modelId: "m", timings: null };
     };
-    const out = await runWritingTool(prose, { run, op: "custom", instruction: "replace John with Marcus", before: "" });
+    const out = await runWritingTool(prose, { run, think: false, op: "custom", instruction: "replace John with Marcus", before: "" });
     gate(seen.length === 0 && out.batchOutcomes.join(",") === "revised",
       "a rename ships deterministically with zero model calls", `${seen.length} calls`);
     gate(countTerm(out.revised, "John") === 0 && countTerm(out.revised, "Marcus") === 4,
@@ -416,10 +416,10 @@ await (async () => {
   // Run loop: honest pre-flight failures.
   {
     const run: AssistantJSONRunner = async () => { throw new Error("must not run"); };
-    const miss = await runWritingTool(prose, { run, op: "custom", instruction: "replace Renner with a pronoun", before: "" });
+    const miss = await runWritingTool(prose, { run, think: false, op: "custom", instruction: "replace Renner with a pronoun", before: "" });
     gate(miss.failReasons[0] === "target-not-found" && (miss.diagnosis ?? "").includes("Renner"),
       "an absent term fails before any model run", miss.diagnosis ?? "none");
-    const single = await runWritingTool("Mara sat down.", { run, op: "custom", instruction: "replace Mara with a pronoun", before: "" });
+    const single = await runWritingTool("Mara sat down.", { run, think: false, op: "custom", instruction: "replace Mara with a pronoun", before: "" });
     gate(single.failReasons[0] === "nothing-to-replace",
       "a single mention has no later mentions to replace", single.failReasons[0]);
   }
@@ -432,7 +432,7 @@ await (async () => {
       seen.push(req);
       return { ok: true as const, json: { text: answers[Math.min(seen.length - 1, answers.length - 1)] } as T, modelId: "m", timings: null };
     };
-    const out = await runWritingTool(prose, { run, op: "custom", instruction: "replace john with a pronoun", before: "" });
+    const out = await runWritingTool(prose, { run, think: false, op: "custom", instruction: "replace john with a pronoun", before: "" });
     gate(seen.length === 2 && out.batchOutcomes.join(",") === "revised",
       "a lazy pronounize earns a diagnosed retry and then ships", `${seen.length} calls, ${out.batchOutcomes.join(",")}`);
     gate(seen[1].userText.includes("still appears 4"), "the count rides the retry note");
@@ -493,11 +493,63 @@ await (async () => {
       seen.push(req);
       return { ok: true as const, json: { text: "The cold bit at Mara. Gulls cried over the turning tide. The light was already going." } as T, modelId: "m", timings: null };
     };
-    const out = await runWritingTool(sel, { run, op: "custom", instruction: "remove the filter words", before: "" });
+    const out = await runWritingTool(sel, { run, think: false, op: "custom", instruction: "remove the filter words", before: "" });
     gate(seen.length === 1, "a paragraph with zero filter words never reaches the model", `${seen.length} calls`);
     gate(out.batchOutcomes.join(",") === "revised,unchanged", "outcomes: dirty revised, clean untouched",
       out.batchOutcomes.join(","));
     gate(out.revised.includes("Salt dried white"), "the clean paragraph survives byte-identical");
+  }
+})();
+
+console.log("\n── 10 · adaptive thinking in the writing loop ────────────────");
+await (async () => {
+  const { decideWritingThinking } = await import("../src/lib/think");
+  gate(!decideWritingThinking("merge", 0, "custom").think, "gated intents run fast at attempt 0");
+  gate(decideWritingThinking("merge", 1, "custom").think, "every custom retry thinks");
+  gate(decideWritingThinking("insert", 0, "custom").think, "creative generation thinks from the start");
+  gate(decideWritingThinking("tone", 0, "custom").think, "open-ended tone thinks from the start");
+  gate(!decideWritingThinking("unknown", 0, "proofread").think, "proofread never thinks at attempt 0");
+
+  const onePara =
+    "The bell rang across the harbour tonight and the boats answered it, hull after hull, while Mara stood at the rail and listened to the sound move away from her over the dark water.";
+  // Sits BETWEEN the strict tone ceiling (1.6x + 120) and the relaxed one
+  // (1.84x + 200) — the only region where "relaxed profile applied" is a
+  // falsifiable claim rather than a vacuous one.
+  const stretched =
+    "The bell rang across the harbour tonight with the self-importance of a town crier, and the boats answered it hull after gossiping hull, a knock here, a shiver of rigging there, until the whole basin was talking at once. Mara stood at the rail like a teacher waiting out a rowdy classroom, listening to the sound skip away over the dark water, taking its sweet time about it, as if the night had nowhere better to be and neither, for once, did she.";
+  const seen: AssistantJSONRequest[] = [];
+  const thinkFlags: boolean[] = [];
+  const run: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
+    seen.push(req);
+    if (req.freeText) {
+      return { ok: true as const, json: { text: "<think>The ask is playful register; lively harbour sounds carry it. Length can stretch a little for rhythm.</think>" } as T, modelId: "m", timings: null };
+    }
+    return { ok: true as const, json: { text: stretched } as T, modelId: "m", timings: null };
+  };
+  const out = await runWritingTool(onePara, {
+    run, op: "custom", instruction: "make it more playful", before: "",
+    onThinking: (t) => thinkFlags.push(t),
+  });
+  gate(seen[0].freeText === true && (seen[0].stopTexts ?? []).includes("</think>"),
+    "★ the think pass is unconstrained and stops at </think>");
+  gate(seen[1].freeText !== true && seen[1].userText.includes("YOUR NOTES"),
+    "★ the notes ride the constrained attempt");
+  gate(stretched.length > onePara.length * 1.6 + 120, "fixture actually exceeds the strict window",
+    `${stretched.length} vs ${Math.round(onePara.length * 1.6 + 120)}`);
+  gate(out.batchOutcomes.join(",") === "revised",
+    "★ a thought attempt is judged against the RELAXED profile", out.batchOutcomes.join(","));
+  gate(thinkFlags[0] === true && thinkFlags[thinkFlags.length - 1] === false,
+    "the thinking indicator is raised and lowered", thinkFlags.join(","));
+
+  // think:false is a hard off-switch (the control arm every probe needs).
+  {
+    const quiet: AssistantJSONRequest[] = [];
+    const runQuiet: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
+      quiet.push(req);
+      return { ok: true as const, json: { text: onePara } as T, modelId: "m", timings: null };
+    };
+    await runWritingTool(onePara, { run: runQuiet, think: false, op: "custom", instruction: "make it more playful", before: "" });
+    gate(quiet.every((r) => r.freeText !== true), "think:false never issues a freeText pass");
   }
 })();
 

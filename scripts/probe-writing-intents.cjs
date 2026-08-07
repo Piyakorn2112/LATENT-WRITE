@@ -78,12 +78,15 @@ const CASES = [
 /** Module-side helpers: requests, classification and judging are REAL code. */
 function mod(op, payload) {
   return JSON.parse(execFileSync(NODE, [TSX, '-e', `
-    import { buildWritingRequest, gateProfileFor, judgeRevision, fromWire, matchQuoteStyle, unchangedRetryNote } from "./src/lib/writing-tool";
+    import { buildWritingRequest, gateProfileFor, judgeRevision, relaxProfile, fromWire, matchQuoteStyle, unchangedRetryNote } from "./src/lib/writing-tool";
     import { classifyInstruction } from "./src/lib/writing-intent";
+    import { decideWritingThinking } from "./src/lib/think";
     const a = JSON.parse(process.argv[process.argv.length - 1]);
     const reading = classifyInstruction(a.instruction);
     let out;
-    if (a.op === "build") {
+    if (a.op === "decide") {
+      out = decideWritingThinking(reading.intent, a.attempt, "custom");
+    } else if (a.op === "build") {
       const structural = ["merge", "split", "insert"].includes(reading.intent) ||
         (reading.intent === "condense" && reading.targetParas !== undefined);
       const batch = { index: 0, text: a.text, sep: "" };
@@ -96,7 +99,8 @@ function mod(op, payload) {
       };
     } else {
       const restored = matchQuoteStyle(a.original, fromWire(a.revised));
-      const verdict = judgeRevision(a.original, restored, gateProfileFor("custom", reading));
+      const base = gateProfileFor("custom", reading);
+      const verdict = judgeRevision(a.original, restored, a.thought ? relaxProfile(base) : base);
       out = { restored, verdict, unchangedNote: unchangedRetryNote(reading) };
     }
     console.log(JSON.stringify(out ?? null));
@@ -119,10 +123,30 @@ async function runCase(c) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { reading, req } = mod('build', { text: c.text, instruction: c.instruction, retryNote });
     const sampled = attempt === 2;
+
+    // Mirror the REAL loop's adaptive thinking: creative intents think at
+    // attempt 0, every retry thinks; notes ride the user turn and the judge
+    // uses the relaxed profile on thought attempts.
+    const decision = mod('decide', { instruction: c.instruction, attempt });
+    let notes = null;
+    if (decision.think) {
+      const tp = await callBridge('assistantRun', {
+        requestId: `wi-${c.id}-a${attempt}-think`, task: 'writing-tool', tier: 'max',
+        noThink: false, freeText: true, stopTexts: ['</think>'],
+        systemPrompt: req.systemPrompt, userText: req.userText,
+        maxTokens: decision.budget, timeoutMs: 120000,
+      });
+      const t = String(tp.json?.text ?? '').replace(/^[\s\S]*?<think>/, '').replace(/<\/think>[\s\S]*$/, '').trim();
+      notes = t.length >= 40 ? (t.length <= 2400 ? t : t.slice(-2400)) : null;
+    }
+
     const t0 = Date.now();
     const res = await callBridge('assistantRun', {
       requestId: `wi-${c.id}-a${attempt}`, task: 'writing-tool', tier: 'max', jsonStyle: 'compact',
-      systemPrompt: req.systemPrompt, userText: req.userText,
+      systemPrompt: req.systemPrompt,
+      userText: notes
+        ? req.userText + '\n\nYOUR NOTES — you already thought this through; use these conclusions:\n' + notes
+        : req.userText,
       schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 150000,
       ...(sampled ? { temperature: 0.7, minP: 0.05 } : {}),
     });
@@ -130,9 +154,9 @@ async function runCase(c) {
     if (attempt === 0) console.log(`── ${c.id}  ("${c.instruction}")  intent=${reading.intent}${reading.targetParas ? ` target=${reading.targetParas}` : ''}`);
     if (!res.ok) { console.log(`   a${attempt}: FAILED ${res.error} (${ms}ms)\n`); return { shipped: false }; }
     const revised = typeof res.json?.text === 'string' ? res.json.text : '';
-    const { restored, verdict, unchangedNote } = mod('judge', { original: c.text, revised, instruction: c.instruction });
+    const { restored, verdict, unchangedNote } = mod('judge', { original: c.text, revised, instruction: c.instruction, thought: !!notes });
     const unchanged = restored.trim() === c.text.trim() || restored.trim() === '';
-    console.log(`   a${attempt}${sampled ? ' (sampled)' : ''}: ${ms}ms · ${res.timings?.tokens} tok · gate=${unchanged ? 'UNCHANGED' : verdict.ok ? 'ACCEPT' : `REFUSE(${verdict.failure.code})`}${retryNote ? ' [diagnosed retry]' : ''}`);
+    console.log(`   a${attempt}${sampled ? ' (sampled)' : ''}${notes ? ' (thought)' : ''}: ${ms}ms · ${res.timings?.tokens} tok · gate=${unchanged ? 'UNCHANGED' : verdict.ok ? 'ACCEPT' : `REFUSE(${verdict.failure.code})`}${retryNote ? ' [diagnosed retry]' : ''}`);
     if (!unchanged && verdict.ok) {
       console.log(`   BEFORE: ${c.text.replace(/\n/g, '\\n')}`);
       console.log(`   AFTER:  ${restored.replace(/\n/g, '\\n')}\n`);

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { OrbEngine } from "./orb/OrbEngine";
+import { ThinkingLabel } from "./ThinkingLabel";
 import { assistantRunJSON, cancelWhere } from "../lib/assistant-client";
 import {
   MAX_ASK_TASK,
@@ -62,6 +63,9 @@ type Phase =
   | { name: "asking"; label: string }
   | { name: "done"; result: MaxAskResult }
   | { name: "failed"; reason?: string };
+
+/** Sentinel label value the render swaps for the rotating ThinkingLabel. */
+const THINKING_LABEL = "__thinking__";
 
 export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props) {
   const [phase, setPhase] = useState<Phase>({ name: "menu" });
@@ -139,7 +143,9 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
           name: "asking",
           // First-person working notes, not third-person narration: the
           // surface says what it is DOING, tersely, as if thinking aloud.
-          label: p === "asking" ? "Reading passage…"
+          // "thinking" gets the playful rotating word (rendered below).
+          label: p === "thinking" ? THINKING_LABEL
+            : p === "asking" ? "Reading passage…"
             : p === "widening" ? "Reading more of the story…"
             : p === "refining" ? "Correcting answer…"
             : "Reviewing answer…",
@@ -209,7 +215,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
             <OrbEngine mode="default" analyzing size={18} flowScale={0.8}
               aberration={0.45} tint="--control-value-fill" />
           </span>
-          {phase.label}
+          {phase.label === THINKING_LABEL ? <ThinkingLabel /> : phase.label}
         </div>
       )}
 

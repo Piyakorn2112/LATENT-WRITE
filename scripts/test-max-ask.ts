@@ -20,8 +20,10 @@ import {
   normalizeClaimCheck, buildReviewRequest, computeReviewVerdict,
   coerceProseAbstention, buildMaxAskRequest as buildReq, maxAskSchema,
   NOT_IN_CONTEXT, FITS, MAX_STEPS, DEFAULT_BUDGET_TOKENS, WIDEN_CEILING_TOKENS,
+  questionEntities,
   type MaxAskInput,
 } from "../src/lib/max-ask";
+import { decideAskThinking } from "../src/lib/think";
 import type { AssistantJSONRunner } from "../src/lib/assistant-client";
 
 let pass = 0, fail = 0;
@@ -133,7 +135,7 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
 {
   // answered on the first try
   const s = scripted([{ answer: "The tin is counted twice in two chapters.", basis: "passage", confidence: 0.9 }]);
-  const r = await runMaxAsk(INPUT, { run: s.run });
+  const r = await runMaxAsk(INPUT, { run: s.run, think: false });
   gate(r.stopped === "answered" && r.steps === 1 && s.calls() === 1,
     `a good first answer stops at one call (stopped=${r.stopped}, steps=${r.steps})`);
   gate(!!r.answer && r.answer.basis === "passage", "…and the answer comes back");
@@ -141,7 +143,7 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
 {
   // ★ ALWAYS ABSTAINS — the shape that makes an agent loop forever.
   const s = scripted([{ answer: "I need more.", basis: NOT_IN_CONTEXT, confidence: 0.4 }]);
-  const r = await runMaxAsk({ ...INPUT, budgetTokens: 40 }, { run: s.run });
+  const r = await runMaxAsk({ ...INPUT, budgetTokens: 40 }, { run: s.run, think: false });
   gate(s.calls() <= MAX_STEPS,
     `★ an always-abstaining model is capped at ${MAX_STEPS} calls (made ${s.calls()})`);
   gate(["steps", "rungs-exhausted", "repeat"].includes(r.stopped),
@@ -151,27 +153,27 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
 {
   // identical answer twice — more context changed nothing
   const s = scripted([{ answer: "same", basis: NOT_IN_CONTEXT, confidence: 0.4 }]);
-  const r = await runMaxAsk({ ...INPUT, budgetTokens: 40 }, { run: s.run, maxSteps: 8 });
+  const r = await runMaxAsk({ ...INPUT, budgetTokens: 40 }, { run: s.run, think: false, maxSteps: 8 });
   gate(s.calls() <= 3, `★ a model repeating itself is cut off early (${s.calls()} calls, cap was 8)`);
   gate(r.stopped === "repeat" || r.stopped === "rungs-exhausted", `stopped=${r.stopped}`);
 }
 {
   // the model errors
   const s = scripted([null]);
-  const r = await runMaxAsk(INPUT, { run: s.run });
+  const r = await runMaxAsk(INPUT, { run: s.run, think: false });
   gate(r.stopped === "failed" && s.calls() === 1, "a failing model stops immediately and says so");
 }
 {
   // the deadline has already passed
   const s = scripted([{ answer: "never asked", basis: "passage", confidence: 1 }]);
-  const r = await runMaxAsk(INPUT, { run: s.run, deadlineMs: -1, now: () => 0 });
+  const r = await runMaxAsk(INPUT, { run: s.run, think: false, deadlineMs: -1, now: () => 0 });
   gate(r.stopped === "deadline" && s.calls() === 0,
     "★ an expired deadline is checked BEFORE the call, not after it");
 }
 {
   // nothing to widen into: every rung already fits
   const s = scripted([{ answer: "nope", basis: NOT_IN_CONTEXT, confidence: 0.3 }]);
-  const r = await runMaxAsk(INPUT, { run: s.run, maxSteps: 5 });
+  const r = await runMaxAsk(INPUT, { run: s.run, think: false, maxSteps: 5 });
   gate(r.stopped === "rungs-exhausted" && s.calls() === 1,
     `★ with nothing dropped there is nothing to retry with — one call (${s.calls()})`);
 }
@@ -181,7 +183,7 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
     { answer: "not enough", basis: NOT_IN_CONTEXT, confidence: 0.3 },
     { answer: "Elena refused the short way in ch 8 and does it again here.", basis: "story-so-far", confidence: 0.85 },
   ]);
-  const r = await runMaxAsk({ ...INPUT, budgetTokens: 60 }, { run: s.run });
+  const r = await runMaxAsk({ ...INPUT, budgetTokens: 60 }, { run: s.run, think: false });
   gate(s.calls() === 2 && r.stopped === "answered",
     `★ widening is used exactly when it can help: ${s.calls()} calls, stopped=${r.stopped}`);
   gate(r.rungsIncluded.length > buildMaxAskPack(INPUT, 60).rungsIncluded.length,
@@ -190,10 +192,10 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
 {
   // every stop reason in the type is reachable by SOME input
   const seen = new Set<string>();
-  seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: "passage", confidence: 1 }]).run })).stopped);
-  seen.add((await runMaxAsk(INPUT, { run: scripted([null]).run })).stopped);
-  seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: "passage", confidence: 1 }]).run, deadlineMs: -1, now: () => 0 })).stopped);
-  seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: NOT_IN_CONTEXT, confidence: 0 }]).run })).stopped);
+  seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: "passage", confidence: 1 }]).run, think: false })).stopped);
+  seen.add((await runMaxAsk(INPUT, { run: scripted([null]).run, think: false })).stopped);
+  seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: "passage", confidence: 1 }]).run, think: false, deadlineMs: -1, now: () => 0 })).stopped);
+  seen.add((await runMaxAsk(INPUT, { run: scripted([{ answer: "a", basis: NOT_IN_CONTEXT, confidence: 0 }]).run, think: false })).stopped);
   gate(seen.size >= 4, `★ ${seen.size} distinct stop reasons are reachable: ${[...seen].join(", ")}`);
 }
 
@@ -255,7 +257,7 @@ console.log("\nthe opening rung and the self-review");
       { answer: "Elena counts twice.", basis: "passage", confidence: 0.9 },
       { answer: "IGNORED", basis: "passage", confidence: 0.9 },   // wrong shape for review
     ]);
-    const r = await runMaxAsk(INPUT, { run: s.run, selfReview: true });
+    const r = await runMaxAsk(INPUT, { run: s.run, think: false, selfReview: true });
     gate(s.calls() === 2, `★ self-review costs exactly one extra call (${s.calls()})`);
     gate(r.stopped === "answered" && !!r.answer && r.review == null,
       "…and an unparseable review loses NOTHING — the answer ships undecorated");
@@ -268,7 +270,7 @@ console.log("\nthe opening rung and the self-review");
         { claim: "she refused the short way", kind: "fact", quote: "Elena refuses the short way" },
       ] },
     ]);
-    const r = await runMaxAsk(INPUT, { run: s.run, selfReview: true });
+    const r = await runMaxAsk(INPUT, { run: s.run, think: false, selfReview: true });
     gate(r.review?.verdict === "supported" && r.review.facts === 2,
       "★ a CHECK answer now reviews cleanly — decomposition locates both facts of a " +
       "correct flag instead of reading the flag as a contradiction of itself");
@@ -279,13 +281,13 @@ console.log("\nthe opening rung and the self-review");
       { claims: [{ claim: "Vale blackmails her", kind: "fact", quote: "" }] },
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
-      { run: s.run, selfReview: true });
+      { run: s.run, think: false, selfReview: true });
     gate(r.review?.verdict === "overreaches" && !!r.answer,
       "★ an overreach decorates and NEVER vetoes — the caution is the UI's lever");
   }
   {
     const s = scripted([{ answer: "x", basis: "passage", confidence: 0.9 }]);
-    await runMaxAsk(INPUT, { run: s.run });
+    await runMaxAsk(INPUT, { run: s.run, think: false });
     gate(s.calls() === 1, "selfReview off (the default) adds no call");
   }
 }
@@ -323,7 +325,7 @@ console.log("\nthe fits outlet, the prose abstention, and the refine loop");
       { answer: "Forty marks, from the notice.", basis: "story-so-far", confidence: 0.9 },
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "how much?", budgetTokens: 60 },
-      { run: s.run });
+      { run: s.run, think: false });
     gate(s.calls() === 2 && r.stopped === "answered",
       `★ a prose abstention now WIDENS instead of shipping (${s.calls()} calls, ${r.stopped})`);
   }
@@ -337,7 +339,7 @@ console.log("\nthe fits outlet, the prose abstention, and the refine loop");
       { claims: [{ claim: "she counts the tin", kind: "fact", quote: "counted what was left in the tin" }] }, // recheck: clean
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
-      { run: s.run, selfReview: true });
+      { run: s.run, think: false, selfReview: true });
     gate(s.calls() === 4 && r.refined === true,
       `★ flagged -> refined -> re-verified -> ships (${s.calls()} calls, refined=${r.refined})`);
     gate(r.answer?.answer.includes("counts") === true && r.review?.verdict === "supported",
@@ -352,7 +354,7 @@ console.log("\nthe fits outlet, the prose abstention, and the refine loop");
       { claims: [{ claim: "Vale burned the ledger", kind: "fact", quote: "" }] },
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
-      { run: s.run, selfReview: true });
+      { run: s.run, think: false, selfReview: true });
     gate(r.refined !== true && r.answer?.answer.includes("pays Vale") === true,
       "★ a revision that fails the re-check is DISCARDED — the original ships with its caution");
     gate(r.review?.verdict === "overreaches",
@@ -367,7 +369,7 @@ console.log("\nthe fits outlet, the prose abstention, and the refine loop");
       { claims: [{ claim: "counts twice", kind: "fact", quote: "counted what was left in the tin" }] },
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why count?" },
-      { run: s.run, selfReview: true });
+      { run: s.run, think: false, selfReview: true });
     gate(s.calls() === 4 && r.refined === true,
       `★ low confidence triggers the refine pass too (${s.calls()} calls, refined=${r.refined})`);
   }
@@ -380,7 +382,7 @@ console.log("\nthe fits outlet, the prose abstention, and the refine loop");
       { claims: [{ claim: "pays Vale weekly", kind: "fact", quote: "" }] },
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "why?" },
-      { run: s.run, selfReview: true });
+      { run: s.run, think: false, selfReview: true });
     gate(s.calls() === 4,
       `★ the refine loop is HARD-CAPPED at one revision + one re-check (${s.calls()} calls)`);
   }
@@ -397,7 +399,7 @@ console.log("\nthe harness narrates its phases");
       { answer: "coins", basis: "passage", confidence: 0.9 },
       { claims: [] },
     ]);
-    const { opts, seen } = phases({ run: s.run, selfReview: true });
+    const { opts, seen } = phases({ run: s.run, think: false, selfReview: true });
     await runMaxAsk({ ...INPUT, kind: "question", question: "what is in the tin?" }, opts);
     gate(seen.join(",") === "asking,reviewing",
       `a clean reviewed question narrates asking -> reviewing (got ${seen.join(",")})`);
@@ -409,7 +411,7 @@ console.log("\nthe harness narrates its phases");
       { answer: "she counts the tin", basis: "passage", confidence: 0.9 },
       { claims: [{ claim: "counts the tin", kind: "fact", quote: "counted what was left in the tin" }] },
     ]);
-    const { opts, seen } = phases({ run: s.run, selfReview: true });
+    const { opts, seen } = phases({ run: s.run, think: false, selfReview: true });
     await runMaxAsk({ ...INPUT, kind: "question", question: "why?" }, opts);
     gate(seen.join(",") === "asking,reviewing,refining,reviewing",
       `★ a refined answer narrates the whole chain (got ${seen.join(",")})`);
@@ -419,7 +421,7 @@ console.log("\nthe harness narrates its phases");
       { answer: "not enough", basis: NOT_IN_CONTEXT, confidence: 0.3 },
       { answer: "found it in ch 8", basis: "story-so-far", confidence: 0.85 },
     ]);
-    const { opts, seen } = phases({ run: s.run });
+    const { opts, seen } = phases({ run: s.run, think: false });
     await runMaxAsk({ ...INPUT, budgetTokens: 60 }, opts);
     gate(seen.join(",") === "asking,widening",
       `a widened ask narrates asking -> widening (got ${seen.join(",")})`);
@@ -429,7 +431,7 @@ console.log("\nthe harness narrates its phases");
       { answer: "fits", basis: "passage", confidence: 0.9 },
       { claims: [] },
     ]);
-    const { opts, seen } = phases({ run: s.run, selfReview: true });
+    const { opts, seen } = phases({ run: s.run, think: false, selfReview: true });
     await runMaxAsk(INPUT, opts);   // check-kind reviews too, under decomposition
     gate(seen.join(",") === "asking,reviewing",
       `a reviewed CHECK narrates asking -> reviewing (got ${seen.join(",")})`);
@@ -450,6 +452,72 @@ console.log("\nthe defaults are sane for an 8 GB window");
   gate(WIDEN_CEILING_TOKENS + 2000 < 8192,
     "★ even a WIDENED pack fits the 8k window with ~2k left for thinking");
 }
+
+console.log("\n── question entities + the mentions rung ─────────────────────");
+{
+  const chapterParas = [
+    "Tim came down to the dock before first light.",
+    "The nets were heavy and the morning was long.",
+    "Tim shouted at Annaha over the winch noise, and she did not answer him.",
+    "Annaha coiled the line alone.",
+    PARA,
+    "Later, Tim left the dock without a word to Annaha.",
+  ];
+  const input: MaxAskInput = {
+    ...INPUT,
+    kind: "question",
+    question: "what did tim do to annaha in this chapter",
+    chapterParagraphs: chapterParas,
+  };
+  const ents = questionEntities(input);
+  gate(ents.includes("Tim") && ents.includes("Annaha"),
+    "★ lowercase-typed names resolve from the CHAPTER's own capitalization", ents.join(","));
+  const pack = buildMaxAskPack(input);
+  gate(pack.rungsIncluded.includes("mentions"), "the mentions rung joins the pack", pack.rungsIncluded.join(","));
+  const mentions = pack.text.split("MENTIONS —")[1] ?? "";
+  gate(mentions.includes("P3:") && mentions.includes("P6:"),
+    "co-mention paragraphs are cited with their numbers", mentions.slice(0, 120));
+  gate(!mentions.includes("P5:"), "the clicked paragraph is not re-cited as a mention");
+  const req = buildMaxAskRequest(pack, undefined, "question");
+  gate((req.schema.properties.basis.enum as readonly string[]).includes("mentions"),
+    "mentions is a citable basis");
+}
+
+console.log("\n── adaptive thinking in the loop ─────────────────────────────");
+await (async () => {
+  gate(!decideAskThinking("check", undefined, 0).think, "fixed menu kinds never think");
+  gate(!decideAskThinking("question", "who is Tim", 1).think, "a bare lookup never thinks");
+  const hard = decideAskThinking("question", "what did Tim do to Annaha in this chapter", 2);
+  gate(hard.think && hard.budget >= 400, "a causal multi-entity question thinks with the big budget", `${hard.budget}`);
+
+  // The loop: a thinking question fires ONE freeText pass whose notes ride
+  // the main constrained call.
+  const seen: Array<{ freeText?: boolean; userText: string; stopTexts?: string[] }> = [];
+  const run: AssistantJSONRunner = async <T,>(req: { freeText?: boolean; userText: string; stopTexts?: string[] }) => {
+    seen.push({ freeText: req.freeText, userText: req.userText, stopTexts: req.stopTexts });
+    if (req.freeText) {
+      return { ok: true as const, json: { text: "<think>Tim shouted at Annaha at the winch, then left without a word; the question asks what he DID, so both actions count.</think>" } as T, modelId: "m", timings: null };
+    }
+    return { ok: true as const, json: { answer: "Tim shouted at Annaha over the winch and later left the dock without a word to her.", basis: "mentions", confidence: 0.9 } as T, modelId: "m", timings: null };
+  };
+  const input: MaxAskInput = {
+    ...INPUT, kind: "question",
+    question: "what did tim do to annaha in this chapter",
+    chapterParagraphs: [
+      "Tim came down to the dock.", "The nets were heavy.",
+      "Tim shouted at Annaha over the winch noise.", "Annaha coiled the line alone.",
+      PARA, "Later, Tim left the dock without a word to Annaha.",
+    ],
+  };
+  const phases: string[] = [];
+  const r = await runMaxAsk(input, { run, onPhase: (p) => phases.push(p) });
+  gate(seen[0].freeText === true && (seen[0].stopTexts ?? []).includes("</think>"),
+    "★ the think pass is unconstrained and stops at </think>", JSON.stringify(seen[0].stopTexts));
+  gate(seen[1].freeText !== true && seen[1].userText.includes("YOUR NOTES"),
+    "★ the notes ride the constrained ask");
+  gate(phases[0] === "thinking" && phases[1] === "asking", "the popover narrates thinking first", phases.join(","));
+  gate(r.stopped === "answered" && r.answer?.basis === "mentions", "the answer cites the mentions rung");
+})();
 
 console.log("\n" + "=".repeat(74));
 console.log(`${pass} passed, ${fail} failed`);

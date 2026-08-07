@@ -9,6 +9,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { OrbEngine } from "./orb/OrbEngine";
+import { ThinkingLabel } from "./ThinkingLabel";
 import type { WritingOp, WritingToolOutcome } from "../lib/writing-tool";
 
 export interface WritingToolPopoverProps {
@@ -21,6 +22,7 @@ export interface WritingToolPopoverProps {
     op: WritingOp,
     instruction: string | undefined,
     onProgress: (done: number, total: number) => void,
+    onThinking: (thinking: boolean) => void,
   ) => Promise<WritingToolOutcome | null>;
   /** Cancels the in-flight batch chain (queued + running). */
   onCancel: () => void;
@@ -106,14 +108,17 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
     };
   }, [props.onClose]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const [thinking, setThinking] = useState(false);
   const start = async (op: WritingOp) => {
     setLastOp(op);
     setPhase("running");
     setProgress(null);
+    setThinking(false);
     const result = await props.onRun(
       op,
       op === "custom" ? instruction.trim() || undefined : undefined,
       (done, total) => { if (aliveRef.current) setProgress({ done, total }); },
+      (t) => { if (aliveRef.current) setThinking(t); },
     );
     if (!aliveRef.current) return;
     if (!result || result.cancelled) { setPhase(result ? "choose" : "failed"); return; }
@@ -174,8 +179,8 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
               <OrbEngine mode="default" analyzing size={18} flowScale={0.8} aberration={0.45} tint="--control-value-fill" />
             </span>
             <span>
-              {OP_LABEL[lastOp]}
-              {progress && progress.total > 1 ? ` part ${progress.done} of ${progress.total}` : ""}
+              {thinking ? <ThinkingLabel /> : OP_LABEL[lastOp]}
+              {!thinking && progress && progress.total > 1 ? ` part ${progress.done} of ${progress.total}` : ""}
             </span>
             <button className="max-ask-again" onClick={() => { props.onCancel(); setPhase("choose"); }}>
               Cancel

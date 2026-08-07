@@ -21,6 +21,7 @@
  */
 import { checkGrammar } from "./grammar-check";
 import { classifyInstruction, namesInInstruction, type IntentReading, type ScrubKind } from "./writing-intent";
+import { decideWritingThinking, runThinkPass, notesBlock } from "./think";
 import type { AssistantJSONRunner } from "./assistant-client";
 
 export const WRITING_TASK = "writing-tool";
@@ -826,6 +827,24 @@ export function revisionAcceptable(original: string, revised: string, op: Writin
   return judgeRevision(original, revised, op === "custom" ? LEGACY_CUSTOM : LEGACY_STRICT).ok;
 }
 
+/**
+ * ★ A THOUGHT ATTEMPT EARNS A LOOSER CHECKER (owner call): when the model
+ *   has actually reasoned about the revision, the windows widen and drift
+ *   gains a paragraph — the reasoning carries judgment the tight bounds
+ *   existed to substitute for. The CONTRACTS stay: exact paragraph targets
+ *   (a merge is still exactly 1), term counts and scrub measures are the
+ *   instruction itself, and the grammar gate never relaxes.
+ */
+export function relaxProfile(p: GateProfile): GateProfile {
+  return {
+    ...p,
+    lenMin: p.lenMin * 0.85,
+    lenMax: p.lenMax * 1.15,
+    lenSlack: p.lenSlack + 80,
+    paras: p.paras.kind === "drift" ? { kind: "drift", max: p.paras.max + 1 } : p.paras,
+  };
+}
+
 // ── the run ───────────────────────────────────────────────────────────────
 
 export interface WritingProgress {
@@ -844,6 +863,11 @@ export interface WritingToolOptions {
   /** Cast present in the selection, non-blank info only. */
   characters?: WritingCharacter[];
   onProgress?: (p: WritingProgress) => void;
+  /** Adaptive reasoning: undefined = decide per attempt (decideWritingThinking);
+   *  false = never think (tests, control arms). */
+  think?: boolean;
+  /** Fires when a reasoning pass starts/ends, for the UI's indicator. */
+  onThinking?: (thinking: boolean) => void;
   timeoutMs?: number;
 }
 
@@ -1018,11 +1042,34 @@ export async function runWritingTool(
         characters, reading, retryNote,
       });
       const sampled = opts.op === "custom" && attempt === MAX_ATTEMPTS_CUSTOM - 1;
+
+      // ── adaptive reasoning ──
+      // Creative intents think at attempt 0; every retry thinks (the gate
+      // failure is the difficulty signal). The notes ride the user turn and
+      // a thought attempt is judged against the RELAXED profile below.
+      const decision = opts.think === false
+        ? { think: false as const, budget: 0 }
+        : decideWritingThinking(reading.intent, attempt, opts.op);
+      let notes: string | null = null;
+      if (decision.think) {
+        opts.onThinking?.(true);
+        notes = await runThinkPass(opts.run, {
+          task: WRITING_TASK,
+          tag: `batch-${batch.index}-a${attempt}`,
+          systemPrompt: request.systemPrompt,
+          userText: request.userText,
+          schema: request.schema,
+          budget: decision.budget,
+          timeoutMs: opts.timeoutMs,
+        });
+        opts.onThinking?.(false);
+      }
+
       const result = await opts.run<{ text?: unknown }>({
         task: WRITING_TASK,
         tag: `batch-${batch.index}-a${attempt}`,
         systemPrompt: request.systemPrompt,
-        userText: request.userText,
+        userText: notes ? `${request.userText}\n\n${notesBlock(notes)}` : request.userText,
         schema: request.schema,
         maxTokens: request.maxTokens,
         timeoutMs: opts.timeoutMs ?? timeoutFor(request.maxTokens),
@@ -1050,7 +1097,7 @@ export async function runWritingTool(
         retryNote = unchangedRetryNote(reading);
         continue;
       }
-      const verdict = judgeRevision(batch.text, text, profile);
+      const verdict = judgeRevision(batch.text, text, notes ? relaxProfile(profile) : profile);
       if (verdict.ok) {
         texts[batch.index] = text;
         outcomes.push("revised");

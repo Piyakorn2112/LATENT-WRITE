@@ -515,6 +515,7 @@ export default function App() {
     op: WritingOp,
     instruction: string | undefined,
     onProgress: (done: number, total: number) => void,
+    onThinking?: (thinking: boolean) => void,
   ) => {
     const sel = writingSel;
     if (!sel) return null;
@@ -552,6 +553,7 @@ export default function App() {
       const outcome = await runWritingTool(job.original, {
         run, op, instruction, before, characters,
         onProgress: (p) => onProgress(p.batchIndex + 1, p.batchCount),
+        onThinking,
       });
       const j = writingJobRef.current;
       if (j && !outcome.cancelled && outcome.batchOutcomes.some((o) => o === "revised")) {

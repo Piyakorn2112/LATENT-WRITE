@@ -42,8 +42,18 @@ export interface AssistantJSONRequest {
   tag?: string;
   systemPrompt: string;
   userText: string;
-  /** JSON Schema compiled to a GBNF grammar by the host; guarantees the shape. */
+  /** JSON Schema compiled to a GBNF grammar by the host; guarantees the shape.
+   *  Ignored (and optional) when `freeText` is set. */
   schema: object;
+  /**
+   * ★ UNCONSTRAINED run — the one way a thinking model can actually think
+   *   (a grammar masks think tokens from token zero, measured). The result's
+   *   json is `{ text: <raw completion> }`. Used for a reasoning pass stopped
+   *   at `stopTexts` (e.g. "</think>"), whose notes then ride a normal
+   *   constrained request. Host-only; the sidecar never sees these.
+   */
+  freeText?: boolean;
+  stopTexts?: string[];
   maxTokens?: number;
   timeoutMs?: number;
   /**
@@ -254,6 +264,8 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       // thinking model is allowed to think; everyone else inherits the
       // runtime's "/no_think" default. See the request type's note.
       ...(job.req.tier ? { tier: job.req.tier } : {}),
+      ...(job.req.freeText ? { freeText: true } : {}),
+      ...(job.req.stopTexts ? { stopTexts: job.req.stopTexts } : {}),
       ...(typeof job.req.temperature === "number" ? { temperature: job.req.temperature } : {}),
       ...(typeof job.req.minP === "number" ? { minP: job.req.minP } : {}),
       ...(job.req.noThink === false ? { noThink: false } : {}),

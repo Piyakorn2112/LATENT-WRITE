@@ -94,6 +94,7 @@
  */
 import { fnv1a } from "./evidence-pack";
 import { tidyTruncatedText } from "./assistant-client";
+import { decideAskThinking, runThinkPass, notesBlock } from "./think";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { WorldData } from "../types";
 
@@ -190,6 +191,57 @@ const estimateTokens = (t: string) => Math.ceil(t.length / CHARS_PER_TOKEN);
 const cap = (t: string, max = PARAGRAPH_CAP) => (t.length <= max ? t : `${t.slice(0, max - 1)}…`);
 const collapse = (t: string) => t.replace(/\s+/g, " ").trim();
 
+// ── question analysis ──────────────────────────────────────────────────────
+
+const STOP_QWORDS = new Set([
+  "what", "did", "does", "who", "whom", "why", "how", "when", "where", "which",
+  "the", "this", "that", "these", "those", "chapter", "paragraph", "scene",
+  "story", "book", "happen", "happens", "happened", "between", "about", "tell",
+  "mean", "means", "meant", "doing", "and", "was", "were", "they", "she", "him",
+  "her", "his", "hers", "their", "you", "your", "with", "for", "from", "into",
+  "before", "after", "here", "there", "would", "could", "should", "have", "has",
+]);
+
+const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * ★ THE QUESTION NAMES ITS OWN EVIDENCE. "what did Tim do to Annaha" needs
+ *   the chapter's Tim-and-Annaha passages, not the neighbours of the clicked
+ *   paragraph — and the writer types names lowercase, so each is resolved
+ *   two ways: against the cast list (names + aliases, case-insensitive) and
+ *   against the CHAPTER TEXT's own capitalization ("tim" finds "Tim" even
+ *   when the cast sheet has never heard of him).
+ */
+export function questionEntities(input: MaxAskInput): string[] {
+  if (input.kind !== "question" || !input.question) return [];
+  const q = input.question;
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const push = (name: string) => {
+    const k = name.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); found.push(name); }
+  };
+  const cast = new Set<string>();
+  for (const c of input.worldData?.characters ?? []) {
+    if (c.name) cast.add(c.name);
+    for (const a of c.aliases ?? []) if (a) cast.add(a);
+  }
+  for (const p of input.present ?? []) if (p) cast.add(p);
+  for (const name of cast) {
+    if (new RegExp(`(^|[^\\p{L}])${escRe(name)}([^\\p{L}]|$)`, "iu").test(q)) push(name);
+  }
+  const chapterText = (input.chapterParagraphs ?? []).join("\n");
+  for (const word of q.match(/\b[\p{L}][\p{L}'’-]{2,}\b/gu) ?? []) {
+    const lower = word.toLowerCase();
+    if (STOP_QWORDS.has(lower) || seen.has(lower)) continue;
+    const capitalized = lower[0].toUpperCase() + lower.slice(1);
+    if (new RegExp(`(^|[^\\p{L}])${escRe(capitalized)}([^\\p{L}]|$)`, "u").test(chapterText)) {
+      push(capitalized);
+    }
+  }
+  return found.slice(0, 4);
+}
+
 const ASK_LINE: Record<AskKind, string> = {
   // ★ "ABSENCE IS NOT A CONFLICT" is load-bearing. Measured without it: on a
   //   perfectly consistent paragraph the model reported "the tin is not
@@ -244,8 +296,17 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
     true);
 
   // ── 2 · the ask ─────────────────────────────────────────────────────────
+  // ★ ENTITY QUESTIONS GET A SCOPE NOTE. The system prompt anchors answers
+  //   to "that paragraph" — right for the menu kinds, wrong for "what did
+  //   Tim do to Annaha in this chapter", which was answered from the first
+  //   matching beat alone (measured, probe-think-ask). The note rides the
+  //   user turn and names the MENTIONS rung as the answer's span.
+  const askEntities = questionEntities(input);
+  const scopeNote = askEntities.length > 0
+    ? "\n(Answer from EVERY passage under MENTIONS that bears on this: name each act, in story order, in one answer. Not only the first, and not from the clicked paragraph alone.)"
+    : "";
   const ask = input.kind === "question"
-    ? collapse(input.question ?? "").slice(0, 300)
+    ? collapse(input.question ?? "").slice(0, 300) + scopeNote
     : ASK_LINE[input.kind];
   add("ask", `ASK\n${ask || ASK_LINE.explain}`, true);
 
@@ -281,6 +342,31 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
       `NEIGHBOURS — immediately around it\n`
       + (before ? `Before: ${cap(collapse(before), NEIGHBOUR_CAP)}\n` : "")
       + (after ? `After: ${cap(collapse(after), NEIGHBOUR_CAP)}` : ""));
+  }
+
+  // ── 4b · the question's own evidence ────────────────────────────────────
+  //
+  // ★ CO-MENTIONS FIRST: for "what did Tim do to Annaha", a paragraph naming
+  //   BOTH is worth more than any paragraph naming one. Chronological within
+  //   each group, the clicked paragraph excluded (it is already the passage
+  //   rung), each row labeled with its paragraph number so the model can
+  //   point at evidence and the writer can find it.
+  const entities = questionEntities(input);
+  if (entities.length > 0 && paras.length > 0) {
+    const res = entities.map((e) => new RegExp(`(^|[^\\p{L}])${escRe(e)}([^\\p{L}]|$)`, "iu"));
+    const rows: Array<{ i: number; all: boolean }> = [];
+    for (let i = 0; i < paras.length; i++) {
+      if (i === input.paragraphIndex) continue;
+      const hits = res.filter((re) => re.test(paras[i])).length;
+      if (hits > 0) rows.push({ i, all: hits === res.length });
+    }
+    rows.sort((a, b) => (a.all === b.all ? a.i - b.i : a.all ? -1 : 1));
+    const picked = rows.slice(0, 6).sort((a, b) => a.i - b.i);
+    if (picked.length > 0) {
+      add("mentions",
+        `MENTIONS — this chapter's passages naming ${entities.join(", ")}\n`
+        + picked.map((r) => `P${r.i + 1}: ${cap(collapse(paras[r.i]), 220)}`).join("\n"));
+    }
   }
 
   // ── 5 · the story so far ────────────────────────────────────────────────
@@ -662,12 +748,15 @@ export function buildRefineRequest(
  * three is hiding the most reassuring fact it has: that different work is
  * happening.
  */
-export type MaxAskPhase = "asking" | "widening" | "reviewing" | "refining";
+export type MaxAskPhase = "thinking" | "asking" | "widening" | "reviewing" | "refining";
 
 export interface MaxAskOptions {
   run: AssistantJSONRunner;
   /** Run the self-review pass on a useful answer. One extra call, bounded. */
   selfReview?: boolean;
+  /** Adaptive reasoning: undefined = decide from the question's shape
+   *  (decideAskThinking); false = never think (tests, probes' control arm). */
+  think?: boolean;
   /** Live phase, fired immediately BEFORE the call it names. */
   onPhase?: (phase: MaxAskPhase) => void;
   maxTokens?: number;
@@ -723,6 +812,16 @@ export async function runMaxAsk(
   let lastAnswerText = "";
   let steps = 0;
 
+  // ── adaptive reasoning ────────────────────────────────────────────────
+  // Decided ONCE from the question's shape; the notes are produced against
+  // the first pack and reused on widening (the reasoning is about the
+  // question, not the pack size). A failed think pass costs its budget and
+  // nothing else — the ask proceeds without notes.
+  const decision = opts.think === false
+    ? { think: false as const, budget: 0, reason: "disabled" }
+    : decideAskThinking(input.kind, input.question, questionEntities(input).length);
+  let notes: string | null = null;
+
   for (let step = 1; step <= maxSteps; step += 1) {
     if (now() >= deadline) {
       return { answer: best, steps, stopped: "deadline", packHash: pack.packHash,
@@ -732,13 +831,26 @@ export async function runMaxAsk(
     const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS, input.kind);
     steps = step;
     opts.onStep?.(step, step === 1 ? "first ask" : "context widened");
+
+    if (step === 1 && decision.think && now() < deadline) {
+      opts.onPhase?.("thinking");
+      notes = await runThinkPass(opts.run, {
+        task: MAX_ASK_TASK,
+        tag: `${input.chapterNumber}:${input.paragraphIndex}`,
+        systemPrompt: request.systemPrompt,
+        userText: request.userText,
+        schema: request.schema,
+        budget: decision.budget,
+        timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
+      });
+    }
     opts.onPhase?.(step === 1 ? "asking" : "widening");
 
     const result = await opts.run<unknown>({
       task: MAX_ASK_TASK,
       tag: `${input.chapterNumber}:${input.paragraphIndex}`,
       systemPrompt: request.systemPrompt,
-      userText: request.userText,
+      userText: notes ? `${request.userText}\n\n${notesBlock(notes)}` : request.userText,
       schema: request.schema,
       maxTokens: request.maxTokens,
       // Never let one call outlive the whole budget.

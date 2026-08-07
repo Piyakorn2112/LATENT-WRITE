@@ -145,6 +145,45 @@ refusal still surfaces the counted diagnosis, which is useful on its own.
   (cache hit per batch), scrub/target token budgets at 1.6x instead of
   custom's 2.8x.
 
+## Phase 7 (shipped 2026-08-08) — adaptive thinking + the ask context system
+
+Research: plans/adaptive-thinking-research.md. The measured ground truth
+was that thinking NEVER actually happened (a grammar masks think tokens
+from token zero), so noThink:false was cosmetic on every constrained run.
+
+- **Two-phase think-then-constrain on the host** (the CRANE pattern, gains
+  proven at 1.5-8B): a freeText run (no grammar, `customStopTriggers`)
+  captures real reasoning — node-llama-cpp SEGMENTS thought out of
+  responseText, so the host reconstructs from the segment array — and the
+  notes ride the user turn of the normal constrained request. The prefix
+  cache makes the second prefill ~free (measured: 2.6-3.8s treated answer
+  after a 12-29s think).
+- **Decision ladder (rules, no router model)**: background batch never
+  thinks; ask menu kinds never think; free questions think on difficulty
+  features (causal shape, ≥2 entities, length), causal+multi-entity gets
+  1024 tokens (448 and 768 both truncated mid-walk, measured); writing
+  thinks at attempt 0 only for insert/tone/unknown, and on EVERY custom
+  retry (gate failure = the cheapest accurate difficulty signal). Notes
+  keep their TAIL on truncation — conclusions form at the end.
+- **Thought attempts get relaxed gates** (owner call): windows ±15%,
+  slack +80, drift +1 — contracts (exact paras, term counts, measures,
+  grammar) never relax.
+- **Ask context system**: questionEntities resolves lowercase-typed names
+  against cast AND the chapter's own capitalization; the MENTIONS rung
+  packs co-mention-first paragraphs labeled P{n}; entity questions get a
+  deterministic scope note (the system prompt anchors to "that paragraph",
+  which answered chapter-scope questions from one beat, measured).
+- Measured: "what did tim do to annaha in this chapter" now answers with
+  the full arc citing mentions (control answered one beat); tone-funny
+  ships at attempt 0 thought (previously needed a diagnosed retry);
+  14/15 intents ship with zero retries; 30/30 constrained-run gates
+  unchanged. Playful rotating "thinking" indicator in both popovers.
+- Research caution honored: thinking HURTS instruction adherence
+  (13/14 models on IFEval) — which is why gated intents stay no-think at
+  attempt 0 and the deterministic gates still judge every thought attempt.
+- KNOWN LIMIT extended: opening-run fails even WITH thinking on retries
+  (fifth presentation variation) — capability limit stands.
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.

@@ -305,6 +305,15 @@ async function handleRun(msg) {
   const maxTokens = Number.isFinite(msg.maxTokens) ? msg.maxTokens : 128;
   const temperature = Number.isFinite(msg.temperature) ? msg.temperature : 0;
   const noThink = msg.noThink !== false;
+  // ★ freeText: NO grammar — the one way this host can actually let a
+  //   thinking model think (a grammar masks think tokens from token zero,
+  //   measured). Callers use it for a reasoning pass stopped at </think>,
+  //   then feed the notes into a normal constrained run. The result carries
+  //   the raw text as { text } so the wire shape stays uniform.
+  const freeText = msg.freeText === true;
+  const stopTexts = Array.isArray(msg.stopTexts)
+    ? msg.stopTexts.filter((s) => typeof s === 'string' && s !== '').slice(0, 4)
+    : [];
   const systemPrompt = String(msg.systemPrompt || '') + (noThink ? '\n/no_think' : '');
 
   let session = null;
@@ -315,11 +324,13 @@ async function handleRun(msg) {
   const t0 = Date.now();
 
   try {
-    let grammar;
-    try {
-      grammar = await getGrammar(msg.schema, msg.jsonStyle);
-    } catch (err) {
-      throw Object.assign(new Error(String((err && err.message) || err)), { kind: 'schema' });
+    let grammar = null;
+    if (!freeText) {
+      try {
+        grammar = await getGrammar(msg.schema, msg.jsonStyle);
+      } catch (err) {
+        throw Object.assign(new Error(String((err && err.message) || err)), { kind: 'schema' });
+      }
     }
 
     // A fresh session per run: every request carries its own system prompt, so
@@ -354,7 +365,8 @@ async function handleRun(msg) {
     });
 
     const meta = await session.promptWithMeta(String(msg.userText || ''), {
-      grammar: grammar.gen,
+      ...(grammar ? { grammar: grammar.gen } : {}),
+      ...(freeText && stopTexts.length ? { customStopTriggers: stopTexts } : {}),
       signal: abort.signal,
       stopOnAbortSignal: true,
       maxTokens,
@@ -400,15 +412,26 @@ async function handleRun(msg) {
     }
 
     let json;
-    try {
-      json = grammar.parse(meta.responseText);
-    } catch (err) {
-      send({
-        type: 'result', id, task, ok: false, error: 'parse',
-        raw: meta.responseText, stopReason: meta.stopReason,
-        detail: String((err && err.message) || err), timings,
-      });
-      return;
+    if (freeText) {
+      // ★ responseText EXCLUDES thought segments on a thinking model — the
+      //   binding segments <think> spans out of the visible response, which
+      //   for a reasoning pass is the entire point. Reconstruct the full
+      //   text from the segment array (strings + {text} segments).
+      const full = Array.isArray(meta.response)
+        ? meta.response.map((it) => (typeof it === 'string' ? it : (it && typeof it.text === 'string' ? it.text : ''))).join('')
+        : '';
+      json = { text: full || meta.responseText };
+    } else {
+      try {
+        json = grammar.parse(meta.responseText);
+      } catch (err) {
+        send({
+          type: 'result', id, task, ok: false, error: 'parse',
+          raw: meta.responseText, stopReason: meta.stopReason,
+          detail: String((err && err.message) || err), timings,
+        });
+        return;
+      }
     }
 
     send({

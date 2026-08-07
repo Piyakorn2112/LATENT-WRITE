@@ -1003,7 +1003,7 @@ async function run(opts = {}) {
   // Queue depth 1. `_claiming` closes the window between this check and
   // `_inflight` being set, which spans an await on ensureLoaded().
   if (_inflight || _claiming) return { ok: false, error: 'busy', requestId };
-  if (!opts.schema || typeof opts.schema !== 'object') {
+  if (opts.freeText !== true && (!opts.schema || typeof opts.schema !== 'object')) {
     return { ok: false, error: 'schema-required', requestId };
   }
 
@@ -1044,7 +1044,9 @@ async function run(opts = {}) {
         task: opts.task || null,
         systemPrompt: String(opts.systemPrompt || ''),
         userText: String(opts.userText || ''),
-        schema: opts.schema,
+        schema: opts.schema || null,
+        freeText: opts.freeText === true,
+        stopTexts: Array.isArray(opts.stopTexts) ? opts.stopTexts : undefined,
         maxTokens: Number.isFinite(opts.maxTokens) ? opts.maxTokens : 128,
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
         minP: Number.isFinite(opts.minP) ? opts.minP : 0,
