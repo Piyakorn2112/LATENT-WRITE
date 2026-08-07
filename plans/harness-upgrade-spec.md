@@ -198,6 +198,29 @@ thinking cases (ominous, insert-dialogue, rhythm, transition): 19/19 ship
 at attempt 0 thought. Classifier gained the ominous/eerie/sinister tone
 vocabulary and possessive-stripped entity resolution ("annaha's warning").
 
+## Where inference actually runs (measured 2026-08-08, M1 Pro)
+
+Both engines are FULLY GPU-offloaded on Apple Silicon; nothing runs on CPU
+by choice, and no mode or task type changes that.
+- In-process host (node-llama-cpp, interactive lane): asks for
+  `gpuLayers: 'max'`; reported back `gpu=metal`, 37/37 layers for the 4B
+  (29/29 for the 1.7B), fa on, Q8_0 KV applied, 1.9s warm load.
+- Sidecar (llama-server, batch lane): passes NO `-ngl`, and llama.cpp's
+  default is `auto`, which resolved to `offloaded 37/37 layers to GPU`
+  (2375.91 MiB weights + 612 MiB KV + 96.4 MiB compute on MTL0). The
+  304 MiB `CPU_Mapped` remainder is the token-embedding table, which
+  llama.cpp keeps host-side by design.
+- ★ THE A/B THAT PROVES IT, same model and 1270-token prompt: default
+  (GPU) 401 tok/s prefill and 35.5 tok/s decode; `-ngl 0` (CPU) 76 tok/s
+  prefill and 17.1 tok/s decode. So Metal is worth 5.3x prefill and 2.1x
+  decode here. Anything that silently loses offload would be very visible.
+- Hardware dependence is real but narrow. `ENGINE.supported` gates the
+  sidecar to darwin+arm64, so elsewhere the batch lane falls back
+  in-process (same answers, less parallelism), and node-llama-cpp picks
+  whatever prebuilt backend that machine has, CPU included. The memory
+  guard shrinks CONTEXT or refuses with `low-memory`; it never quietly
+  demotes to CPU.
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.
