@@ -4,6 +4,10 @@
  * cycling slowly (Claude Code's spinner vocabulary, tuned to a novelist's
  * desk); the random start keeps repeat runs from always opening on the
  * same word.
+ *
+ * CYCLE_MS is deliberately long. A think pass runs 12-30s, so ~5s a word
+ * shows three to six words over a whole pass — the label reads as a settled
+ * mood rather than a flicker, and each phrase gets long enough to be read.
  */
 import { useEffect, useState } from "react";
 
@@ -20,10 +24,12 @@ const WORDS = [
   "Turning it over…",
 ];
 
+const CYCLE_MS = 5000;
+
 export function ThinkingLabel() {
   const [i, setI] = useState(() => Math.floor(Math.random() * WORDS.length));
   useEffect(() => {
-    const t = setInterval(() => setI((v) => v + 1), 1600);
+    const t = setInterval(() => setI((v) => v + 1), CYCLE_MS);
     return () => clearInterval(t);
   }, []);
   return <>{WORDS[i % WORDS.length]}</>;
