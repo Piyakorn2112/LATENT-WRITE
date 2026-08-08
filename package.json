@@ -91,7 +91,9 @@
     "verify:max-ask-e2e": "node scripts/verify-max-ask-e2e.mjs",
     "probe:max-ask-golden": "electron scripts/probe-max-ask-golden.cjs",
     "verify:timeline-cast-scroll": "electron scripts/verify-timeline-cast-scroll.cjs",
-    "verify:timeline-hit-area": "electron scripts/verify-timeline-hit-area.cjs"
+    "verify:timeline-hit-area": "electron scripts/verify-timeline-hit-area.cjs",
+    "probe:character-dossier": "tsx scripts/probe-character-dossier.ts",
+    "probe:dossier-model": "electron scripts/probe-dossier-model.cjs"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",
