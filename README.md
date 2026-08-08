@@ -2078,7 +2078,7 @@ electron scripts/verify-assistant-tasks.cjs
 
 ### Every script in the project
 
-All 80 entries in `package.json`, grouped. The short list above is
+All 81 entries in `package.json`, grouped. The short list above is
 what you would reach for daily; this is the complete inventory, because a
 suite that nobody knows exists is a suite that stops being run.
 
@@ -2168,6 +2168,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run verify:orb-fun-fade` | `scripts/verify-orb-fun-fade.cjs` |
 | `npm run verify:timeline-cast` | `scripts/verify-timeline-cast.cjs` |
 | `npm run verify:timeline-cast-scroll` | `scripts/verify-timeline-cast-scroll.cjs` |
+| `npm run verify:timeline-hit-area` | `scripts/verify-timeline-hit-area.cjs` |
 | `npm run verify:timeline-panel` | `scripts/verify-timeline-panel.cjs` |
 | `npm run verify:toggle-motion` | `scripts/verify-toggle-motion.cjs` |
 | `npm run verify:toggle-press` | `scripts/verify-toggle-press.cjs` |

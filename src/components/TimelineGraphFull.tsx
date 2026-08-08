@@ -601,6 +601,30 @@ const StaticTimelineLayer = memo(function StaticTimelineLayer({
         />
       ) : null)}
 
+      {/* ★ THE COLUMN IS THE TARGET, NOT JUST THE DOT. Selecting a chapter used
+          to mean hitting a ~14px node or its label; the only other thing
+          carrying the handler was a 0.75px drop line. This lays an invisible
+          full-height band over each chapter in exactly the geometry the active
+          beam paints, so the highlight a reader already sees IS the hit area.
+
+          ★★ IT SITS HERE, EARLY, ON PURPOSE. SVG hit-testing follows paint
+          order, so everything drawn after this still wins the click: the cast
+          bars and their tooltips, the chapter nodes and labels below, and the
+          event chips, which are a whole layer painted after this component.
+          Moving this band later would silently swallow every chip click. */}
+      {chapters.map(({ ch, x }) => (
+        <rect
+          key={`hit-${ch.id}`}
+          data-chapter-hit={ch.id}
+          x={x - 26} y={8}
+          width={52} height={svgH - 16}
+          fill="transparent"
+          pointerEvents="all"
+          style={{ cursor: "pointer" }}
+          onClick={() => { onSelectChapter(ch.id); }}
+        />
+      ))}
+
       {/* Narrative spine — tension terrain curve */}
       {spinePath && (
         <path
