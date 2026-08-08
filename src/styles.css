@@ -13761,20 +13761,34 @@ body.workspace-window .renderer-full-chat .rp-chat-input-area:has(.rp-chat-input
   justify-self: end;
 }
 
+/* ★ THE CAST LEDGER SITS AT THE BOTTOM OF THE CANVAS, SO overflow-y: hidden
+   MADE IT UNREACHABLE RATHER THAN MERELY OFF-SCREEN. The canvas height grows
+   with the cast (CHAR_TRACK_H per character, up to MAX_TRACKS), so on a
+   shorter display the ledger was clipped with no way to scroll to it:
+   measured 121px lost at 1280x800 with only five characters, and roughly
+   289px at the eight-track maximum.
+
+   `auto` on both axes is deliberately the whole fix. It changes nothing when
+   the canvas fits, because a scrollbar only appears when it does not, and
+   macOS overlay scrollbars take no layout space either way. The chip strip,
+   the terrain and every coordinate in the SVG are untouched. */
 .timeline-full-scroll {
   flex: 1;
   overflow-x: auto;
-  overflow-y: hidden;
+  overflow-y: auto;
   min-height: 0;
   scrollbar-width: thin;
   scrollbar-color: var(--divider-line) transparent;
   contain: layout paint;
   will-change: scroll-position;
-  overscroll-behavior-x: contain;
+  /* Both axes, so a scroll that runs out of canvas does not chain to the page
+     behind the overlay. */
+  overscroll-behavior: contain;
 }
 
 .timeline-full-scroll::-webkit-scrollbar {
   height: 4px;
+  width: 4px;
 }
 
 .timeline-full-scroll::-webkit-scrollbar-track {
