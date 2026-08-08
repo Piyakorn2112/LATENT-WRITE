@@ -89,6 +89,9 @@ access to your machine rather than as a sandbox.
 - [A note on how this project works](#a-note-on-how-this-project-works)
 - [Project layout](#project-layout)
 - [Command reference](#command-reference)
+- [The IPC surface](#the-ipc-surface)
+- [Building and packaging](#building-and-packaging)
+- [The analysis widgets](#the-analysis-widgets)
 - [Current System Hot Spots](#current-system-hot-spots)
 - [Files To Start With](#files-to-start-with)
 - [Going deeper](#going-deeper)
@@ -2194,6 +2197,91 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run train:event-ranker` | `scripts/train-event-ranker.ts` |
 
 ---
+
+## The IPC surface
+
+The writing surface and the part of the app with real access to your machine are
+two different processes, and everything that crosses between them goes through
+one narrow, explicitly listed bridge. That list is the security boundary, so it
+is worth seeing whole. **49 entries** in total.
+
+| Group | Calls | Events | Examples |
+|---|---|---|---|
+| **App menu and draft guard** | 5 | 1 | `export-pdf`, `draft-guard:update`, `renderer-review`, `narrative-lm-embed` … |
+| **Project filesystem** | 15 | 0 | `project:open`, `project:create`, `project:current`, `project:readFile` … |
+| **Edge colour capture** | 1 | 0 | `edge-color:capture` |
+| **Renderer workspace window** | 3 | 1 | `workspace:open`, `workspace:focus`, `workspace:isOpen` |
+| **Local assistant runtime** | 8 | 1 | `assistant:status`, `assistant:ensure-model`, `assistant:run`, `assistant:cancel` … |
+| **Custom tools** | 3 | 0 | `tool:compile`, `tool:scanProject`, `tool:importTools` |
+| **Claude CLI (the renderer workspace)** | 5 | 6 | `claude:status`, `claude:run`, `claude:stream`, `claude:cancel` … |
+
+Two properties hold across all of it. The bridge is an allow-list, so the page
+you type on cannot reach anything not named here. And in the browser build none
+of it exists, so every call resolves to an unavailable result rather than
+throwing, which is why the web version degrades instead of breaking.
+
+---
+
+## Building and packaging
+
+`electron-builder.yml` defines two distribution paths.
+
+| Target | State |
+|---|---|
+| **DMG (sideload, arm64)** | Builds today. Deliberately **unsigned**, with hardened runtime and Gatekeeper assessment off, so macOS will warn on first open until a Developer ID certificate is configured. |
+| **Mac App Store (.pkg)** | Fully configured but not signed. Needs a Developer Program membership, two certificates, a provisioning profile, and the sandbox entitlements already checked in under `build/`. |
+
+Three things a first-time builder needs to know.
+
+**The build depends on a directory outside this repository.** `extraResources`
+pulls in `../novel-writing-system`, a sibling folder. Without it,
+`npm run electron:build` will not complete from a fresh clone. This is the
+single most likely reason a new checkout fails to package.
+
+**Some things cannot live inside the app archive.** The archive is read-only,
+but llama.cpp ships prebuilt binaries and dynamic libraries that must be opened
+from a real filesystem path, and the tool compiler is a WebAssembly bundle with
+the same constraint. Both are explicitly unpacked.
+
+**Platform binaries are pruned by installation, not by configuration.** The
+llama.cpp binaries arrive as optional dependencies gated on operating system and
+processor, so an install on an Apple Silicon Mac only ever materialises the one
+Metal build. The upstream template's per-platform include patterns are
+deliberately *not* copied here, because they are JavaScript template strings in
+a TypeScript config and electron-builder's own expander does not understand them
+in YAML; pasting them in fails at pack time.
+
+---
+
+## The analysis widgets
+
+Every widget carries its own help text, written to answer "I do not know what
+this is telling me". Those descriptions are reproduced here verbatim, because
+they are the documentation.
+
+| Widget | What it tells you |
+|---|---|
+| **Diagnostics** | Specific problems found in this chapter, such as unclear attribution or a stalled opening. Each line names the thing to go and look at. |
+| **Tension** | How much pressure each paragraph carries, from the first to the last. The peak marks where the chapter turns, and a flat line means nothing is escalating. |
+| **Cast** | Who speaks and how much of the dialogue each character holds. One dominant slice means a single voice is carrying the scene. |
+| **Continuity** | Things that may contradict earlier chapters, including timeline slips, place and time hand-offs, objects introduced and never used again, and knowledge a character could not have yet. |
+| **Cross Arc** | This chapter's tension shape beside the chapters before and after it, with who left the story and who arrived. Shows whether it varies the rhythm or repeats it. |
+| **Role** | The job this chapter does in the book, such as buildup, breather or climax, and how its length, tension and dialogue compare with your average chapter. |
+| **Shaping** | Whether the chapter delivers the effect its structure promises. Over-structured means the scaffolding is doing more work than the prose is. |
+| **Prose Profile** | Point of view and tense as the text actually reads, not as intended, with reading grade, sentence variety, and how much you show against how much you tell. |
+| **Voice** | The dominant mode of the writing, whether sensory, action or dialogue, which senses you write through most, and the register the prose sits in. |
+| **Rhythm** | Every sentence in the chapter as one bar, in the order you wrote them. Bars of similar height read monotonous, mixed heights read varied. |
+| **Repetition** | Exact phrases used more than once, with where each one first appears. Useful for catching echoes you did not intend. |
+| **Style Watch** | Habits worth a second look, counting filter words, passive voice, adverbs and clichés, plus sentence openers you repeat. |
+| **Character Voice** | How each character's dialogue differs, by average line length and how often they speak. Also flags pronouns that do not match a character's profile. |
+
+The board is reorderable and each widget can be hidden. The default order is a
+deliberate reading order rather than an arbitrary one: what looks **wrong**
+first, then the chapter's own shape, then how it sits against its neighbours,
+then craft detail from coarse to fine.
+
+---
+
 
 ## Current System Hot Spots
 
