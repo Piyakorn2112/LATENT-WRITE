@@ -244,6 +244,41 @@ corpus test.
 
 ---
 
+## Tidy-up pass executed 2026-08-08 (low-risk only)
+
+Gated by `scripts/fingerprint-analysis.ts` — 21 signatures, ~93k
+consumer-visible facts, hash IDENTICAL before and after every change.
+
+**Done**
+- Deleted `src/lib/auto-intel.ts` (36 lines, born dead 2026-04-30) and
+  `src/components/ProjectSetup.tsx` (212 lines, born dead 2026-05-18; the only
+  commit mentioning it is its own creation). Both confirmed unreferenced
+  including by string, across `src/`, `scripts/`, `electron/` and `index.html`.
+- Removed three adaptive helpers orphaned when the debug panel stopped
+  reporting the retired learner.
+- Hoisted the per-keyword `toLowerCase()` in `chapter-analysis.ts`.
+
+**Measured and reverted** — caching per-name word-boundary regexes in
+`action-detect.ts` moved nothing (2070ms → 2080ms on a 444-paragraph,
+120-name stress shape). V8 already caches them. Shipped nothing.
+
+**Corrections to this audit, found by checking rather than trusting §6**
+- `renderer-review.ts`'s `runRendererReview` / `REVIEW_MODELS` / `FLAG_COLORS`
+  are NOT dead. There is a live electron IPC handler at `main.cjs:520` and a
+  preload binding. It is staged infrastructure awaiting UI. **§6 was wrong to
+  list them.** Any future sweep must resolve against `electron/` IPC channel
+  names, not just JS identifiers.
+- Neither micro-optimisation in §7 is a measurable performance win. §7's claim
+  should be read as "removes redundant work", not "makes it faster". The
+  bottleneck is elsewhere and was not located.
+- Unused entries in the `Icon.tsx` lucide barrel are not a defect; a curated
+  palette exposes more than any one screen uses.
+
+**Deliberately untouched:** `alias-review.ts` (must stay unwired),
+`features.ts: hasAccess` (licensing scaffolding), `chapter-observation.ts`
+(staged feature), `detectSpeechInParagraph` (core engine file), and everything
+in §1-§5.
+
 ## Suggested order
 
 1. §7 micro-waste — free, provable, warms up the corpus gate. (P3 but trivial)
