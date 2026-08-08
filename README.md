@@ -239,9 +239,13 @@ flowchart TD
     T --> U[TimelineGraph]
     T --> V[TimelineGraphFull]
 
-    H --> D
-    H --> L
-    H --> G
+    %% Corrections no longer steer detection. They are resolved to spans and
+    %% stamped onto the analysis RESULT, which every consumer then shares.
+    H --> HP["annotation-pins: resolve + stamp"]
+    D --> HP
+    HP --> L
+    HP --> F
+    HP --> G
 
     I --> W[RendererPanel]
     W --> X[RendererWorkspaceFull]
@@ -1906,6 +1910,128 @@ electron scripts/verify-alias-ui.cjs
 # Local-model tasks (skip cleanly when the model is not downloaded)
 electron scripts/verify-assistant-tasks.cjs
 ```
+
+---
+
+### Every script in the project
+
+All 79 entries in `package.json`, grouped. The short list above is
+what you would reach for daily; this is the complete inventory, because a
+suite that nobody knows exists is a suite that stops being run.
+
+**Run and build**
+
+| Command | Runs |
+|---|---|
+| `npm run build` | `tsc -b && vite build` |
+| `npm run dev` | `vite` |
+| `npm run electron:build` | `npm run build && electron-builder --mac --conf…` |
+| `npm run electron:dev` | `npm run build && electron .` |
+| `npm run preview` | `vite preview` |
+
+**Accuracy suites — score an engine against expectations**
+
+| Command | Runs |
+|---|---|
+| `npm run test:action-assign` | `scripts/test-action-assign.ts` |
+| `npm run test:action-corpus` | `scripts/test-action-corpus.ts` |
+| `npm run test:alias-scan` | `scripts/test-alias-scan.ts` |
+| `npm run test:arc-insights` | `scripts/test-arc-insights.ts` |
+| `npm run test:assist-reviews` | `scripts/test-assist-reviews.ts` |
+| `npm run test:attribution-corpus` | `scripts/test-attribution-corpus.ts` |
+| `npm run test:auto-format` | `scripts/test-auto-format.ts` |
+| `npm run test:cast-corpus` | `scripts/test-cast-corpus.ts` |
+| `npm run test:cast-roles` | `scripts/test-cast-roles.ts` |
+| `npm run test:chapter-brief` | `scripts/test-chapter-brief.ts` |
+| `npm run test:chapter-observation` | `scripts/test-chapter-observation.ts` |
+| `npm run test:chapter-roles` | `scripts/test-chapter-roles.ts` |
+| `npm run test:chapter-summary` | `scripts/test-chapter-summary.ts` |
+| `npm run test:chip-picker` | `scripts/test-chip-picker.ts` |
+| `npm run test:dialogue-events` | `scripts/test-dialogue-events.ts` |
+| `npm run test:entity-review` | `scripts/test-entity-review.ts` |
+| `npm run test:entity-scan` | `scripts/test-entity-scan.ts` |
+| `npm run test:event-detect` | `scripts/test-event-detect.ts` |
+| `npm run test:evidence-pack` | `scripts/test-evidence-pack.ts` |
+| `npm run test:glass-exact` | `scripts/test-liquid-glass-exact.ts` |
+| `npm run test:glass-fuzz` | `scripts/test-liquid-glass-fuzz.ts` |
+| `npm run test:glass-pixels` | `scripts/glass-pixel-diff.cjs` |
+| `npm run test:glass-pixels:save` | `scripts/glass-pixel-diff.cjs` |
+| `npm run test:knob-glass` | `scripts/test-knob-glass.ts` |
+| `npm run test:knowledge-ledger` | `scripts/test-knowledge-ledger.ts` |
+| `npm run test:known-names` | `scripts/test-known-names.ts` |
+| `npm run test:label-quality` | `scripts/test-label-quality.ts` |
+| `npm run test:local-review` | `scripts/test-local-review.ts` |
+| `npm run test:max-ask` | `scripts/test-max-ask.ts` |
+| `npm run test:narrative-lm` | `scripts/test-narrative-lm.ts` |
+| `npm run test:orb-physics` | `scripts/orb-physics-probe.ts` |
+| `npm run test:pronoun-owners` | `scripts/test-pronoun-owners.ts` |
+| `npm run test:prose-segments` | `scripts/test-prose-segments.ts` |
+| `npm run test:tension-scene` | `scripts/test-tension-scene.ts` |
+
+**Probes — measure and print, no pass/fail**
+
+| Command | Runs |
+|---|---|
+| `npm run analyse:event-signals` | `scripts/analyse-event-signals.ts` |
+| `npm run print:alias-chapter` | `scripts/test-alias-scan.ts` |
+| `npm run print:chapter` | `scripts/print-chapter.ts` |
+| `npm run probe:alias-referent` | `scripts/probe-alias-referent.cjs` |
+| `npm run probe:assist-funnels` | `scripts/probe-assist-funnels.ts` |
+| `npm run probe:chip-quality` | `scripts/probe-chip-quality.cjs` |
+| `npm run probe:entity-funnel` | `scripts/probe-entity-funnel.ts` |
+| `npm run probe:lm-blend` | `scripts/probe-lm-blend.ts` |
+| `npm run probe:lm-cost` | `scripts/probe-lm-cost.ts` |
+| `npm run probe:max-ask` | `scripts/probe-max-ask.cjs` |
+| `npm run probe:max-ask-golden` | `scripts/probe-max-ask-golden.cjs` |
+| `npm run probe:missed-majors` | `scripts/probe-missed-majors.ts` |
+| `npm run probe:position-prior` | `scripts/probe-position-prior.ts` |
+| `npm run probe:rank-inversion` | `scripts/probe-rank-inversion.ts` |
+| `npm run probe:writer-view` | `scripts/probe-writer-view.ts` |
+
+**Verification — behaviour gates, many in real Electron**
+
+| Command | Runs |
+|---|---|
+| `npm run diff:toggle-sequence` | `scripts/diff-toggle-sequence.cjs` |
+| `npm run gold:validate` | `scripts/validate-gold-batch.ts` |
+| `npm run verify:alias-scan-ui` | `scripts/verify-alias-scan-ui.cjs` |
+| `npm run verify:app-toggle` | `scripts/probe-app-toggle.cjs` |
+| `npm run verify:assistant-runtime` | `scripts/verify-assistant-runtime.cjs` |
+| `npm run verify:assistant-tasks` | `scripts/verify-assistant-tasks.cjs` |
+| `npm run verify:cross-widgets` | `scripts/verify-cross-widgets.mjs` |
+| `npm run verify:knowledge-e2e` | `scripts/verify-knowledge-e2e.mjs` |
+| `npm run verify:max-ask-e2e` | `scripts/verify-max-ask-e2e.mjs` |
+| `npm run verify:model-manage` | `scripts/verify-model-manage.cjs` |
+| `npm run verify:orb-fun-fade` | `scripts/verify-orb-fun-fade.cjs` |
+| `npm run verify:timeline-cast` | `scripts/verify-timeline-cast.cjs` |
+| `npm run verify:timeline-panel` | `scripts/verify-timeline-panel.cjs` |
+| `npm run verify:toggle-motion` | `scripts/verify-toggle-motion.cjs` |
+| `npm run verify:toggle-press` | `scripts/verify-toggle-press.cjs` |
+| `npm run verify:toggle-tap` | `scripts/verify-toggle-tap.cjs` |
+| `npm run verify:widget-help` | `scripts/verify-widget-help.mjs` |
+
+**Drift audits — held-out books the engines were never tuned on**
+
+| Command | Runs |
+|---|---|
+| `npm run audit:ood` | `scripts/ood-language-audit.ts` |
+| `npm run audit:ood-events` | `scripts/ood-event-audit.ts` |
+
+**Performance**
+
+| Command | Runs |
+|---|---|
+| `npm run bench:assistant` | `scripts/bench-assistant.cjs` |
+| `npm run bench:glass-glow` | `scripts/glass-glow-bench.cjs` |
+| `npm run bench:glass-gpu` | `scripts/glass-gpu-bench.cjs` |
+| `npm run profile:glass-app` | `scripts/glass-app-profile.cjs` |
+
+**Tooling**
+
+| Command | Runs |
+|---|---|
+| `npm run export:orb` | `scripts/export-orb-svg.ts` |
+| `npm run train:event-ranker` | `scripts/train-event-ranker.ts` |
 
 ---
 
