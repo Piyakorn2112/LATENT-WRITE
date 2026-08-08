@@ -76,10 +76,16 @@ export function DebugPanel({
     [globalCorrectionCount, pins],
   );
 
+  // ★ THESE ARE A CHAIN, NOT TWO PEERS, AND THE PANEL USED TO IMPLY OTHERWISE.
+  //   Speech runs first. Action then runs ON speech's output: quoted spans are
+  //   excluded from action candidates, the confident speakers join the actor
+  //   pool, and the speaker becomes the antecedent the pronoun carry resolves
+  //   against. So a wrong speaker propagates into the actor beneath it, and
+  //   reading the two counts as independent scores hides the real dependency.
   const taskSummary = useMemo(
     () => [
-      { label: "Speech", predictions: speechPredictions, review: speechReviewCount },
-      { label: "Action", predictions: actionPredictions, review: actionReviewCount },
+      { label: "Speech", note: "runs first", predictions: speechPredictions, review: speechReviewCount },
+      { label: "Action", note: "from speech", predictions: actionPredictions, review: actionReviewCount },
     ],
     [speechPredictions, speechReviewCount, actionPredictions, actionReviewCount],
   );
@@ -129,6 +135,7 @@ export function DebugPanel({
           <span key={task.label} className="debug-panel-task-card">
             <span className="debug-panel-task-head">
               <span className="debug-panel-task-name">{task.label}</span>
+              <span className="debug-panel-task-chip">{task.note}</span>
             </span>
             <span className="debug-panel-task-metrics">
               <span className="debug-panel-task-metric">
@@ -149,6 +156,9 @@ export function DebugPanel({
         <span className="debug-panel-line">Saving to {storageLine}</span>
         <span className="debug-panel-line">
           Corrections pin their own span and do not steer detection
+        </span>
+        <span className="debug-panel-line">
+          Action attribution reads speech, so a wrong speaker carries into it
         </span>
       </div>
     </div>
