@@ -35,6 +35,40 @@
  *      improves. A confident wrong speaker is the failure that costs something;
  *      a declined answer costs nothing, because the engine keeps its own.
  *
+ * ★★ THREE MORE MODELS MEASURED (2026-08-08). STILL NOT WIRED, BUT THE BLOCKER
+ *    IS NOW ONE NAMED CASE INSTEAD OF FOUR. Per presentation, over the same
+ *    five determinate cases:
+ *
+ *      model                        right  declined  WRONG-APPLIED
+ *      Qwen3-1.7B      (ships, On)      1       0-1            3-4
+ *      Qwen3-4B-Think  (ships, Max)     4         0              1
+ *      Qwen3.5-4B      (candidate)      4         0              1
+ *      Granite-4.0-1B  (candidate)      0         5              0
+ *
+ *    Scale fixes MOST of it: the 1.7B's "asserts evidence that is not there"
+ *    is gone at 4B, and three of its four wrong cases go right. But both 4B
+ *    models fail the SAME case, `continues+`, in ALL FOUR presentations, at the
+ *    same 0.9 confidence, with the same sentence: "the line is a direct reply
+ *    to Bern Halloway's statement". That is the reply-direction inversion,
+ *    applying alternation to a speaker continuing through his own beat.
+ *
+ *    It survives 1.7B → 4B (2.4x the parameters), Qwen3 → Qwen3.5 (a full
+ *    generation), four presentations and two prompt versions. So it is
+ *    MODEL-INVARIANT WITHIN THIS FAMILY and buying a bigger model will not
+ *    clear the bar. The gold is not in doubt: ¶7 is Bern's own beat and the
+ *    line opens with "And", continuing his sentence.
+ *
+ *    The Granite 0/5/0 is not a pass. It emitted nothing usable at all: GBNF
+ *    decoding fails on it in our stack ("Unexpected empty grammar stack"), so
+ *    every case declined. Never read a zero in the WRONG-APPLIED column as
+ *    success without checking the `right` column is non-zero.
+ *
+ *    What is left is a single, precisely characterised, reproducible failure
+ *    with unlimited training data available (every novel in the corpus is full
+ *    of continued-beat dialogue). That makes it the one place in this app where
+ *    a task-specific fine-tune has a clear target. See
+ *    plans/model-evaluation-2026-08.md for the effort estimate and the risks.
+ *
  * The queue is the ENGINE'S OWN UNCERTAINTY: spans where a speaker was chosen
  * but the posterior landed between PRONOUN_MIN_POSTERIOR (0.25) and
  * ATTESTED_FLOOR (0.78).

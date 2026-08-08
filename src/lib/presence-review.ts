@@ -63,6 +63,23 @@ export const PRESENCE_MIN_CONFIDENCE = 0.7;
  *    model that has already shown it will answer 0.5 rather than abstain.
  *    Re-run scripts/probe-presence-review.cjs on any new model before repeating
  *    this claim — reachability is a property of the model, not of the prompt.
+ *
+ * ★★ RE-RUN ON THREE MORE MODELS (2026-08-08), STILL ZERO. The claim above was
+ *    measured on qwen3-1.7b alone. It now holds across the whole size range and
+ *    across a model generation, so it is a property of the TASK, not of one
+ *    model, and scaling will not buy the abstention:
+ *
+ *      model                        right  wrong-applied  declined  "unsure"
+ *      Qwen3-1.7B      (ships, On)      4              0         3         0
+ *      Qwen3-4B-Think  (ships, Max)     3              0         4         0
+ *      Qwen3.5-4B      (candidate)      5              0         2         0
+ *      Granite-4.0-1B  (candidate)      0              0         7         0
+ *
+ *    Every model clears the ship condition (wrong-applied 0), so this task is
+ *    NOT the one to change models for. The Granite row is not a score: its
+ *    grammar decoding fails outright in our stack, see the findings doc.
+ *    Run a candidate with PROBE_TIER=max and/or PROBE_NOTHINK=0 as appropriate;
+ *    `/no_think` is a Qwen token and is junk in a non-Qwen prompt.
  */
 export type PresenceVerdict = "in-the-scene" | "talked-about" | "unsure";
 

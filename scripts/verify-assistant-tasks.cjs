@@ -174,9 +174,28 @@ const timingLine = (t) =>
     ? `prefill ${t.prefillMs}ms · gen ${t.genMs}ms · total ${t.totalMs}ms · ${t.tokens} tok · ${t.tokensPerSec} tok/s`
     : 'no timings';
 
+// ★ CANDIDATE-MODEL INPUTS, DEFAULTING TO EXACTLY THE OLD BEHAVIOUR.
+//   ASSISTANT_MODEL_PATH already swaps the WEIGHTS, but the tier's CONFIG still
+//   comes from the registry — so pointing it at a thinking model silently ran
+//   it with the SMALL tier's settings and reported it under the small tier's
+//   id. That is a misleading comparison, not a measurement. These make the
+//   config an input too:
+//     PROBE_TIER=max    use the registry's max config (noThink false, 8k ctx)
+//     PROBE_NOTHINK=0   stop appending `/no_think`, which is a QWEN token and
+//                       is literal junk in a Granite or Gemma prompt
+//   Set neither and every historical number from this harness stays comparable.
+const RUN_TIER = process.env.PROBE_TIER === 'max' ? { tier: 'max' } : {};
+const RUN_NOTHINK = process.env.PROBE_NOTHINK === '0' ? { noThink: false } : {};
+const RUN_OVERRIDES = { ...RUN_TIER, ...RUN_NOTHINK };
+
 let win = null;
 async function callBridge(method, arg) {
-  const payload = JSON.stringify(arg === undefined ? null : arg);
+  // Only assistantRun accepts these; every other bridge method passes through.
+  const withOverrides =
+    method === 'assistantRun' && arg && typeof arg === 'object'
+      ? { ...arg, ...RUN_OVERRIDES }
+      : arg;
+  const payload = JSON.stringify(withOverrides === undefined ? null : withOverrides);
   return win.webContents.executeJavaScript(
     `window.electronAPI.${method}(${payload === 'null' ? '' : payload})`,
     true,

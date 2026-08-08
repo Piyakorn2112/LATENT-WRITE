@@ -128,6 +128,17 @@ async function main() {
   const FLOOR = mod.floor;
   CASES.forEach((c, i) => { c.engine = mod.engine[i]; });
 
+  // ★ TIER IS AN INPUT. The "unsure" reachability claim in presence-review.ts
+  //   is explicitly a property of the MODEL, not of the prompt, so re-running
+  //   this against a candidate is the documented procedure. PROBE_TIER=max
+  //   uses the registry's max config rather than applying the small tier's
+  //   settings (noThink true, 4k) to different weights.
+  const TIER = process.env.PROBE_TIER === 'max' ? 'max' : undefined;
+  // ★ `/no_think` is a Qwen token; it is literal junk in a Granite or Gemma
+  //   prompt. Run any non-Qwen candidate with PROBE_NOTHINK=0.
+  const NO_THINK = process.env.PROBE_NOTHINK === '0' ? { noThink: false } : {};
+  console.log(`  model tier: ${TIER || 'small (default)'}${process.env.PROBE_NOTHINK === '0' ? ' · noThink OFF' : ''}`);
+
   const rows = [];
   for (let i = 0; i < CASES.length; i++) {
     const c = CASES[i];
@@ -135,7 +146,11 @@ async function main() {
     const res = await callBridge('assistantRun', {
       requestId: `presrev-${c.id}`, task: 'presence-review',
       systemPrompt: req.systemPrompt, userText: req.userText,
-      schema: req.schema, maxTokens: req.maxTokens, timeoutMs: 60_000,
+      schema: req.schema,
+      // A thinking model spends tokens before it emits.
+      maxTokens: TIER === 'max' ? Math.max(req.maxTokens, 1024) : req.maxTokens,
+      timeoutMs: TIER === 'max' ? 180_000 : 60_000,
+      ...(TIER ? { tier: TIER } : {}), ...NO_THINK,
     });
     const j = res && res.ok ? res.json : null;
     rows.push({ c, j });

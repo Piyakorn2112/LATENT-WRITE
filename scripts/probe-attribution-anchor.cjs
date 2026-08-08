@@ -204,8 +204,23 @@ async function main() {
   const mod = JSON.parse(dumped.trim().split('\n').pop());
   const systemPrompt = mod.ATTRIBUTION_SYSTEM;
   const schema = mod.ATTRIBUTION_SCHEMA;
-  const maxTokens = 128;
+  // ★ TIER IS AN INPUT, because this probe's whole job is to be re-run against
+  //   a candidate model. Defaulting to the small tier keeps every historical
+  //   number comparable; PROBE_TIER=max runs the 4B with the REGISTRY's max
+  //   config (noThink false, 8k context) rather than silently applying the
+  //   small tier's settings to different weights, which is what makes an
+  //   ASSISTANT_MODEL_PATH swap alone a misleading comparison.
+  const TIER = process.env.PROBE_TIER === 'max' ? 'max' : undefined;
+  // ★ `/no_think` IS A QWEN TOKEN, NOT A UNIVERSAL ONE. The host appends it to
+  //   the system prompt whenever noThink is true, which is right for Qwen3 and
+  //   is literal junk in a Granite or Gemma prompt. Any non-Qwen candidate must
+  //   be run with PROBE_NOTHINK=0 or it is being handicapped, not measured.
+  const NO_THINK = process.env.PROBE_NOTHINK === '0' ? { noThink: false } : {};
+  // A thinking model spends tokens before it emits, so the cap has to move with
+  // the tier or the budget is gone before the JSON starts.
+  const maxTokens = Number(process.env.PROBE_MAX_TOKENS) || (TIER === 'max' ? 1024 : 128);
   const MIN = mod.ATTRIBUTION_MIN_CONFIDENCE;
+  console.log(`  model tier: ${TIER || 'small (default)'} · maxTokens ${maxTokens}`);
 
   const tally = new Map(VARIANTS.map((v) => [v.id, { right: 0, wrongApplied: 0, declined: 0 }]));
 
@@ -217,7 +232,8 @@ async function main() {
         task: 'attribution-review',
         systemPrompt,
         userText: buildUserText(c, variant),
-        schema, maxTokens, timeoutMs: 60_000,
+        schema, maxTokens, timeoutMs: 180_000,
+        ...(TIER ? { tier: TIER } : {}), ...NO_THINK,
       });
       const json = res && res.ok ? res.json : null;
       const said = json && typeof json.speaker === 'string' ? json.speaker.trim() : '';
