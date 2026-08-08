@@ -366,27 +366,33 @@ It is tempting to present this as one ranked list of clues. That would be wrong,
 so here is the real shape. The engine first checks for a speech verb (*said*,
 *asked*, *whispered*) within about 80 characters of the quote. That single test
 sends the paragraph down **one of two different chains of rules**, and each chain
-is a run of specific tests that stops the moment one matches. There are roughly
-thirty-five such exits. Only when none of them fires does a **scoring stage**
-run, where every candidate character accumulates points.
+is a run of specific tests that stops the moment one matches. There are exactly
+thirty-five such exits. A **scoring stage**, where candidates accumulate points,
+sits partway down the chain rather than at the end, and two further single-exit
+rules sit below it. The chain taken when there is no speech verb nearby, which
+is roughly half the traffic, never reaches the main scoring stage at all and
+runs a small one of its own.
 
 The signals carrying the most weight are these.
 
 | Signal | What it does |
 |---|---|
 | An explicit tag | `"Go now," said Mara.` Settles it outright. |
-| Narrative focus | Whose paragraph this is. The largest single score in the engine, worth nearly three times "the character currently on stage". |
+| Narrative focus | Whose paragraph this is. The largest **capped** term, worth nearly three times "the character currently on stage". Two uncapped terms, conversation turns taken and how densely a name appears nearby, can exceed it. |
 | Gender agreement | A **filter**, not a score. `she said` removes every man from the running, and when that leaves exactly one candidate it counts as strong evidence rather than weak. |
-| The dialogue thread | A running model of who is in this conversation and whose turn it is. Removing it drops the high setting from 210 correct out of 217 to 183. |
+| The dialogue thread | A running model of who is in this conversation and whose turn it is. Ablating it was measured costing 27 of 217 curated cases at the time it was added. |
 | Continuity | Whoever is already active keeps speaking unless something displaces them. |
 | Alternation | Two people trading turns. Deliberately loses to continuity when the two disagree. |
-| Scene roster | Who is actually present in this scene, which stops a line being handed to someone who never speaks in the entire book. This one constraint fixed 15.2% of bare dialogue lines. |
-| A later sentence | A pass that reads *forward*, because fiction often names the speaker only after the line. |
+| Scene roster | Who has actually spoken in this scene, used to prefer a plausible speaker over a merely nearby name. |
+| Candidate filtering | A separate step *before* attribution that strips places, factions and objects out of the pool of possible speakers. Measured fixing **15.2%** of bare dialogue lines that had been handed to something that never speaks in its own book. |
+| A later sentence | A high-setting-only pass that reads *forward* and uses a sandwich: if the lines either side of a bare one belong to the same speaker, the bare one belongs to the other party. |
 
 **About the word "confidence".** It is not a probability that the answer is
-right, and it is not a margin over the runner-up. It is a fixed number attached
-to *whichever rule fired*, running from about 0.95 for an explicit tag down to
-about 0.55 for the weakest inference. So it records **how the engine reached
+right. For almost every answer it is a fixed number attached to *whichever rule
+fired*, running from about 0.95 for an explicit tag down to about 0.55 for the
+weakest inference. The exception is the pronoun-resolution branch, which does
+compute a genuine ratio between the winner and the runner-up; measured, that
+accounts for between 1% and 7% of attributed lines. So it records **how the engine reached
 this answer**, and the strength of colour in your margin is showing you that. A
 pale colour means "this came from a weak rule, worth a look", not "the engine
 calculated a chance of being wrong".
@@ -457,9 +463,9 @@ Paler colour means it is less sure. If it is wrong you can correct it, and the
 correction sticks to that line forever (see
 [Correcting the app](#5-correcting-the-app-when-it-is-wrong)).
 
-**Honest limits, with both numbers.** On ordinary dialogue that carries a tag
-like `said Mara`, the engine is right **86%** of the time at its normal setting
-and **100%** on the curated test cases. On dialogue where the tag has been
+**Honest limits, with both numbers.** On the curated suite, which is mostly
+ordinary tagged dialogue, the engine scores **86%** at the fast-then-refined
+first pass and **100%** once it settles at the high setting. On dialogue where the tag has been
 deliberately deleted and the speaker must be recovered from context alone,
 across fifteen books, it is right about **52%** of the time.
 
@@ -547,7 +553,7 @@ paragraphs and a bucket index maps back to a bucket *centre*.
 
 From `scripts/test-analysis-responsiveness.ts` on the current codebase:
 
-- Low: ~44.45ms average across sampled chapters.
+- Fast: ~44.45ms average across sampled chapters.
 - Default: ~58.13ms average.
 - High: ~214.73ms average.
 - High mode is roughly 4.83x the cost of low mode on the sampled set.
@@ -628,7 +634,7 @@ flowchart TD
 #### Two Channels, And Why
 
 Most events in this corpus are **attributed dialogue acts**. Speaker attribution is
-this app's strongest signal (`speech-detect` ~96% in high mode) and the predecessor
+this app's strongest signal (`speech-detect` at its measured high-mode accuracy) and the predecessor
 used it as a flat +0.2 for "contains a quotation mark".
 
 #### Verification
@@ -1032,7 +1038,7 @@ Beyond role, tension curve, word count and `majorEvents`, an entry carries:
 - Hover text on every event chip in both views: type, salience, paragraph,
   confidence, and the **source clause**.
 - Top-character chips and chapter navigation clicks.
-- Stored story graph entries in localStorage.
+- Stored story graph entries, in the project folder when one is open and local storage otherwise.
 
 #### Performance Paths
 
@@ -1091,9 +1097,10 @@ flowchart TD
 
 Two design rules matter here:
 
-**The model is given windows, never the whole book.** Each task gets a window of roughly 110 to 140
-characters on *each side* of the thing in question, so 220 to 280 characters in
-total, about a short paragraph. This keeps answers about
+**The model is given windows, never the whole book.** How much varies by task. The narrowest ask for about 130 to 140 characters on
+*each side* of the thing in question, roughly a short paragraph. The widest,
+scene review, gets up to 1200 characters, taken as the head and tail of the
+scene rather than the middle. This keeps answers about
 what the sentences actually say rather than what the model half-remembers.
 
 **Answers are checked, not trusted.** A verifier looks at whether the answer is
@@ -1169,11 +1176,14 @@ flowchart LR
 
 #### Current Bottlenecks
 
-- One model, one slot. Concurrent tasks queue; the sweep is written to be
-  sequential and cancellable rather than to fight for the lock.
-- First run after a cold start pays host boot plus model load (both have
-  120 s ceilings) before the first token.
-- The 5-minute idle TTL trades a reload against holding ~1.1 GB resident.
+- The in-process host is one model, one slot, so concurrent interactive tasks
+  queue; the sweep is written to be sequential and cancellable rather than to
+  fight for the lock. The batch lane is different: it runs on the sidecar with
+  four slots and true continuous batching.
+- First run after a cold start pays host boot (60 s ceiling) plus model load
+  (120 s ceiling) before the first token.
+- The idle TTL trades a reload against holding the weights resident. It is
+  per-tier: 5 minutes for the small model, 90 seconds for the larger one.
 
 </details>
 
@@ -1434,9 +1444,17 @@ time you reopened the app.
 Desktop writes one JSON file per store into the project directory through
 `project-manager.ts` → `electron/project-fs.cjs`. The browser build writes the
 same shapes to `localStorage`. `stateTarget()` is the switch and it resolves
-*project vs local*, not *desktop vs web*: a desktop session with no project open
-writes locally, and a refused project write falls back to local rather than
-being dropped. Every store asks it before writing.
+*project vs local* rather than *desktop vs web*, so a desktop session with no
+project open writes locally, and a refused project write falls back to local
+rather than being dropped.
+
+★★ THIS WAS ONCE TRUE OF ONE STORE AND CLAIMED OF ALL OF THEM. The story graph
+got the fix; `storage.ts`, which holds the NOVEL, never called `stateTarget()`
+at all, and five other stores discarded the result of their project write. The
+gate covered story-graph alone, which is exactly how a single-instance fix
+became a false universal. All six stores now resolve the target and rescue a
+refused write, and `verify-state-persistence.ts` drives every one of them
+through both failure modes.
 
 | Store | Project file | localStorage key | Holds |
 |---|---|---|---|
@@ -1525,7 +1543,9 @@ flowchart LR
 
 - Persistent Claude sessions, streamed assistant/thinking/tool lanes, and file-change notifications.
 - Fullscreen renderer workspace with file tree, markdown/text preview, and resizable chat pane.
-- Renderer review flags in the analysis surface.
+- Renderer review flags in the analysis surface. **Staged, not reachable:**
+  `runRendererReview` has no caller in `src/`, so nothing currently collects an
+  API key or posts to the API. The IPC handler and the client both exist.
 - Persisted review results.
 - Exported PDF / print HTML.
 
@@ -1587,8 +1607,8 @@ flowchart LR
 - Novel content loaded from `storage.ts`.
 - Current chapter id loaded from `storage.ts`.
 - Preferences loaded from `preferences.ts`.
-- Story graph loaded from `story-graph.ts` localStorage helpers.
-- Review results loaded from `renderer-review.ts` localStorage helpers.
+- Story graph loaded via `story-graph.ts`, from the project folder or local storage depending on the resolved target.
+- Review results loaded via `renderer-review.ts`, from the project folder or local storage depending on the resolved target.
 - Annotation store loaded from `annotation-store.ts`.
 - Adaptive store loaded from `adaptive-store.ts`.
 - Electron menu commands, keyboard shortcuts, import/export actions.
@@ -2179,7 +2199,7 @@ suite that nobody knows exists is a suite that stops being run.
 
 - Fullscreen timeline detail chips remain the primary timeline-specific hot path.
 - Event detection adds a synchronous per-chapter pass on the deferred story-graph path; it is clause-level over every sentence, so it scales with sentence count rather than paragraph count.
-- High intelligence mode remains intentionally expensive; low mode is the fast writing-safe path.
+- High intelligence mode remains intentionally expensive; fast mode is the writing-safe path.
 - Whole-book world/entity scans remain expensive on large manuscripts.
 - LocalStorage persistence still needs disciplined payload sizes for annotations/adaptive data.
 - Complex backdrop-filter stacks are still a compositor risk when not explicitly frozen or isolated, which is why timeline, renderer workspace, and onboarding all use body-freeze overlay modes.
