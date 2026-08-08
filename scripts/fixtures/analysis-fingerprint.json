@@ -1,0 +1,86 @@
+{
+ "pride/fast": {
+  "hash": "7753bf0f4feeb5ce",
+  "lines": 8889
+ },
+ "pride/default": {
+  "hash": "6f835156f470cdcd",
+  "lines": 8937
+ },
+ "pride/high": {
+  "hash": "0ba862d58162fc14",
+  "lines": 8945
+ },
+ "sherlock/fast": {
+  "hash": "77651eff4da28ea5",
+  "lines": 5271
+ },
+ "sherlock/default": {
+  "hash": "134ee02de7db3476",
+  "lines": 5298
+ },
+ "sherlock/high": {
+  "hash": "a51e080b6fe4ee83",
+  "lines": 5305
+ },
+ "expectations/fast": {
+  "hash": "4d6bd00dbb0b70e5",
+  "lines": 13018
+ },
+ "expectations/default": {
+  "hash": "7b100e0b9805d323",
+  "lines": 13145
+ },
+ "expectations/high": {
+  "hash": "b55cbead8f206af7",
+  "lines": 13168
+ },
+ "anne/fast": {
+  "hash": "e4b5605e89e4fd4a",
+  "lines": 5748
+ },
+ "anne/default": {
+  "hash": "7fd2b53173b22eb0",
+  "lines": 5782
+ },
+ "anne/high": {
+  "hash": "21e0468f14eda186",
+  "lines": 5780
+ },
+ "gatsby/fast": {
+  "hash": "6fa9d4a4ec624f84",
+  "lines": 4641
+ },
+ "gatsby/default": {
+  "hash": "6d59248e7a0c6046",
+  "lines": 4608
+ },
+ "gatsby/high": {
+  "hash": "e048865c3ac85685",
+  "lines": 4625
+ },
+ "webnovel/fast": {
+  "hash": "b1d26a8a21e4a1fd",
+  "lines": 1005
+ },
+ "webnovel/default": {
+  "hash": "f609a74c718fadd6",
+  "lines": 1013
+ },
+ "webnovel/high": {
+  "hash": "8adf6b11d26624aa",
+  "lines": 1023
+ },
+ "treasure/fast": {
+  "hash": "f16a15e6fe7f1a83",
+  "lines": 4570
+ },
+ "treasure/default": {
+  "hash": "382211af9eb625f8",
+  "lines": 4606
+ },
+ "treasure/high": {
+  "hash": "fc61ddb31af8e349",
+  "lines": 4624
+ }
+}
