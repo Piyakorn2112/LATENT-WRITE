@@ -255,6 +255,68 @@ matter as much as the shipped flags.
   gpt-oss advice) is ~7% WORSE than default here; ubatch 256-1024 all within
   noise on throughput. Measure per machine class, don't import advice.
 
+## Annotation: corrections are pins, not priors (shipped 2026-08-08)
+
+The annotation loop's promise was never measured. `probe-annotation-feedback.ts`
+replays it against auto-labelled corpus gold and scores only spans the user
+never touched.
+
+- ★★ THE STORE SAMPLED THE ENGINE'S ERRORS AND WAS USED AS A MODEL OF THE
+  WORLD. Only disagreements could ever be stored (Confirm was disabled when
+  the user agreed; every adaptive persist path filtered
+  `correctedLabel !== undefined`), so `speakerPriors` was
+  P(character | engine was wrong) applied as P(character speaks). Boosting a
+  character *because they are hard to attribute* pushes them into paragraphs
+  the engine already had right, and it compounds with volume.
+- MEASURED: held-out accuracy 0.0pp across five books up to 160 corrections,
+  against 115/3923 attributions flipped book-wide at just 10 corrections
+  (2.9%, peaking 3.2%), visibly wrong (Pip→Joe, Wopsle→Joe, Pumblechook→Joe).
+  Damage PEAKS at the activation threshold, where the prior is most
+  concentrated. Easy gold resolves at an early tier and is BLIND to the bias,
+  so accuracy alone reported nothing — blast radius is the metric.
+- ★★ SCALE: `speakWeights` is a recency slot whose max is 1.0 ("just spoke",
+  decaying ×0.80/para). The prior injected up to 5.0, outranking a live
+  speaker for ~8 paragraphs and staying over the 0.05 floor for ~21.
+- ★★ THE CORRECTION NEVER REACHED THE SPAN. The override lived in
+  HighlightLayer only, so it repainted the editor while the story graph,
+  timeline, chips and every LLM prompt kept the engine's original guess.
+  Answering "who said this" correctly in the UI and wrongly to the model.
+- SHIPPED: `src/lib/annotation-pins.ts`. A correction pins its span exactly,
+  anchored by CONTENT (span text + context edge, index only as a first
+  guess), applied to the shared analysis result so every consumer and the
+  model inherit it. Detection runs at the baseline the accuracy suites have
+  always tested — they never passed a bias — re-verified FAST/DEFAULT/HIGH at
+  80/86/100%. Index anchoring was actively dangerous in a writing app: an
+  inserted paragraph silently RE-POINTED a label onto a different sentence.
+- Gates: `verify-annotation-pins.ts` (14) proves sticks / travels / inert,
+  plus edit-shift and deleted-sentence handling. Keep the probe: it is what
+  any future "let corrections teach the engine" proposal must beat.
+- Deferred by design: generalisation is allowed back only inside the base
+  engine's uncertainty band, bounded below its native signal scale, and gated
+  on leave-one-out replay of the user's own labels. That needs recorded
+  AGREEMENT first (enable Confirm when unchanged), which nothing stores yet.
+
+## Durable state: the timeline used to vanish on close (shipped 2026-08-08)
+
+- ★★ "IS DESKTOP" AND "HAS SOMEWHERE TO WRITE" ARE DIFFERENT QUESTIONS. Every
+  store branched on `isDesktopApp()` alone, sending state to the project
+  folder and skipping localStorage. But `project:saveState` returns
+  `{ok:false,'No project open'}` when there is no folder, and no caller read
+  the result — so a desktop draft wrote its story graph, annotations,
+  reviews, ledger and adaptive store to NOWHERE. Boot then called
+  `clearProjectLocalStorage()` before knowing whether a project would open.
+  The arc timeline was blank on every reopen.
+- SHIPPED: `stateTarget()` in project-manager resolves project vs local; a
+  refused write falls back to local rather than being dropped and
+  self-corrects the flag; boot clears local keys only once a project has
+  actually opened; hydrate sets the target before its own re-saves.
+  Generation and the live session are untouched — revisiting a chapter still
+  re-runs analysis and restamps its entry, this only stops the graph starting
+  from nothing.
+- Gate: `verify-state-persistence.ts` (12) covers web / desktop-no-project /
+  desktop-project / project-closes-mid-session, and was checked against the
+  old code where it reproduces the blank timeline.
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.
