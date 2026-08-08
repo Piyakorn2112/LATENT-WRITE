@@ -47,7 +47,7 @@ import {
   saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
 } from "./lib/story-graph";
 import { loadReviewResults, loadReviewResultsFromProject, saveReviewResults } from "./lib/renderer-review";
-import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools, setProjectOpenState, stateTarget } from "./lib/project-manager";
+import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools, setProjectOpenState } from "./lib/project-manager";
 import type { ToolScanEntry } from "./lib/project-manager";
 import { ToolImportOverlay } from "./components/ToolImportOverlay";
 import type { ToolHighlight } from "./lib/tool-runner";
@@ -699,17 +699,6 @@ export default function App() {
     [annotationStore.corrections, activeChapterId],
   );
 
-  const annotationOverrides = useMemo<Map<string, string | null> | undefined>(() => {
-    if (!activeChapterId) return undefined;
-    const relevant = chapterCorrections;
-    if (!relevant.length) return undefined;
-    const map = new Map<string, string | null>();
-    for (const c of relevant) {
-      map.set(`${c.paragraphIndex}-${c.spanIndex}-${c.spanType}`, c.correctedSpeaker);
-    }
-    return map;
-  }, [chapterCorrections, activeChapterId]);
-
   const handleSpeechAnnotate = useCallback((info: AnnotationTarget, anchor: DOMRect) => {
     const existing = activeChapterId
       ? annotationStore.corrections.find(
@@ -878,6 +867,7 @@ export default function App() {
     entityNameMap,
     prevResult: prevAnalysisResult,
     nextResult: nextAnalysisResult,
+    resultChapterId: analysisChapterId,
   } = useAnalysis(novel, activeChapterId, {
     debounceMs: analysisDebounceMs,
     converge: intelMode !== "off",
@@ -900,14 +890,38 @@ export default function App() {
   //   engine's original guess. Pinning here means the corrected speaker is
   //   what the whole app, and the model, actually sees.
   const pinned = useMemo(() => {
-    if (!rawAnalysisResult || chapterCorrections.length === 0) {
+    // ★★ NEVER PIN ACROSS A CHAPTER BOUNDARY. `rawAnalysisResult` is swapped
+    //    inside an effect, so for one render after a chapter switch it still
+    //    holds the PREVIOUS chapter while `chapterCorrections` has already
+    //    moved to the new one. Pins match by sentence text, and short lines
+    //    ("Yes.", "What?") repeat across chapters, so an unguarded pass could
+    //    stamp chapter B's answer onto chapter A and hand that to the story
+    //    graph and the model. Only pin when the analysis is for this chapter.
+    const sameChapter = !!activeChapterId && analysisChapterId === activeChapterId;
+    if (!rawAnalysisResult || !sameChapter || chapterCorrections.length === 0) {
       return { result: rawAnalysisResult, pins: [] as ResolvedPin[] };
     }
-    const pins = resolvePins(chapterCorrections, rawAnalysisResult);
+    const pins = resolvePins(chapterCorrections, rawAnalysisResult, analysisChapterId);
     return { result: applyResolvedPins(rawAnalysisResult, pins), pins };
-  }, [rawAnalysisResult, chapterCorrections]);
+  }, [rawAnalysisResult, chapterCorrections, analysisChapterId, activeChapterId]);
   const analysisResult = pinned.result;
   const chapterPinStats = useMemo(() => pinStats(pinned.pins), [pinned.pins]);
+
+  // ★ THE HIGHLIGHT OVERRIDE MAP MUST FOLLOW THE RESOLVED PINS, NOT THE RAW
+  //   CORRECTIONS. Keying it off the stored (paragraph, span) index rebuilt
+  //   the exact bug pins were added to kill: after an edit shifts text, the
+  //   stored index points at a DIFFERENT sentence, so the editor would paint
+  //   the corrected colour onto an innocent line while the analysis had the
+  //   pin correctly relocated. Same source of truth for both, always.
+  const annotationOverrides = useMemo<Map<string, string | null> | undefined>(() => {
+    if (!activeChapterId || pinned.pins.length === 0) return undefined;
+    const map = new Map<string, string | null>();
+    for (const p of pinned.pins) {
+      if (p.via === "unresolved") continue;
+      map.set(`${p.paragraphIndex}-${p.spanIndex}-${p.spanType}`, p.speaker);
+    }
+    return map.size > 0 ? map : undefined;
+  }, [pinned.pins, activeChapterId]);
 
   // Update StoryGraph entry whenever analysis settles.
   // Deferred with setTimeout so heavy NLP never blocks a keystroke frame.
@@ -2959,7 +2973,7 @@ export default function App() {
           pins={chapterPinStats}
           intelligenceLevel={analysisResultLevel ?? intelMode}
           typingSettleMs={analysisDebounceMs}
-          storageTarget={stateTarget()}
+          storageTarget={desktopProjectOpen ? "project" : "local"}
           storedChapters={Object.keys(storyGraph.entries).length}
           totalChapters={chapters.length}
         />

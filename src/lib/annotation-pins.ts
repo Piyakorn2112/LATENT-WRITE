@@ -66,11 +66,22 @@ export interface ResolvedPin {
 export function resolvePins(
   corrections: AnnotationCorrection[],
   result: ChapterAnalysisResult,
+  /**
+   * ★★ THE CHAPTER `result` BELONGS TO. Pins match by sentence text, and
+   *    short lines ("Yes.", "What?") repeat across a book, so a correction
+   *    from another chapter can genuinely find a home in this one. Callers
+   *    combining a correction list with an analysis MUST pass this: the
+   *    analysis is swapped inside an effect, so right after a chapter switch
+   *    the two disagree for a render. Omitted only by tests that build both
+   *    sides themselves.
+   */
+  expectChapterId?: string | null,
 ): ResolvedPin[] {
   const { paragraphs, speechResults, actionPredictions } = result;
   const out: ResolvedPin[] = [];
 
   for (const c of corrections) {
+    if (expectChapterId != null && c.chapterId !== expectChapterId) continue;
     const wantText = norm(c.spanText);
     if (!wantText) continue;
     const wantBefore = edge(c.contextBefore, 40);
@@ -215,12 +226,14 @@ export function applyResolvedPins(
 
   // Prediction traces feed the story graph's character extraction, so they
   // must carry the pin too or the timeline keeps the engine's guess.
+  // `speechPredictions` only ever holds task:'speech' traces (the runner
+  // fills it from speech-detect's trace-out); action actors reach the graph
+  // through `actionPredictions` above, which is why there is no action branch
+  // here.
   const speechPredictions = result.speechPredictions.map((trace) => {
-    const pinned = trace.task === "action"
-      ? actionByPara.get(trace.paragraphIndex)
-      : speechByPara.get(trace.paragraphIndex);
-    if (!pinned || !pinned.has(trace.spanIndex)) return trace;
-    return { ...trace, predictedLabel: pinned.get(trace.spanIndex) ?? null };
+    const pinnedPara = speechByPara.get(trace.paragraphIndex);
+    if (!pinnedPara || !pinnedPara.has(trace.spanIndex)) return trace;
+    return { ...trace, predictedLabel: pinnedPara.get(trace.spanIndex) ?? null };
   });
 
   return { ...result, speechResults, actionPredictions, speechPredictions };

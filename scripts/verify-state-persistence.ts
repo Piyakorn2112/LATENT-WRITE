@@ -112,6 +112,30 @@ async function main() {
     `keys=${store.size}`);
   gate("target self-corrects after refusal", stateTarget() === "local");
 
+  // ── 5. the IPC itself rejects ─────────────────────────────────────────────
+  //
+  // ipcRenderer.invoke THROWS when no handler is registered or the main
+  // process is tearing down. An unhandled rejection here meant the caller's
+  // `.then(ok => fallback)` never ran, so a write that looked guarded lost
+  // data silently. Both helpers must resolve, never throw.
+  console.log("\n5. the IPC rejects outright (no handler / teardown)");
+  store.clear();
+  projectOpen = true;
+  setProjectOpenState(true);
+  electronAPI.projectSaveState = async () => { throw new Error("No handler registered"); };
+  electronAPI.projectLoadState = async () => { throw new Error("No handler registered"); };
+  let threw = false;
+  try {
+    saveStoryGraph(sample("ipc-down") as never);
+    await wait();
+  } catch { threw = true; }
+  gate("save does not throw", !threw);
+  gate("rescued to local instead of lost", store.size > 0, `keys=${store.size}`);
+  let loadThrew = false;
+  try { await loadStoryGraphFromProject(); } catch { loadThrew = true; }
+  gate("load does not throw", !loadThrew);
+  gate("target self-corrects to local", stateTarget() === "local");
+
   void emptyStoryGraph;
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${failed.length === 0 ? "ALL PASS" : `${failed.length} FAILED`}  (${results.length} gates)\n`);

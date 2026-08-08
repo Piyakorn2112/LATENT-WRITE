@@ -19,7 +19,7 @@
  * Run: ./node_modules/.bin/tsx scripts/verify-annotation-pins.ts
  */
 import { runChapterAnalysis } from "../src/lib/chapter-analysis-runner";
-import { applyPinsToAnalysis, resolvePins } from "../src/lib/annotation-pins";
+import { applyPinsToAnalysis, applyResolvedPins, resolvePins } from "../src/lib/annotation-pins";
 import type { AnnotationCorrection, Chapter } from "../src/types";
 
 const results: Array<{ name: string; ok: boolean }> = [];
@@ -169,6 +169,21 @@ function main() {
   gate("nothing was overwritten",
     JSON.stringify(speakerMap(deletedPinned) instanceof Map ? [...speakerMap(deletedPinned)] : [])
       === JSON.stringify([...speakerMap(deleted)]));
+
+  // ── the chapter-boundary guard ────────────────────────────────────────────
+  console.log("\n7. a pin never crosses a chapter boundary");
+  // Same sentence text, correction recorded in a DIFFERENT chapter. Short
+  // dialogue repeats across a book, so text alone must not be enough.
+  const foreign = { ...pin, id: "pin-foreign", chapterId: "ch9" };
+  gate("foreign-chapter correction is ignored when the chapter is known",
+    resolvePins([foreign], base, "ch1").length === 0);
+  gate("and applying it changes nothing",
+    applyResolvedPins(base, resolvePins([foreign], base, "ch1")) === base);
+  gate("the matching chapter still resolves",
+    resolvePins([pin], base, "ch1").length === 1);
+  gate("segments arrive already sorted by start (the index convention)",
+    base.speechResults.every((p) =>
+      !p || p.segments.every((s, i) => i === 0 || p.segments[i - 1].start <= s.start)));
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${failed.length === 0 ? "ALL PASS" : `${failed.length} FAILED`}  (${results.length} gates)\n`);

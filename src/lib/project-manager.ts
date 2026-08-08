@@ -483,23 +483,35 @@ export async function cancelPipeline(): Promise<boolean> {
 
 // ── Desktop state persistence ───────────────────────────────────────────────
 
+// ★★ THE IPC CAN REJECT, NOT JUST RETURN ok:false. `ipcRenderer.invoke`
+//    throws outright when no handler is registered (seen for real in the
+//    smoke harness) or when the main process is tearing down. An unhandled
+//    rejection here used to mean the caller's `.then(ok => ...)` fallback
+//    never ran, so a write that LOOKED guarded silently lost data. Both
+//    helpers now resolve rather than throw, and a failed save is treated the
+//    same as a refusal.
 export async function saveProjectState(key: string, data: unknown): Promise<boolean> {
   const a = api();
   if (!a) return false;
-  const result = await a.projectSaveState(key, JSON.stringify(data));
+  let ok = false;
+  try {
+    const result = await a.projectSaveState(key, JSON.stringify(data));
+    ok = !!result?.ok;
+  } catch { ok = false; }
   // A refused write is the authoritative answer to "is a project open" —
   // keep the flag honest even if nobody called setProjectOpenState.
-  if (!result.ok) _projectOpen = false;
-  return result.ok;
+  if (!ok) _projectOpen = false;
+  return ok;
 }
 
 export async function loadProjectState<T>(key: string): Promise<T | null> {
   const a = api();
   if (!a) return null;
-  const result = await a.projectLoadState(key);
-  if (!result.ok || !result.data) return null;
-  try { return JSON.parse(result.data) as T; }
-  catch { return null; }
+  try {
+    const result = await a.projectLoadState(key);
+    if (!result?.ok || !result.data) return null;
+    return JSON.parse(result.data) as T;
+  } catch { return null; }
 }
 
 export async function reopenLastProject(): Promise<ProjectStatus | null> {

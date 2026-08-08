@@ -81,6 +81,13 @@ interface UseAnalysisReturn {
   prevResult: ChapterAnalysisResult | null;
   /** Cached analysis for the chapter immediately after the current one. */
   nextResult: ChapterAnalysisResult | null;
+  /**
+   * Chapter id that `result` was produced for. Briefly differs from the
+   * requested chapter right after a switch, because `result` is only swapped
+   * inside an effect. Callers that combine `result` with per-chapter data
+   * MUST check this rather than assuming the two agree.
+   */
+  resultChapterId: string | null;
 }
 
 // Runs the full speech-detect → chapter-analysis pipeline for the current chapter.
@@ -101,6 +108,13 @@ export function useAnalysis(
   const adaptiveSpeechVersion = options.adaptiveContext?.store.models.speech.version ?? 0;
   const adaptiveActionVersion = options.adaptiveContext?.store.models.action.version ?? 0;
   const [result, setResult] = useState<ChapterAnalysisResult | null>(null);
+  // ★ WHICH CHAPTER `result` IS FOR, AS STATE. `resultChapterId` below tracks
+  //   the same thing but only updates inside an effect, so for one render
+  //   after a chapter switch `result` still holds the OLD chapter while the
+  //   rest of the app has already moved on. Anything that combines `result`
+  //   with per-chapter data (annotation pins, most of all) must be able to
+  //   see that mismatch during render, not one effect later.
+  const [resultFor, setResultFor] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
   const [resultLevel, setResultLevel] = useState<IntelligenceLevel | null>(null);
@@ -141,6 +155,7 @@ export function useAnalysis(
   useEffect(() => {
     if (!currentChapterId) {
       setResult(null);
+      setResultFor(null);
       resultChapterId.current = null;
       return;
     }
@@ -167,9 +182,11 @@ export function useAnalysis(
     const switchedChapter = resultChapterId.current !== currentChapterId;
     if (stale) {
       setResult(stale);
+      setResultFor(currentChapterId);
       resultChapterId.current = currentChapterId;
     } else if (chapter.content.trim().length === 0 || switchedChapter) {
       setResult(null);
+      setResultFor(null);
       resultChapterId.current = currentChapterId;
     }
 
@@ -226,6 +243,7 @@ export function useAnalysis(
           if (cancelled) return;
           cache.current.set(currentChapterId, fresh);
           setResult(fresh);
+          setResultFor(currentChapterId);
           setResultLevel(level);
           resultChapterId.current = currentChapterId;
 
@@ -248,6 +266,7 @@ export function useAnalysis(
                   if (cancelled) return;
                   cache.current.set(currentChapterId, refined);
                   setResult(refined);
+                  setResultFor(currentChapterId);
                   setResultLevel(refineLevel);
                 } finally {
                   if (!cancelled) setIsRefining(false);
@@ -392,5 +411,5 @@ export function useAnalysis(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [novel.chapters, currentChapterId, result, adjacentReady]);
 
-  return { result, isAnalyzing, isRefining, resultLevel, knownNames, entityNameMap, prevResult, nextResult };
+  return { result, isAnalyzing, isRefining, resultLevel, knownNames, entityNameMap, prevResult, nextResult, resultChapterId: resultFor };
 }
