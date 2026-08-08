@@ -1,30 +1,25 @@
 /**
- * probe-dossier-model.cjs — can either shipping tier actually WRITE the
- * character panel from the evidence the harness found?
+ * probe-dossier-model.cjs — the dossier card against the REAL shipping tiers.
  *
- * probe-character-dossier.ts answered the first question: the manuscript does
- * contain retrievable description, but the candidate pool it produces is about
- * one-in-seven useful — the same raw precision the knowledge ledger measured
- * before the adjudicator was built. So the pool is not the product. The
- * question this probe answers is whether a 1.7B and a 4B can pick the right
- * span out of fourteen and write a line that is TRUE, or whether they write a
- * plausible line that the manuscript does not support.
+ * ★ EVERYTHING SHIPPED, NOTHING COPIED. Packs come from the module through
+ *   probe-character-dossier.ts --pack; the per-field prompts, schemas, gates,
+ *   grounding, repair and usefulness test are the module's own, reached
+ *   through tsx. A probe that hand-rolls any of those measures the probe.
  *
- * ★★ THE ABSTENTION CASES DECIDE, NOT THE RICH ONES.
- *    Anything can write a paragraph about Elizabeth Bennet — the model knows
- *    the book. The cases that decide whether this feature can ship are the ones
- *    where the evidence is THIN or ABSENT, because that is the state a real
- *    draft is in, and a confident invented description is strictly worse for a
- *    writer than an empty field. Two are included and they are graded hardest.
+ * ★★ ONE FIELD PER CALL IS A MEASURED REQUIREMENT, NOT A STYLE. The
+ *    three-field mega-ask returned every field empty at confidence 0 on all
+ *    four RICH packs while answering the starved ones; the per-field A/B on
+ *    the same packs answered correctly ("dark eyes" cited [3] at 0.9). See
+ *    the module's request-section comment.
  *
- * ★★ EVERY CLAIM IS GROUNDING-CHECKED IN CODE, NOT BY READING IT.
- *    The model must cite span numbers. `groundClaim` then requires each content
- *    word of the written line to appear in a cited span. A line that reads
- *    beautifully and cites nothing is UNGROUNDED and would not ship. This is
- *    what "verifiable" has to mean if it is to mean anything.
+ * ★★ THE ABSTENTION CASES DECIDE. A starved field must produce a closed gate
+ *    and zero tokens, never an invented description. GATE=off is the canary:
+ *    it asks anyway (full span list as candidates) and must reproduce the
+ *    fabrication class the gates exist to stop — if gate-on and gate-off look
+ *    the same, the gate is dead.
  *
- * Run: ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
- *      TIERS=max ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
+ * Run: TIERS=max   ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
+ *      GATE=off TIERS=max ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
  */
 const { app, BrowserWindow } = require('electron');
 const path = require('node:path');
@@ -37,105 +32,24 @@ const NODE = '/opt/homebrew/bin/node';
 const TSX = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const assistant = require(path.join(ROOT, 'electron', 'assistant.cjs'));
 
-const TIERS = (process.env.TIERS || 'small,max').split(',');
-/** ★ THE GATE MUST BE CANARIED. A run with GATE=off reproduces the fabrications
- *  it exists to stop; if both runs look the same, the gate is not firing. */
+const TIERS = (process.env.TIERS || 'max').split(',');
 const GATE_OFF = process.env.GATE === 'off';
-const PICK_ONLY = process.env.PICK === '1';
+const FIELDS = ['appearance', 'personality', 'background'];
 
-/**
- * The cases. Two rich, two middling, two starved — and the starved ones are
- * the gate.
- *
- *   truth  what the manuscript actually supports, established by reading it.
- *          `null` means the manuscript supports NOTHING and the only correct
- *          answer is an empty appearance with no cited spans.
- */
 const CASES = [
   { spec: 'pride:Elizabeth', kind: 'rich',
-    truth: 'dark eyes, a face with hardly a good feature but made intelligent by the eyes; walks far and fast' },
+    truth: 'dark eyes; lively, determined; walks far and fast' },
   { spec: 'pride:Darcy', kind: 'rich',
-    truth: 'tall, proud, clever; the pack may only support "proud/clever" and a mantel-piece posture' },
+    truth: 'proud, clever; the pack may only support manner, not looks' },
   { spec: 'anne:Anne', kind: 'rich',
-    truth: 'red hair, freckles, thin, grey eyes, talkative' },
+    truth: 'red hair, freckles, thin, gray eyes; talkative, imaginative' },
   { spec: 'dracula:Van Helsing', kind: 'middling',
-    truth: 'older, broad, a strong face; speaks in broken English' },
+    truth: 'iron jaw, bushy brows; resolute' },
   { spec: 'webnovel:Jonah', kind: 'starved',
-    truth: null },
+    truth: 'appearance NOTHING (gate must close); 2 trait spans exist' },
   { spec: 'webnovel:Elder Kang', kind: 'starved',
-    truth: null },
+    truth: 'appearance NOTHING; near-nothing anywhere' },
 ];
-
-// ── the ask ───────────────────────────────────────────────────────────────
-//
-// ★★ SPANS BEFORE PROSE, IN DECLARATION ORDER. A grammar emits properties in
-//    the order they are declared, so a schema that puts the written line first
-//    makes the model commit to a sentence and then hunt for citations to
-//    justify it. Citing first forces the selection to happen before the
-//    writing, which is the whole point.
-const SCHEMA = {
-  type: 'object',
-  properties: {
-    appearanceSpans: { type: 'array', items: { type: 'integer' }, maxItems: 3 },
-    appearance: { type: 'string', maxLength: 140 },
-    traitSpans: { type: 'array', items: { type: 'integer' }, maxItems: 3 },
-    role: { type: 'string', maxLength: 48 },
-    confidence: { type: 'number' },
-  },
-};
-
-const SYSTEM = `You fill in a character card for a novel, from evidence a search has already
-gathered. You cannot read the manuscript. The numbered passages are all the
-evidence that exists.
-
-Answer as JSON: {"appearanceSpans","appearance","traitSpans","role","confidence"}
-in that order.
-
-appearanceSpans: FIRST. The numbers of the passages that state what this person
-  LOOKS LIKE — body, face, hair, eyes, height, age, clothing. Choose before you
-  write. If no passage states any of that, answer [].
-appearance: at most 20 words, built ONLY from the passages you just cited, using
-  their own words where you can. If appearanceSpans is [], this MUST be "".
-traitSpans: the numbers of the passages that show what this person is LIKE or
-  what they DO. [] if none.
-role: at most 6 words naming this person's place in the story, from the counted
-  facts and the passages. Examples of the shape: "viewpoint character",
-  "her closest friend", "the man she argues with". Not a genre label.
-confidence: 0 to 1, how much the passages actually settle this. Never above 1.
-
-A passage tagged (pronoun) had its subject resolved by a machine and may belong
-to someone else; trust it less. A passage tagged (said) is one character SPEAKING
-about another and may be unfair or wrong.
-
-An empty answer is a correct answer. Writing something true of most people is
-NOT an answer. Never use anything you know about this book from elsewhere —
-only these passages.`;
-
-// ── grounding ─────────────────────────────────────────────────────────────
-
-const STOP = new Set(('a an the and or but of to in on at by for with from as is are was were be been ' +
-  'his her their its he she they him them this that these those very quite more most much many some any ' +
-  'who whom which what when where how not no nor than then there here also into over under about ' +
-  'seems seem appears appear looks look has have had having does do did done will would could should ' +
-  'man woman person character people someone thing things').split(' '));
-
-/**
- * Is every content word of `line` present in at least one cited span?
- *
- * Deliberately crude and deliberately generous — a light stem (strip a trailing
- * s/ed/ing/ly) and substring containment, so "walks"/"walked" and
- * "intelligent"/"intelligence" both pass. A crude check that a claim FAILS is a
- * real failure; a crude check it passes is not a guarantee, which is why the
- * written lines are also printed for reading.
- */
-function groundClaim(line, citedTexts) {
-  const hay = citedTexts.join(' ').toLowerCase();
-  const stem = (w) => w.replace(/(?:ing|ed|ly|s)$/, '');
-  const words = String(line || '').toLowerCase().match(/[a-z][a-z'-]{2,}/g) || [];
-  const content = words.filter((w) => !STOP.has(w) && w.length >= 4);
-  const missing = content.filter((w) => !hay.includes(stem(w)));
-  return { checked: content.length, missing };
-}
 
 let win = null;
 const callBridge = (method, arg) => {
@@ -144,6 +58,18 @@ const callBridge = (method, arg) => {
     `window.electronAPI.${method}(${payload === 'null' ? '' : payload})`, true,
   );
 };
+
+const tsxEval = (code, arg) => JSON.parse(execFileSync(NODE, [TSX, '-e', code, JSON.stringify(arg)],
+  { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim().split('\n').pop());
+
+/** GATE=off: every span becomes a candidate for every field, so the ask is
+ *  made and the accepting gate has nothing to close. */
+const ungate = (pack) => ({
+  ...pack,
+  visualCandidates: pack.spans.map((s) => s.n),
+  traitCandidates: pack.spans.map((s) => s.n),
+  loreCandidates: pack.spans.map((s) => s.n),
+});
 
 async function main() {
   assistant.registerAssistant();
@@ -156,135 +82,108 @@ async function main() {
   });
   await win.loadURL('about:blank');
 
-  console.log('\nassembling packs from the real corpus…');
+  console.log('\nassembling packs from the real corpus via the shipped module…');
   const packs = JSON.parse(execFileSync(NODE, [
     TSX, path.join('scripts', 'probe-character-dossier.ts'), '--pack',
     ...CASES.map((c) => c.spec),
-  ], { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }).trim().split('\n').pop());
+  ], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim().split('\n').pop());
+  const byName = new Map(packs.map((p) => [`${p.book}:${p.name}`, GATE_OFF ? ungate(p) : p]));
 
-  const byName = new Map(packs.map((p) => [`${p.book}:${p.name}`, p]));
-  console.log(`  ${packs.length} packs, ${packs.map((p) => p.spans.length).join('/')} spans each\n`);
+  // Per-field requests via the module's own builder (null = gate closed),
+  // plus the extractive retry request the refusal path uses.
+  const requests = tsxEval(
+    'import {buildFieldRequest, buildFieldRetryRequest} from "./src/lib/character-dossier";' +
+    'const a = JSON.parse(process.argv[process.argv.length-1]);' +
+    'console.log(JSON.stringify(a.map(({pack}) => ' +
+    '  Object.fromEntries(["appearance","personality","background"].map((f) => ' +
+    '    [f, {ask: buildFieldRequest(pack, f), retry: buildFieldRetryRequest(pack, f)}])))))',
+    [...byName.values()].map((pack) => ({ pack })),
+  );
+  const reqBySpec = new Map([...byName.keys()].map((k, i) => [k, requests[i]]));
 
   for (const tier of TIERS) {
     const status = await callBridge('assistantStatus', { tier });
     if (!status.model.present) { console.log(`SKIP ${tier} — model not on disk.`); continue; }
-    console.log(`\n${'═'.repeat(78)}\nTIER ${tier} — ${status.model.id}\n${'═'.repeat(78)}`);
+    console.log(`\n${'═'.repeat(78)}\nTIER ${tier} — ${status.model.id}${GATE_OFF ? '   [GATE OFF — canary]' : ''}\n${'═'.repeat(78)}`);
 
+    const answers = [];
     for (const c of CASES) {
-      const pack = byName.get(c.spec);
-      if (!pack) { console.log(`\n${c.spec}: NO PACK`); continue; }
-
-      // ★★ THE GATE RUNS FIRST. No describable feature in the pack means no
-      //    question is asked, so there is nothing for the model to invent. This
-      //    is the fix for the two disqualifying cases and it lives in code, not
-      //    in the prompt — the prompt already said an empty answer was correct
-      //    and both tiers ignored it.
-      if (!GATE_OFF && pack.visualCandidates.length === 0) {
-        console.log(`\n── ${c.spec}  [${c.kind}]  GATED — 0 spans carry a describable feature`);
-        console.log(`   truth: ${c.truth === null ? 'NOTHING — the only correct answer is an empty appearance' : c.truth}`);
-        console.log(`   VERDICT: ${c.truth === null ? 'ABSTAINED — correct, and no tokens spent' : 'GATE COST A REAL ANSWER'}`);
-        continue;
-      }
-      // ★★ THE NARROWER JOB, and it is the one that decides what "on" mode is.
-      //    chip-picker.ts already proves the shape: the model may PICK from
-      //    numbered options and may not compose. If the 1.7B can point at the
-      //    span that describes the character, the conservative tier can ship an
-      //    EXTRACTIVE card — the writer's own sentence, quoted — with zero
-      //    fabrication surface. If it cannot even point, the model has no part
-      //    in that tier at all and the card is built from counted facts alone.
-      if (PICK_ONLY) {
-        const t1 = Date.now();
-        const r = await callBridge('assistantRun', {
-          requestId: `pick-${tier}-${c.spec}`.replace(/[^a-z0-9-]/gi, '-'),
-          task: 'character-dossier-pick', tier,
-          ...(tier === 'max' ? { noThink: false } : {}),
-          systemPrompt:
-            'You are given numbered passages from a novel and one character name. '
-            + 'Answer as JSON {"reason","spans"} in that order.\n'
-            + 'reason: FIRST, at most 12 words naming what the passage shows.\n'
-            + 'spans: the numbers of the passages that state what THIS NAMED PERSON '
-            + 'looks like — body, face, hair, eyes, height, age, clothing. Many '
-            + 'passages describe SOMEBODY ELSE while mentioning this person; those '
-            + 'do not count. If none qualify, answer [].\n'
-            + 'Do not write a description. Only choose.',
-          userText: `${pack.text}\n\nWhich passages state what ${pack.name} looks like?`,
-          schema: { type: 'object', properties: {
-            reason: { type: 'string', maxLength: 90 },
-            spans: { type: 'array', items: { type: 'integer' }, maxItems: 4 },
-          } },
-          maxTokens: tier === 'max' ? 512 : 128,
-          timeoutMs: 180000,
-        });
-        const picked = (r && r.ok && r.json && r.json.spans) || [];
-        const legal = picked.filter((n) => pack.spans.some((s) => s.n === n));
-        console.log(`\n── ${c.spec}  [${c.kind}]  PICK  ${Date.now() - t1}ms`);
-        console.log(`   gate-eligible: [${pack.visualCandidates.join(', ')}]`);
-        console.log(`   picked:        [${picked.join(', ')}]${picked.length !== legal.length ? '  ✗ includes a span that does not exist' : ''}`);
-        console.log(`   reason:        ${JSON.stringify(r && r.ok && r.json ? r.json.reason : null)}`);
-        for (const n of legal.slice(0, 3)) {
-          const s = pack.spans.find((x) => x.n === n);
-          console.log(`     [${n}] ${s.text.slice(0, 130)}`);
+      const reqs = reqBySpec.get(c.spec);
+      if (!reqs) continue;
+      console.log(`\n── ${c.spec}  [${c.kind}]`);
+      console.log(`   truth: ${c.truth}`);
+      const perField = {};
+      for (const field of FIELDS) {
+        const pair = reqs[field];
+        if (!pair || !pair.ask) {
+          console.log(`   ${field.padEnd(12)} GATED — no eligible spans, no call`);
+          perField[field] = { gated: true };
+          continue;
         }
-        continue;
+        const runOne = async (req, label) => {
+          const t0 = Date.now();
+          const res = await callBridge('assistantRun', {
+            requestId: `dsr-${tier}-${c.spec}-${field}-${label}`.replace(/[^a-z0-9-]/gi, '-'),
+            task: 'character-dossier', tier,
+            ...(tier === 'max' ? { noThink: false } : {}),
+            systemPrompt: req.systemPrompt, userText: req.userText,
+            schema: req.schema, maxTokens: req.maxTokens,
+            timeoutMs: 180000,
+          });
+          return { res, ms: Date.now() - t0 };
+        };
+        const first = await runOne(pair.ask, 'a');
+        if (!first.res || !first.res.ok) {
+          console.log(`   ${field.padEnd(12)} NO ANSWER (${first.res && first.res.error})  ${first.ms}ms`);
+          perField[field] = { raw: null };
+          continue;
+        }
+        const j = first.res.json || {};
+        console.log(`   ${field.padEnd(12)} [${(j.spans || []).join(',')}] ${JSON.stringify(j[field])}  conf ${j.confidence}  ${first.ms}ms`);
+
+        // ★ REFUSAL LICENSES ONE EXTRACTIVE RETRY — the module's own rule,
+        //   checked with the module's own normalizer.
+        const verdict = tsxEval(
+          'import {normalizeFieldAnswer} from "./src/lib/character-dossier";' +
+          'const a = JSON.parse(process.argv[process.argv.length-1]);' +
+          'console.log(JSON.stringify(normalizeFieldAnswer(a.raw, a.pack, a.field).status))',
+          { raw: j, pack: byName.get(c.spec), field },
+        );
+        if (verdict === 'refused' && pair.retry) {
+          const second = await runOne(pair.retry, 'b');
+          if (second.res && second.res.ok) {
+            const k = second.res.json || {};
+            console.log(`   ${''.padEnd(12)} retry → [${(k.spans || []).join(',')}] ${JSON.stringify(k[field])}  ${second.ms}ms`);
+            perField[field] = { raw: k };
+            continue;
+          }
+        }
+        perField[field] = { raw: j };
       }
-
-      const t0 = Date.now();
-      const res = await callBridge('assistantRun', {
-        requestId: `dossier-${tier}-${c.spec}`.replace(/[^a-z0-9-]/gi, '-'),
-        task: 'character-dossier', tier,
-        // ★ /no_think is a Qwen token the runtime appends by default. Right for
-        //   the 1.7B, wrong for the 4B thinking tier.
-        ...(tier === 'max' ? { noThink: false } : {}),
-        systemPrompt: SYSTEM,
-        userText: `${pack.text}\n\nFill in the card for ${pack.name}.`,
-        schema: SCHEMA,
-        maxTokens: tier === 'max' ? 1024 : 256,
-        timeoutMs: 180000,
-      });
-      const ms = Date.now() - t0;
-      console.log(`\n── ${c.spec}  [${c.kind}]  ${ms}ms`);
-      console.log(`   truth: ${c.truth === null ? 'NOTHING — the only correct answer is an empty appearance' : c.truth}`);
-      if (!res || !res.ok) { console.log(`   NO ANSWER (${res && res.error})`); continue; }
-      const j = res.json || {};
-      const cited = (j.appearanceSpans || [])
-        .map((n) => pack.spans.find((s) => s.n === n))
-        .filter(Boolean);
-      const badRefs = (j.appearanceSpans || []).filter((n) => !pack.spans.some((s) => s.n === n));
-      const g = groundClaim(j.appearance, cited.map((s) => s.text));
-
-      console.log(`   spans:  [${(j.appearanceSpans || []).join(', ')}]${badRefs.length ? `  ✗ ${badRefs.length} DO NOT EXIST` : ''}`);
-      console.log(`   appear: ${JSON.stringify(j.appearance)}`);
-      console.log(`   role:   ${JSON.stringify(j.role)}   conf ${j.confidence}`);
-
-      // ★★ REPAIR BEFORE REJECT, AND THE ANNE CASE IS WHY.
-      //    Both tiers wrote "freckled face, solemn gray eyes" for Anne Shirley
-      //    and cited spans that do not contain those words — so the grounding
-      //    check failed it. But the words are in span 9, which the model read
-      //    and simply failed to number. The retrieval was right, the writing was
-      //    right, only the citation was wrong; rejecting there would throw away
-      //    the single best description in the pack. So a claim that fails
-      //    against its own citations is re-checked against the WHOLE pack, and
-      //    only a claim that locates nowhere is refused.
-      const whole = groundClaim(j.appearance, pack.spans.map((s) => s.text));
-      const repaired = g.missing.length && !whole.missing.length
-        ? pack.spans.filter((s) => g.missing.some((w) => s.text.toLowerCase().includes(w.replace(/(?:ing|ed|ly|s)$/, ''))))
-            .map((s) => s.n)
-        : [];
-
-      const verdict = c.truth === null
-        ? ((j.appearance || '').trim() === '' && (j.appearanceSpans || []).length === 0
-            ? 'ABSTAINED — correct' : 'INVENTED — disqualifying')
-        : (!(j.appearance || '').trim()
-            ? 'abstained (evidence existed)'
-            : !g.missing.length && !badRefs.length
-              ? `grounded as cited (${g.checked} content words located)`
-            : !whole.missing.length
-              ? `REPAIRABLE — every word is in the pack; citation corrected to [${repaired.join(', ')}]`
-            : `REFUSED — ${whole.missing.join(', ')} appear nowhere in the pack`);
-      console.log(`   VERDICT: ${verdict}`);
+      answers.push({ spec: c.spec, perField });
     }
+
+    // The SHIPPED normalize/ground/repair pass, batch, through tsx.
+    const graded = tsxEval(
+      'import {normalizeFieldAnswer} from "./src/lib/character-dossier";' +
+      'const rows = JSON.parse(process.argv[process.argv.length-1]);' +
+      'console.log(JSON.stringify(rows.map((r) => ' +
+      '  Object.fromEntries(Object.entries(r.perField).map(([f, v]) => ' +
+      '    [f, v.gated ? {status: "gated-before-call"} : v.raw == null ? {status: "no-answer"} ' +
+      '      : normalizeFieldAnswer(v.raw, r.pack, f)])))))',
+      answers.map((r) => ({ perField: r.perField, pack: byName.get(r.spec) })),
+    );
+
+    console.log(`\n${'─'.repeat(78)}\nAFTER THE SHIPPED GROUNDING AND GATES:\n`);
+    answers.forEach((r, i) => {
+      console.log(`── ${r.spec}`);
+      for (const field of FIELDS) {
+        const g = graded[i][field];
+        console.log(`   ${field.padEnd(12)} [${g.status}] ${g.text ? JSON.stringify(g.text) + ' ← spans [' + g.spans.join(',') + ']' : ''}`);
+      }
+      console.log('');
+    });
   }
-  console.log('');
   app.exit(0);
 }
 
