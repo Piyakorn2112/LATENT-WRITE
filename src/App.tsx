@@ -385,7 +385,13 @@ export default function App() {
     if (!window.electronAPI) return;
     let cancelled = false;
     (async () => {
-      const project = await reopenLastProject();
+      // A failed reopen must still release the loading gate. This used to be
+      // an uncaught rejection, which left the app stuck mid-boot whenever the
+      // IPC was unavailable, and now also decides where state gets written.
+      let project = null;
+      try {
+        project = await reopenLastProject();
+      } catch { /* no project layer available — treat as no project */ }
       if (cancelled || !project) {
         // ★ NO PROJECT MEANS localStorage IS THE REAL STORE, SO DO NOT WIPE IT.
         //   This used to clear every key before we knew whether a project
@@ -401,9 +407,12 @@ export default function App() {
       clearProjectLocalStorage();
       setProjectOpenState(true);
       setDesktopProjectOpen(true);
-      await hydrateProjectState();
+      try {
+        await hydrateProjectState();
+      } finally {
+        if (!cancelled) setProjectLoading(false);
+      }
       if (cancelled) return;
-      setProjectLoading(false);
       window.dispatchEvent(new CustomEvent("project-ready"));
     })();
     return () => { cancelled = true; };
