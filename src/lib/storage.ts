@@ -1,6 +1,6 @@
 import type { Chapter, Novel } from "../types";
 import { emptyNovel, parseNovel, serializeNovel } from "./parser";
-import { isDesktopApp, saveProjectState, loadProjectState, readProjectFile, writeProjectFile } from "./project-manager";
+import { isDesktopApp, saveProjectState, loadProjectState, readProjectFile, writeProjectFile, stateTarget } from "./project-manager";
 
 const KEY = "glass-editor:novel-v1";
 const CURRENT_CHAPTER_KEY = "glass-editor:current-chapter-v1";
@@ -105,8 +105,16 @@ export function resolvePersistedCurrentChapterId(
   return null;
 }
 
+/**
+ * ★★ THE MANUSCRIPT GETS THE SAME RULE AS EVERYTHING ELSE. This used to branch
+ *    on isDesktopApp(), so a desktop session with no project open read nothing
+ *    and wrote nowhere — the exact defect that was fixed for the story graph
+ *    and then generalised in the docs without being generalised in the code.
+ *    That left the worst of both: a reopened draft restored its ANALYSIS from
+ *    local storage while the prose it described was gone.
+ */
 export function loadNovel(): Novel {
-  if (isDesktopApp()) return emptyNovel();
+  if (stateTarget() === "project") return emptyNovel();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return emptyNovel();
@@ -153,10 +161,16 @@ export async function saveNovelToProject(novel: Novel): Promise<boolean> {
 }
 
 export function saveNovel(novel: Novel): void {
-  if (isDesktopApp()) {
-    void saveNovelToProject(novel);
+  if (stateTarget() === "project") {
+    // A refused write means the project closed under us. Keep the draft rather
+    // than dropping the writer's prose on the floor.
+    void saveNovelToProject(novel).then((ok) => { if (!ok) writeLocalNovel(novel); });
     return;
   }
+  writeLocalNovel(novel);
+}
+
+function writeLocalNovel(novel: Novel): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(novel));
   } catch {
@@ -165,7 +179,7 @@ export function saveNovel(novel: Novel): void {
 }
 
 export function loadCurrentChapterId(): string | null {
-  if (isDesktopApp()) return null;
+  if (stateTarget() === "project") return null;
   try {
     return localStorage.getItem(CURRENT_CHAPTER_KEY);
   } catch {
@@ -178,8 +192,8 @@ export async function loadCurrentChapterIdFromProject(): Promise<PersistedChapte
 }
 
 export function saveCurrentChapterId(id: string | null, chapter?: Pick<Chapter, "number" | "title"> | null): void {
-  if (isDesktopApp()) {
-    saveProjectState(
+  if (stateTarget() === "project") {
+    void saveProjectState(
       "current-chapter",
       id
         ? {
@@ -188,9 +202,13 @@ export function saveCurrentChapterId(id: string | null, chapter?: Pick<Chapter, 
             title: chapter?.title ?? "",
           }
         : null,
-    );
+    ).then((ok) => { if (!ok) writeLocalChapterId(id); });
     return;
   }
+  writeLocalChapterId(id);
+}
+
+function writeLocalChapterId(id: string | null): void {
   try {
     if (id) localStorage.setItem(CURRENT_CHAPTER_KEY, id);
     else localStorage.removeItem(CURRENT_CHAPTER_KEY);

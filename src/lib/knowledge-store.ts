@@ -134,7 +134,16 @@ export async function loadKnowledgeLedgerFromProject(): Promise<KnowledgeLedgerS
 }
 
 export function saveKnowledgeLedger(store: KnowledgeLedgerStore): void {
-  if (stateTarget() === "project") { void saveProjectState("knowledge-ledger", store); return; }
+  if (stateTarget() === "project") {
+    // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
+    // a live session; route the data to local storage rather than losing it.
+    void saveProjectState("knowledge-ledger", store).then((ok) => { if (!ok) writeLocalLedger(store); });
+    return;
+  }
+  writeLocalLedger(store);
+}
+
+function writeLocalLedger(store: KnowledgeLedgerStore): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
   } catch {

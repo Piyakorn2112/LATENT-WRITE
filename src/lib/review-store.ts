@@ -128,7 +128,16 @@ export async function loadReviewStoreFromProject(): Promise<AssistReviewStore | 
 }
 
 export function saveReviewStore(store: AssistReviewStore): void {
-  if (stateTarget() === "project") { void saveProjectState("assist-reviews", store); return; }
+  if (stateTarget() === "project") {
+    // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
+    // a live session; route the data to local storage rather than losing it.
+    void saveProjectState("assist-reviews", store).then((ok) => { if (!ok) writeLocalReviews(store); });
+    return;
+  }
+  writeLocalReviews(store);
+}
+
+function writeLocalReviews(store: AssistReviewStore): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
   } catch {

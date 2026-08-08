@@ -83,7 +83,16 @@ export function saveAdaptiveStore(store: AdaptiveLearningStore): void {
       .sort((a, b) => a.timestamp - b.timestamp)
       .slice(-MAX_PERSISTED_PREDICTIONS),
   };
-  if (stateTarget() === "project") { void saveProjectState("adaptive", persisted); return; }
+  if (stateTarget() === "project") {
+    // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
+    // a live session; route the data to local storage rather than losing it.
+    void saveProjectState("adaptive", persisted).then((ok) => { if (!ok) writeLocalAdaptive(persisted); });
+    return;
+  }
+  writeLocalAdaptive(persisted);
+}
+
+function writeLocalAdaptive(persisted: AdaptiveLearningStore): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(persisted));
   } catch {

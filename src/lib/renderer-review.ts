@@ -17,7 +17,16 @@ export async function loadReviewResultsFromProject(): Promise<Record<string, Rev
 }
 
 export function saveReviewResults(results: Record<string, ReviewResult>): void {
-  if (stateTarget() === "project") { void saveProjectState("review-results", results); return; }
+  if (stateTarget() === "project") {
+    // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
+    // a live session; route the data to local storage rather than losing it.
+    void saveProjectState("review-results", results).then((ok) => { if (!ok) writeLocalResults(results); });
+    return;
+  }
+  writeLocalResults(results);
+}
+
+function writeLocalResults(results: Record<string, ReviewResult>): void {
   try { localStorage.setItem(REVIEW_RESULTS_KEY, JSON.stringify(results)); }
   catch { /* quota — ignore */ }
 }

@@ -35,6 +35,15 @@ const electronAPI = {
     projectFiles.set(key, data);
     return { ok: true };
   },
+  projectWriteFile: async (relPath: string, content: string) => {
+    if (!projectOpen) return { ok: false };
+    projectFiles.set(relPath, content);
+    return { ok: true };
+  },
+  projectReadFile: async (relPath: string) =>
+    projectOpen && projectFiles.has(relPath)
+      ? { ok: true, content: projectFiles.get(relPath)! }
+      : { ok: false, content: null },
   projectLoadState: async (key: string) =>
     projectOpen && projectFiles.has(key)
       ? { ok: true, data: projectFiles.get(key)! }
@@ -135,6 +144,67 @@ async function main() {
   try { await loadStoryGraphFromProject(); } catch { loadThrew = true; }
   gate("load does not throw", !loadThrew);
   gate("target self-corrects to local", stateTarget() === "local");
+
+
+  // ── 6. EVERY store, not just the story graph ─────────────────────────────
+  //
+  // ★★ THIS IS THE GATE THAT WAS MISSING, AND ITS ABSENCE COST THE MANUSCRIPT.
+  //    The original version of this file exercised story-graph alone, and the
+  //    documentation then generalised that to "every store". The two were not
+  //    equivalent: storage.ts (the NOVEL and the current chapter) never called
+  //    stateTarget() at all, and five other stores fired their project write
+  //    and forgot it, so a refusal dropped the payload. Test the FAMILY.
+  console.log("\n6. every store honours the target and survives a refusal");
+  const { saveNovel, loadNovel } = await import("../src/lib/storage");
+  const { saveAnnotationStore, loadAnnotationStore } = await import("../src/lib/annotation-store");
+  const { saveKnowledgeLedger, loadKnowledgeLedger } = await import("../src/lib/knowledge-store");
+  const { saveAdaptiveStore, loadAdaptiveStore } = await import("../src/lib/adaptive-store");
+  const { saveReviewStore, loadReviewStore } = await import("../src/lib/review-store");
+  const { saveReviewResults, loadReviewResults } = await import("../src/lib/renderer-review");
+
+  const emptyModel = (task: string) => ({ task, sampleCount: 0, learningRate: 0.08, l2: 0, bias: 0, weights: {}, version: 1, lastUpdatedAt: 0 });
+  const STORES: Array<{ name: string; save: () => void; load: () => unknown; ok: (v: unknown) => boolean }> = [
+    { name: "novel (the manuscript)",
+      save: () => saveNovel({ meta: { title: "T", author: "A" }, chapters: [{ id: "c1", number: 1, title: "One", content: "Hello." }] } as never),
+      load: () => loadNovel(), ok: (v) => ((v as { chapters: unknown[] }).chapters ?? []).length > 0 },
+    { name: "annotations",
+      save: () => saveAnnotationStore({ version: 1, corrections: [{ id: "x" }] } as never),
+      load: () => loadAnnotationStore(), ok: (v) => ((v as { corrections: unknown[] }).corrections ?? []).length > 0 },
+    { name: "knowledge ledger",
+      save: () => saveKnowledgeLedger({ version: 1, chapters: {}, facts: [{ id: "f" }], candidates: [], decisions: {} } as never),
+      load: () => loadKnowledgeLedger(), ok: (v) => JSON.stringify(v).includes("\"f\"") },
+    { name: "adaptive store",
+      save: () => saveAdaptiveStore({ version: 1, predictions: [], models: { version: 1, speech: { ...emptyModel("speech"), sampleCount: 3 }, action: emptyModel("action"), entity: emptyModel("entity") } } as never),
+      load: () => loadAdaptiveStore(), ok: (v) => (v as { models: { speech: { sampleCount: number } } }).models.speech.sampleCount === 3 },
+    { name: "assist reviews",
+      save: () => saveReviewStore({ version: 1, chapters: { c1: {} } } as never),
+      load: () => loadReviewStore(), ok: (v) => JSON.stringify(v).includes("c1") },
+    { name: "review results",
+      save: () => saveReviewResults({ c1: { chapterId: "c1", flags: [] } } as never),
+      load: () => loadReviewResults(), ok: (v) => Object.keys(v as object).length > 0 },
+  ];
+
+  // 6a. desktop with NO project open: every store must round-trip locally.
+  (globalThis as Record<string, unknown>).window = { electronAPI };
+  projectOpen = false;
+  setProjectOpenState(false);
+  for (const st of STORES) {
+    store.clear();
+    st.save();
+    await wait();
+    gate(st.name + ": survives close on a desktop draft", st.ok(st.load()));
+  }
+
+  // 6b. the folder vanishes mid-session: the write must be rescued, not lost.
+  for (const st of STORES) {
+    store.clear();
+    projectFiles.clear();
+    projectOpen = false;         // folder gone...
+    setProjectOpenState(true);   // ...but the app still believes it is open
+    st.save();
+    await wait();
+    gate(st.name + ": refused write falls back, not dropped", store.size > 0, "keys=" + store.size);
+  }
 
   void emptyStoryGraph;
   const failed = results.filter((r) => !r.ok);

@@ -25,7 +25,16 @@ export async function loadAnnotationStoreFromProject(): Promise<AnnotationStore 
 }
 
 export function saveAnnotationStore(store: AnnotationStore): void {
-  if (stateTarget() === "project") { void saveProjectState("annotations", store); return; }
+  if (stateTarget() === "project") {
+    // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
+    // a live session; route the data to local storage rather than losing it.
+    void saveProjectState("annotations", store).then((ok) => { if (!ok) writeLocalAnnotations(store); });
+    return;
+  }
+  writeLocalAnnotations(store);
+}
+
+function writeLocalAnnotations(store: AnnotationStore): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
   } catch {
