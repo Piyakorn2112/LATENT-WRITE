@@ -27,16 +27,28 @@ have. The app never asks you for a key and never stores one.
 
 Three things make it safe to ignore. You have to open it deliberately, it is
 **not used by any of the analysis** on this page, and everything else works
-normally if you never touch it. Two things are worth knowing before you do open
+normally if you never touch it.
+
+**A second cloud path exists in the code, and you should know about it even
+though you cannot currently reach it.** There is a prose-review feature that
+would post chapter text straight to Anthropic's API using a key stored in your
+own settings. It is built end to end, the setting field exists, and the
+electron side is wired, but **no screen in the app calls it**, so today it
+cannot run. It is disclosed here rather than omitted because it exists in the
+source, because a future version could switch it on, and because a privacy
+section that quietly leaves out a dormant upload path is not worth reading. Two things are worth knowing before you do open
 it. It runs the `claude` tool with its permission prompts turned off, so
 anything you ask it to do to your files, it does. And nothing in the code
 confines it to the project folder, so treat it as a capable assistant with
 access to your machine rather than as a sandbox.
 
-> **Status.** Version 0.1.0, and there is no installer yet. Today it runs from
-> source, which realistically means a developer sets it up. If you are a writer
-> evaluating this, read on for what it does, but know that the
-> [Quick start](#quick-start) is not yet a door you can walk through.
+> **Status.** Version 0.1.0. A macOS disk image can be built and one exists in
+> the tree, but it is **unsigned and un-notarised**, so macOS will warn about it,
+> and the build currently depends on a directory that lives outside this
+> repository, so it will not complete from a fresh clone. A Mac App Store target
+> is configured but not signed either. In practice this still means a developer
+> sets it up. If you are a writer evaluating this, read on for what it does, but
+> treat [Quick start](#quick-start) as not yet a door you can walk through.
 
 > Built with React (an interface library), TypeScript, Vite and Electron
 > (the toolkit that turns a web app into a desktop program). The project is
@@ -65,6 +77,12 @@ access to your machine rather than as a sandbox.
   - [7. Keeping your work](#7-keeping-your-work)
   - [8. The renderer workspace](#8-the-renderer-workspace)
   - [9. The app shell](#9-the-app-shell)
+  - [10. Rewriting a passage](#10-rewriting-a-passage)
+  - [11. Asking about a passage](#11-asking-about-a-passage)
+  - [12. Custom tools](#12-custom-tools)
+  - [13. The analysis board](#13-the-analysis-board)
+  - [14. Tidying prose](#14-tidying-prose)
+  - [15. Keyboard shortcuts](#15-keyboard-shortcuts)
 - [The four levels of "AI" in this app](#the-four-levels-of-ai-in-this-app)
 - [How we know it works](#how-we-know-it-works)
 - [Is any of it paid?](#is-any-of-it-paid)
@@ -104,7 +122,8 @@ your prose sits in a file called `novel.txt`, which is ordinary text you can ope
 in anything, on any machine, with or without this app. Everything the app works
 out is kept in *separate* small files alongside it, so the worst case, this
 project disappearing tomorrow, still leaves you with your manuscript intact.
-There is also a text export and a formatted PDF export.
+Export also runs to **Markdown, Word (.docx) and EPUB**, alongside plain text
+and a typographically configurable PDF.
 
 **Does it run on Windows?** Unproven. Development and all measurements are on
 macOS with Apple Silicon. The code has no Mac-only dependency and the
@@ -486,7 +505,7 @@ flowchart LR
 - Sibling chapter stats from cached analyses.
 - Resolved names from `world-data.ts`.
 - Intelligence level (`low`, `default`, `high`, or auto-resolved).
-- ~~Optional learned bias and adaptive inference context.~~ **No longer passed.** Corrections are applied as pins after detection instead; see System 6.
+- ~~Optional learned bias and adaptive inference context.~~ **No longer passed.** Corrections are applied as pins after detection instead; see [Correcting the app when it is wrong](#5-correcting-the-app-when-it-is-wrong).
 
 #### Output Channels
 
@@ -1422,14 +1441,17 @@ being dropped. Every store asks it before writing.
 | Store | Project file | localStorage key | Holds |
 |---|---|---|---|
 | Novel | project files | `glass-editor:novel-v1` | chapters, meta, world data |
-| Current chapter |, | `glass-editor:current-chapter-v1` | selection only |
+| Current chapter | n/a | `glass-editor:current-chapter-v1` | selection only |
 | Story graph | `story-graph` | `glass-editor:story-graph-v1` | per-chapter entries, events, presence |
 | Annotations | `annotations` | `glass-editor:annotations-v1` | the writer's corrections |
-| Adaptive model | `adaptive` | `glass-editor:adaptive-learning-v1` | learned weights and traces. **Only the `entity` task still consumes these**; the speech and action models are retained but no longer reach detection (see System 6). |
+| Adaptive model | `adaptive` | `glass-editor:adaptive-learning-v1` | learned weights and traces. **Only the `entity` task still consumes these**; the speech and action models are retained but no longer reach detection (see [Correcting the app](#5-correcting-the-app-when-it-is-wrong)). |
 | Assist reviews | `assist-reviews` | `glass-editor:assist-reviews-v1` | model answers + every key asked |
 | Knowledge ledger | `knowledge-ledger` | `glass-editor:knowledge-ledger-v1` | world facts, verdicts, dismissals |
 | Review results | `review-results` | `glass-editor:review-results-v1` | prose-review output |
-| License |, | `glass-editor:license-v1` | tier + activation code |
+| License | n/a | `glass-editor:license-v1` | tier + activation code |
+| Preferences | n/a | `latentwrite:prefs-v1` | all 16 preference fields, including the assistant tier and the dormant review API key |
+| Daily words | n/a | `latentwrite:daily-words-v1` | per-day word counts for the goal readout |
+| Widget board | `widget-config` | `latentwrite:widget-config-v1` | which analysis widgets are shown and in what order. The only store that is **both** project-backed and local. |
 
 **★ EVERY MODEL-DERIVED STORE IS KEYED BY `contentHash` + `modelId`.** Changing
 either drops the chapter's entry whole rather than merging into it: answers
@@ -1457,8 +1479,9 @@ a capable assistant with real access to your machine, not as a sandbox. None of
 the analysis, the timeline or the local assistant uses it, and it never runs
 unless you open it.
 
-**Export lives here too.** Plain text export, and a formatted PDF with
-configurable typography.
+**Export lives here too.** Plain text, Markdown, Word (.docx), EPUB, and a PDF
+with configurable typography. The Markdown, Word and PDF exports have menu
+shortcuts.
 
 
 <details>
@@ -1589,6 +1612,123 @@ flowchart LR
 - Story-graph maintenance is already deferred, but still fans out to multiple widgets after analysis settles.
 
 </details>
+
+---
+
+### 10. Rewriting a passage
+
+**What it is for.** Selecting text and asking for it to be proofread, rewritten,
+or changed according to an instruction you type. It is the only feature in the
+app that writes into your manuscript by itself.
+
+**How it works.** Your request is first classified into an intent, and that
+classification decides everything downstream: how much text is sent at once, what
+the model is told, how strictly the answer is checked, and whether a failure is
+worth retrying. Proofreading merges adjacent paragraphs into one batch because it
+is mechanical and never restructures. Rewriting deliberately does not, because
+handing the model two paragraphs invites it to merge them.
+
+**The safety rule worth knowing.** Every revised passage is run through the
+grammar checker before it is allowed anywhere near your text, and it is
+**refused if it contains more hard errors than the text it would replace**. A
+model that "improves" a sentence into a broken one gets thrown away rather than
+shown to you. Replacements also go through the normal editing path, so undo
+works exactly as you would expect.
+
+---
+
+### 11. Asking about a passage
+
+**What it is for.** Right-clicking a paragraph and asking what it means in the
+story around it. The rule-based engines can tell you *where* things are. This is
+for what a passage is *doing*.
+
+**How it works.** The interesting part is that the model does no searching. A
+separate step assembles the evidence, in a fixed priority order, until a token
+budget runs out: the cast present in the scene, per-chapter summaries, the
+relevant world data, and so on. Whatever does not fit is dropped from the bottom.
+The model receives that pack and nothing else, so it cannot wander into the rest
+of the book or answer from a half-memory of a novel it read in training.
+
+Two rungs that could be in that ladder are deliberately left out, and the
+reasoning is recorded in the source rather than lost.
+
+---
+
+### 12. Custom tools
+
+**What it is for.** Extending the app per project. A tool is a small program that
+lives in your project folder, gets a slash command, and can appear as a chat
+command, a widget on the analysis board, a sidebar, an overlay, or a highlight
+layer over your prose.
+
+**How it works.** Tools declare what they need (the current chapter, the
+analysis, world data, specific files), are compiled inside the app when they
+change, and draw themselves using a supplied kit of interface pieces so they
+match the rest of the app without shipping their own styling. A handful of slash
+commands are reserved by the app and cannot be taken over.
+
+**What to know as a user.** This is off unless you enable it, and tools you add
+run with the access they declare, so treat one you did not write the way you
+would treat any other plugin.
+
+---
+
+### 13. The analysis board
+
+**What it is for.** The panel of widgets showing what the app has worked out
+about the chapter you are in.
+
+**How it works.** The board is a registry of widgets you can reorder and hide,
+saved per project. The default order is a deliberate reading order rather than an
+arbitrary one: what looks **wrong** first, then the chapter's own shape, then how
+it sits against its neighbours, then craft detail from coarse to fine. Every
+widget carries its own help text, written to answer the question "I do not know
+what this widget is telling me".
+
+Widgets cover diagnostics, tension, cast, continuity, cross-chapter arc, chapter
+role, shaping, prose profile, voice, rhythm, repetition, style watch and
+character voice, plus a slot for any custom tool that asked to be a widget.
+
+---
+
+### 14. Tidying prose
+
+**What it is for.** Two one-button passes over your own text. One re-paragraphs a
+wall of unbroken prose. The other inserts scene-break markers where a scene
+clearly ends.
+
+**How it works.** Both are built on a shared sentence-segmentation layer tuned
+for high precision, and both refuse to act when the signal is ambiguous.
+
+**The rule that protects you.** Your existing paragraph breaks are treated as
+authoritative and are never second-guessed. The only case the app fully
+reconstructs is a chapter that arrives as a single unbroken block, which is
+usually the result of an import rather than a decision you made.
+
+---
+
+### 15. Keyboard shortcuts
+
+| Shortcut | Does |
+|---|---|
+| ⌘⇧O | Open project |
+| ⌘↵ | New chapter |
+| ⌘I | Chapter index |
+| ⌘J | World data |
+| ⌘O | Import .txt |
+| ⌘⇧E | Export .txt |
+| ⌘⇧P | Export PDF |
+| ⌘⇧M | Export Markdown |
+| ⌘⇧D | Export Word (.docx) |
+| ⌘S | Save |
+| ⌘Z / ⌘⇧Z | Undo / redo |
+| ⌘F | Find |
+| ⌘⇧F | Find across the project |
+| ⌘. | Focus mode |
+| ⌘⇧I | Toggle analysis on and off |
+| ⌘\ | Split view |
+| ⌥← / ⌥→ | Previous / next chapter |
 
 ---
 
@@ -1929,7 +2069,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run electron:dev` | `npm run build && electron .` |
 | `npm run preview` | `vite preview` |
 
-**Accuracy suites — score an engine against expectations**
+**Accuracy suites, scoring an engine against expectations**
 
 | Command | Runs |
 |---|---|
@@ -1968,7 +2108,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run test:prose-segments` | `scripts/test-prose-segments.ts` |
 | `npm run test:tension-scene` | `scripts/test-tension-scene.ts` |
 
-**Probes — measure and print, no pass/fail**
+**Probes, which measure and print rather than pass or fail**
 
 | Command | Runs |
 |---|---|
@@ -1988,7 +2128,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run probe:rank-inversion` | `scripts/probe-rank-inversion.ts` |
 | `npm run probe:writer-view` | `scripts/probe-writer-view.ts` |
 
-**Verification — behaviour gates, many in real Electron**
+**Verification, behaviour gates, many running in real Electron**
 
 | Command | Runs |
 |---|---|
@@ -2010,7 +2150,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run verify:toggle-tap` | `scripts/verify-toggle-tap.cjs` |
 | `npm run verify:widget-help` | `scripts/verify-widget-help.mjs` |
 
-**Drift audits — held-out books the engines were never tuned on**
+**Drift audits, run on held-out books the engines were never tuned on**
 
 | Command | Runs |
 |---|---|
