@@ -163,13 +163,26 @@ const RB = "(?![A-Za-z0-9])";
  *    book. A gate that silently excludes the best evidence in the corpus is
  *    worse than no gate.
  */
+/** Determiners and possessives open a noun phrase; nothing BEFORE one can
+ *  modify the noun AFTER it. Without this, "reopened his eyes" reads as
+ *  descriptive because "reopened" ends in -ed two tokens back. */
+const NP_OPENER = new Set(["the", "a", "an", "his", "her", "their", "its", "my", "your", "our"]);
+
 export function hasDescriptiveAppearance(text: string): boolean {
   const all = new RegExp(`${LB}${APPEARANCE_NOUN}${RB}`, "gi");
   for (let m = all.exec(text); m; m = all.exec(text)) {
     const before = text.slice(Math.max(0, m.index - 40), m.index);
     const after = text.slice(m.index + m[0].length, m.index + m[0].length + 40);
-    const pre = before.match(/([a-z-]+)[,\s]+([a-z-]+)?[,\s]*$/i);
-    if (pre && [pre[1], pre[2]].some((w) => w && isAdjectiveShaped(w.toLowerCase()))) return true;
+    const pre = before.match(/(?:([a-z-]+)[,\s]+)?([a-z-]+)[,\s]*$/i);
+    if (pre) {
+      const adjacent = pre[2]?.toLowerCase();
+      const back = pre[1]?.toLowerCase();
+      if (adjacent && isAdjectiveShaped(adjacent) && !NP_OPENER.has(adjacent)) return true;
+      // The token behind the adjacent one only counts when the adjacent one
+      // does not RESTART the phrase: "tall, gaunt figure" yes, "reopened his
+      // eyes" no.
+      if (back && !NP_OPENER.has(adjacent ?? "") && isAdjectiveShaped(back) && !NP_OPENER.has(back)) return true;
+    }
     const post = after.match(/^(?:\s*(?:was|were|is|are|seemed|looked|had)\s+|\s*,\s*)([a-z-]+)/i);
     if (post && isAdjectiveShaped(post[1].toLowerCase())) return true;
   }
