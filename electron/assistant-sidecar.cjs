@@ -8,9 +8,10 @@
  *
  * ★ SCOPE (v1): background batch work only — chips + chapter summaries on
  *   the max tier. Interactive paths (max-ask, writing tool) and every
- *   custom model stay on the in-process host: llama-server slots are fixed
- *   at contextTotal/slots tokens each, sized here for batch prompts, and
- *   the golden-tested interactive behaviour is not re-judged in v1.
+ *   custom model stay on the in-process host: the context pool is sized
+ *   here for batch prompts (-kvu shares it across slots, so one prompt may
+ *   exceed contextTotal/slots when neighbours are idle), and the
+ *   golden-tested interactive behaviour is not re-judged in v1.
  *
  * ★ THE CALLER'S ERROR VOCABULARY IS A CONTRACT. The chip tick classifies
  *   failures into content-shaped ({parse, no-json, schema} → permanent
@@ -253,6 +254,23 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     //   attention, which is on above.
     '-ctk', 'q8_0',
     '-ctv', 'q8_0',
+    // ★ ONE SHARED KV POOL instead of hard per-slot walls. Without -kvu a
+    //   prompt longer than contextTotal/slots is a flat 400 even when the
+    //   other slots sit empty (measured: 2228 tokens → 400; with -kvu it
+    //   just runs, 4-way concurrency intact). Capacity is unchanged, so the
+    //   memory guard's math still holds; this only removes the artificial
+    //   wall and the slot-halving reboot it used to force.
+    '-kvu',
+    // ★★ SMALL MICRO-BATCH IS THE UI-SMOOTHNESS LEVER, deliberately below
+    //   the throughput optimum. Each ubatch is one Metal dispatch; at the
+    //   default 512 a saturated sidecar drops ~12% of the app's 120Hz
+    //   frames (fullscreen glass probe: p95 17ms, worst 75ms). At 128 the
+    //   dispatches are short enough for the compositor to interleave: 95%
+    //   of frames delivered, p95 12ms, zero frames >25ms — for 4% prefill
+    //   and ~3% concurrent throughput (389 vs 405 tok/s; decode unchanged).
+    //   Process-priority knobs were measured and REJECTED: --prio -1 moved
+    //   nothing and taskpolicy -b starved GPU feeding (177ms stalls).
+    '-ub', '128',
     // ★★ THE HOST-RAM PROMPT CACHE DEFAULTS TO 8192 MiB, ON. b10298 keeps
     //   evicted slot KV states in host memory (PR #16391) and re-matches
     //   them by prefix — a real win for our byte-identical per-task system

@@ -221,6 +221,40 @@ by choice, and no mode or task type changes that.
   guard shrinks CONTEXT or refuses with `low-memory`; it never quietly
   demotes to CPU.
 
+## Sidecar tuning pass (measured 2026-08-08, M1 Pro, fullscreen-glass UI probe)
+
+Shipped: `-kvu` (unified KV pool) and `-ub 128` (small micro-batch). Every
+other researched knob was measured and rejected — the eliminated hypotheses
+matter as much as the shipped flags.
+
+- ★★ THE UI-CONTENTION LEVER IS MICRO-BATCH SIZE, NOT PROCESS PRIORITY.
+  Each ubatch is one Metal dispatch; the compositor can only interleave
+  between dispatches. A saturated sidecar at the default `-ub 512` cost a
+  fullscreen-glass 120Hz scene ~12% of its frames (p95 17ms, worst 75ms);
+  `-ub 128` returned it to 95% delivered, p95 12ms, zero frames >25ms.
+  Cost, bracketed base/ub128/base: prefill 405 → 389 tok/s (4%), warm
+  4-slot aggregate ~3%, decode unchanged. A light 480x320 probe scene
+  showed ZERO contention at any setting — the probe scene must match the
+  real compositor load or it measures nothing.
+- Priority knobs rejected on measurement: `--prio -1` moved no frame
+  metric and costs ~3% throughput; `taskpolicy -b` STARVED the host-side
+  GPU feeding (worst frame 177ms, ten >50ms stalls) — the background QoS
+  clamp E-cores the thread that submits Metal work. Idle-vs-busy CPU of
+  the sidecar is 0.3% vs ~4%, so the `--poll 0`/`-t 2` advice from older
+  builds has nothing to save on b10298; config stays minimal.
+- `-kvu`: without it a prompt longer than contextTotal/slots is a flat 400
+  even with idle neighbours (measured: 2228 tokens → 400; with -kvu it
+  runs, 4-way concurrency intact, probe-sidecar-e2e 1.95x warm). Same
+  total capacity, so the memory guard's math is untouched; it removes the
+  artificial per-slot wall and the slot-halving reboot it forced.
+- `--cache-reuse 256` tested and DROPPED: for an edited-chapter re-summary
+  (shared head, one changed sentence, shared tail) prompt_n was identical
+  with and without it, q8_0 and f16 KV both — chunked tail reuse never
+  engaged on b10298; plain prefix caching already recovers the head.
+- Blog-guide refutations for this hardware+model class: `-ub 2048` (Apple's
+  gpt-oss advice) is ~7% WORSE than default here; ubatch 256-1024 all within
+  noise on throughput. Measure per machine class, don't import advice.
+
 ## Deferred, with reasons
 - Lazy-grammar think-then-constrain (item 5): needs a chip-gold A/B to prove
   no schema/quality regression; conditional benefit. Next pass.
