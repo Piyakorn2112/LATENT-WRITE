@@ -209,6 +209,22 @@ async function main() {
     marlowPack, "personality");
   expect("a one-word prose answer is VACUOUS, not shipped", g5.status === "vacuous", g5.status);
 
+  // The grammar cap leaves a ragged tail; observed verbatim on the real 4B.
+  // The tidy pass must cut back to the completed sentence BEFORE grounding.
+  const raggedAtCap =
+    "abstracted, eating mechanically, with her big eyes fixed unswervingly and unseeingly " +
+    "on the sky outside the window. a little, flat, glossy, new sailor, the [ext";
+  const tidyPack = {
+    ...marlowPack,
+    spans: [{ n: 1, channel: "copular" as const, chapter: 1, text: raggedAtCap.replace(" [ext", " extreme") }],
+    traitCandidates: [1],
+  };
+  const g6 = normalizeFieldAnswer(
+    { spans: [1], personality: raggedAtCap, confidence: 0.7 }, tidyPack, "personality");
+  expect("an at-cap ragged tail tidies to the completed sentence",
+    g6.status === "grounded" && g6.text.endsWith("window.") && !g6.text.includes("[ext"),
+    JSON.stringify(g6.text.slice(-40)));
+
   console.log("\n══ usefulness — the measured answers, verbatim ══");
   expect("'dark eyes' is useful", usefulAppearance("dark eyes"));
   expect("'bushy brows' is useful", usefulAppearance("bushy brows"));

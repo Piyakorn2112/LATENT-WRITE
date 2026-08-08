@@ -24,6 +24,24 @@ import { assistantMode } from "../lib/preferences";
 import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
+import { OrbEngine } from "./orb/OrbEngine";
+import {
+  DOSSIER_TASK,
+  buildDossierPack,
+  buildExtractiveCard,
+  buildFieldRequest,
+  buildFieldRetryRequest,
+  dossierSignature,
+  harvestDossierEvidence,
+  normalizeFieldAnswer,
+  DOSSIER_FIELDS,
+  emptyProposal,
+  type DossierEvidence,
+  type DossierFieldKey,
+  type DossierProposal,
+  type ExtractiveCard,
+  type HarvestProgress,
+} from "../lib/character-dossier";
 import {
   ENTITY_REVIEW_TASK,
   applyProposalsToScanResult,
@@ -47,6 +65,34 @@ import {
 
 type Tab = "characters" | "places" | "factions" | "entities";
 type Entity = WorldCharacter | WorldPlace | WorldFaction | WorldGenericEntity;
+
+// ── Character dossier (auto role + description) ───────────────────────────
+//
+// The engine and its measured rationale live in src/lib/character-dossier.ts;
+// this file owns only the wiring. Provenance rule: NOTHING the model writes
+// enters worldData until the writer clicks it in — role and description are
+// read back into evidence-pack, max-ask and the gender inference as if the
+// writer asserted them, so acceptance is the provenance boundary.
+
+type DossierPhase = "idle" | "reading" | "writing" | "ready" | "error";
+
+interface DossierUiState {
+  phase: DossierPhase;
+  /** The character the current result belongs to; a rename hides the card. */
+  forName: string | null;
+  progress: HarvestProgress | null;
+  fieldInFlight: DossierFieldKey | null;
+  /** Max-tier generated card, already gated and grounded. Null in "on". */
+  proposal: DossierProposal | null;
+  /** Deterministic card: counted-facts role + the manuscript's own quotes. */
+  card: ExtractiveCard | null;
+  error?: string;
+}
+
+const DOSSIER_IDLE: DossierUiState = {
+  phase: "idle", forName: null, progress: null, fieldInFlight: null,
+  proposal: null, card: null,
+};
 type ScanCategory = "characters" | "places" | "factions" | "entities";
 type ScanLabel = "character" | "place" | "faction" | "entity";
 type ScanPhase = "pick" | "scanning" | "review" | "alias-scanning" | "alias-review";
@@ -302,6 +348,127 @@ export function WorldDataView({
   const [aliasSelected, setAliasSelected] = useState<Set<string>>(() => new Set());
   const aliasKey = (c: { character: string; alias: string }) =>
     `${c.character.toLowerCase()}|${c.alias.toLowerCase()}`;
+
+  // ── Dossier state ───────────────────────────────────────────────────────
+  const [dossier, setDossier] = useState<DossierUiState>(DOSSIER_IDLE);
+  /** The manuscript read is shared by the whole cast; one click pays it, the
+   *  next nine cards are instant. Keyed by content + cast signature. */
+  const dossierCacheRef = useRef<{ sig: string; evidence: DossierEvidence } | null>(null);
+  const dossierAbortRef = useRef<AbortController | null>(null);
+  const dossierRunIdRef = useRef(0);
+
+  const cancelDossier = () => {
+    dossierRunIdRef.current += 1;
+    dossierAbortRef.current?.abort();
+    dossierAbortRef.current = null;
+    cancelWhere((info) => info.task === DOSSIER_TASK);
+    setDossier(DOSSIER_IDLE);
+  };
+  // Panel unmount: stop the harvest and drop any queued model work.
+  useEffect(() => () => {
+    dossierAbortRef.current?.abort();
+    cancelWhere((info) => info.task === DOSSIER_TASK);
+  }, []);
+
+  /** The whole flow: read the manuscript once, then in max mode ask the model
+   *  one FIELD at a time over only that field's eligible spans. Every result
+   *  is gated and grounded by the module before the writer sees it. */
+  const generateDossier = async (entity: WorldCharacter) => {
+    const runId = ++dossierRunIdRef.current;
+    const controller = new AbortController();
+    dossierAbortRef.current?.abort();
+    dossierAbortRef.current = controller;
+    const alive = () => runId === dossierRunIdRef.current && !controller.signal.aborted;
+
+    const cast = wd.characters.map((c) => ({ name: c.name, aliases: c.aliases }));
+    const sig = dossierSignature(novel, cast);
+
+    try {
+      let evidence = dossierCacheRef.current?.sig === sig
+        ? dossierCacheRef.current.evidence
+        : null;
+      if (!evidence) {
+        setDossier({ ...DOSSIER_IDLE, phase: "reading", forName: entity.name });
+        evidence = await harvestDossierEvidence(novel, cast, {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            if (alive()) setDossier((d) => ({ ...d, progress }));
+          },
+        });
+        dossierCacheRef.current = { sig, evidence };
+      }
+      if (!alive()) return;
+
+      const ev = evidence.byName.get(entity.name);
+      if (!ev) {
+        setDossier({ ...DOSSIER_IDLE, phase: "error", forName: entity.name, error: "This character is not in the cast list." });
+        return;
+      }
+      const rank = [...evidence.characters]
+        .sort((a, b) => b.counts.mentions - a.counts.mentions)
+        .findIndex((c) => c.name === entity.name);
+      const card = buildExtractiveCard(ev, Math.max(0, rank));
+      const pack = buildDossierPack(ev);
+
+      // "on" is a different product, not a smaller model: counted-facts role
+      // plus the manuscript's own sentences. Measured: the 1.7B abstains or
+      // fabricates on this task and points at the right person about half the
+      // time, so it plays no part here.
+      const mode = assistantMode(loadPrefs());
+      if (mode !== "max" || !(await assistantAvailable())) {
+        if (alive()) setDossier({ phase: "ready", forName: entity.name, progress: null, fieldInFlight: null, proposal: null, card });
+        return;
+      }
+
+      const proposal: DossierProposal = emptyProposal(pack, card.role);
+      for (const field of DOSSIER_FIELDS) {
+        if (!alive()) return;
+        const request = buildFieldRequest(pack, field);
+        if (!request) continue; // gate closed: never asked, never invented
+        setDossier({ phase: "writing", forName: entity.name, progress: null, fieldInFlight: field, proposal: null, card });
+
+        const ask = async (req: typeof request) => assistantRunJSON<Record<string, unknown>>({
+          task: DOSSIER_TASK,
+          tag: entity.name,
+          tier: "max",
+          // ★ The thinking tier: /no_think must NOT be appended.
+          noThink: false,
+          systemPrompt: req.systemPrompt,
+          userText: req.userText,
+          schema: req.schema,
+          maxTokens: req.maxTokens,
+          timeoutMs: 120_000,
+        });
+
+        const first = await ask(request);
+        if (!alive()) return;
+        if (!first.ok) continue; // that field stays empty; the card says so
+        let answer = normalizeFieldAnswer(first.json, pack, field);
+        // ★ A refusal licenses ONE extractive retry (module rule): the line
+        //   used words from outside the passages, so ask again for verbatim.
+        if (answer.status === "refused") {
+          const retryReq = buildFieldRetryRequest(pack, field);
+          if (retryReq) {
+            const second = await ask(retryReq);
+            if (!alive()) return;
+            if (second.ok) {
+              const retried = normalizeFieldAnswer(second.json, pack, field);
+              if (retried.text) answer = retried;
+            }
+          }
+        }
+        proposal[field] = { text: answer.text, spans: answer.spans, status: answer.status };
+        proposal.confidence = Math.max(proposal.confidence, answer.confidence);
+      }
+
+      if (alive()) setDossier({ phase: "ready", forName: entity.name, progress: null, fieldInFlight: null, proposal, card });
+    } catch (error) {
+      if ((error as Error)?.name === "AbortError") return;
+      if (alive()) {
+        setDossier({ ...DOSSIER_IDLE, phase: "error", forName: entity.name, error: "The manuscript read failed. Try again." });
+      }
+    }
+  };
 
   // Run heavy computation after the "scanning" loading state has painted
   useEffect(() => {
@@ -1286,6 +1453,17 @@ export function WorldDataView({
                     }
                     onAcceptAlias={acceptAlias}
                     onDismissAlias={dismissAlias}
+                    dossier={
+                      tab === "characters"
+                        ? {
+                            state: dossier,
+                            llmMode: assistantMode(loadPrefs()),
+                            onGenerate: () => void generateDossier(current as WorldCharacter),
+                            onCancel: cancelDossier,
+                            onDismiss: () => setDossier(DOSSIER_IDLE),
+                          }
+                        : undefined
+                    }
                   />
                 ) : (
                   <div className="world-edit-empty">
@@ -1324,9 +1502,202 @@ const ALIAS_RULE_LONG: Record<AliasProposal["rule"], string> = {
   initial:          "an initial plus the same surname",
 };
 
+interface DossierFormProps {
+  state: DossierUiState;
+  llmMode: "off" | "on" | "max";
+  onGenerate: () => void;
+  onCancel: () => void;
+  onDismiss: () => void;
+}
+
+const DOSSIER_FIELD_LABEL: Record<DossierFieldKey, string> = {
+  appearance: "Appearance",
+  personality: "Personality",
+  background: "Background",
+};
+
+const DOSSIER_QUOTE_LABEL: Record<"appearance" | "personality" | "background", string> = {
+  appearance: "looks",
+  personality: "manner",
+  background: "history",
+};
+
+/**
+ * The card under the Description field. Three phases: a quiet offer, the
+ * rewrite tool's own orb while working, then proposals that do nothing until
+ * clicked. Max mode shows generated lines with their citations; "on" mode
+ * shows the deterministic card only — the counted-facts role and the
+ * manuscript's own sentences — because the small model measurably cannot do
+ * this job and plays no part in it.
+ */
+function DossierCard({
+  entityName, description, dossier, onPatch,
+}: {
+  entityName: string;
+  description: string;
+  dossier: DossierFormProps;
+  onPatch: (patch: Partial<Entity>) => void;
+}) {
+  const { state, llmMode } = dossier;
+  const mine = state.forName === entityName;
+  const busy = mine && (state.phase === "reading" || state.phase === "writing");
+  const ready = mine && state.phase === "ready";
+
+  const appendToDescription = (text: string) => {
+    const current = description.trim();
+    onPatch({ description: current ? `${current}\n${text}` : text } as Partial<Entity>);
+  };
+
+  const fields = ready && state.proposal
+    ? DOSSIER_FIELDS
+        .map((key) => ({ key, field: state.proposal![key] }))
+        .filter(({ field }) => field.text.length > 0)
+    : [];
+  // Quotes cover what generation left blank: everything in "on" mode, the
+  // gated or empty fields in max mode.
+  const quotes = ready && state.card
+    ? state.card.quotes.filter((q) =>
+        !state.proposal || state.proposal[q.kind as DossierFieldKey]?.text.length === 0)
+    : [];
+  const nothingFound = ready && fields.length === 0 && quotes.length === 0;
+
+  return (
+    <div className="world-field">
+      <span className="world-field-label">From the manuscript</span>
+
+      {(!mine || state.phase === "idle") && (
+        <div className="world-dossier-offer">
+          <button
+            className="world-alias-btn"
+            onClick={dossier.onGenerate}
+            title={llmMode === "max"
+              ? "Read the whole manuscript for this character and draft role and description lines, each cited to its passage"
+              : "Read the whole manuscript and offer this character's role and the passages that describe them"}
+          >
+            Read from manuscript
+          </button>
+        </div>
+      )}
+
+      {mine && state.phase === "error" && (
+        <div className="world-dossier-note">
+          <span>{state.error}</span>
+          <button className="world-alias-btn" onClick={dossier.onGenerate}>Retry</button>
+        </div>
+      )}
+
+      {busy && (
+        <div className="world-dossier-wait">
+          {/* The rewrite tool's own indicator, verbatim — same component, same
+              tint, so the app has ONE way of saying "the model is working". */}
+          <span className="max-ask-orb">
+            <OrbEngine mode="default" analyzing size={18} flowScale={0.8} aberration={0.45} tint="--control-value-fill" />
+          </span>
+          <span className="world-dossier-wait-label">
+            {state.phase === "reading"
+              ? state.progress
+                ? `Reading chapter ${state.progress.chapter} of ${state.progress.chapterTotal}…`
+                : "Reading the manuscript…"
+              : `Writing ${state.fieldInFlight ?? "the card"}…`}
+          </span>
+          <button className="world-alias-btn" onClick={dossier.onCancel}>Cancel</button>
+        </div>
+      )}
+
+      {ready && (
+        <div className="world-alias-suggest">
+          {state.card && (
+            <div className="world-dossier-row">
+              <span className="world-alias-name">{state.card.role}</span>
+              <span className="world-alias-why" title={state.card.factLine}>{state.card.factLine}</span>
+              <span className="world-alias-actions">
+                <button
+                  className="world-alias-btn"
+                  onClick={() => onPatch({ role: state.card!.role } as Partial<Entity>)}
+                  title="Set the Role field to this"
+                >
+                  Use
+                </button>
+              </span>
+            </div>
+          )}
+
+          {fields.map(({ key, field }) => (
+            <div key={key} className="world-dossier-row">
+              <span className="world-alias-kind" title={
+                field.status === "repaired"
+                  ? "Every word locates in the cited passages; the citation was corrected in code"
+                  : "Every word locates in the cited passages"
+              }>
+                {DOSSIER_FIELD_LABEL[key]}
+              </span>
+              <span className="world-dossier-text">
+                {field.text}
+                <span className="world-dossier-cites">
+                  {field.spans.map((n) => ` [${n}]`).join("")}
+                </span>
+              </span>
+              <span className="world-alias-actions">
+                <button
+                  className="world-alias-btn"
+                  onClick={() => appendToDescription(field.text)}
+                  title="Append this line to the Description"
+                >
+                  Add
+                </button>
+              </span>
+            </div>
+          ))}
+
+          {quotes.map((quote) => (
+            <div key={`${quote.kind}:${quote.chapter}:${quote.text.slice(0, 24)}`} className="world-dossier-row">
+              <span className="world-alias-kind" title={
+                quote.provenance === "said"
+                  ? "Spoken by a character about them; may be unfair or wrong in-world"
+                  : quote.provenance === "pronoun"
+                    ? "The passage names them by pronoun; the referent was resolved by the engine"
+                    : "The manuscript's own sentence"
+              }>
+                {DOSSIER_QUOTE_LABEL[quote.kind]}
+              </span>
+              <span className="world-dossier-text world-dossier-quote" title={quote.text}>
+                “{quote.text}” <span className="world-dossier-cites">ch {quote.chapter}</span>
+              </span>
+              <span className="world-alias-actions">
+                <button
+                  className="world-alias-btn"
+                  onClick={() => appendToDescription(`“${quote.text}” (ch ${quote.chapter})`)}
+                  title="Append this passage to the Description, quoted"
+                >
+                  Add
+                </button>
+              </span>
+            </div>
+          ))}
+
+          {nothingFound && (
+            <div className="world-dossier-note">
+              {/* An honest empty state is the whole point: the alternative,
+                  measured, was a confident invented description. */}
+              <span>The manuscript does not describe {entityName} yet. The card fills in as you write.</span>
+            </div>
+          )}
+
+          <div className="world-dossier-foot">
+            <button className="world-alias-btn" onClick={dossier.onDismiss}>Dismiss</button>
+            <button className="world-alias-btn" onClick={dossier.onGenerate} title="Read the manuscript again">
+              Refresh
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EntityForm({
   entity, currentTab, roleLabel, onPatch, onMoveTo, onRename, tabKey, isCharacter,
-  aliasProposals, onAcceptAlias, onDismissAlias,
+  aliasProposals, onAcceptAlias, onDismissAlias, dossier,
 }: {
   entity: Entity;
   currentTab: Tab;
@@ -1339,6 +1710,7 @@ function EntityForm({
   aliasProposals: AliasProposal[];
   onAcceptAlias: (proposal: AliasProposal) => void;
   onDismissAlias: (proposal: AliasProposal) => void;
+  dossier?: DossierFormProps;
 }) {
   const aliasesText = (entity.aliases ?? []).join(", ");
   const roleField = (entity as WorldCharacter).role ?? (entity as WorldPlace).type ?? "";
@@ -1476,6 +1848,20 @@ function EntityForm({
           rows={5}
         />
       </label>
+
+      {/* ── Dossier: role + description read out of the manuscript ──────────
+          Nothing here writes into the fields until the writer clicks it in —
+          acceptance is the provenance boundary, because these two fields are
+          read back into the model packs and the gender inference as if the
+          writer asserted them. */}
+      {isCharacter && dossier && dossier.llmMode !== "off" && (
+        <DossierCard
+          entityName={entity.name}
+          description={entity.description ?? ""}
+          dossier={dossier}
+          onPatch={onPatch}
+        />
+      )}
 
       <div className="world-field">
         <span className="world-field-label">Move To</span>

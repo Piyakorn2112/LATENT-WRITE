@@ -15643,6 +15643,91 @@ body.electron-window-unfocused .wc-panel::after {
 
 .world-alias-btn:hover { color: var(--text); border-color: var(--text-secondary); }
 
+/* ── Character dossier card ────────────────────────────────────────────────
+   Sits under the Description field and borrows the alias-suggest family:
+   flat rows, quiet borders, buttons that do the writing only when clicked.
+   The wait row reuses .max-ask-orb VERBATIM — the app has one way of saying
+   "the model is working", and it is the rewrite tool's blue orb. */
+.world-dossier-offer {
+  display: flex;
+  margin-top: 2px;
+}
+
+.world-dossier-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  margin-top: 2px;
+}
+
+.world-dossier-wait-label {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-dossier-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+}
+
+.world-dossier-text {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.world-dossier-quote {
+  font-style: italic;
+  color: var(--panel-text-4, var(--text-secondary));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.world-dossier-cites {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--text-secondary);
+  letter-spacing: 0.03em;
+}
+
+.world-dossier-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  color: var(--text-secondary);
+  padding: 4px 8px 2px 8px;
+}
+
+.world-dossier-foot {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
 /* ── GlassModeSelector ─────────────────────────────────────────────────────
    A three-stop track with a glass knob. Borrows GlassToggle's motion grammar —
    the same spring, the same press swell, the same alternating press/release

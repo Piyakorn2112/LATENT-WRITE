@@ -366,3 +366,91 @@ TIERS=max   ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
 PICK=1 TIERS=small ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
 GATE=off TIERS=small ./node_modules/.bin/electron scripts/probe-dossier-model.cjs   # canary
 ```
+
+---
+
+# Addendum: built and shipped (2026-08-09)
+
+The investigation above concluded "buildable on max, not on 'on' as a
+generator". This addendum records the build, its second round of measured
+findings, and the final verification. Engine: `src/lib/character-dossier.ts`.
+UI: the dossier card in `WorldDataView`, under the Description field. Suite:
+`test:character-dossier` (51 assertions). UI verifier: `verify:dossier-ui`
+(15 gates). Model probe: `probe:dossier-model`.
+
+## Findings the build added to the investigation
+
+1. **Three cite-first fields in one schema silenced the 4B.** Every field
+   came back empty at confidence 0 on all four rich packs while the starved
+   packs answered. One field per call, showing only that field's candidate
+   spans, answers correctly ("dark eyes" cited at 0.9). An A/B on identical
+   packs decided it. This also makes the fabrication class structurally
+   unbuildable: a field with no candidates has no request.
+2. **A surname is a family, not a person.** Miss Darcy's "tall … womanly and
+   graceful" harvested as Mr. Darcy's appearance, and the chapter-local
+   gender map handed him "her figure" spans in Georgiana's chapters. Fixed by
+   honorific-dominance masking plus whole-book pronoun-class filtering; the
+   mask acts only on CLEAR dominance, so ambiguous families (Bennet) are left
+   alone rather than wrongly split.
+3. **Relation spans describe the related party.** "The eldest … about
+   twenty-seven" is Charlotte, harvested under Elizabeth, and the model
+   turned it into a grounded false claim. Relation spans stay in the pack for
+   the writer and are barred from the model's background field.
+4. **Silent-e adjectives evade every suffix test.** "fine", "handsome" and
+   "noble" all failed the adjective shape test, which excluded the only
+   physical description of Darcy in the book. The bare list now carries the
+   frequent silent-e set; "-some" joined the suffixes.
+5. **Grounding needed derivational reach and floors.** "laughs" must ground
+   against "laughingly" (iterative stem); a refusal licenses ONE extractive
+   retry; the retry can over-compress to a single grounded word, so prose
+   fields have a four-word floor; and the grammar's maxLength cut leaves a
+   ragged tail that must be tidied to the last completed sentence BEFORE
+   grounding.
+6. **An -ed verb before a possessive read as an adjective** ("reopened his
+   eyes" counted as descriptive). Determiners and possessives now open the
+   noun phrase and block anything behind them. Caught by the unit suite while
+   it was being written.
+
+## Final measured state (max tier, real 4B)
+
+| character | appearance | personality | background |
+|---|---|---|---|
+| Elizabeth | "dark eyes" grounded | grounded (extractive retry) | true, grounded |
+| Darcy | "fine, tall person, handsome features, noble mien" | "Clever and superior in understanding" | grounded |
+| Anne | "big eyes, white face, pointed freckled face, solemn gray eyes" | grounded, tidied | grounded, said-tagged |
+| Van Helsing | "bushy brows" repaired | refused (retry junk, killed) | grounded, said-tagged |
+| Jonah | gated, no call | grounded from 2 spans | gated, no call |
+| Elder Kang | gated, no call | gated, no call | gated, no call |
+
+A refused field ships as an empty field. That is the contract.
+
+## Resources, measured
+
+Harvest is once per novel per cast, cached, cooperative-yielding per chapter:
+121k words / 57 ch → 2.3s; 161k / 27 ch → 2.1s; 535k / 174 ch → 5.3s at
+114MB heap. Pack assembly is under 10ms for a whole cast. Model calls are 2
+to 6s per open field, at most three plus at most one retry per card, through
+the client's single-flight queue, cancellable, task-tagged
+`character-dossier`.
+
+## The card
+
+"Read from manuscript" under the Description field, characters tab, hidden
+when the assistant is off. While working it shows the rewrite tool's own orb
+indicator (`.max-ask-orb` + OrbEngine, verbatim) with live progress. In max
+mode the generated lines render with their citation numbers; in "on" mode the
+card is the deterministic product: counted-facts role plus the manuscript's
+own sentences as quotes. Nothing writes into Role or Description until
+clicked ("Use" / "Add") — acceptance is the provenance boundary, because
+those fields are read back into evidence-pack, max-ask and the gender
+inference. The never-described character gets an honest empty state, verified
+against the running component.
+
+## Verification ledger
+
+- `test:character-dossier` 51/51, every negative gate paired with a positive
+- `verify:dossier-ui` 15/15 on the real component, orb caught mid-flight
+- `probe:dossier-model` max tier: table above; `GATE=off` canary diverges
+- `verify:assistant-tasks` 30/30 (no regression)
+- alias UI verifiers 12/12 and full-pass (no regression)
+- `tsc` clean, `vite build` clean

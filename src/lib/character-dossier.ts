@@ -36,6 +36,7 @@
  * the model reads, code checks. Same thesis as evidence-pack.ts and max-ask.ts.
  */
 import { splitSentences, stripQuotes } from "./prose-segments";
+import { tidyTruncatedText } from "./assistant-client";
 import {
   detectSpeechInChapter,
   resolvePronounOwners,
@@ -1050,6 +1051,7 @@ function groundField(
   pack: DossierPack,
   candidates: readonly number[],
   useful: (line: string) => boolean,
+  maxLen: number,
 ): DossierField {
   // THE GATE, accepting side. No eligible evidence: the field is empty no
   // matter what the model wrote. This is the code half of the fix for the
@@ -1057,7 +1059,15 @@ function groundField(
   // run when every gate is empty.
   if (candidates.length === 0) return { text: "", spans: [], status: "gated" };
 
-  const text = typeof rawText === "string" ? rawText.replace(/\s+/g, " ").trim() : "";
+  // A grammar cut at maxLength leaves a ragged tail ("… a little, flat,
+  // glossy, new sailor, the [ext" was observed). Tidy BEFORE grounding — the
+  // fragment is not a claim and must not fail one. Order matters: the tidy
+  // helper detects truncation by the string sitting AT the cap, so it must
+  // see the raw length; the bracket and dangling-article strips run after.
+  let text = typeof rawText === "string" ? rawText.replace(/\s+/g, " ").trim() : "";
+  text = tidyTruncatedText(text, maxLen)
+    .replace(/\s*\[[^\]]*$/, "")
+    .replace(/[\s,]+(?:a|an|the|and|or|with|of|by|in|on|at)$/i, "");
   if (!text) return { text: "", spans: [], status: "empty" };
   if (!useful(text)) return { text: "", spans: [], status: "vacuous" };
 
@@ -1106,7 +1116,8 @@ export function normalizeFieldAnswer(
   const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const grounded = groundField(
     value[field], value.spans, pack, fieldCandidates(pack, field),
-    field === "appearance" ? usefulAppearance : usefulProse);
+    field === "appearance" ? usefulAppearance : usefulProse,
+    FIELD_MAX[field]);
   const confRaw = typeof value.confidence === "number" && Number.isFinite(value.confidence)
     ? value.confidence : 0;
   return { ...grounded, confidence: Math.min(1, Math.max(0, confRaw)) };
