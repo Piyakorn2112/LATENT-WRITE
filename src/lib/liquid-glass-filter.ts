@@ -577,6 +577,36 @@ function buildFilterEl(
   //
   // If both are dropped the chain ends at feDisplacementMap, whose output is
   // then the filter result (the last primitive's always is).
+  //
+  // ── MEASURED, AND THERE IS NOTHING HERE TO WIN ──────────────────────────
+  //
+  // A faster blur was researched and benchmarked (2026-08-08, M1 Pro, real GPU,
+  // vsync and the frame cap disabled). THE TAIL BLUR IS FREE. Sweeping only
+  // this stdDeviation with the filter region pinned, so nothing else moves:
+  //
+  //     sigma        0        real (0.9-3)     12         30
+  //     working   1.459 ms      1.449        1.448      1.425
+  //     popover   0.167 ms      0.156        0.151      0.149
+  //
+  // Every delta is negative, i.e. below the harness noise floor. Not "cheap",
+  // UNMEASURABLE, and still unmeasurable at ten times the sigma we ship.
+  //
+  // ★ WHY, so nobody re-opens this. Skia's GPU blur is already the optimised
+  // algorithm the literature recommends: a separable two-pass with adjacent
+  // taps folded into single bilinear fetches, plus progressive downscaling
+  // above kMaxLinearSigma = 4 (src/core/SkBlurEngine.h). Every sigma this app
+  // ships is UNDER that threshold, so the blur is one small separable pass
+  // over a region of roughly 10^5 pixels, which is order 0.02 ms on this GPU.
+  // Kawase, dual-filter/dual-Kawase, stack blur, triple-box and recursive IIR
+  // all trade kernel width for extra passes and render targets, so they only
+  // start winning at radii far beyond ours, and dual-Kawase additionally
+  // quantises to power-of-two radii it could not hit 0.9 or 1.4 with.
+  //
+  // The glass cost is the feImage map resample plus the feDisplacementMap
+  // gather over the filter region, and it grows SUPERADDITIVELY when regions
+  // overlap: panel 0.368 + popover 0.151 + idle chrome 0.353 measured alone is
+  // 0.872, but 1.433 together. Optimise region area and overlap, not the blur.
+  // Reproduce with scripts/glass-gpu-bench.cjs (scenes popover, panelPopover).
   let tail = "displaced";
   if (blur > 0) {
     filter.append(

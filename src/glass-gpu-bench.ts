@@ -57,6 +57,8 @@ const SCENES: Record<string, Spec[]> = {
   // Isolated surfaces, to price each one on its own.
   toolbar: [TOOLBAR],
   panel: [PANEL],
+  popover: [POPOVER],
+  panelPopover: [PANEL, POPOVER],
   settingsPanelOnly: [SETTINGS],
   knobs: [RANGE_KNOB, TOGGLE_KNOB],
   lens: [LENS],
