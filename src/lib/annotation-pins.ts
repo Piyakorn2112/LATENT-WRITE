@@ -145,7 +145,40 @@ export function applyPinsToAnalysis(
   corrections: AnnotationCorrection[],
 ): ChapterAnalysisResult {
   if (corrections.length === 0) return result;
-  const pins = resolvePins(corrections, result).filter((p) => p.via !== "unresolved");
+  return applyResolvedPins(result, resolvePins(corrections, result));
+}
+
+/** What the pins did, for the annotation bar and the debug panel. */
+export interface PinStats {
+  /** Corrections recorded for this chapter. */
+  total: number;
+  /** Landed on the span they were recorded against. */
+  atIndex: number;
+  /** Re-located by content after the text moved. */
+  relocated: number;
+  /** Sentence no longer present — deliberately NOT applied anywhere. */
+  unresolved: number;
+}
+
+export function pinStats(pins: ResolvedPin[]): PinStats {
+  let atIndex = 0, relocated = 0, unresolved = 0;
+  for (const p of pins) {
+    if (p.via === "index") atIndex++;
+    else if (p.via === "content") relocated++;
+    else unresolved++;
+  }
+  return { total: pins.length, atIndex, relocated, unresolved };
+}
+
+/**
+ * Apply pins that have ALREADY been resolved. Split out so a caller that also
+ * wants to report on the pins does not pay for resolution twice.
+ */
+export function applyResolvedPins(
+  result: ChapterAnalysisResult,
+  resolved: ResolvedPin[],
+): ChapterAnalysisResult {
+  const pins = resolved.filter((p) => p.via !== "unresolved");
   if (pins.length === 0) return result;
 
   const speechByPara = new Map<number, Map<number, string | null>>();

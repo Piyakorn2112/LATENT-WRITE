@@ -47,7 +47,7 @@ import {
   saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
 } from "./lib/story-graph";
 import { loadReviewResults, loadReviewResultsFromProject, saveReviewResults } from "./lib/renderer-review";
-import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools, setProjectOpenState } from "./lib/project-manager";
+import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools, setProjectOpenState, stateTarget } from "./lib/project-manager";
 import type { ToolScanEntry } from "./lib/project-manager";
 import { ToolImportOverlay } from "./components/ToolImportOverlay";
 import type { ToolHighlight } from "./lib/tool-runner";
@@ -68,8 +68,8 @@ import {
   clearAnnotations,
   exportAnnotationsJSON,
 } from "./lib/annotation-store";
-import { computeLearnedBias, characterBreakdown } from "./lib/annotation-learn";
-import { applyPinsToAnalysis } from "./lib/annotation-pins";
+import { characterBreakdown } from "./lib/annotation-learn";
+import { resolvePins, applyResolvedPins, pinStats, type ResolvedPin } from "./lib/annotation-pins";
 import {
   addDecision as addKnowledgeDecision,
   emptyKnowledgeLedger,
@@ -127,7 +127,6 @@ import {
 import { toParagraphs, type ChapterAnalysisResult } from "./lib/chapter-analysis-runner";
 import { runChapterAnalysisInWorker } from "./lib/analysis-worker-client";
 import {
-  computeAdaptiveMetrics,
   emptyAdaptiveStore,
   loadAdaptiveStore,
   loadAdaptiveStoreFromProject,
@@ -143,7 +142,6 @@ import type {
   Novel,
   WorldData,
   AnnotationTarget,
-  LearnedBias,
 } from "./types";
 
 // Window.electronAPI type is declared in src/lib/project-manager.ts
@@ -640,29 +638,19 @@ export default function App() {
   const [annotationMode, setAnnotationMode] = useState(false);
   const [annotationStore, setAnnotationStore] = useState(() => loadAnnotationStore());
   const [adaptiveStore, setAdaptiveStore] = useState(() => loadAdaptiveStore());
-  const [learnedBias, setLearnedBias] = useState<LearnedBias | null>(null);
   const [annotationTarget, setAnnotationTarget] = useState<{ target: AnnotationTarget; anchor: DOMRect; correctedSpeaker?: string | null } | null>(null);
-
-  const chapterOrderKey = novel.chapters.map((chapter) => chapter.id).join("\u001f");
-  const chapterOrderIds = useMemo(
-    () => novel.chapters.map((chapter) => chapter.id),
-    [chapterOrderKey],
-  );
 
   // Persist annotation store whenever it changes.
   useEffect(() => {
     saveAnnotationStore(annotationStore);
   }, [annotationStore]);
 
-  // Chapter-aware bias uses chapter order + current chapter, not chapter text,
-  // so it stays off the live-typing hot path.
-  useEffect(() => {
-    const bias = computeLearnedBias(annotationStore, novel.worldData, {
-      currentChapterId: activeChapterId,
-      chapterIds: chapterOrderIds,
-    });
-    setLearnedBias(bias);
-  }, [annotationStore, novel.worldData, activeChapterId, chapterOrderIds]);
+  // ★ THE LEARNED BIAS IS GONE FROM THE RUNNING APP. It was recomputed here
+  //   on every correction and fed to the detectors; measurement showed 0.0pp
+  //   held-out benefit against up to 3.2% of attributions flipped book-wide
+  //   (scripts/probe-annotation-feedback.ts). computeLearnedBias and the
+  //   adaptive ranker still exist as the record of that experiment, and the
+  //   probe still exercises them, but nothing on this path calls them.
 
   useEffect(() => {
     saveAdaptiveStore(adaptiveStore);
@@ -680,11 +668,6 @@ export default function App() {
   const adaptiveContext = useMemo(
     () => buildAdaptiveInferenceContext(adaptiveStore, novel.worldData),
     [adaptiveStore, novel.worldData],
-  );
-
-  const adaptiveMetrics = useMemo(
-    () => computeAdaptiveMetrics(adaptiveStore),
-    [adaptiveStore],
   );
 
   const collectPredictionDetails = annotationMode || !!prefs.debugPanel;
@@ -916,10 +899,15 @@ export default function App() {
   //   story graph, the timeline, the chips and every LLM prompt kept the
   //   engine's original guess. Pinning here means the corrected speaker is
   //   what the whole app, and the model, actually sees.
-  const analysisResult = useMemo(
-    () => (rawAnalysisResult ? applyPinsToAnalysis(rawAnalysisResult, chapterCorrections) : rawAnalysisResult),
-    [rawAnalysisResult, chapterCorrections],
-  );
+  const pinned = useMemo(() => {
+    if (!rawAnalysisResult || chapterCorrections.length === 0) {
+      return { result: rawAnalysisResult, pins: [] as ResolvedPin[] };
+    }
+    const pins = resolvePins(chapterCorrections, rawAnalysisResult);
+    return { result: applyResolvedPins(rawAnalysisResult, pins), pins };
+  }, [rawAnalysisResult, chapterCorrections]);
+  const analysisResult = pinned.result;
+  const chapterPinStats = useMemo(() => pinStats(pinned.pins), [pinned.pins]);
 
   // Update StoryGraph entry whenever analysis settles.
   // Deferred with setTimeout so heavy NLP never blocks a keystroke frame.
@@ -2819,6 +2807,31 @@ export default function App() {
               {chapterCorrectionCount} correction{chapterCorrectionCount !== 1 ? "s" : ""}
             </span>
 
+            {/* ★ "IS MY FIX STILL ATTACHED" IS THE ONLY STATUS A WRITER NEEDS.
+                A correction pins its own sentence and changes nothing else, so
+                there is no learning progress to report. What can go wrong is
+                the sentence moving or being deleted, and that is exactly what
+                these two numbers say. */}
+            {chapterPinStats.total > 0 && (
+              <>
+                <span className="annotation-panel-divider" />
+                <span
+                  className="annotation-panel-count"
+                  title={`${chapterPinStats.atIndex} on their original line, ${chapterPinStats.relocated} followed edited text`}
+                >
+                  {chapterPinStats.total - chapterPinStats.unresolved} pinned
+                </span>
+                {chapterPinStats.unresolved > 0 && (
+                  <span
+                    className="annotation-panel-review-count"
+                    title="These corrections pointed at text that no longer exists, so they are applied nowhere rather than being moved onto a different line."
+                  >
+                    {chapterPinStats.unresolved} text gone
+                  </span>
+                )}
+              </>
+            )}
+
             {reviewCount > 0 && (
               <>
                 <span className="annotation-panel-divider" />
@@ -2942,14 +2955,13 @@ export default function App() {
           actionReviewCount={actionReviewCount}
           speechPredictions={analysisResult.speechPredictions.length}
           actionPredictions={analysisResult.actionPredictions.flat().length}
-          metrics={adaptiveMetrics}
-          learnedBias={learnedBias}
           globalCorrectionCount={globalCorrectionCount}
+          pins={chapterPinStats}
+          intelligenceLevel={analysisResultLevel ?? intelMode}
           typingSettleMs={analysisDebounceMs}
-          modelSamples={{
-            speech: adaptiveContext.store.models.speech.sampleCount,
-            action: adaptiveContext.store.models.action.sampleCount,
-          }}
+          storageTarget={stateTarget()}
+          storedChapters={Object.keys(storyGraph.entries).length}
+          totalChapters={chapters.length}
         />
       )}
 

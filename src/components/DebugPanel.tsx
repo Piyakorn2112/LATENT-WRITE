@@ -1,21 +1,42 @@
+/**
+ * DebugPanel — what is actually governing attribution right now.
+ *
+ * ★ THIS PANEL USED TO REPORT A SYSTEM THAT NO LONGER RUNS. Its Learning and
+ *   Bias sections showed blend ratios, cue weights, "bias leaders" and mean
+ *   confidence from the adaptive ranker, all of which stopped reaching
+ *   detection when corrections became pins (see annotation-pins.ts and
+ *   scripts/probe-annotation-feedback.ts). A debug panel that reports dead
+ *   machinery is worse than no panel — it invites you to explain a bug with a
+ *   number that cannot cause it. Confidence in particular is gone from here:
+ *   the base engine still computes a top-2 gap to decide what NEEDS REVIEW,
+ *   and that count is shown, but there is no longer a learned confidence to
+ *   average and nothing downstream consumes one.
+ *
+ *   What replaced it is the two things that DO decide behaviour: where your
+ *   corrections landed, and where durable state is being written.
+ */
 import { useMemo } from "react";
-import { LEARN_THRESHOLD } from "../lib/annotation-learn";
-import type { AdaptiveLearningMetrics, LearnedBias } from "../types";
+import type { PinStats } from "../lib/annotation-pins";
 
 interface Props {
+  /** Spans in the current chapter the engine wants a human to look at. */
   reviewCount: number;
   speechReviewCount: number;
   actionReviewCount: number;
   speechPredictions: number;
   actionPredictions: number;
-  metrics: AdaptiveLearningMetrics;
-  learnedBias: LearnedBias | null;
+  /** Corrections across the whole book. */
   globalCorrectionCount: number;
+  /** How this chapter's corrections resolved against the current text. */
+  pins: PinStats;
+  /** Analysis level actually in force, and the debounce behind it. */
+  intelligenceLevel: string;
   typingSettleMs: number;
-  modelSamples: {
-    speech: number;
-    action: number;
-  };
+  /** "project" when a folder owns the state, "local" for an unsaved draft. */
+  storageTarget: "project" | "local";
+  /** Chapters with a stored timeline entry, i.e. what survives a reopen. */
+  storedChapters: number;
+  totalChapters: number;
 }
 
 export function DebugPanel({
@@ -24,103 +45,63 @@ export function DebugPanel({
   actionReviewCount,
   speechPredictions,
   actionPredictions,
-  metrics,
-  learnedBias,
   globalCorrectionCount,
+  pins,
+  intelligenceLevel,
   typingSettleMs,
-  modelSamples,
+  storageTarget,
+  storedChapters,
+  totalChapters,
 }: Props) {
-  const derived = useMemo(() => {
-    const chapterPredictions = speechPredictions + actionPredictions;
-    const annotationPredictions = metrics.byTask.speech.predictions + metrics.byTask.action.predictions;
-    const annotationLabeled = metrics.byTask.speech.labeled + metrics.byTask.action.labeled;
-    const annotationCorrected = metrics.byTask.speech.corrected + metrics.byTask.action.corrected;
-    const annotationConfidence = annotationPredictions > 0
-      ? (
-          metrics.byTask.speech.meanConfidence * metrics.byTask.speech.predictions +
-          metrics.byTask.action.meanConfidence * metrics.byTask.action.predictions
-        ) / annotationPredictions
-      : 0;
-    const autoMatchPct = annotationLabeled > 0
-      ? Math.round((1 - annotationCorrected / Math.max(1, annotationLabeled)) * 100)
-      : null;
-    const meanConfidencePct = Math.round(annotationConfidence * 100);
-    const nearbyPct = learnedBias ? Math.round(learnedBias.scope.localBlend * 100) : 0;
-    const cueLine = learnedBias
-      ? `lead ${Math.round(learnedBias.contextCueWeights.beforeName * 100)}% · trail ${Math.round(learnedBias.contextCueWeights.afterName * 100)}% · surround ${Math.round(learnedBias.contextCueWeights.surroundingName * 100)}% · carry ${Math.round(learnedBias.contextCueWeights.previousSpeakerCarry * 100)}%`
-      : "calibrating from confirmed corrections";
-    const blendLine = learnedBias
-      ? `nearby ${nearbyPct}% / global ${100 - nearbyPct}% · ${learnedBias.scope.effectiveChapterCount} chapter patch · ${learnedBias.scope.localWeightedSamples} weighted samples`
-      : `warm-up ${Math.min(globalCorrectionCount, LEARN_THRESHOLD)}/${LEARN_THRESHOLD} corrections before learned bias turns on`;
-    const biasLine = learnedBias?.scope.topSpeakers.length
-      ? learnedBias.scope.topSpeakers
-          .slice(0, 3)
-          .map((speaker) => `${speaker.name} ${speaker.blendedWeight.toFixed(1)}`)
-          .join(" · ")
-      : null;
-    return {
-      chapterPredictions,
-      annotationLabeled,
-      autoMatchPct,
-      meanConfidencePct,
-      cueLine,
-      blendLine,
-      biasLine,
-    };
-  }, [speechPredictions, actionPredictions, metrics, learnedBias, globalCorrectionCount]);
-
   const chapterSummary = useMemo(
     () => [
-      { label: "Current spans", value: derived.chapterPredictions },
+      { label: "Spans", value: speechPredictions + actionPredictions },
       { label: "Needs review", value: reviewCount },
+      { label: "Pinned here", value: pins.total - pins.unresolved },
     ],
-    [derived.chapterPredictions, reviewCount],
+    [speechPredictions, actionPredictions, reviewCount, pins],
   );
 
-  const learningSummary = useMemo(
+  // ★ The pin line is the one that explains "my correction did not stick".
+  //   `relocated` means the text moved and the pin followed it; `unresolved`
+  //   means the sentence is gone, so the pin is deliberately applied nowhere
+  //   rather than landing on a neighbour.
+  const pinSummary = useMemo(
     () => [
       { label: "Corrections", value: globalCorrectionCount },
-      { label: "Labeled", value: derived.annotationLabeled },
-      { label: "Auto-match", value: derived.autoMatchPct == null ? "—" : `${derived.autoMatchPct}%` },
-      { label: "Mean conf", value: `${derived.meanConfidencePct}%` },
+      { label: "On original", value: pins.atIndex },
+      { label: "Re-located", value: pins.relocated },
+      { label: "Text gone", value: pins.unresolved },
     ],
-    [globalCorrectionCount, derived.annotationLabeled, derived.autoMatchPct, derived.meanConfidencePct],
+    [globalCorrectionCount, pins],
   );
 
   const taskSummary = useMemo(
     () => [
-      {
-        label: "Speech",
-        predictions: speechPredictions,
-        review: speechReviewCount,
-        confidence: Math.round(metrics.byTask.speech.meanConfidence * 100),
-        samples: modelSamples.speech,
-      },
-      {
-        label: "Action",
-        predictions: actionPredictions,
-        review: actionReviewCount,
-        confidence: Math.round(metrics.byTask.action.meanConfidence * 100),
-        samples: modelSamples.action,
-      },
+      { label: "Speech", predictions: speechPredictions, review: speechReviewCount },
+      { label: "Action", predictions: actionPredictions, review: actionReviewCount },
     ],
-    [speechPredictions, speechReviewCount, actionPredictions, actionReviewCount, metrics, modelSamples],
+    [speechPredictions, speechReviewCount, actionPredictions, actionReviewCount],
   );
 
+  const storageLine = storageTarget === "project"
+    ? `project folder · ${storedChapters}/${totalChapters} chapters stored`
+    : `local draft · ${storedChapters}/${totalChapters} chapters stored · open a project to store alongside the manuscript`;
+
   return (
-    <div className="debug-panel" aria-label="Adaptive system debug panel">
+    <div className="debug-panel" aria-label="Attribution debug panel">
       <div className="debug-panel-head">
         <div className="debug-panel-head-copy">
           <span className="debug-panel-eyebrow">Debug</span>
-          <span className="debug-panel-title">Annotation Engine</span>
+          <span className="debug-panel-title">Attribution</span>
         </div>
         <span className="debug-panel-head-meta">
-          settle {typingSettleMs}ms
+          {intelligenceLevel} · settle {typingSettleMs}ms
         </span>
       </div>
 
       <div className="debug-panel-section">
-        <span className="debug-panel-section-label">Chapter</span>
+        <span className="debug-panel-section-label">This chapter</span>
         <div className="debug-panel-stats-grid">
           {chapterSummary.map((item) => (
             <span key={item.label} className="debug-panel-stat-card">
@@ -132,9 +113,9 @@ export function DebugPanel({
       </div>
 
       <div className="debug-panel-section">
-        <span className="debug-panel-section-label">Learning</span>
+        <span className="debug-panel-section-label">Pins</span>
         <div className="debug-panel-stats-grid">
-          {learningSummary.map((item) => (
+          {pinSummary.map((item) => (
             <span key={item.label} className="debug-panel-stat-card">
               <span className="debug-panel-stat-value">{item.value}</span>
               <span className="debug-panel-stat-caption">{item.label}</span>
@@ -148,20 +129,15 @@ export function DebugPanel({
           <span key={task.label} className="debug-panel-task-card">
             <span className="debug-panel-task-head">
               <span className="debug-panel-task-name">{task.label}</span>
-              <span className="debug-panel-task-chip">{task.samples} samples</span>
             </span>
             <span className="debug-panel-task-metrics">
               <span className="debug-panel-task-metric">
                 <span className="debug-panel-task-num">{task.predictions}</span>
-                <span className="debug-panel-task-meta">current</span>
+                <span className="debug-panel-task-meta">spans</span>
               </span>
               <span className="debug-panel-task-metric">
                 <span className="debug-panel-task-num">{task.review}</span>
                 <span className="debug-panel-task-meta">review</span>
-              </span>
-              <span className="debug-panel-task-metric">
-                <span className="debug-panel-task-num">{task.confidence}%</span>
-                <span className="debug-panel-task-meta">conf</span>
               </span>
             </span>
           </span>
@@ -169,10 +145,11 @@ export function DebugPanel({
       </div>
 
       <div className="debug-panel-summary">
-        <span className="debug-panel-section-label">Bias</span>
-        <span className="debug-panel-line">Blend {derived.blendLine}</span>
-        <span className="debug-panel-line">Clues {derived.cueLine}</span>
-        {derived.biasLine && <span className="debug-panel-line">Bias leaders {derived.biasLine}</span>}
+        <span className="debug-panel-section-label">State</span>
+        <span className="debug-panel-line">Saving to {storageLine}</span>
+        <span className="debug-panel-line">
+          Corrections pin their own span and do not steer detection
+        </span>
       </div>
     </div>
   );

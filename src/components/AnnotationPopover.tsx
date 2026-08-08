@@ -186,6 +186,15 @@ export function AnnotationPopover({ target, anchor, worldData, correctedSpeaker,
         })}
       </ul>
 
+      {/* ★ SAY WHAT THE ACTION ACTUALLY DOES. The old copy left people
+          expecting the engine to learn from this and generalise; it does not,
+          by design, because doing so was measurably harmful. It pins this one
+          line, and that pin is what the timeline, the chips and the model all
+          read from here on. */}
+      <p className="annotation-popover-note">
+        Pins this line only. The timeline and the assistant use your answer.
+      </p>
+
       {/* Action row */}
       <div className="annotation-popover-actions">
         <button
@@ -193,7 +202,7 @@ export function AnnotationPopover({ target, anchor, worldData, correctedSpeaker,
           disabled={unchanged}
           onClick={() => onConfirm(selected ?? null)}
         >
-          Confirm
+          Pin speaker
         </button>
         <button
           className="annotation-popover-btn annotation-popover-btn--cancel"
