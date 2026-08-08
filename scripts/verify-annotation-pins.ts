@@ -19,7 +19,7 @@
  * Run: ./node_modules/.bin/tsx scripts/verify-annotation-pins.ts
  */
 import { runChapterAnalysis } from "../src/lib/chapter-analysis-runner";
-import { applyPinsToAnalysis, applyResolvedPins, resolvePins } from "../src/lib/annotation-pins";
+import { applyPinsToAnalysis, applyResolvedPins, resolvePins, pinStats } from "../src/lib/annotation-pins";
 import type { AnnotationCorrection, Chapter } from "../src/types";
 
 const results: Array<{ name: string; ok: boolean }> = [];
@@ -184,6 +184,26 @@ function main() {
   gate("segments arrive already sorted by start (the index convention)",
     base.speechResults.every((p) =>
       !p || p.segments.every((s, i) => i === 0 || p.segments[i - 1].start <= s.start)));
+
+  // ── duplicate records for one line ────────────────────────────────────────
+  console.log("\n8. two corrections for the same line count as one pin");
+  // An edit shifts text, the user corrects the same sentence again, and the
+  // store keeps both because it dedupes on the (now stale) index.
+  const dupe = { ...pin, id: "pin-dupe", paragraphIndex: t.pi + 3, correctedSpeaker: wanted };
+  const dupeResolved = resolvePins([pin, dupe], base, "ch1");
+  const dupeStats = pinStats(dupeResolved);
+  gate("both records resolve to the same span", dupeResolved.length === 2
+    && dupeResolved[0].paragraphIndex === dupeResolved[1].paragraphIndex
+    && dupeResolved[0].spanIndex === dupeResolved[1].spanIndex);
+  gate("but the count reports one pinned line", dupeStats.total === 1,
+    `total=${dupeStats.total}`);
+  gate("and applying them is still one change",
+    (() => {
+      const m = speakerMap(applyResolvedPins(base, dupeResolved));
+      let n = 0;
+      for (const [k, v] of before) if (m.get(k) !== v) n++;
+      return n === 1;
+    })());
 
   const failed = results.filter((r) => !r.ok);
   console.log(`\n${failed.length === 0 ? "ALL PASS" : `${failed.length} FAILED`}  (${results.length} gates)\n`);

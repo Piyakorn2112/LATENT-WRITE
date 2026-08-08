@@ -171,14 +171,26 @@ export interface PinStats {
   unresolved: number;
 }
 
+/**
+ * ★ COUNT SPANS, NOT RECORDS. Editing text can leave two corrections for the
+ *   same sentence (the store dedupes on the stored index, which the edit
+ *   changed), and both then resolve to the same span. Only the last one is
+ *   applied, so counting records would tell the writer "2 pinned" for one
+ *   pinned line. Later entries win here exactly as they do in apply.
+ */
 export function pinStats(pins: ResolvedPin[]): PinStats {
-  let atIndex = 0, relocated = 0, unresolved = 0;
+  const byTarget = new Map<string, ResolvedPin>();
+  let unresolved = 0;
   for (const p of pins) {
-    if (p.via === "index") atIndex++;
-    else if (p.via === "content") relocated++;
-    else unresolved++;
+    if (p.via === "unresolved") { unresolved++; continue; }
+    byTarget.set(`${p.spanType}|${p.paragraphIndex}|${p.spanIndex}`, p);
   }
-  return { total: pins.length, atIndex, relocated, unresolved };
+  let atIndex = 0, relocated = 0;
+  for (const p of byTarget.values()) {
+    if (p.via === "index") atIndex++;
+    else relocated++;
+  }
+  return { total: byTarget.size + unresolved, atIndex, relocated, unresolved };
 }
 
 /**
