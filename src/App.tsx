@@ -69,6 +69,7 @@ import {
   exportAnnotationsJSON,
 } from "./lib/annotation-store";
 import { computeLearnedBias, characterBreakdown } from "./lib/annotation-learn";
+import { applyPinsToAnalysis } from "./lib/annotation-pins";
 import {
   addDecision as addKnowledgeDecision,
   emptyKnowledgeLedger,
@@ -698,16 +699,24 @@ export default function App() {
 
   // Build a lookup map so HighlightLayer can colour corrected spans immediately
   // without waiting for a full re-analysis pass.
+  /** The active chapter's corrections — the source for pins and overrides. */
+  const chapterCorrections = useMemo(
+    () => (activeChapterId
+      ? annotationStore.corrections.filter((c) => c.chapterId === activeChapterId)
+      : []),
+    [annotationStore.corrections, activeChapterId],
+  );
+
   const annotationOverrides = useMemo<Map<string, string | null> | undefined>(() => {
     if (!activeChapterId) return undefined;
-    const relevant = annotationStore.corrections.filter((c) => c.chapterId === activeChapterId);
+    const relevant = chapterCorrections;
     if (!relevant.length) return undefined;
     const map = new Map<string, string | null>();
     for (const c of relevant) {
       map.set(`${c.paragraphIndex}-${c.spanIndex}-${c.spanType}`, c.correctedSpeaker);
     }
     return map;
-  }, [annotationStore.corrections, activeChapterId]);
+  }, [chapterCorrections, activeChapterId]);
 
   const handleSpeechAnnotate = useCallback((info: AnnotationTarget, anchor: DOMRect) => {
     const existing = activeChapterId
@@ -869,7 +878,7 @@ export default function App() {
   useEffect(() => { setPrefs((p) => ({ ...p, intelMode })); }, [intelMode]);
 
   const {
-    result: analysisResult,
+    result: rawAnalysisResult,
     isAnalyzing: analysisRunning,
     isRefining: analysisRefining,
     resultLevel: analysisResultLevel,
@@ -880,10 +889,28 @@ export default function App() {
   } = useAnalysis(novel, activeChapterId, {
     debounceMs: analysisDebounceMs,
     converge: intelMode !== "off",
-    learnedBias: learnedBias ?? undefined,
-    adaptiveContext: annotationStore.corrections.length > 0 ? adaptiveContext : undefined,
+    // ★★ CORRECTIONS NO LONGER STEER DETECTION, THEY PIN IT.
+    //    The learned prior and the adaptive re-ranker were both fed only by
+    //    disagreements, i.e. by evidence about WHERE THE ENGINE FAILS, and
+    //    applied as if they were evidence about who speaks. Measured
+    //    (scripts/probe-annotation-feedback.ts): 0.0pp held-out accuracy
+    //    across five books, against up to 3.2% of all attributions flipped
+    //    book-wide, worst right at the activation threshold. Detection now
+    //    runs at the SAME baseline the accuracy suites have always tested —
+    //    those suites never passed a bias — and the user's answer is applied
+    //    exactly, on its own span, by applyPinsToAnalysis below.
     collectPredictionDetails,
   });
+
+  // ★ ONE PINNED RESULT, SHARED BY EVERY CONSUMER. The override used to live
+  //   in HighlightLayer alone, so a correction repainted the editor while the
+  //   story graph, the timeline, the chips and every LLM prompt kept the
+  //   engine's original guess. Pinning here means the corrected speaker is
+  //   what the whole app, and the model, actually sees.
+  const analysisResult = useMemo(
+    () => (rawAnalysisResult ? applyPinsToAnalysis(rawAnalysisResult, chapterCorrections) : rawAnalysisResult),
+    [rawAnalysisResult, chapterCorrections],
+  );
 
   // Update StoryGraph entry whenever analysis settles.
   // Deferred with setTimeout so heavy NLP never blocks a keystroke frame.

@@ -19,6 +19,13 @@
  *   unambiguous, so a WRONG answer here is unambiguously wrong. A learner
  *   that degrades on the easy case is degrading, full stop.
  *
+ * ★ THIS PROBE IS THE EVIDENCE FOR A DECISION ALREADY TAKEN. It calls
+ *   computeLearnedBias and hands it to the detector directly, which the APP
+ *   no longer does: corrections are applied as pins (src/lib/annotation-pins.ts)
+ *   and detection runs at the untouched baseline. Keep the probe. It is what
+ *   any future "let's make corrections teach the engine" proposal has to beat,
+ *   and re-running it is how you check a new learner is not repeating this.
+ *
  * Run: ./node_modules/.bin/tsx scripts/probe-annotation-feedback.ts
  */
 import { loadBook, splitParagraphs } from "./print-chapter";
