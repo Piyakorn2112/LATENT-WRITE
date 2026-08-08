@@ -11,7 +11,7 @@
  *   may resurrect a dismissed candidate; the only thing that reopens a pair is
  *   the anchor text itself changing (see retireDeadAnchors in knowledge-ledger).
  */
-import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
 const KEY = "glass-editor:knowledge-ledger-v1";
 
@@ -117,7 +117,7 @@ function valid(store: KnowledgeLedgerStore | null | undefined): store is Knowled
 }
 
 export function loadKnowledgeLedger(): KnowledgeLedgerStore {
-  if (isDesktopApp()) return emptyKnowledgeLedger();
+  if (stateTarget() === "project") return emptyKnowledgeLedger();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return emptyKnowledgeLedger();
@@ -134,7 +134,7 @@ export async function loadKnowledgeLedgerFromProject(): Promise<KnowledgeLedgerS
 }
 
 export function saveKnowledgeLedger(store: KnowledgeLedgerStore): void {
-  if (isDesktopApp()) { saveProjectState("knowledge-ledger", store); return; }
+  if (stateTarget() === "project") { void saveProjectState("knowledge-ledger", store); return; }
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
   } catch {

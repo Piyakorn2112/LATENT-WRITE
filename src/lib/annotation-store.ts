@@ -1,12 +1,12 @@
 import type { AnnotationCorrection, AnnotationStore } from "../types";
-import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
 // ── Storage ───────────────────────────────────────────────────────────────
 
 const KEY = "glass-editor:annotations-v1";
 
 export function loadAnnotationStore(): AnnotationStore {
-  if (isDesktopApp()) return empty();
+  if (stateTarget() === "project") return empty();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return empty();
@@ -25,7 +25,7 @@ export async function loadAnnotationStoreFromProject(): Promise<AnnotationStore 
 }
 
 export function saveAnnotationStore(store: AnnotationStore): void {
-  if (isDesktopApp()) { saveProjectState("annotations", store); return; }
+  if (stateTarget() === "project") { void saveProjectState("annotations", store); return; }
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
   } catch {

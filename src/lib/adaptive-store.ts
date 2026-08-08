@@ -9,7 +9,7 @@ import type {
   AnnotationCorrection,
 } from "../types";
 
-import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
 const KEY = "glass-editor:adaptive-learning-v1";
 const MAX_PERSISTED_PREDICTIONS = 2000;
@@ -47,7 +47,7 @@ export function emptyAdaptiveStore(): AdaptiveLearningStore {
 }
 
 export function loadAdaptiveStore(): AdaptiveLearningStore {
-  if (isDesktopApp()) return emptyAdaptiveStore();
+  if (stateTarget() === "project") return emptyAdaptiveStore();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return emptyAdaptiveStore();
@@ -88,7 +88,7 @@ export function saveAdaptiveStore(store: AdaptiveLearningStore): void {
       .sort((a, b) => a.timestamp - b.timestamp)
       .slice(-MAX_PERSISTED_PREDICTIONS),
   };
-  if (isDesktopApp()) { saveProjectState("adaptive", persisted); return; }
+  if (stateTarget() === "project") { void saveProjectState("adaptive", persisted); return; }
   try {
     localStorage.setItem(KEY, JSON.stringify(persisted));
   } catch {

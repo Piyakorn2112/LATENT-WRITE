@@ -353,6 +353,37 @@ export function isDesktopApp(): boolean {
   return !!api();
 }
 
+// ── Project-open tracking ────────────────────────────────────────────────────
+//
+// ★★ "DESKTOP" AND "HAS SOMEWHERE TO WRITE" ARE DIFFERENT QUESTIONS, AND
+//    CONFLATING THEM SILENTLY DESTROYED STATE. Every store used to branch on
+//    isDesktopApp() alone: on desktop it sent state to the project folder and
+//    skipped localStorage entirely. But `project:saveState` returns
+//    `{ok:false,'No project open'}` when no folder is open, and nobody
+//    inspected the result — so a desktop user with an unsaved draft wrote
+//    their story graph, annotations, reviews and ledger to NOWHERE, and every
+//    reopen came back blank. Stores must ask hasOpenProject(), and fall back
+//    to localStorage exactly like the web build when the answer is no.
+let _projectOpen = false;
+
+/** Records whether a project folder is currently open. */
+export function setProjectOpenState(open: boolean): void {
+  _projectOpen = open;
+}
+
+/** True only when there is a project folder to write into. */
+export function hasOpenProject(): boolean {
+  return _projectOpen;
+}
+
+/**
+ * Where should durable state go right now? `project` when a folder is open,
+ * `local` for the web build AND for a desktop draft with no project yet.
+ */
+export function stateTarget(): "project" | "local" {
+  return isDesktopApp() && _projectOpen ? "project" : "local";
+}
+
 export async function openProject(): Promise<ProjectStatus | null> {
   const a = api();
   if (!a) return null;
@@ -456,6 +487,9 @@ export async function saveProjectState(key: string, data: unknown): Promise<bool
   const a = api();
   if (!a) return false;
   const result = await a.projectSaveState(key, JSON.stringify(data));
+  // A refused write is the authoritative answer to "is a project open" —
+  // keep the flag honest even if nobody called setProjectOpenState.
+  if (!result.ok) _projectOpen = false;
   return result.ok;
 }
 

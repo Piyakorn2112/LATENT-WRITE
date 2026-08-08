@@ -6,7 +6,7 @@ import { classifyChapterPresence } from "./character-presence";
 
 const DEV = (import.meta as { env?: { DEV?: boolean } }).env?.DEV ?? false;
 
-import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
 const STORY_GRAPH_KEY = "glass-editor:story-graph-v1";
 
@@ -14,8 +14,17 @@ export function emptyStoryGraph(): StoryGraph {
   return { version: 1, entries: {} };
 }
 
+/**
+ * ★ THE TIMELINE MUST SURVIVE A CLOSE. This used to return empty on desktop
+ *   unconditionally and rely on the project hydrate to fill it, which meant a
+ *   desktop draft with no project open came back blank every single time —
+ *   the analysis had run, the chips had been generated, and all of it went
+ *   nowhere. `stateTarget()` sends a real draft to localStorage instead.
+ *   Analysis itself is unchanged: revisiting a chapter still re-runs and
+ *   restamps its entry, this only stops the graph starting from nothing.
+ */
 export function loadStoryGraph(): StoryGraph {
-  if (isDesktopApp()) return emptyStoryGraph();
+  if (stateTarget() === "project") return emptyStoryGraph();
   try {
     const raw = localStorage.getItem(STORY_GRAPH_KEY);
     if (!raw) return emptyStoryGraph();
@@ -34,7 +43,16 @@ export async function loadStoryGraphFromProject(): Promise<StoryGraph | null> {
 }
 
 export function saveStoryGraph(g: StoryGraph): void {
-  if (isDesktopApp()) { saveProjectState("story-graph", g); return; }
+  if (stateTarget() === "project") {
+    // A refused write means the project closed under us; keep the draft
+    // rather than dropping it on the floor.
+    saveProjectState("story-graph", g).then((ok) => { if (!ok) writeLocalStoryGraph(g); });
+    return;
+  }
+  writeLocalStoryGraph(g);
+}
+
+function writeLocalStoryGraph(g: StoryGraph): void {
   try { localStorage.setItem(STORY_GRAPH_KEY, JSON.stringify(g)); }
   catch { /* quota — ignore */ }
 }

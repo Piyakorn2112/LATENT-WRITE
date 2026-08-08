@@ -47,7 +47,7 @@ import {
   saveStoryGraph, buildChapterEntry, enrichChapterEntryWithLM,
 } from "./lib/story-graph";
 import { loadReviewResults, loadReviewResultsFromProject, saveReviewResults } from "./lib/renderer-review";
-import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools } from "./lib/project-manager";
+import { getCurrentProject, reopenLastProject, openProject, scanExternalProject, importTools, setProjectOpenState } from "./lib/project-manager";
 import type { ToolScanEntry } from "./lib/project-manager";
 import { ToolImportOverlay } from "./components/ToolImportOverlay";
 import type { ToolHighlight } from "./lib/tool-runner";
@@ -302,6 +302,10 @@ export default function App() {
   }, []);
 
   const hydrateProjectState = useCallback(async () => {
+    // Hydration only ever runs with a project open, and it re-saves whatever
+    // the project lacked — so the write target must be the folder before the
+    // first of those saves fires, on every call path.
+    setProjectOpenState(true);
     const [pNovel, pCurrentChapter, pStoryGraph, pReviews, pAnnotations, pAdaptive, pKnowledge, pAssistReviews] = await Promise.all([
       loadNovelFromProject(),
       loadCurrentChapterIdFromProject(),
@@ -367,24 +371,34 @@ export default function App() {
   const [desktopProjectOpen, setDesktopProjectOpen] = useState(false);
   const syncDesktopProjectOpen = useCallback(async () => {
     if (!window.electronAPI) {
+      setProjectOpenState(false);
       setDesktopProjectOpen(false);
       return;
     }
     const project = await getCurrentProject();
+    setProjectOpenState(!!project);
     setDesktopProjectOpen(!!project);
   }, []);
 
   useEffect(() => {
     if (!window.electronAPI) return;
-    clearProjectLocalStorage();
     let cancelled = false;
     (async () => {
       const project = await reopenLastProject();
       if (cancelled || !project) {
+        // ★ NO PROJECT MEANS localStorage IS THE REAL STORE, SO DO NOT WIPE IT.
+        //   This used to clear every key before we knew whether a project
+        //   would open, which threw away the previous session's story graph
+        //   and left the timeline blank on every reopen.
+        setProjectOpenState(false);
         setDesktopProjectOpen(false);
         setProjectLoading(false);
         return;
       }
+      // A project owns the state from here, so stale local keys must not
+      // shadow it — clear them only once we know there is a folder.
+      clearProjectLocalStorage();
+      setProjectOpenState(true);
       setDesktopProjectOpen(true);
       await hydrateProjectState();
       if (cancelled) return;
@@ -1683,6 +1697,9 @@ export default function App() {
       const proj = await openProject();
       if (!proj) return;
       clearProjectLocalStorage();
+      // Flip the target BEFORE hydrating: hydrate re-saves any state the
+      // project lacked, and those writes belong in the project folder.
+      setProjectOpenState(true);
       await hydrateProjectState();
       await syncDesktopProjectOpen();
       window.dispatchEvent(new CustomEvent("project-ready"));

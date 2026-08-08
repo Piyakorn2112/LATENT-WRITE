@@ -33,7 +33,7 @@
  *   knowledge sweep uses when it will only land a verdict on a candidate whose
  *   sentence is still the one that was judged.
  */
-import { isDesktopApp, saveProjectState, loadProjectState } from "./project-manager";
+import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 import { CHEKHOV_MIN_CONFIDENCE } from "./chekhov-review";
 import type { ChekhovVerdict } from "./chekhov-review";
 import type { PresenceVerdict } from "./presence-review";
@@ -111,7 +111,7 @@ function valid(store: AssistReviewStore | null | undefined): store is AssistRevi
 }
 
 export function loadReviewStore(): AssistReviewStore {
-  if (isDesktopApp()) return emptyReviewStore();
+  if (stateTarget() === "project") return emptyReviewStore();
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return emptyReviewStore();
@@ -128,7 +128,7 @@ export async function loadReviewStoreFromProject(): Promise<AssistReviewStore | 
 }
 
 export function saveReviewStore(store: AssistReviewStore): void {
-  if (isDesktopApp()) { saveProjectState("assist-reviews", store); return; }
+  if (stateTarget() === "project") { void saveProjectState("assist-reviews", store); return; }
   try {
     localStorage.setItem(KEY, JSON.stringify(store));
   } catch {
