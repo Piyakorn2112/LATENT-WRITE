@@ -1,20 +1,15 @@
 import type {
-  AdaptiveLearningMetrics,
-  AdaptiveLearningMetricsByTask,
   AdaptiveLearningStore,
   AdaptivePredictionRecord,
   AdaptiveRankModelStore,
   AdaptiveRankTaskModel,
   AdaptiveTask,
-  AnnotationCorrection,
 } from "../types";
 
 import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
 const KEY = "glass-editor:adaptive-learning-v1";
 const MAX_PERSISTED_PREDICTIONS = 2000;
-
-const TASKS: AdaptiveTask[] = ["speech", "action", "entity"];
 
 function emptyTaskModel(task: AdaptiveTask): AdaptiveRankTaskModel {
   return {
@@ -169,71 +164,5 @@ export function upsertAdaptivePredictions(
   return {
     ...store,
     predictions: normalized,
-  };
-}
-
-export function attachCorrectionToAdaptiveStore(
-  store: AdaptiveLearningStore,
-  correction: AnnotationCorrection,
-): AdaptiveLearningStore {
-  const targetKey = `${correction.chapterId}|${correction.paragraphIndex}|${correction.spanIndex}|${correction.spanType}`;
-  let changed = false;
-  const predictions = store.predictions.map((prediction) => {
-    if (buildAdaptivePredictionKey(prediction) !== targetKey) return prediction;
-    changed = true;
-    return {
-      ...prediction,
-      correctedLabel: correction.correctedSpeaker,
-      timestamp: correction.timestamp,
-    };
-  });
-  return changed ? { ...store, predictions } : store;
-}
-
-function emptyMetricsByTask(): Record<AdaptiveTask, AdaptiveLearningMetricsByTask> {
-  return {
-    speech: { predictions: 0, labeled: 0, corrected: 0, meanConfidence: 0, needsReview: 0 },
-    action: { predictions: 0, labeled: 0, corrected: 0, meanConfidence: 0, needsReview: 0 },
-    entity: { predictions: 0, labeled: 0, corrected: 0, meanConfidence: 0, needsReview: 0 },
-  };
-}
-
-export function computeAdaptiveMetrics(store: AdaptiveLearningStore): AdaptiveLearningMetrics {
-  const byTask = emptyMetricsByTask();
-  for (const prediction of store.predictions) {
-    const bucket = byTask[prediction.task];
-    bucket.predictions += 1;
-    bucket.meanConfidence += prediction.confidence;
-    if (prediction.needsReview) bucket.needsReview += 1;
-    if (prediction.correctedLabel !== undefined) {
-      bucket.labeled += 1;
-      if (prediction.correctedLabel !== prediction.predictedLabel) bucket.corrected += 1;
-    }
-  }
-  for (const task of TASKS) {
-    const bucket = byTask[task];
-    bucket.meanConfidence = bucket.predictions > 0 ? bucket.meanConfidence / bucket.predictions : 0;
-  }
-
-  const totals = TASKS.reduce(
-    (acc, task) => {
-      const bucket = byTask[task];
-      acc.predictions += bucket.predictions;
-      acc.labeled += bucket.labeled;
-      acc.corrected += bucket.corrected;
-      acc.meanConfidence += bucket.meanConfidence * bucket.predictions;
-      acc.needsReview += bucket.needsReview;
-      return acc;
-    },
-    { predictions: 0, labeled: 0, corrected: 0, meanConfidence: 0, needsReview: 0 },
-  );
-
-  return {
-    predictions: totals.predictions,
-    labeled: totals.labeled,
-    corrected: totals.corrected,
-    meanConfidence: totals.predictions > 0 ? totals.meanConfidence / totals.predictions : 0,
-    needsReview: totals.needsReview,
-    byTask,
   };
 }

@@ -543,8 +543,16 @@ export function analyzeChapter(
   const suppressKw  = ['bit back', 'fought the urge', 'swallowed hard', 'carefully controlled',
                        'did not react', 'did not speak', 'did not answer', 'held back',
                        'killing intent', 'suppressed', 'held it in'];
-  const silenceCount     = paragraphs.filter(p => silenceKw.some(w => p.toLowerCase().includes(w))).length;
-  const suppressionCount = paragraphs.filter(p => suppressKw.some(w => p.toLowerCase().includes(w))).length;
+  // toLowerCase() ONCE per paragraph, not once per keyword per scan. It used
+  // to sit inside the .some() callback, so each paragraph was lowercased 16
+  // times across the two passes. Same predicate, same result.
+  let silenceCount = 0;
+  let suppressionCount = 0;
+  for (const p of paragraphs) {
+    const lower = p.toLowerCase();
+    if (silenceKw.some(w => lower.includes(w))) silenceCount++;
+    if (suppressKw.some(w => lower.includes(w))) suppressionCount++;
+  }
 
   // ── Speaker analysis — A5: Confidence-Weighted ────────────────────────
   // Each segment's contribution is scaled by attribution confidence.

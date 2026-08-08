@@ -3,7 +3,6 @@ import type {
   AdaptiveContextMemory,
   AdaptiveInferenceContext,
   AdaptiveLearningStore,
-  AdaptivePredictionRecord,
   AdaptiveTask,
   WorldData,
 } from "../types";
@@ -117,16 +116,5 @@ export function rerankAdaptiveCandidates(
     confidence: ranking.confidence,
     needsReview: ranking.confidence < context.reviewThreshold || ranking.needsReview,
     ambiguityGap: ranking.ambiguityGap,
-  };
-}
-
-export function buildAdaptivePredictionRecord(
-  trace: Omit<AdaptivePredictionRecord, "id" | "timestamp" | "modelVersion">,
-): AdaptivePredictionRecord {
-  return {
-    ...trace,
-    id: `${trace.chapterId}:${trace.task}:${trace.paragraphIndex}:${trace.spanIndex}`,
-    timestamp: Date.now(),
-    modelVersion: 1,
   };
 }
