@@ -192,21 +192,20 @@ export function useAliasSuggestions(
  *   the common case pays nothing for the large-cast case.
  */
 export function useProgressiveCount(total: number, batch = 60): number {
-  const [count, setCount] = useState(() => Math.min(total, batch));
+  const [shown, setShown] = useState(() => Math.min(total, batch));
 
+  // ★ THE COUNT ONLY EVER GROWS, and clamping at the end is what makes that
+  //   safe. Restarting the stream whenever `total` changed looked equivalent
+  //   and was not: adding a character to a cast of eighty collapsed the list
+  //   back to the first batch and re-streamed it, and the new entry — which
+  //   Add immediately selects — was not on screen to see. Growing monotonically
+  //   also means switching to Places (3 rows) and back to Characters (80)
+  //   re-renders the whole list at once rather than streaming it again.
   useEffect(() => {
-    if (total <= batch) { setCount(total); return; }
-    setCount(batch);
-    let raf = 0;
-    let shown = batch;
-    const step = () => {
-      shown = Math.min(shown + batch, total);
-      setCount(shown);
-      if (shown < total) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
+    if (shown >= total) return;
+    const raf = requestAnimationFrame(() => setShown((n) => Math.min(n + batch, total)));
     return () => cancelAnimationFrame(raf);
-  }, [total, batch]);
+  }, [shown, total, batch]);
 
-  return Math.min(count, total);
+  return Math.min(shown, total);
 }

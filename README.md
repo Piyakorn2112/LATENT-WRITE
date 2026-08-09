@@ -1116,6 +1116,61 @@ the **default (1.7B) tier in both "on" and "max" modes**, since `reviewEntities`
 is called without one; routing it to the 4B would buy two more correct moves
 and one correct deletion for roughly three times the wall time.
 
+#### Opening the panel
+
+On a 3.4M-character manuscript with a cast of 80, the World panel took **9.0
+seconds to appear**, switching back to the Characters tab took another 8.8, and
+a single keystroke in a Name field cost 8.8 more. Three symptoms, one shape.
+
+**The work was on the render path.** The panel computed its alias suggestions in
+a `useMemo`, and React runs a memo synchronously *while rendering* — so the
+whole-book analysis finished before the overlay existed. The memo was keyed on
+the cast, so typing "Elizabeth" was nine whole-book analyses.
+
+**And two regexes could not skip.** Neither could use V8's literal-prefix
+search, so each attempted a match at every position in the book:
+
+| pattern | shape | cost per name |
+|---|---|---|
+| `namePrefixRe` | `(.{0,4})` in front of the name | 107ms, flat |
+| `surnameSharedByFamily` | 13-way title alternation in front of the name | 16.3ms × 2 |
+
+The tell is that 107ms was the cost whether a name occurred 3074 times or
+**zero** times. A scanner that skipped would have returned at once. Both now
+search for the name itself and read backwards, which is the same fix the
+context-window capture in `scanAndClassify` already paid for.
+
+Rewriting them may not change an answer, and two rules of the old regexes are
+load-bearing and invisible until a book breaks them. **A line break ends the
+prefix window**, because `.` never matched one, so the old scanner read
+"…the\nAssembly" as bare, and five of the seven corpus books are hard-wrapped.
+**The previous match ends it too**, because `exec` resumes at `lastIndex`.
+`test:name-usage-scan` is a differential gate carrying the old code verbatim:
+900 name scans over 7 books, all agreeing, including the 32 positive
+family-surname readings that stop a sister being merged into her brother.
+
+`alias-suggestions.ts` then puts a seam where the memo was: deferred to idle,
+debounced against typing, and cached in **two layers**, because the halves have
+different lifetimes. The candidate list and the joined text depend only on the
+manuscript and are keyed on the chapters array by identity; only
+`proposeAliases` depends on the cast. So editing a character re-runs the cast
+half alone, and a tab switch re-runs nothing. The list streams too: the first 60
+rows paint and the rest arrive a batch per frame.
+
+`verify:world-panel-perf` drives the **real component** on the real manuscript,
+because a Node benchmark cannot answer "were there pixels":
+
+| moment | before | after |
+|---|---|---|
+| open the panel | 8978ms | **59ms** |
+| Places → Characters | 8829ms | **62ms** |
+| one keystroke in a Name field | 8830ms | **11ms** |
+
+Every timing is gated beside a row count, because an empty panel opens
+instantly. Bucket accuracy (98.4% corpus, 100% gold recall) and speech
+attribution (98.4% / 99.8% precision) are unchanged, which is the point: the
+scans got faster without answering anything differently.
+
 </details>
 
 
