@@ -93,6 +93,24 @@ export interface EntityReviewProposal {
  *
  *    Renaming the wire label fixed both without touching a single rule. The
  *    store's own type stays `entity`; `WIRE_TO_TYPE` maps it back.
+ *
+ * ★★ AND IT HAPPENED A SECOND TIME, TO "not-a-name".
+ *
+ *    Measured on The Root Crown against the 4B: NINE of its fifteen accepted
+ *    proposals were `not-a-name`, deleting Growth, Bind, Founding, Aldren,
+ *    Hollow Vein and Mycomedical — all of them real names — with reasons like
+ *    "the name appears after the/a and is not spoken to or spoken by anyone".
+ *
+ *    That reason is a near-quotation of the prompt, which explained the counts
+ *    with the phrase "after the/a suggests it is not a PERSONAL name". The
+ *    model carried "not a … name" straight onto the label that reads the same
+ *    way. Two lexically confusable strings, one of them an escape hatch, and
+ *    the escape hatch wins — the identical mechanism, and the second time this
+ *    file has paid for it.
+ *
+ *    `common-word` names what the label is actually for: a capitalised word
+ *    that is not naming anything. Nothing about a thing written "the X" reads
+ *    that way, which is the point.
  */
 export const ENTITY_REVIEW_SCHEMA = {
   type: "object",
@@ -104,7 +122,7 @@ export const ENTITY_REVIEW_SCHEMA = {
     //    whose reason read "clearly a person"). Naming the evidence first lets
     //    the label follow from it. Do not reorder these for tidiness.
     reason: { type: "string", maxLength: REASON_MAX },
-    type: { enum: ["character", "place", "faction", "object", "not-a-name"] },
+    type: { enum: ["character", "place", "faction", "object", "common-word"] },
     confidence: { type: "number" },
   },
 } as const;
@@ -118,6 +136,7 @@ const WIRE_TO_TYPE: Record<string, ProposedType> = {
   faction: "faction",
   object: "entity",
   entity: "entity",
+  "common-word": "not-a-name",
   "not-a-name": "not-a-name",
 };
 
@@ -136,28 +155,54 @@ const WIRE_TO_TYPE: Record<string, ProposedType> = {
  *    anchored it so hard that "Meanwhile" stayed a character. The asymmetric
  *    acceptance bar in `applyProposalsToScanResult` is where that caution
  *    belongs — in code, where it cannot bias a reading.
+ *
+ * ★★ WHEN THERE ARE TWO ESCAPE HATCHES, THE IRREVERSIBLE ONE GOES LAST.
+ *
+ *    The ladder ends where the model stops reading, so last place is the
+ *    scarce position and only one label can have it. `object` files a name in
+ *    a bucket the writer can drag it out of; `common-word` DELETES it, and a
+ *    name deleted from the cast is one the writer never sees again. That
+ *    asymmetry decides the order, not which label is semantically broader.
+ *
+ *    It also matches what the 4B was measured doing with them reversed: for
+ *    Growth, Bind and Founding it wrote reasons that name them exactly ("a
+ *    class of phrases with specific technical definitions", "a time period"),
+ *    which is rung 4 stated precisely, and then answered rung 4 as it was
+ *    then written — `common-word` — and deleted all three.
  */
 export const ENTITY_REVIEW_SYSTEM = `You classify how a NAME is used in a novel manuscript. You are given the name,
 counts of how it is used across the chapter, and verbatim snippets. That is all
 the evidence there is.
 
 Decide in this order and stop at the first that fits:
-1. It speaks, or is spoken to, or acts and is described like a person —
-   "character". Places, objects and groups do not talk.
+1. It speaks, or is spoken to, or acts and is described like a person, OR it is
+   part of a person's name — "character". A surname carries this: if the
+   snippets show it after a given name ("Tessa Mosswell"), it is that family's
+   name and belongs here, however often the rest of the book writes "the
+   Mosswell loaves". Places, objects and groups do not talk.
 2. People go to it, come from it, or are inside it — "place". A city, house,
    road, region.
 3. It is an organised group acting as one — "faction". An order, guild, army,
    court, crew.
-4. It is not being used as a name at all — "not-a-name". A capitalised word
-   that merely opens a sentence, an interjection, a bare title, a heading.
-5. Only if none of the above fit: a physical thing that is not a person, a
-   place or a group — "object". A ship, a sword, a book, a treaty. Every name
-   is the name of something, so "it is a named thing" is NOT a reason to
-   answer "object". This is a last resort, never a default.
+4. It names a thing that is not a person, a place or a group — "object". A
+   ship, a sword, a book, a doctrine, a named spell or technique, an era, a
+   treaty. Every name is the name of something, so "it is a named thing" is
+   NOT on its own a reason to answer "object".
+5. Only if none of the above fit: it is not naming anything at all —
+   "common-word". The test is replacement: an ordinary word could be written
+   in lower case without changing what the sentence means, as with a word that
+   merely opens a sentence, an interjection, a bare title, a heading. "the
+   Growth phrase" does not survive that test and IS a name. This is a last
+   resort, never a default.
 
 The counts: "speaks" and "spoken to" are person usage; "after a place
-preposition" counts "at X" and "through X"; "after the/a" suggests it is not a
-personal name. Where the counts and the snippets disagree, the snippets decide.
+preposition" counts "at X" and "through X"; a high "after the/a" count means it
+is a thing rather than a person, which still leaves place, faction and object
+open. Where the counts and the snippets disagree, the snippets decide.
+
+When a multi-word name ends in a word saying what kind of thing it is, that
+LAST word decides and the earlier words only say which one: "the Outer Ring
+Anomaly" is an anomaly named after a district, not a district.
 
 Judge only from the evidence. Do not use knowledge of any real or famous name.
 The current label is an earlier guess and is not evidence.

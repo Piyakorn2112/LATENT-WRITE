@@ -17,6 +17,8 @@ import {
   usageSnippets,
   applyProposalsToScanResult,
   buildEntityReviewRequest,
+  ENTITY_REVIEW_SCHEMA,
+  ENTITY_REVIEW_SYSTEM,
   OVERTURN_CONFIDENT_MIN,
   OVERTURN_DOUBTED_MIN,
   type EntityReviewEntry,
@@ -160,6 +162,45 @@ console.log("═".repeat(70));
   );
   gate(!withoutSignals.userText.includes("COUNTS ACROSS"), "counts are omitted when absent, not faked",
     "no counts block");
+}
+
+// ── 7. The ladder contract ───────────────────────────────────────────────
+//
+// ★★ TWO LABELS ARE ESCAPE HATCHES AND ONLY ONE CAN BE LAST, AND WHICH ONE IT
+//    IS WAS MEASURED. With `common-word` at rung 4 the 4B deleted Growth,
+//    Bind, Founding, Aldren, Hollow Vein and Mycomedical — every one a real
+//    name — while writing reasons that described rung 5 precisely ("a class of
+//    phrases with specific technical definitions"). Putting the IRREVERSIBLE
+//    answer last cut the deletions from eight to one, and that one was right.
+//
+//    Structural, not stylistic: the enum is a wire contract, the order is the
+//    fix, and the banned phrase is the exact string the old label name
+//    collided with. Re-measure against real models with probe-bucket-review.
+{
+  console.log("\nladder contract");
+  const wire = ENTITY_REVIEW_SCHEMA.properties.type.enum as readonly string[];
+  gate(wire.includes("common-word") && !wire.includes("not-a-name"),
+    "the deletion label is 'common-word' on the wire", wire.join(", "));
+  gate(Object.keys(ENTITY_REVIEW_SCHEMA.properties)[0] === "reason",
+    "reason is declared before type", "a grammar emits in declaration order");
+
+  const objectAt = ENTITY_REVIEW_SYSTEM.indexOf('— "object"');
+  const commonAt = ENTITY_REVIEW_SYSTEM.indexOf('"common-word"');
+  gate(objectAt > 0 && commonAt > objectAt,
+    "the IRREVERSIBLE answer is the last rung",
+    "object files a name the writer can move; common-word deletes it");
+
+  gate(!/not a personal name/i.test(ENTITY_REVIEW_SYSTEM),
+    "the counts note avoids the phrase the old label collided with",
+    "'after the/a suggests it is not a personal name' produced not-a-name");
+
+  gate(/surname/i.test(ENTITY_REVIEW_SYSTEM),
+    "rung 1 covers a name that is PART of a person's name",
+    "a surname never speaks, so nothing else routed it to character");
+
+  gate(/LAST word decides/i.test(ENTITY_REVIEW_SYSTEM),
+    "the head word decides a multi-word name",
+    "an anomaly named after a district is not a district");
 }
 
 console.log(`\n${failures === 0 ? "✓ ALL GATES GREEN" : `✗ ${failures} GATE(S) FAILED`}`);
