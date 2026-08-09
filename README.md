@@ -947,6 +947,66 @@ invisible until the sample is wide enough to stop looking like noise. `npm run t
 `npm run test:bucket-corpus`; `npm run probe:bucket-audit` dumps every name
 with the evidence the classifier saw.
 
+#### Bucketing: names are not ASCII
+
+JavaScript's `\b` is ASCII-only. `Á` is not a word character to a
+non-unicode regex, so between a space and it there is no boundary and
+`/\bÁntonia\b/` matches nothing, ever. The title character of *My Ántonia*
+appears **287 times** and the scan returned her **zero** times; "Alcée Arobin"
+in *The Awakening* arrived as `Alc`, because `[a-z]` stops at the accent and
+the fragment then survives the tests the whole name would have passed.
+
+The review pass had it too, and there it produced an impossible reading rather
+than a degraded one: `/\bÁntonia\b/` fails but `/\basked\s+Ántonia\b/`
+succeeds, because that boundary sits on "asked". `usageSignals` reported
+`occurrences: 0` and `spoken: 1` in the same object, which downstream meant a
+contradiction score over a zero denominator, no snippets so the model was never
+asked, and the occurrence floor refusing every correction on the grounds that
+the name does not appear.
+
+Every name-anchored pattern in `world-data.ts` and `entity-review.ts` now uses
+`(?<![\p{L}\p{N}_])` and `(?![\p{L}\p{N}_])`. The corpus recovers Ántonia,
+Léonce, Adèle, Alcée Arobin, Désirée, Pélagie and Côte Joyeuse.
+
+Chasing the 2.6x that unicode boundaries cost found something better. The
+per-candidate context regex was `([^\n]{0,90})…NAME…([^\n]{0,90})`, and those
+two greedy captures cost **260x the match itself** (131.8ms per pass against
+0.5ms without them). Slicing the window off the source string by index instead
+is identical work for the reader and none for the regex engine: a whole-book
+scan went **6.7s to 2.7s**, faster than before the unicode work started. The
+greedy capture was also *eating occurrences* — two mentions inside the same
+90-character window counted as one, because the capture consumed the second
+before `lastIndex` moved.
+
+#### Bucketing: what a review call costs
+
+Prefill is already free: every request of a task type carries a byte-identical
+system prompt and the host never clears the sequence's KV cache, so
+`compareContextTokens` re-reads nothing (measured at 8x, see System 11). What a
+call costs is therefore the tokens it **emits**, about 45 of them at ~65 tok/s,
+which is the ~730ms per name the probe reports.
+
+Two levers were measured and one was kept. Cutting the call count from 19 to 12
+by not asking dead questions is the one that worked. `jsonStyle: "compact"` is
+worth 2x where a schema emits many short fields, but here the reason string *is*
+the decode and structural whitespace is a rounding error: 726ms against 724ms
+per call over twelve calls, so it was reverted rather than shipped as an
+unmeasured knob.
+
+The largest lever left is **continuous batching**, and it is architecturally
+unavailable today: `assistant-host.cjs` creates its context with
+`sequences: 1` and hard-rejects a second request as `busy`. Decode on Apple
+Silicon is memory-bandwidth-bound, so concurrent sequences share the per-token
+weight read almost for free; published Apple-Silicon numbers put aggregate
+throughput at ~4.3x for 16 concurrent requests, and four would plausibly take
+this pass from ~9s to ~3s. It is a change to the runtime every other task
+shares, so it is written down here rather than done.
+
+Speculative decoding is the one that looks applicable and is not. It reaches
+~2.4x on predictable workloads with acceptance above 65%, and this workload
+emits a free-form reason clause that is not copied from the prompt — the same
+reason prompt-lookup decoding was measured to LOSE on the chip pipeline.
+
 #### Bucketing: what the review pass is allowed to do
 
 The scan reports an honest **confidence** and `selectReviewable` ranks on it,
@@ -965,6 +1025,20 @@ time this file has paid for a label the prompt primes. And **when there are two
 escape hatches, the irreversible one goes last**. `object` files a name the
 writer can drag out of a bucket, `common-word` deletes it, and the ladder ends
 where the model stops reading.
+
+The pass also refuses to ask a question with no answer in it. Priority zero
+means the scan did not doubt the name and its own usage counts do not
+contradict the label, so eleven of twenty-four slots were being spent on names
+whose only possible outcome was churning a correct answer. Twelve calls now
+instead of nineteen, same result.
+
+Four ways it could damage a correct cast are closed, each with a gate in
+`test:entity-review-robustness`: a runner that throws costs one name rather
+than the whole pass (the rejection used to propagate out and the caller's
+try/catch discarded every proposal already collected); two proposals for one
+name no longer walk it across three buckets; a name the scan filed twice is
+resolved rather than copied; and malformed JSON, unknown labels and whitespace
+reasons are all refused at the door.
 
 The code gate is an occurrence floor on bucket MOVES. Every wrong accepted
 proposal on the 4B was a name with one or two sightings in 660KB and every
@@ -2317,6 +2391,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run test:chip-picker` | `scripts/test-chip-picker.ts` |
 | `npm run test:dialogue-events` | `scripts/test-dialogue-events.ts` |
 | `npm run test:entity-review` | `scripts/test-entity-review.ts` |
+| `npm run test:entity-review-robustness` | `scripts/test-entity-review-robustness.ts` |
 | `npm run test:entity-scan` | `scripts/test-entity-scan.ts` |
 | `npm run test:event-detect` | `scripts/test-event-detect.ts` |
 | `npm run test:evidence-pack` | `scripts/test-evidence-pack.ts` |
