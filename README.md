@@ -931,8 +931,19 @@ Three classes of non-name (`Don't`, `pre-Imperial`, `Day 23`) are rejected at
 the occurrence rather than at the name, so a book with a real Don keeps him.
 
 Against a hand-labelled gold on a 30-chapter manuscript this reaches **96.6%**
-bucket accuracy with zero junk names, up from 91.5% with four. On four
-published novels nobody tuned against it reaches **100%** (30/30). `npm run test:bucket-gold` and
+bucket accuracy with zero junk names, up from 91.5% with four. Across
+**thirteen published novels** nobody tuned against, **98.4%** (243/247), up
+from 83.8%.
+
+That second number is why the corpus harness covers thirteen books and not
+four. At four it read 93%, which looks like a rounding difference from the dev
+book. At thirteen it read 83.8%, and every one of the 40 wrong buckets was a
+place filed as a character with no error of any other kind anywhere in the
+sample. Each had place evidence and no person evidence at all, and each was
+losing to a bare-name default because its evidence sat under the deciding
+floors. Those floors stop a small signal outvoting a **larger competing** one,
+so when nothing competes they no longer apply. A failure that uniform stays
+invisible until the sample is wide enough to stop looking like noise. `npm run test:bucket-gold` and
 `npm run test:bucket-corpus`; `npm run probe:bucket-audit` dumps every name
 with the evidence the classifier saw.
 
