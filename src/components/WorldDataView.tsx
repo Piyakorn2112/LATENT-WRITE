@@ -432,7 +432,13 @@ export function WorldDataView({
       // "on" is a different product, not a smaller model: measured, the 1.7B
       // abstains or fabricates on this task, so it plays no part here.
       const mode = assistantMode(loadPrefs());
-      if (mode !== "max" || !(await assistantAvailable())) {
+      // ★ ASK ABOUT THE TIER THIS IS ABOUT TO RUN ON. The parameterless form
+      //   checks the SMALL model, and this branch runs on max — the exact
+      //   trap assistantAvailable's own comment names. It fails both ways:
+      //   4B downloaded and 1.7B absent silently demoted max mode to the
+      //   extractive card, and 1.7B present with the 4B absent green-lit
+      //   three max calls that could only fail.
+      if (mode !== "max" || !(await assistantAvailable("max"))) {
         if (alive()) {
           setDossier({
             phase: "ready", forName: entity.name, progress: null, fieldInFlight: null,
@@ -711,7 +717,10 @@ export function WorldDataView({
             //    from "different models" is the fingerprint.)
             // ══════════════════════════════════════════════════════════════
             const useMaxModel = assistantMode(loadPrefs()) === "max";
-            if (useMaxModel && result.unresolved.length > 0 && await assistantAvailable() && !cancelled) {
+            // ★ "max" here too: this run passes tier:"max" below, so asking
+            //   the default tier answers the wrong question in both
+            //   directions (see assistantAvailable).
+            if (useMaxModel && result.unresolved.length > 0 && await assistantAvailable("max") && !cancelled) {
               const bookHash = fnv1a(novel.chapters.map((c) => c.content).join("\n").slice(0, 20_000));
               const answers = await reviewUnresolvedForms(result.unresolved, {
                 // The tier that passed the probe, and only that tier. 4k
