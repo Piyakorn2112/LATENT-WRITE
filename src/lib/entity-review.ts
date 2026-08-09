@@ -242,7 +242,28 @@ confidence: a number from 0 to 1, how much the evidence shows. Never above 1.`;
 // They are evidence for the priority queue AND they ride along in the prompt,
 // because a count over the whole span sees what three windows cannot.
 
-const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, (c) => `\\${c}`);
+
+/**
+ * ★★ `\b` IS ASCII-ONLY AND IT MADE THIS MODULE LIE.
+ *
+ *    `Á` is not a word character to a non-unicode regex, so `/\bÁntonia\b/`
+ *    never matches — but `/\basked\s+Ántonia\b/` does, because there the
+ *    boundary sits on "asked". Measured: `usageSignals` reported Ántonia as
+ *    `occurrences: 0` and `spoken: 1` IN THE SAME OBJECT, which is not a
+ *    degraded reading, it is an impossible one. Downstream that meant a
+ *    contradiction score computed against a zero denominator, a name jumping
+ *    the review queue on phantom evidence, `usageSnippets` returning nothing
+ *    so the model was never asked, and `MIN_MOVE_OCCURRENCES` refusing every
+ *    correction on the grounds that the name does not appear.
+ *
+ *    Every boundary in this file is these. world-data.ts carries the same
+ *    pair; the two are deliberately not shared, because this module does not
+ *    import the scanner.
+ */
+const WB = "(?<![\\p{L}\\p{N}_])";
+const WA = "(?![\\p{L}\\p{N}_])";
+const nameRe = (body: string, flags = "g") => new RegExp(body, `${flags}u`);
 
 export interface UsageSignals {
   /** "X said", "said X", "X asked" — a name that speaks is a person. */
@@ -268,21 +289,21 @@ export function usageSignals(text: string, name: string): UsageSignals {
   }
   return {
     spoken:
-      count(text, new RegExp(`\\b${n}\\b\\s+(?:said|says|asked|asks|replied|answered|whispered|shouted|muttered|thought|nodded|smiled|laughed|cried|shrugged)\\b`, "g")) +
-      count(text, new RegExp(`\\b(?:said|asked|replied|answered|whispered|shouted|muttered|cried)\\s+${n}\\b`, "g")),
-    addressed: count(text, new RegExp(`\\b(?:asked|told|warned|reminded|thanked|greeted|assured|answered|informed|begged)\\s+${n}\\b|\\bturn(?:ed|ing)?\\s+to\\s+${n}\\b`, "g")),
+      count(text, nameRe(`${WB}${n}${WA}\\s+(?:said|says|asked|asks|replied|answered|whispered|shouted|muttered|thought|nodded|smiled|laughed|cried|shrugged)${WA}`)) +
+      count(text, nameRe(`${WB}(?:said|asked|replied|answered|whispered|shouted|muttered|cried)\\s+${n}${WA}`)),
+    addressed: count(text, nameRe(`${WB}(?:asked|told|warned|reminded|thanked|greeted|assured|answered|informed|begged)\\s+${n}${WA}|${WB}turn(?:ed|ing)?\\s+to\\s+${n}${WA}`)),
     // ★ "to" IS NOT A PLACE PREPOSITION ON ITS OWN. "turned to Doran" and
     //   "said to Doran" are person usage, and counting them as place evidence
     //   made a speaking character read as a location — the exact failure this
     //   module exists to catch. Bare "to X" only counts when no attention or
     //   speech verb governs it; the unambiguous prepositions always count.
     placePrep:
-      count(text, new RegExp(`\\b(?:in|at|from|toward|towards|outside|inside|near|across|through|into|onto|past|beyond|around)\\s+${n}\\b`, "g")) +
-      count(text, new RegExp(`(?<!\\b(?:turn|turns|turned|turning|spoke|speak|speaks|speaking|said|says|talk|talks|talked|listen|listens|listened|whisper|whispers|whispered|shout|shouts|shouted|gesture|gestures|gestured|nod|nods|nodded|point|points|pointed|reply|replies|replied|according|close|next|back)\\s)\\bto\\s+${n}\\b`, "g")),
-    determiner: count(text, new RegExp(`\\b(?:the|a|an)\\s+${n}\\b`, "g")),
-    possessive: count(text, new RegExp(`\\b${n}(?:['’]s)`, "g")),
-    vocative: count(text, new RegExp(`[,;]\\s*${n}\\s*[,.!?]`, "g")),
-    occurrences: count(text, new RegExp(`\\b${n}\\b`, "g")),
+      count(text, nameRe(`${WB}(?:in|at|from|toward|towards|outside|inside|near|across|through|into|onto|past|beyond|around)\\s+${n}${WA}`)) +
+      count(text, nameRe(`(?<!${WB}(?:turn|turns|turned|turning|spoke|speak|speaks|speaking|said|says|talk|talks|talked|listen|listens|listened|whisper|whispers|whispered|shout|shouts|shouted|gesture|gestures|gestured|nod|nods|nodded|point|points|pointed|reply|replies|replied|according|close|next|back)\\s)${WB}to\\s+${n}${WA}`)),
+    determiner: count(text, nameRe(`${WB}(?:the|a|an)\\s+${n}${WA}`)),
+    possessive: count(text, nameRe(`${WB}${n}(?:['’]s)`)),
+    vocative: count(text, nameRe(`[,;]\\s*${n}\\s*[,.!?]`)),
+    occurrences: count(text, nameRe(`${WB}${n}${WA}`)),
   };
 }
 
@@ -374,7 +395,7 @@ export function usageSnippets(
   radius = SNIPPET_RADIUS,
 ): string[] {
   if (!text || !name) return [];
-  const re = new RegExp(`\\b${escapeRe(name)}\\b`, "g");
+  const re = nameRe(`${WB}${escapeRe(name)}${WA}`);
   const out: string[] = [];
   let lastIndex = -Infinity;
   for (let m = re.exec(text); m && out.length < limit; m = re.exec(text)) {

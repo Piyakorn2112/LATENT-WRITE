@@ -152,6 +152,10 @@ export const ROOT_CROWN_GOLD: Record<string, GoldEntry> = {
   "Aunt Mira":           { accept: ["character"] },
   "Sarn Tolen":          { accept: ["character"] },
   "Pala Drest":          { accept: ["character"] },
+  // Recovered when the context capture stopped swallowing repeat occurrences
+  // inside its own 90-character window.
+  Ovren: { accept: ["character"], why: '"the other one — Ovren\'s, on the north end"' },
+  Mair:  { accept: ["character"], why: '"Mair\'s boy from the lower village"' },
   "Lila Vell":           { accept: ["character"] },
   "Anwen Vell":          { accept: ["character"] },
   "Tessa Mosswell":      { accept: ["character"] },

@@ -278,15 +278,46 @@ const MIN_IDF_SOLO             = 1.61; // log(1 + 1/0.27)
 const MIN_IDF_WITH_CONTEXT     = 0.72; // log(1 + 1/0.55)
 const CONTEXT_SIGNAL_THRESHOLD = 4;    // min accumulated context points to unlock relaxed gate
 
-const TITLE_TOKEN_PATTERN = `[A-Z][a-z]{1,}(?:['’-][A-Z][a-z]{1,})*`;
+/**
+ * ★★ JAVASCRIPT'S `\b` IS ASCII-ONLY, AND IT LOSES WHOLE CASTS.
+ *
+ *    `Á` is not a word character to a non-unicode regex, so between a space
+ *    and it there is NO boundary and `/\bÁntonia\b/` never matches anything.
+ *    Measured on the corpus: "Ántonia" occurs 287 times in My Ántonia and the
+ *    scan returned her ZERO times — the title character of the book, absent
+ *    from her own cast. "Alcée Arobin" in The Awakening arrived as `Alc`,
+ *    because `[a-z]` stops at the accent and the fragment survives the tests
+ *    that the whole name would have passed.
+ *
+ *    Every name-anchored pattern in this file and in entity-review.ts uses
+ *    these instead. They are the same boundary `\b` means, written so that a
+ *    letter is a letter: French, Spanish, Portuguese, German, Nordic,
+ *    Vietnamese and every transliteration with a diacritic.
+ */
+const escapeForRe = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, (c) => `\\${c}`);
+const WORD_BEFORE = "(?<![\\p{L}\\p{N}_])";
+const WORD_AFTER = "(?![\\p{L}\\p{N}_])";
+
+/** A whole-word match for a literal name, safe for non-ASCII letters. */
+export function nameBoundaryRe(name: string, flags = "g"): RegExp {
+  return new RegExp(`${WORD_BEFORE}${escapeForRe(name)}${WORD_AFTER}`, `${flags}u`);
+}
+
+/** The same, capturing the four characters in front — what the determiner and
+ *  bracket tests read. */
+function namePrefixRe(name: string): RegExp {
+  return new RegExp(`(.{0,4})${WORD_BEFORE}${escapeForRe(name)}${WORD_AFTER}`, "gu");
+}
+
+const TITLE_TOKEN_PATTERN = `\\p{Lu}[\\p{Ll}\\p{M}]{1,}(?:['’-]\\p{Lu}[\\p{Ll}\\p{M}]{1,})*`;
 const TITLE_JOINER_PATTERN = `(?:of|the|for|de|du|del|da|di|la|le)`;
 const LEADING_ARTICLES = new Set(["The"]);
 const CONNECTOR_WORDS = new Set(["of", "the", "for", "de", "du", "del", "da", "di", "la", "le"]);
 
 function buildTitleCaseCandidateRe(maxWords: number): RegExp {
   return new RegExp(
-    `\\b(${TITLE_TOKEN_PATTERN}(?:[ \\t]+(?:${TITLE_JOINER_PATTERN}[ \\t]+)?${TITLE_TOKEN_PATTERN}){0,${Math.max(0, maxWords - 1)}})\\b`,
-    "g",
+    `${WORD_BEFORE}(${TITLE_TOKEN_PATTERN}(?:[ \\t]+(?:${TITLE_JOINER_PATTERN}[ \\t]+)?${TITLE_TOKEN_PATTERN}){0,${Math.max(0, maxWords - 1)}})${WORD_AFTER}`,
+    "gu",
   );
 }
 
@@ -424,7 +455,7 @@ function isFragmentOccurrence(text: string, start: number, end: number): boolean
   // An index, not a name: "Day 1", "Chapter 4", "Level 12".
   if (/^\s+\d/.test(after)) return true;
   // A lowercase prefix owns the hyphen: pre-, post-, non-, self-, mid-.
-  if (/[a-z][-–]$/.test(text.slice(Math.max(0, start - 2), start))) return true;
+  if (/[\p{Ll}\p{M}][-–]$/u.test(text.slice(Math.max(0, start - 2), start))) return true;
   return false;
 }
 
@@ -433,7 +464,7 @@ function collectTitleCaseCandidates(text: string, maxWords: number): Map<string,
   const midSentence = new Map<string, number>();
   // Every word that appears LOWERCASE anywhere in this text. See isProbablyName:
   // this is the dictionary, and it is the text's own.
-  const lowercaseForms = new Set<string>(text.match(/\b[a-z][a-z'-]{1,}\b/g) ?? []);
+  const lowercaseForms = new Set<string>(text.match(/\p{Ll}[\p{Ll}\p{M}'-]{1,}/gu) ?? []);
   const pattern = buildTitleCaseCandidateRe(maxWords);
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
@@ -576,8 +607,28 @@ function computeEntityContextSignals(
   name: string,
   nouns?: ReadonlySet<string>,
 ): EntityContextSignals {
-  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const ctxRe = new RegExp(`([^\\n]{0,90})\\b${escaped}\\b([^\\n]{0,90})`, "gi");
+  // ★★ SLICE THE CONTEXT, DO NOT CAPTURE IT. This used to be
+  //    `([^\n]{0,90})…NAME…([^\n]{0,90})` and those two greedy captures cost
+  //    260x the match itself: measured on The Root Crown, 131.8ms per pass
+  //    against 0.5ms for the same pattern with the captures removed. Every
+  //    surviving candidate pays it once per chapter, so it was most of the
+  //    scan. Taking the window off the source string by index is identical
+  //    work for the reader and none for the regex engine.
+  //
+  //    It also paid for the unicode boundaries outright. The `u` flag made
+  //    the captured version 2.6x slower again (131.8ms → 349.4ms) and turned
+  //    a 6.7s scan into 17.2s; without the captures the flag costs nothing
+  //    measurable.
+  const ctxRe = nameBoundaryRe(name, "gi");
+  const windowAround = (start: number, end: number) => {
+    let before = text.slice(Math.max(0, start - 90), start);
+    const breakBefore = before.lastIndexOf("\n");
+    if (breakBefore >= 0) before = before.slice(breakBefore + 1);
+    let after = text.slice(end, end + 90);
+    const breakAfter = after.indexOf("\n");
+    if (breakAfter >= 0) after = after.slice(0, breakAfter);
+    return { before, after };
+  };
 
   let occurrences = 0;
   let charScore = 0;
@@ -607,8 +658,7 @@ function computeEntityContextSignals(
 
   let match: RegExpExecArray | null;
   while ((match = ctxRe.exec(text)) !== null) {
-    const before = match[1];
-    const after = match[2];
+    const { before, after } = windowAround(match.index, match.index + match[0].length);
     occurrences += 1;
     if (!previewBefore && !previewAfter) {
       previewBefore = before;
@@ -1033,14 +1083,14 @@ const PLACE_PREP_DET_RE = /\b(in|at|from|near|through|outside|inside|across|towa
  */
 function buildNounLexicon(text: string): Set<string> {
   const out = new Set<string>();
-  const re = /\b(?:the|a|an)\s+([a-z][a-z'’-]{1,})\b/g;
+  const re = /(?<![\p{L}\p{N}_])(?:the|a|an)\s+(\p{Ll}[\p{Ll}\p{M}'’-]{1,})(?![\p{L}\p{N}_])/giu;
   for (let m = re.exec(text); m; m = re.exec(text)) out.add(m[1]);
   return out;
 }
 
 function followingWordIsNoun(after: string, nouns: ReadonlySet<string> | undefined): boolean {
   if (!nouns) return false;
-  const next = /^\s+([a-z][a-z'’-]*)/.exec(after);
+  const next = /^\s+(\p{Ll}[\p{Ll}\p{M}'’-]*)/u.exec(after);
   return !!next && nouns.has(next[1]);
 }
 
@@ -1070,7 +1120,7 @@ function singularForms(word: string): string[] {
 }
 
 function attributiveHeadLabel(after: string): "place" | "faction" | "entity" | null {
-  const next = /^\s+([a-z][a-z'’-]*)/.exec(after);
+  const next = /^\s+(\p{Ll}[\p{Ll}\p{M}'’-]*)/u.exec(after);
   return next ? vocabularyLabelOf(next[1]) : null;
 }
 
@@ -1478,7 +1528,7 @@ function applyCastCoherence(decisions: CastDecision[], text: string): void {
   // One pass over the text for every Title-Case bigram, rather than a
   // full-text regex per candidate. 660KB, one scan.
   const followers = new Map<string, Map<string, number>>();
-  const bigram = /\b([A-Z][a-z]+)[ \t]+([A-Z][a-z]+)\b/g;
+  const bigram = new RegExp(`${WORD_BEFORE}(\\p{Lu}[\\p{Ll}\\p{M}]+)[ \\t]+(\\p{Lu}[\\p{Ll}\\p{M}]+)${WORD_AFTER}`, "gu");
   for (let m = bigram.exec(text); m; m = bigram.exec(text)) {
     const [, first, second] = m;
     let inner = followers.get(second);
@@ -2000,7 +2050,7 @@ const MAX_DETERMINER_RATIO = 0.10;
  *  scanAndClassify (threshold 0.4, precision-first) — same measurement, two
  *  deliberately different bars. */
 export function determinerUsage(text: string, name: string): { occurrences: number; ratio: number } {
-  const re = new RegExp(`(.{0,4})\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+  const re = namePrefixRe(name);
   let occurrences = 0;
   let determined = 0;
   let m: RegExpExecArray | null;
@@ -2014,7 +2064,7 @@ export function determinerUsage(text: string, name: string): { occurrences: numb
 export function filterSpeakerCandidates(names: readonly string[], text: string): string[] {
   if (!text) return [...names];
   return names.filter((name) => {
-    const re = new RegExp(`(.{0,4})\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+    const re = namePrefixRe(name);
     let occ = 0;
     let determined = 0;
     let bracketed = 0;
@@ -2086,8 +2136,7 @@ export function buildSpeakerAliasMap(
     st = st.replace(/([a-z])\1$/, "$1");
     return st.length >= 3 ? st : undefined;
   };
-  const countOf = (n: string): number =>
-    (text.match(new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g")) ?? []).length;
+  const countOf = (n: string): number => (text.match(nameBoundaryRe(n)) ?? []).length;
 
   for (const a of single) {
     const stem = stemOf(a);

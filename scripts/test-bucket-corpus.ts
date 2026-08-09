@@ -73,6 +73,9 @@ const EXPECTED: Record<string, Record<string, Bucket>> = {
     Spencervale: "place",
   },
   antonia: {
+    // ★ THE TITLE CHARACTER. 287 sightings, and the scan returned her zero
+    //   times until the name boundaries stopped being ASCII-only.
+    "Ántonia": "character",
     Shimerda: "character", Ambrosch: "character", Yulka: "character",
     Pavel: "character", Cuzak: "character", Krajiek: "character",
     Jelinek: "character", Harling: "character", Cleric: "character",
@@ -83,6 +86,10 @@ const EXPECTED: Record<string, Record<string, Bucket>> = {
     Klondike: "place", Seattle: "place", Florida: "place",
   },
   awakening: {
+    // Every one of these was lost or truncated to a fragment ("Alc") before
+    // the boundaries were made unicode-safe.
+    "Léonce": "character", "Adèle": "character", "Désirée": "character",
+    "Alcée Arobin": "character",
     Pontellier: "character", Arobin: "character", Mariequita: "character",
     Celestine: "character", Beaudelet: "character", Edna: "character",
     Robert: "character", Victor: "character",
