@@ -25,12 +25,17 @@ import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
 import { OrbEngine } from "./orb/OrbEngine";
+import { runThinkPass } from "../lib/think";
+import { ThinkingLabel } from "./ThinkingLabel";
 import {
   DOSSIER_TASK,
   buildDossierPack,
   buildExtractiveCard,
   buildFieldRequest,
   buildFieldRetryRequest,
+  buildFieldThinkRequest,
+  decideDossierThinking,
+  fieldCandidates,
   composeExtractiveDescription,
   composeProposalDescription,
   dossierSignature,
@@ -91,6 +96,8 @@ interface DossierUiState {
   citedChapters: number[];
   /** True when the description came from the model rather than extraction. */
   generated: boolean;
+  /** True while the unconstrained reasoning pass is running. */
+  thinking?: boolean;
   /** Deterministic role + counted-facts line. */
   card: ExtractiveCard | null;
   error?: string;
@@ -488,7 +495,33 @@ export function WorldDataView({
       const proposal: DossierProposal = emptyProposal(pack, card.role);
       for (const field of DOSSIER_FIELDS) {
         if (!alive()) return;
-        const request = buildFieldRequest(pack, field, kind);
+        // ★★ REAL THINKING NEEDS ITS OWN UNCONSTRAINED CALL. A grammar masks
+        //    think tokens from token zero, so `noThink: false` on the
+        //    constrained request below has always been cosmetic. Only the
+        //    abstractive field earns the second call — see
+        //    decideDossierThinking.
+        const policy = decideDossierThinking(field, fieldCandidates(pack, field).length);
+        let notes: string | null = null;
+        if (policy.think) {
+          const thinkReq = buildFieldThinkRequest(pack, field, kind);
+          if (thinkReq) {
+            setDossier({
+              phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
+              descriptionText: "", citedChapters: [], generated: false, card, thinking: true,
+            });
+            notes = await runThinkPass(assistantRunJSON, {
+              task: DOSSIER_TASK,
+              tag: entity.name,
+              systemPrompt: thinkReq.systemPrompt,
+              userText: thinkReq.userText,
+              schema: thinkReq.schema,
+              budget: policy.budget,
+              timeoutMs: 90_000,
+            });
+            if (!alive()) return;
+          }
+        }
+        const request = buildFieldRequest(pack, field, kind, notes);
         if (!request) continue; // gate closed: never asked, never invented
         setDossier({
           phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
@@ -518,7 +551,7 @@ export function WorldDataView({
         // ★ A refusal licenses ONE extractive retry (module rule): the line
         //   used words from outside the passages, so ask again for verbatim.
         if (answer.status === "refused") {
-          const retryReq = buildFieldRetryRequest(pack, field, kind);
+          const retryReq = buildFieldRetryRequest(pack, field, kind, notes);
           if (retryReq) {
             const second = await ask(retryReq);
             if (!alive()) return;
@@ -1672,7 +1705,11 @@ function DossierCard({
               ? state.progress
                 ? `Reading chapter ${state.progress.chapter} of ${state.progress.chapterTotal}…`
                 : "Reading the manuscript…"
-              : `Writing ${state.fieldInFlight ?? "the card"}…`}
+              /* The reasoning pass runs 10-30s unconstrained, so it gets the
+                 app's own thinking vocabulary rather than a frozen label. */
+              : state.thinking
+                ? <ThinkingLabel />
+                : `Writing ${state.fieldInFlight ?? "the card"}…`}
           </span>
           <button className="world-alias-btn" onClick={dossier.onCancel}>Cancel</button>
         </div>

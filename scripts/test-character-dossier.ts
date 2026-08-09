@@ -268,16 +268,30 @@ async function main() {
     osricCard.role.length > 0 && osricCard.quotes.length === 0,
     JSON.stringify(osricCard.quotes));
 
-  console.log("\n══ composed description — one text, the manuscript's own words ══");
+  console.log("\n══ composed description — prose, not a fragment pile ══");
   const composed = composeExtractiveDescription(marlow);
   expect("Marlow's description composes from his phrases",
-    composed.includes("tall, gaunt") || composed.includes("weathered face"), composed);
+    composed.includes("gaunt") || composed.includes("weathered face") || composed.includes("grey eyes"), composed);
   expect("…and carries the habit clause",
     /habit of counting/.test(composed), composed);
   expect("…and the narrated lore, never the spoken rumour",
     /fishing quarter/.test(composed) && !/wreck/.test(composed), composed);
   expect("composed twin: Osric composes to EMPTY, not to filler",
     composeExtractiveDescription(osric) === "", composeExtractiveDescription(osric));
+
+  // ★★ THE PROSE GATES. A semicolon pile is not a description, and a
+  //    pronoun that disagrees with its verb is worse than no sentence.
+  expect("every sentence starts with a capital and ends with a stop",
+    composed.split(/(?<=\.)\s+/).every((s) => /^[A-Z"“]/.test(s) && /\.$/.test(s)), composed);
+  expect("no semicolon-joined fragment pile",
+    !composed.includes("; "), composed);
+  expect("subject and verb agree (no 'They is', no 'He are')",
+    !/\b(?:They is|He are|She are)\b/.test(composed), composed);
+  expect("a clause given a subject keeps its verb (no 'They in the valley')",
+    !/\b(?:He|She|They)\s+(?:in|at|on|with|of|for)\s/.test(composed), composed);
+  expect("pronoun class comes from evidence, defaulting to they",
+    marlow.pronounClass === "masc" || marlow.pronounClass === "unknown",
+    marlow.pronounClass);
 
   expect("phrase extraction: possessive-bound 'his weathered face' is taken",
     extractDescriptivePhrases("a tall man with his weathered face").includes("weathered face"));

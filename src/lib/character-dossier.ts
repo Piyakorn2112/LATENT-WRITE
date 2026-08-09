@@ -37,6 +37,7 @@
  */
 import { splitSentences, stripQuotes } from "./prose-segments";
 import { tidyTruncatedText } from "./assistant-client";
+import { notesBlock } from "./think";
 import {
   detectSpeechInChapter,
   resolvePronounOwners,
@@ -182,7 +183,15 @@ const LORE_PREDICATE =
   "worked (?:as|for|at)|studied|trained|apprenticed|fought (?:in|at)|left (?:home|the village|the city)|" +
   "arrived from|returned from|lost (?:his|her|their) (?:father|mother|wife|husband|son|daughter|family|home)|" +
   "died|was killed|escaped|was sent|was taken|was known (?:as|for)|is known (?:as|for)|" +
-  "they say|it is said|rumou?red|legend|had lived|has lived|spent (?:his|her|their) (?:life|childhood|youth))";
+  "they say|it is said|rumou?red|legend|had lived|has lived|spent (?:his|her|their) (?:life|childhood|youth)|" +
+  // ★ `had been` IS BIOGRAPHY WHEN IT TAKES A PLACE OR A ROLE, and scene
+  //   detail otherwise. Dropping it wholesale cost a genuinely good line —
+  //   "Tessa had been in the valley for sixty-three years and had woven
+  //   blankets and raised two children" — while keeping it wholesale let
+  //   "had been sitting on the bench for eleven minutes" through. The
+  //   complement decides: a locative or a role is a life, a progressive is
+  //   a moment.
+  "had been (?:in|at|on|with|among|of) (?!this|that|these|those)|had been (?:an?|the)\\b)";
 
 /** Habit frames — durable personality evidence, not a moment. */
 const HABIT_FRAME =
@@ -293,6 +302,9 @@ export interface CharacterDossierEvidence {
   name: string;
   /** Every surface form: the name plus its aliases. */
   forms: string[];
+  /** Whole-book honorific dominance. Never guessed from the name; "unknown"
+   *  is a first-class answer and composes with they/their. */
+  pronounClass: HonorificClass;
   counts: DossierCounts;
   byChannel: Record<DossierChannel, DossierSpan[]>;
 }
@@ -621,6 +633,7 @@ export async function harvestDossierEvidence(
   const characters: CharacterDossierEvidence[] = cleanCast.map((c) => ({
     name: c.name,
     forms: [c.name, ...c.aliases.filter((a) => a.toLowerCase() !== c.name.toLowerCase())],
+    pronounClass: "unknown" as HonorificClass,
     counts: {
       mentions: 0, chapters: [], chapterTotal: novel.chapters.length,
       speechLines: 0, meanLineWords: 0, agentVerbs: [], distinctiveVerbs: [],
@@ -653,6 +666,13 @@ export async function harvestDossierEvidence(
       })(),
       verbCounts: new Map<string, number>(),
       speechVerbCounts: new Map<string, number>(),
+      // Which possessive the RESOLVER assigned this character, counted. The
+      // honorific test needs "Mr./Miss X" forms and most modern prose has
+      // none, so it returns unknown for a whole cast whose genders the
+      // narration makes obvious. The resolver already decided; this reads
+      // its decisions back instead of guessing from a name.
+      ownedHis: 0,
+      ownedHer: 0,
       saidCount: 0,
       station: null as string | null,
       lineWords: [] as number[],
@@ -712,6 +732,10 @@ export async function harvestDossierEvidence(
         //   chapter-local guess.
         const pc = perCharByName.get(canonical);
         if (pc && !pronounCompatible(owner.pronoun, pc.klass)) continue;
+        if (pc) {
+          if (/^his$/i.test(owner.pronoun)) pc.ownedHis += 1;
+          else if (/^hers?$/i.test(owner.pronoun)) pc.ownedHer += 1;
+        }
         if (ev.byChannel["pronoun-owned"].length >= SPANS_PER_CHANNEL_MAX) continue;
         const after = paragraph.slice(owner.end, owner.end + 60);
         // {0,4} because Austen's one description of Darcy is "his fine, tall
@@ -810,6 +834,13 @@ export async function harvestDossierEvidence(
       ? pc.saidCount / (pc.saidCount + markedTotal)
       : 0;
     pc.ev.counts.station = pc.station;
+    // Honorific dominance first (whole-book, strongest); the resolver's own
+    // possessive assignments second; "unknown" -> they/their, which is
+    // correct for an unresolved referent rather than a guess.
+    pc.ev.pronounClass = pc.klass !== "unknown" ? pc.klass
+      : pc.ownedHis >= 3 && pc.ownedHis > pc.ownedHer * 2 ? "masc"
+      : pc.ownedHer >= 3 && pc.ownedHer > pc.ownedHis * 2 ? "fem"
+      : "unknown";
     pc.ev.counts.meanLineWords = pc.lineWords.length
       ? Math.round(pc.lineWords.reduce((a, b) => a + b, 0) / pc.lineWords.length)
       : 0;
@@ -1184,6 +1215,92 @@ export interface DossierFieldRequest {
   maxTokens: number;
 }
 
+/**
+ * ★★ WHICH FIELDS EARN A THINKING PASS, and it is not all of them.
+ *
+ *    A grammar masks think tokens from token zero, so real thinking costs a
+ *    second unconstrained call. think.ts's policy is the one to follow:
+ *    background batch work never thinks, interactive work thinks when the
+ *    TASK SHAPE earns it. Here the shapes differ sharply per field:
+ *
+ *    · appearance and background are EXTRACTIVE. The answer is in one of the
+ *      passages and the job is to find and copy it; reasoning adds latency
+ *      to a lookup. They do not think.
+ *    · personality is ABSTRACTIVE and multi-span: the model has to read
+ *      several pieces of conduct and name the trait they share. That is the
+ *      inference shape think.ts's own rules select for, and it is where the
+ *      measured quality lives.
+ *
+ *    Thinking is also skipped when there is nothing to weigh — a single
+ *    candidate span cannot support a comparison, so a lone span is a lookup
+ *    whatever the field.
+ */
+export function decideDossierThinking(
+  field: DossierFieldKey,
+  candidateCount: number,
+): { think: boolean; budget: number; reason: string } {
+  if (field !== "personality") return { think: false, budget: 0, reason: "extractive-field" };
+  if (candidateCount < 2) return { think: false, budget: 0, reason: "single-span" };
+  // ★★ THE BUDGET IS SET BY WHERE THE CONCLUSION SITS, NOT BY THE TASK.
+  //
+  //    At 320 every note came back exactly at the cap, opening "Okay, I need
+  //    to figure out what X is like… let me go through each passage" and
+  //    stopping mid-walk: the model narrating its process and never reaching
+  //    the conclusion the second call needs. think.ts records the identical
+  //    failure at 448 and 768 on the ask surface.
+  //
+  //    At 1024 the notes completed (~4000 chars) and cost THIRTY SECONDS a
+  //    field, for two answers better, two equal and one worse. That is a bad
+  //    trade at 3x the card's whole latency.
+  //
+  //    A conclusion-first prompt at 512 was tried to buy the same notes for
+  //    half the time. It backfired twice over: the model spent its opening
+  //    lines RESTATING THE INSTRUCTION ("I have to write a VERDICT on the
+  //    first line…"), and every answer collapsed toward a generic trait
+  //    triple — "reliable" led four of five characters, and Mira's rich
+  //    "deeply connected to others through shared history and care" became
+  //    "community-oriented". Reasoning about what evidence ADDS UP TO pulls
+  //    a model toward category labels; answering directly keeps it near the
+  //    text. That is the cost of thinking on this task, and it is why the
+  //    budget is not the only thing that had to be right.
+  //
+  //    1024 is what ships. Measured on five characters of the owner's
+  //    manuscript: two answers materially richer (Mira gained "nurturing and
+  //    protective", Tessa gained "skilled in practical crafts"), two equal,
+  //    one thinner. It costs ~30s on top of a ~10s card, which is why only
+  //    this one field spends it and why the UI names the wait.
+  return { think: true, budget: 1024, reason: "multi-span-inference" };
+}
+
+/** The reasoning prompt for a field. Same evidence, different instruction:
+ *  reach a conclusion in prose, do not produce the answer's JSON. */
+export function buildFieldThinkRequest(
+  pack: DossierPack,
+  field: DossierFieldKey,
+  kind: DossierKind = "character",
+): DossierFieldRequest | null {
+  const base = buildFieldRequest(pack, field, kind);
+  if (!base) return null;
+  return {
+    ...base,
+    // ★ LET IT WALK THE EVIDENCE. A conclusion-first variant was measured and
+    //   reverted: instructing the model to lead with a verdict made it open
+    //   by restating the instruction, and pushed every answer toward the same
+    //   generic trait triple. This wording keeps the reasoning close to the
+    //   passages, which is where the two measured gains came from.
+    systemPrompt:
+      `You are reading evidence about one ${SUBJECT_WORD[kind]} from a novel, to decide what it shows.\n\n`
+      + `Work out which passages agree with each other, which one is the odd\n`
+      + `one out, and what qualities they add up to. Stay close to what the\n`
+      + `passages actually show — a quality you cannot point at a passage for\n`
+      + `is not one this evidence supports.\n\n`
+      + `Weigh a passage tagged (pronoun) less — its subject was resolved by a\n`
+      + `machine. A passage tagged (counted) is a whole-book tally, not a\n`
+      + `quotation, so it shows a pattern rather than a moment.\n`
+      + `Do not write JSON and do not write the final answer. Just reason.`,
+  };
+}
+
 export function fieldCandidates(pack: DossierPack, field: DossierFieldKey): number[] {
   return field === "appearance" ? pack.visualCandidates
     : field === "personality" ? pack.traitCandidates
@@ -1200,6 +1317,11 @@ export function buildFieldRequest(
   pack: DossierPack,
   field: DossierFieldKey,
   kind: DossierKind = "character",
+  /** Conclusions from a prior unconstrained reasoning pass, if one ran. The
+   *  notes ride the USER turn, never the system prompt: the system prompts
+   *  in this repo stay frozen so a measured prompt cannot drift under a
+   *  feature (the LENGTH_SYSTEM lesson from the writing tool). */
+  notes?: string | null,
 ): DossierFieldRequest | null {
   const candidates = fieldCandidates(pack, field);
   if (candidates.length === 0) return null;
@@ -1214,10 +1336,13 @@ export function buildFieldRequest(
     "PASSAGES — verbatim, numbered. These are the only evidence there is.",
     ...subset.map((s) => `[${s.n}] ch${s.chapter} (${PROVENANCE[s.channel]}): ${s.text}`),
   ];
+  const question = ASK_BY_KIND[kind][field].question.replace("{name}", pack.name);
   return {
     field,
     systemPrompt: fieldSystem(field, kind),
-    userText: `${lines.join("\n")}\n\n${ASK_BY_KIND[kind][field].question.replace("{name}", pack.name)}`,
+    userText: notes
+      ? `${lines.join("\n")}\n\n${notesBlock(notes)}\n\n${question}`
+      : `${lines.join("\n")}\n\n${question}`,
     schema: DOSSIER_FIELD_SCHEMAS[field],
     maxTokens: 512,
   };
@@ -1465,8 +1590,9 @@ export function buildFieldRetryRequest(
   pack: DossierPack,
   field: DossierFieldKey,
   kind: DossierKind = "character",
+  notes?: string | null,
 ): DossierFieldRequest | null {
-  const base = buildFieldRequest(pack, field, kind);
+  const base = buildFieldRequest(pack, field, kind, notes);
   if (!base) return null;
   return {
     ...base,
@@ -1638,12 +1764,39 @@ const phraseModifier = (w: string): boolean => {
  *    fragments, because a complement runs on past where the phrase ends
  *    ("Hand was cold from the").
  */
-export function extractDescriptivePhrases(text: string): string[] {
+export function extractDescriptivePhrases(text: string, referentBound = false): string[] {
   const out: string[] = [];
-  const all = new RegExp(
-    `${LB}(?:his|her|their|its|my|your|our|[A-Z][a-z]+['’]s)\\s+((?:[a-z-]+(?:,\\s+|\\s+)){0,3})(${APPEARANCE_NOUN})${RB}`,
-    "g");
-  for (let m = all.exec(text); m; m = all.exec(text)) {
+  const push = (phrase: string) => { if (!out.includes(phrase)) out.push(phrase); };
+
+  // ★ WHEN THE CHANNEL HAS ALREADY BOUND THE REFERENT, a determiner is
+  //   enough. The possessive requirement exists to stop "alley air" being
+  //   read as a person's bearing; inside the possessive and pronoun-owned
+  //   channels the engine has ALREADY established whose feature this is, so
+  //   insisting on a second possessive threw away real descriptions —
+  //   "a small mended scar … pale against her palm" among them.
+  const binder = referentBound
+    ? `(?:his|her|their|its|my|your|our|an?|the|[A-Z][a-z]+['’]s)`
+    : `(?:his|her|their|its|my|your|our|[A-Z][a-z]+['’]s)`;
+
+  /**
+   * ★★ SOME NOUNS NEVER TAKE A DETERMINER BINDER, however bound the channel.
+   *    Relaxing to determiners inside the resolved channels immediately
+   *    brought back "alley air" and "kitchen air" as descriptions of a
+   *    person. `air`, `look`, `manner`, `walk` and `figure` denote a bearing
+   *    AND an ordinary thing, and only a possessive disambiguates them; a
+   *    body part does not have that problem, which is why the relaxation is
+   *    worth keeping for the rest.
+   */
+  const strictNoun = (noun: string) =>
+    /^(?:air|look|manner|walk|step|bearing|figure|build|frame|appearance|expression)$/i.test(noun);
+  const posBinder = `(?:his|her|their|its|my|your|our|[A-Z][a-z]+['’]s)`;
+  const boundOk = (noun: string, matched: string) =>
+    !strictNoun(noun) || new RegExp(`^${posBinder}\\b`).test(matched.trim());
+
+  // 1 — ATTRIBUTIVE: binder + modifiers + noun. "her long grey cloak".
+  const attributive = new RegExp(
+    `${LB}${binder}\\s+((?:[a-z-]+(?:,\\s+|\\s+)){0,3})(${APPEARANCE_NOUN})${RB}`, "g");
+  for (let m = attributive.exec(text); m; m = attributive.exec(text)) {
     const preWords = (m[1] ?? "").trim().split(/[\s,]+/).filter(Boolean);
     // A non-modifier RESTARTS the run, so "small, mended" survives intact
     // while "cold from the" contributes nothing.
@@ -1652,8 +1805,25 @@ export function extractDescriptivePhrases(text: string): string[] {
       if (phraseModifier(word)) adjectives.push(word);
       else adjectives.length = 0;
     }
-    if (adjectives.length > 0) out.push(`${adjectives.join(", ")} ${m[2]}`);
+    if (adjectives.length > 0 && boundOk(m[2], m[0])) push(`${adjectives.join(", ")} ${m[2]}`);
   }
+
+  // 2 — PREDICATIVE: binder + noun + copula + adjective. "Kinoko's face was
+  //     warm", "her eyes were grey and steady".
+  //
+  //     ★ ONLY THE ADJECTIVES COME BACK, never the tail. An earlier version
+  //       took the whole complement and produced "Hand was cold from the" —
+  //       a fragment, because a complement runs on past where the phrase
+  //       ends. Emitting "warm face" is fragment-free by construction.
+  const predicative = new RegExp(
+    `${LB}${binder}\\s+(${APPEARANCE_NOUN})${RB}\\s+(?:was|were|is|are|seemed|looked)\\s+((?:[a-z-]+)(?:(?:,\\s+|\\s+and\\s+)[a-z-]+){0,2})`,
+    "g");
+  for (let m = predicative.exec(text); m; m = predicative.exec(text)) {
+    const adjectives = (m[2] ?? "").split(/[\s,]+|and/).filter(Boolean)
+      .filter((w) => phraseModifier(w));
+    if (adjectives.length > 0 && boundOk(m[1], m[0])) push(`${adjectives.join(", ")} ${m[1]}`);
+  }
+
   return out;
 }
 
@@ -1704,6 +1874,28 @@ function usableClause(clause: string): boolean {
  *    person WAS. A reader meeting a character wants the same order a novel
  *    gives them: who they are, what they do, then what they look like.
  */
+/**
+ * ★ THE PRONOUN COMES FROM THE HONORIFIC CLASS THE HARVEST ALREADY
+ *   COMPUTED, and falls back to "they" — which is correct for an unknown
+ *   referent and never misgenders anyone. It is never guessed from a name.
+ */
+function subjectPronoun(ev: CharacterDossierEvidence): string {
+  return ev.pronounClass === "masc" ? "He" : ev.pronounClass === "fem" ? "She" : "They";
+}
+function possessive(ev: CharacterDossierEvidence): string {
+  return ev.pronounClass === "masc" ? "his" : ev.pronounClass === "fem" ? "her" : "their";
+}
+function beVerb(ev: CharacterDossierEvidence): string {
+  return ev.pronounClass === "unknown" ? "are" : "is";
+}
+
+/** Lower-case a clause's first letter unless it opens on a proper noun. */
+function lowerFirst(text: string): string {
+  return /^[A-Z][a-z]+\s/.test(text) && /^(?:The|A|An)\s/.test(text) === false
+    ? text
+    : text.replace(/^./, (c) => c.toLowerCase());
+}
+
 export function composeExtractiveDescription(
   ev: CharacterDossierEvidence,
   otherCastNames: readonly string[] = [],
@@ -1740,13 +1932,16 @@ export function composeExtractiveDescription(
       if (!m) continue;
       // A name governed by a preposition is not the subject of what follows.
       if (PREP_BEFORE.test(span.text.slice(Math.max(0, m.index - 24), m.index))) continue;
+      // ★ THE LEADING COPULA STAYS. It used to be stripped so the clause
+      //   could stand alone, but the composer now gives every clause a
+      //   SUBJECT — and stripping the verb then produced "They in the valley
+      //   for sixty-three years". A clause that keeps its verb reads as a
+      //   sentence the moment a pronoun is put in front of it.
       let clause = m[1].trim()
         // ★ AN EM-DASH OR COLON INTRODUCES A NEW FOCUS. "Mira was a child —
         //   two people in it, the kitchen their primary room" predicates
         //   Mira for four words and the house for twenty.
-        .split(/\s*[—–:]\s*/)[0]
-        .replace(/^(?:was|is|were|are|had been|has been)\s+(?=an?\b|the\b|in\b)/, "")
-        .replace(/^(?:had|has)\s+been\s+/, "");
+        .split(/\s*[—–:]\s*/)[0];
       // ★ A CLAUSE THAT NAMES ANOTHER CAST MEMBER IS ABOUT THEM. This is the
       //   same failure as the subject test one level out: "…which was the
       //   kind of thing people said about Tessa" arrived under Mira.
@@ -1770,9 +1965,18 @@ export function composeExtractiveDescription(
 
   const sentences: string[] = [];
 
-  // 1 — IDENTITY. Direct definition: what the book says this person IS.
+  // 1 — IDENTITY. Direct definition: what the book says this person IS. A
+  //     bare clause ("The person who came when a birth needed…") is a
+  //     fragment on its own, so it gets a subject; the station opens the
+  //     paragraph when the prose named one.
   const identity = clauseFrom(ev.byChannel.identity, 130);
-  if (identity) sentences.push(identity.replace(/^./, (c) => c.toUpperCase()) + ".");
+  if (ev.counts.station && identity) {
+    sentences.push(`${ev.name} is the ${ev.counts.station}, ${lowerFirst(identity.replace(/^(?:was|is|had been)\s+/, ""))}.`);
+  } else if (ev.counts.station) {
+    sentences.push(`${ev.name} is the ${ev.counts.station}.`);
+  } else if (identity) {
+    sentences.push(`${ev.name} ${lowerFirst(identity)}.`);
+  }
 
   // 2 — CONDUCT. Only a habit the prose STATES. A bare verb tally was tried
   //     here and reverted: "Most often seen to filed, considered, agreed"
@@ -1781,7 +1985,7 @@ export function composeExtractiveDescription(
   //     fact in the pack, where the model can weigh them as evidence and
   //     phrase them itself; extraction may not compose.
   const habit = clauseFrom(ev.byChannel.habitual, 100);
-  if (habit) sentences.push(habit.replace(/^./, (c) => c.toUpperCase()) + ".");
+  if (habit) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(habit)}.`);
 
   // 3 — APPEARANCE, last and only if the manuscript bound some to them.
   const seen = new Set<string>();
@@ -1789,7 +1993,13 @@ export function composeExtractiveDescription(
   const pack = buildDossierPack(ev);
   const byN = new Map(pack.spans.map((s) => [s.n, s]));
   for (const n of pack.visualCandidates) {
-    for (const phrase of extractDescriptivePhrases(byN.get(n)?.text ?? "")) {
+    const span = byN.get(n);
+    if (!span) continue;
+    // These three channels already resolved WHOSE feature this is, so the
+    // extractor may accept a determiner-bound phrase inside them.
+    const bound = span.channel === "possessive"
+      || span.channel === "pronoun-owned" || span.channel === "pronoun-attr";
+    for (const phrase of extractDescriptivePhrases(span.text, bound)) {
       const key = phrase.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1798,12 +2008,23 @@ export function composeExtractiveDescription(
     }
     if (phrases.length >= PHRASE_CAP) break;
   }
-  if (phrases.length > 0) sentences.push(`${phrases.join("; ")}.`.replace(/^./, (c) => c.toUpperCase()));
+  // ★★ A SEMICOLON PILE IS NOT PROSE. "Small, mended scar; warm face;
+  //    different look" is a search result with punctuation. The phrases are
+  //    the manuscript's own and must stay verbatim, but they can be placed
+  //    inside a frame that reads as a sentence — extraction supplies the
+  //    words, the template supplies the grammar, and nothing is invented
+  //    because the frame states only that the book describes them.
+  if (phrases.length > 0) {
+    const list = phrases.length === 1
+      ? phrases[0]
+      : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
+    sentences.push(`${subjectPronoun(ev)} ${beVerb(ev)} described by ${possessive(ev)} ${list}.`);
+  }
 
   // 4 — BACKGROUND. Narrated only; a spoken claim is someone's opinion and
   //     does not belong in a description written as fact.
   const lore = clauseFrom(ev.byChannel["lore-narrated"], 120);
-  if (lore) sentences.push(lore.replace(/^./, (c) => c.toUpperCase()) + ".");
+  if (lore) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(lore)}.`);
 
   // ★ A SINGLE APPEARANCE FRAGMENT IS NOT A DESCRIPTION. "Outer coat." was
   //   the whole of one character's card; a writer reads that as the feature
