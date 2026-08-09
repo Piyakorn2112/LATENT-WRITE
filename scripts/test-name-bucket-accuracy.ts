@@ -501,6 +501,312 @@ async function testSingleChapterIdfGate(): Promise<Assertion[]> {
   ];
 }
 
+/**
+ * GROUP 10 — A DETERMINER IS NOT A BUCKET.
+ *
+ * ★★ THE MEASURED BUG. `\bthe\s*$` sat in BOTH the faction prefix list and the
+ *    entity prefix list, worth +1.5 each, while the place-preposition test
+ *    required the preposition to touch the name and so scored ZERO on "at the
+ *    Mosshollow". Every name a novel writes as "the X" therefore accumulated
+ *    equal faction and entity mass and no place mass at all, tied at the top,
+ *    and the tie fell through the argmax to `character` and then out of the
+ *    determiner eviction into `entity`. On The Root Crown that put a valley
+ *    (Mosshollow), a village (Cymboll), a marsh (Dovesmoor) and a transit line
+ *    (Drowner's Lift) in the same bucket as the magic system.
+ *
+ * The three cases below are the same shape — a name that is ALWAYS determined
+ * — separated only by what the prose does around it. If the determiner is
+ * driving instead of the prose, they collapse into one bucket and two fail.
+ */
+async function testDeterminerIsNotABucket(): Promise<Assertion[]> {
+  const text = [
+    // PLACE — always "the Wendrel", always after a place preposition.
+    "She felt for it at the Wendrel, open-handed, the way she always had.",
+    "The path back to the Wendrel was easy enough in daylight.",
+    "He had come down from the Wendrel before the rain started.",
+    "Nothing in the Wendrel had changed since the last season.",
+    // ENTITY — always "the Ordinance", always governing something.
+    "The Ordinance required every reading to be filed within the day.",
+    "Under the Ordinance, nothing could be altered after submission.",
+    "The Ordinance governed which phrases a licensed caster could use.",
+    "The Ordinance defines the boundary between practice and offence.",
+    // FACTION — always "the Kithren", always acting as one body.
+    "The Kithren gathered at the lower hall before the announcement.",
+    "The Kithren had declared the road closed for the season.",
+    "The Kithren marched on the eastern gate at first light.",
+    "The Kithren demanded an answer before the week was out.",
+  ].join("\n\n");
+
+  const r = await scanAndClassify(text, undefined, 2);
+  return [
+    assert("determined place → place", bucketOfVariant(r, "Wendrel") === "place",
+      `actual: ${bucketOfVariant(r, "Wendrel") ?? "not found"}`),
+    assert("determined doctrine → entity", bucketOfVariant(r, "Ordinance") === "entity",
+      `actual: ${bucketOfVariant(r, "Ordinance") ?? "not found"}`),
+    assert("determined group → faction", bucketOfVariant(r, "Kithren") === "faction",
+      `actual: ${bucketOfVariant(r, "Kithren") ?? "not found"}`),
+    // The positive twin for the whole group: the three must not agree, which is
+    // exactly what a determiner-driven classifier would produce.
+    assert("the three do not collapse into one bucket",
+      new Set([bucketOfVariant(r, "Wendrel"), bucketOfVariant(r, "Ordinance"), bucketOfVariant(r, "Kithren")]).size === 3),
+  ];
+}
+
+/**
+ * GROUP 11 — A FRAGMENT OF A WORD IS NOT A NAME.
+ *
+ * Three ways the collector's `\b` boundary lets a capitalised substring pass as
+ * a name, each measured on The Root Crown: "Don" out of "Don't", "Imperial" out
+ * of "pre-Imperial", "Day" out of "Day 23". Each negative is paired with the
+ * SAME token used as a real name, because a guard that also removes the real
+ * thing has not fixed anything.
+ */
+async function testFragmentGuards(): Promise<Assertion[]> {
+  const contraction = [
+    `"Don't let them take it for scrap," she said. "It's a good keel."`,
+    `"Don't," he said again, quieter this time.`,
+    `"Don't ask me that. Don't ask anyone that."`,
+    `She won't say it and he can't say it and that is the whole trouble.`,
+    "Marek watched the two of them and said nothing at all.",
+    "Marek had been at the yard since before either of them arrived.",
+  ].join("\n\n");
+
+  const realDon = [
+    "Don said nothing when the letter came. He set it down and looked away.",
+    "Don had known for a week. Don turned the envelope over twice.",
+    "She asked Don about the yard and he told her what he knew.",
+  ].join("\n\n");
+
+  const hyphen = [
+    "Pre-Imperial materials ended up in the peripheral catalogue often.",
+    "He is listed as a pre-Imperial monastic chronicler. One folder.",
+    "The pre-Imperial libraries held their materials only in the old script.",
+    "A pre-Imperial notation survives in the compendium.",
+    "Ferrow read the folder twice and then read it a third time.",
+    "Ferrow had asked for the catalogue and been given a list instead.",
+  ].join("\n\n");
+
+  const realImperial = [
+    "The Imperial Guard had been stationed at the gate for three weeks.",
+    "Reports to the Imperial Guard were filed on alternating days.",
+    "The Imperial Guard controlled every crossing in the district.",
+  ].join("\n\n");
+
+  const numbered = [
+    "She had been using it as a reference frequency since Day 1.",
+    "Walking with Kel through the early evening of Day 23, which was cold.",
+    "On a morning in the week before Day 27, the marshal sat at his desk.",
+    "By Day 40 the counting had stopped meaning anything.",
+    "Kel had been walking that route since the first week.",
+    "Kel said nothing about the counting and she did not ask.",
+  ].join("\n\n");
+
+  const realDay = [
+    "Day said nothing when the door opened. She turned toward the table.",
+    "Day had known for some time. Day walked to the window and waited.",
+    "He asked Day about the letter and she told him the truth.",
+    "Lady Day arrived before the others and said so.",
+    "Day's coat was still wet. Day looked at the letter again and put it down.",
+    'Day replied without turning around. "I already told you what I know."',
+  ].join("\n\n");
+
+  // A hyphen AFTER the name is the name being used as a modifier, not a
+  // fragment: "Growth-class" is the Growth phrase, and must survive.
+  const trailingHyphen = [
+    "It applies to mid-level Growth-class substrate contact, more specific and less porous.",
+    "A Growth-class response from a monitored pad behind the market was logged.",
+    "The Growth foundational and the Bind-containment are both class A.",
+    "She had done the Growth phrase twice that week and once in the alley.",
+  ].join("\n\n");
+
+  const [rc, rd, rh, ri, rn, rday, rt] = await Promise.all([
+    scanAndClassify(contraction, undefined, 2),
+    scanAndClassify(realDon, undefined, 2),
+    scanAndClassify(hyphen, undefined, 2),
+    scanAndClassify(realImperial, undefined, 2),
+    scanAndClassify(numbered, undefined, 2),
+    scanAndClassify(realDay, undefined, 2),
+    scanAndClassify(trailingHyphen, undefined, 2),
+  ]);
+
+  return [
+    assert('"Don" not harvested from "Don\'t"', !hasName(rc, "Don"),
+      hasName(rc, "Don") ? `in ${bucketOf(rc, "Don")}` : undefined),
+    assert("a real Don is still found", hasName(rd, "Don"),
+      `found: ${allNames(rd).join(", ")}`),
+    assert('"Imperial" not harvested from "pre-Imperial"', !hasName(rh, "Imperial"),
+      hasName(rh, "Imperial") ? `in ${bucketOf(rh, "Imperial")}` : undefined),
+    assert("a real Imperial Guard is still found", hasNameVariant(ri, "Imperial Guard"),
+      `found: ${allNames(ri).join(", ")}`),
+    assert('"Day" not harvested from "Day 23"', !hasName(rn, "Day"),
+      hasName(rn, "Day") ? `in ${bucketOf(rn, "Day")}` : undefined),
+    assert("a real Day is still found", hasName(rday, "Day"),
+      `found: ${allNames(rday).join(", ")}`),
+    assert('a trailing hyphen does not block "Growth"', hasName(rt, "Growth"),
+      `found: ${allNames(rt).join(", ")}`),
+  ];
+}
+
+/**
+ * GROUP 12 — THE HEAD WORD DECIDES, NOT ANY WORD IN THE NAME.
+ *
+ * The suffix vocabularies were tested against the whole name, so "Outer Ring
+ * Anomaly" scored +4 place for `ring` AND +4 entity for `anomaly` and tied.
+ * English puts the head last: an Anomaly named after the Outer Ring is an
+ * anomaly, and a Ring in the outer part of a city is a ring.
+ */
+async function testHeadWordDecides(): Promise<Assertion[]> {
+  const text = [
+    "The Outer Ring Anomaly was logged on the second day and reopened on the fourth.",
+    "Nothing in the file explained the Outer Ring Anomaly to anyone's satisfaction.",
+    "The Outer Ring Anomaly required a second reading before it could be closed.",
+    "She had lived in the Outer Ring her whole life and knew every lane in it.",
+    "The transit from the Outer Ring took forty minutes on a good morning.",
+    "Walking north through the Outer Ring, she counted the shuttered stalls.",
+    "The Cinder Guild met on the first of the month without exception.",
+    "The Cinder Guild had refused the contract twice already.",
+    "Representatives of the Cinder Guild gathered in the upper chamber.",
+    "The Cinder Bridge had been closed since the flood took its eastern span.",
+    "They crossed the Cinder Bridge at dusk and did not look down.",
+    "From the Cinder Bridge the whole lower quarter was visible at once.",
+  ].join("\n\n");
+
+  const r = await scanAndClassify(text, undefined, 2);
+  return [
+    assert("Outer Ring Anomaly → entity (head: anomaly)",
+      bucketOfVariant(r, "Outer Ring Anomaly") === "entity",
+      `actual: ${bucketOfVariant(r, "Outer Ring Anomaly") ?? "not found"}`),
+    assert("Outer Ring → place (head: ring)",
+      bucketOfVariant(r, "Outer Ring") === "place",
+      `actual: ${bucketOfVariant(r, "Outer Ring") ?? "not found"}`),
+    assert("Cinder Guild → faction (head: guild)",
+      bucketOfVariant(r, "Cinder Guild") === "faction",
+      `actual: ${bucketOfVariant(r, "Cinder Guild") ?? "not found"}`),
+    assert("Cinder Bridge → place (head: bridge, same modifier)",
+      bucketOfVariant(r, "Cinder Bridge") === "place",
+      `actual: ${bucketOfVariant(r, "Cinder Bridge") ?? "not found"}`),
+  ];
+}
+
+/**
+ * GROUP 13 — A SURNAME IS A PERSON, AND "the X <noun>" IS NOT A DETERMINED NAME.
+ *
+ * A family name is written "the Mosswell loaves", "the Mosswell house", "elder
+ * Mosswell" far more often than it is written bare, so the determiner test
+ * reads it as a common noun and evicts it from the cast. The article in those
+ * phrases belongs to the noun that FOLLOWS, not to the name.
+ *
+ * The twin matters: an invented word that is never preceded by a person's given
+ * name must NOT be recovered into the cast just because it is capitalised and
+ * frequent.
+ */
+async function testSurnameRecovery(): Promise<Assertion[]> {
+  // The determined uses have to OUTNUMBER the bare ones, or the eviction the
+  // fix exists to prevent never fires and the assertion proves nothing.
+  const text = [
+    "Tessa Mosswell hesitated at the mention of the work, and then went on.",
+    "Brennan Mosswell did not come in before he was finished, which was usual.",
+    "The wedding bread was on the tables, the Vell loaves and the Mosswell loaves together.",
+    "The Mosswell house sat at the end of the lane, past the second gate.",
+    "The Mosswell kitchen smelled of yeast for two days after.",
+    "The Mosswell loom had been rethreaded twice that winter.",
+    "She counted the Mosswell chairs and found there were not enough.",
+    "The Mosswell dogs barked at the gate and then stopped.",
+    "Elder Mosswell had an opinion about the ford and shared it twice.",
+    "She asked Mosswell about the loom and got a long answer.",
+    "Mosswell said nothing for a while and then said the obvious thing.",
+    // The twin: frequent, capitalised, determined, never preceded by a person.
+    "The Ashwood mill had been grinding since before the treaty.",
+    "Smoke from the Ashwood mill hung over the lower road most mornings.",
+    "They walked past the Ashwood yard without stopping to look.",
+    "The Ashwood road curved north through the pass and then dropped.",
+  ].join("\n\n");
+
+  const r = await scanAndClassify(text, undefined, 2);
+  return [
+    assert("Mosswell → character (a surname)", bucketOf(r, "Mosswell") === "character",
+      `actual: ${bucketOf(r, "Mosswell") ?? "not found"}`),
+    assert("Ashwood not recovered into the cast", bucketOf(r, "Ashwood") !== "character",
+      `actual: ${bucketOf(r, "Ashwood") ?? "not found"}`),
+  ];
+}
+
+/**
+ * GROUP 14 — A FAMILY PLURAL IS THE FAMILY, NOT A SECOND ENTITY.
+ *
+ * "the Vells had gone home" is the Vell household. Filed as its own faction it
+ * gives the writer two entries for one referent and a group that never existed.
+ * The twin: a plural whose singular is NOT in the cast is its own name.
+ */
+async function testFamilyPlural(): Promise<Assertion[]> {
+  const text = [
+    "Vell said nothing about the harvest and nobody pressed him on it.",
+    "Vell had been at the ford since morning. Vell turned when she called.",
+    "She asked Vell about the loom and he pointed at the far wall.",
+    "The Vells had gone home through the September evening, all of them at once.",
+    "The Vells were coming for supper, which meant the long table.",
+    "Supper with the Vells ran late and nobody minded it.",
+    "The Vells gathered at the far end and stayed there.",
+    "Nobody told the Vells anything they did not already know.",
+    "The Vells arrived before the bread was out of the oven.",
+    "The Northern Passes stayed closed for three winters after the treaty.",
+    "They crossed the Northern Passes in the second week of spring.",
+    "Beyond the Northern Passes the road turned to gravel and then to nothing.",
+  ].join("\n\n");
+
+  const r = await scanAndClassify(text, undefined, 2);
+  return [
+    assert("Vell → character", bucketOf(r, "Vell") === "character",
+      `actual: ${bucketOf(r, "Vell") ?? "not found"}`),
+    assert("Vells not filed as its own entity", !hasName(r, "Vells"),
+      hasName(r, "Vells") ? `in ${bucketOf(r, "Vells")}` : undefined),
+    assert("Northern Passes kept (no singular in the cast)",
+      hasNameVariant(r, "Northern Passes"),
+      `found: ${allNames(r).join(", ")}`),
+  ];
+}
+
+/**
+ * GROUP 15 — NAMES SHARING A HEAD AGREE WITH EACH OTHER.
+ *
+ * On The Root Crown the scan put "The Closed School" in places and "The Open
+ * School" in factions, off nothing but which one happened to follow a place
+ * preposition more often. Two institutions of the same kind in the same book
+ * cannot be different kinds of thing, and the writer reads that split as the
+ * system being confused, which it is.
+ *
+ * The twin: names that share a MODIFIER, not a head, must stay independent.
+ */
+async function testHeadFamilyCoherence(): Promise<Assertion[]> {
+  // One school is written the way a BUILDING is written (people go to it, work
+  // inside it), the other the way an INSTITUTION is (it decides, refuses,
+  // publishes). That asymmetry is real prose and it is exactly what split the
+  // two on The Root Crown. Coherence has to survive it.
+  const text = [
+    "She had been at the Closed School as long as anyone still working there.",
+    "Walking to the Closed School took twenty minutes from the market.",
+    "Nobody at the Closed School would say the word out loud.",
+    "He came from the Closed School by the lower road, as he always did.",
+    "Inside the Closed School the corridors were colder than the street.",
+    "She waited outside the Closed School until the bell went.",
+    "The Open School published its findings at the end of each season.",
+    "The Open School had refused the request twice and would refuse it again.",
+    "Representatives of the Open School convened in the upper chamber.",
+    "The Open School admitted forty students that year, which was fewer than usual.",
+    "The Open School declared the matter closed and would not reopen it.",
+    "The Open School ordered a second reading before the season ended.",
+  ].join("\n\n");
+
+  const r = await scanAndClassify(text, undefined, 2);
+  const closed = bucketOfVariant(r, "Closed School");
+  const open = bucketOfVariant(r, "Open School");
+  return [
+    assert("both schools found", !!closed && !!open, `closed: ${closed}, open: ${open}`),
+    assert("the two schools agree", !!closed && closed === open,
+      `closed: ${closed ?? "not found"}, open: ${open ?? "not found"}`),
+  ];
+}
+
 // ─── Runner ────────────────────────────────────────────────────────────────────
 
 const TARGETS = {
@@ -525,6 +831,12 @@ async function main() {
     { name: "LM institutional disambiguation", fn: testLMInstitutionalDisambiguation, category: "lm" },
     { name: "Event sentence LM no-regression", fn: testEventSentenceLMNoRegression, category: "lm" },
     { name: "Single-chapter IDF gate", fn: testSingleChapterIdfGate, category: "fp" },
+    { name: "A determiner is not a bucket", fn: testDeterminerIsNotABucket, category: "bucket" },
+    { name: "Word-fragment guards", fn: testFragmentGuards, category: "fp" },
+    { name: "The head word decides", fn: testHeadWordDecides, category: "bucket" },
+    { name: "Surname recovery", fn: testSurnameRecovery, category: "bucket" },
+    { name: "Family plural folding", fn: testFamilyPlural, category: "fp" },
+    { name: "Head-family coherence", fn: testHeadFamilyCoherence, category: "bucket" },
   ];
 
   const results: TestResult[] = [];
