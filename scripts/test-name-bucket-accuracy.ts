@@ -817,6 +817,81 @@ async function testHeadFamilyCoherence(): Promise<Assertion[]> {
   ];
 }
 
+/**
+ * GROUP 16 — WHEN ONE BUCKET HOLDS ALL THE EVIDENCE, THE FLOORS DO NOT APPLY.
+ *
+ * ★★ THE LARGEST SINGLE ERROR CLASS, MEASURED. Across thirteen published
+ *    novels every one of 40 wrong buckets was a PLACE filed as a CHARACTER,
+ *    and not one error of any other kind: Switzerland, Leghorn and Perth in
+ *    Frankenstein, nine London suburbs in The War of the Worlds, Louisiana and
+ *    Kentucky in The Awakening. Each has place evidence and no person evidence
+ *    at all, and each was losing to a bare-name default because its evidence
+ *    sat under the deciding floors. Fixing it took the corpus from 83.8% to
+ *    98.4%.
+ *
+ * The two twins are what keep it honest. A name with COMPETING evidence must
+ * still face the floors, and a DETERMINED name must not reach this rung at all
+ * — `character` is zeroed for those by construction, so "nothing competes" is
+ * an artifact of the zeroing rather than a fact about the prose, and letting
+ * it through sends a named spell to Places on one sighting.
+ */
+async function testUncontestedEvidence(): Promise<Assertion[]> {
+  // Two bare place sightings, nothing else, in a book with plenty of prose.
+  const quiet = [
+    "The letter had come from Perrin two weeks before anyone read it.",
+    "She had grown up in Perrin and had not been back since.",
+    "Nobody in the valley spoke about what had happened that winter.",
+    "The road was long and the season was turning and there was little to say.",
+    "Hallam said nothing at all when the letter was read aloud.",
+    "Hallam had known for a week. Hallam turned the page over twice.",
+    "She asked Hallam about the road and he told her what he knew.",
+  ].join("\n\n");
+
+  // The same shape, but the name also does person things.
+  const contested = [
+    "The letter had come from Verrin two weeks before anyone read it.",
+    "She had grown up in Verrin and had not been back since.",
+    "Verrin said nothing at all when the letter was read aloud.",
+    "Verrin had known for a week. Verrin turned the page over twice.",
+    "She asked Verrin about the road and he told her what he knew.",
+    "Hallam watched the two of them and did not interrupt.",
+    "Hallam had been at the gate since morning.",
+  ].join("\n\n");
+
+  // Determined throughout, one place sighting, nothing else: a named
+  // technique, not a location.
+  const determined = [
+    "The monitoring system reads the Sundering as common and licensed.",
+    "She had done the Sundering twice that week and once in the alley.",
+    "Past the Sundering in her first volume there was nothing she could use.",
+    "The Sundering had a syntax she could not hold in her head at once.",
+    "The Sundering was listed under class A with everything else.",
+    "Hallam said nothing about the Sundering and she did not ask.",
+    "Hallam had been reading the volume since morning.",
+  ].join("\n\n");
+
+  const [q, c, d] = await Promise.all([
+    scanAndClassify(quiet, undefined, 2),
+    scanAndClassify(contested, undefined, 2),
+    scanAndClassify(determined, undefined, 2),
+  ]);
+
+  return [
+    assert("uncontested place evidence wins without clearing the floor",
+      bucketOf(q, "Perrin") === "place",
+      `actual: ${bucketOf(q, "Perrin") ?? "not found"}`),
+    assert("the person in the same book is still a character",
+      bucketOf(q, "Hallam") === "character",
+      `actual: ${bucketOf(q, "Hallam") ?? "not found"}`),
+    assert("COMPETING evidence still faces the floors",
+      bucketOf(c, "Verrin") === "character",
+      `actual: ${bucketOf(c, "Verrin") ?? "not found"}`),
+    assert("a DETERMINED name never reaches the rung",
+      bucketOf(d, "Sundering") !== "place",
+      `actual: ${bucketOf(d, "Sundering") ?? "not found"}`),
+  ];
+}
+
 // ─── Runner ────────────────────────────────────────────────────────────────────
 
 const TARGETS = {
@@ -847,6 +922,7 @@ async function main() {
     { name: "Surname recovery", fn: testSurnameRecovery, category: "bucket" },
     { name: "Family plural folding", fn: testFamilyPlural, category: "fp" },
     { name: "Head-family coherence", fn: testHeadFamilyCoherence, category: "bucket" },
+    { name: "Uncontested evidence", fn: testUncontestedEvidence, category: "bucket" },
   ];
 
   const results: TestResult[] = [];

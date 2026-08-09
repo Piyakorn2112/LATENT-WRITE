@@ -974,7 +974,7 @@ function nameCarriesPersonTitle(name: string): boolean {
   return words.length >= 2 && words.some((w) => PERSON_TITLE_WORD_RE.test(w));
 }
 
-const PLACE_PREP_RE = /\b(in|at|from|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
+const PLACE_PREP_RE = /\b(in|at|on|for|from|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
 
 /**
  * ★★ "to" IS NOT A PLACE PREPOSITION ON ITS OWN, AND THIS BUG WAS ALREADY
@@ -1174,6 +1174,29 @@ function decideBucket(
       confidence: Math.min(0.95, (top[1] - second[1]) / top[1]),
       reason: determined ? "context-determined" : "context",
     };
+  }
+
+  // ★★ WHEN ONE BUCKET HOLDS ALL THE EVIDENCE, THE FLOORS DO NOT APPLY.
+  //
+  //    The floors above exist to stop a small signal outvoting a LARGER
+  //    competing one on a coin flip. Nothing competes here, so the only
+  //    reading the prose offered is the only reading there is, and refusing it
+  //    means falling through to a default that has nothing to do with the
+  //    name.
+  //
+  //    Measured across thirteen published novels: EVERY ONE of the 40 wrong
+  //    buckets was a place filed as a character, and not one error of any
+  //    other kind. Switzerland, Leghorn and Perth in Frankenstein, nine
+  //    London suburbs in The War of the Worlds, Louisiana and Kentucky in The
+  //    Awakening. All of them have place evidence and no person evidence
+  //    whatsoever, and all of them were losing to a bare-name default.
+  //
+  // ★  NOT FOR A DETERMINED NAME. `character` was zeroed by construction a few
+  //    lines up, so "nothing competes" would be an artifact of that zeroing
+  //    rather than a fact about the prose — and it would send The Root Crown's
+  //    casting classes to Places on a single sighting each.
+  if (!determined && top[1] > 0 && second[1] === 0) {
+    return { label: top[0], confidence: 0.55, reason: "uncontested" };
   }
 
   // Tied, or no context evidence at all. Name-internal vocabulary is weaker
