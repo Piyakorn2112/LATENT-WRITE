@@ -22,6 +22,8 @@ interface EntityContextSignals {
   placeScore: number;
   factScore: number;
   entityScore: number;
+  /** Occurrences preceded by the/a/an. Never a bucket score — see FACTION_PREFIX_RE. */
+  determinedCount: number;
   totalContext: number;
   previewBefore: string;
   previewAfter: string;
@@ -380,6 +382,40 @@ function isSentenceInitial(text: string, index: number): boolean {
  * reasoning applied in narrative-events.ts, where the proper-noun test skips the
  * clause's first word for exactly this reason.
  */
+/**
+ * ★★ A CAPITALISED SUBSTRING IS NOT A NAME.
+ *
+ * `\b` treats an apostrophe, a hyphen and a digit boundary as word edges, so
+ * three whole classes of non-name walked into the cast. All three measured on
+ * The Root Crown, all three in the CHARACTER bucket:
+ *
+ *   "Don't let them take it"          → Don
+ *   "a pre-Imperial monastic chronicler" → Imperial
+ *   "the early evening of Day 23"     → Day
+ *
+ * ★ THE TEST IS ON THE OCCURRENCE, NOT ON THE NAME, and that is the whole
+ *   design. A book that has both "Don't" and a man called Don keeps the man:
+ *   only his contraction occurrences are discarded, and what remains is
+ *   counted normally. A name list could never do that — it would have to
+ *   choose, book-wide, between losing Don and keeping the fragment.
+ *
+ * A hyphen AFTER the token is the opposite situation: the name is the head of
+ * the compound and the modifier follows it ("Growth-class", "Bind-containment"
+ * are the Growth and Bind phrases). Only a LOWERCASE letter before the hyphen
+ * marks the token as somebody else's suffix.
+ */
+function isFragmentOccurrence(text: string, start: number, end: number): boolean {
+  const after = text.slice(end, end + 4);
+  // A contraction: the apostrophe belongs to a verb, not to a possessive.
+  // "'s" is deliberately absent — that one really is the name's possessive.
+  if (/^['’](?:t|ll|re|ve|d|m)\b/i.test(after)) return true;
+  // An index, not a name: "Day 1", "Chapter 4", "Level 12".
+  if (/^\s+\d/.test(after)) return true;
+  // A lowercase prefix owns the hyphen: pre-, post-, non-, self-, mid-.
+  if (/[a-z][-–]$/.test(text.slice(Math.max(0, start - 2), start))) return true;
+  return false;
+}
+
 function collectTitleCaseCandidates(text: string, maxWords: number): Map<string, number> {
   const total = new Map<string, number>();
   const midSentence = new Map<string, number>();
@@ -389,6 +425,7 @@ function collectTitleCaseCandidates(text: string, maxWords: number): Map<string,
   const pattern = buildTitleCaseCandidateRe(maxWords);
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {
+    if (isFragmentOccurrence(text, match.index, match.index + match[1].length)) continue;
     let name = match[1];
     const words = name.split(/\s+/).filter(Boolean);
     const prefix = text.slice(Math.max(0, match.index - 4), match.index);
@@ -413,7 +450,26 @@ function collectTitleCaseCandidates(text: string, maxWords: number): Map<string,
     // name ranking, which that suite locks at 100%. One residual false name at
     // whole-book scale is a better trade than a regression in the ranking the app
     // depends on to know who the characters are.
-    if (shouldRejectCandidateName(name)) continue;
+    if (shouldRejectCandidateName(name)) {
+      // ★ "The Ordinance." AT A SENTENCE START IS THE ORDINANCE.
+      //
+      //   The candidate regex is greedy, so it swallows the article into a
+      //   two-word candidate, and `allowLeadingArticle` then rejects the pair
+      //   for having only one meaningful word — which is right for the pair
+      //   and loses the name. Every occurrence of a name that always opens its
+      //   sentence this way disappears with it.
+      //
+      //   The tail is retried, and ONLY the tail: the article is dropped, the
+      //   position stays sentence-initial, and so the tail still has to pass
+      //   the never-lowercase test like any other candidate. That is what
+      //   keeps "The Basement" out while letting "The Ordinance" through, and
+      //   it is why this cannot be generalised to leading verbs and adverbs
+      //   (measured: doing so breaks the cold-start name ranking).
+      const tail = words.length === 2 && LEADING_ARTICLES.has(words[0]) ? words[1] : "";
+      if (!tail || shouldRejectCandidateName(tail)) continue;
+      total.set(tail, (total.get(tail) ?? 0) + 1);
+      continue;
+    }
     total.set(name, (total.get(name) ?? 0) + 1);
     if (!isSentenceInitial(text, match.index)) {
       midSentence.set(name, (midSentence.get(name) ?? 0) + 1);
@@ -473,13 +529,33 @@ function isProbablyName(
 const CHAR_NAMED_RE = /\b(named|called|name is)\s*$/i;
 const CHAR_POSSESSIVE_AFTER_RE = /^\s*['’]s\b/i;
 const PLACE_OF_RE = /\b(city|town|village|hamlet|kingdom|empire|realm|province|district|ward|sector|port|harbor|harbour|temple|fortress|castle|keep|mount|mountain|river|lake|forest|woods|island|sea|bay|garden|market|road|street|avenue|hall|inn|bridge|gate|capital|region|territory|basin|ring|plaza|station|library|campus)\s+(?:of|called)\s*$/i;
-const FACTION_PREFIX_RE = /\b(the|house|order|guild|clan|legion|council|academy|guard|watch|union|alliance|ministry|court|brotherhood|sisterhood|syndicate|collective|committee|board)\s*$/i;
-const ENTITY_PREFIX_RE = /\b(the|directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative)\s*$/i;
+/**
+ * ★★ "the" IS NOT IN EITHER LIST, AND TAKING IT OUT IS THE FIX.
+ *
+ *    It used to lead both, worth +1.5 to faction and +1.5 to entity on every
+ *    occurrence. So a name a novel writes as "the X" accumulated two equal
+ *    piles of evidence proportional to nothing but its frequency, tied at the
+ *    top of the argmax, and the tie fell through to `character` and then out
+ *    of the determiner eviction into `entity`. Measured on The Root Crown:
+ *    Mosshollow reached faction 63 / entity 63 / place 0, and a valley
+ *    finished in the same bucket as the magic system, alongside Cymboll,
+ *    Dovesmoor, Mosswell and the Drowner's Lift.
+ *
+ *    A determiner is real evidence, but of ONE thing only: that the name is
+ *    not a personal name. That is what `determinerUsage` is for, and it is
+ *    read once, in the decision, instead of being spent as bucket score here.
+ */
+const FACTION_PREFIX_RE = /\b(house|order|guild|clan|legion|council|academy|guard|watch|union|alliance|ministry|court|brotherhood|sisterhood|syndicate|collective|committee|board)\s*$/i;
+const ENTITY_PREFIX_RE = /\b(directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative)\s*$/i;
 const ENTITY_OF_RE = /\b(directive|framework|protocol|act|policy|program|system|charter|doctrine|orthodoxy|standard|authority|shell|compact|accord|network|initiative|unit|processing)\s+(?:of|for)\s*$/i;
 const ENTITY_PREP_RE = /\b(under|via|per|according\s+to|pursuant\s+to)\s*$/i;
 const ENTITY_AFTER_RE = /^\s*(requires|mandates|governs|defines|permits|forbids|authorizes|regulates|maintains|tracks|allocates|routes|weights|classifies|stabilizes|monitors|enforces|codifies)\b/i;
 
-function computeEntityContextSignals(text: string, name: string): EntityContextSignals {
+function computeEntityContextSignals(
+  text: string,
+  name: string,
+  nouns?: ReadonlySet<string>,
+): EntityContextSignals {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const ctxRe = new RegExp(`([^\\n]{0,90})\\b${escaped}\\b([^\\n]{0,90})`, "gi");
 
@@ -488,12 +564,25 @@ function computeEntityContextSignals(text: string, name: string): EntityContextS
   let placeScore = 0;
   let factScore = 0;
   let entityScore = 0;
+  let determinedCount = 0;
   let previewBefore = "";
   let previewAfter = "";
 
-  if (PLACE_SUFFIX_RE.test(name)) placeScore += 4;
-  if (FACTION_SUFFIX_RE.test(name)) factScore += 4;
-  if (ENTITY_SUFFIX_RE.test(name)) entityScore += 4;
+  // ★★ THE HEAD WORD CARRIES THE KIND; A MODIFIER ONLY HINTS AT IT.
+  //    The suffix vocabularies used to be tested against the whole name, so
+  //    "Outer Ring Anomaly" collected +4 place for `ring` AND +4 entity for
+  //    `anomaly` and tied — and an anomaly named after a district went to the
+  //    faction bucket. English puts the head last: an Anomaly is an anomaly
+  //    wherever it happened, and a Ring is a ring however outer it is. The
+  //    modifier keeps a small voice (+1) because it is still evidence, just
+  //    never enough to outvote the head.
+  const byHead = headVocabularyLabel(name);
+  if (byHead === "place") placeScore += 4;
+  else if (PLACE_SUFFIX_RE.test(name)) placeScore += 1;
+  if (byHead === "faction") factScore += 4;
+  else if (FACTION_SUFFIX_RE.test(name)) factScore += 1;
+  if (byHead === "entity") entityScore += 4;
+  else if (ENTITY_SUFFIX_RE.test(name)) entityScore += 1;
 
   let match: RegExpExecArray | null;
   while ((match = ctxRe.exec(text)) !== null) {
@@ -511,9 +600,23 @@ function computeEntityContextSignals(text: string, name: string): EntityContextS
     if (CHAR_NAMED_RE.test(before))   charScore += 2;
     if (CHAR_POSSESSIVE_AFTER_RE.test(after)) charScore += 0.75;
 
-    if (PLACE_PREP_RE.test(before))   placeScore += 1.25;
+    // "the Dovesmoor marshes": a word this book uses after an article is a
+    // noun, and so is any word already in one of the vocabularies — the
+    // lexicon is a fallback for the ones that are not, not a prerequisite.
+    // Gating the modified-noun signal on the lexicon left Dovesmoor with zero
+    // evidence, because The Root Crown never writes the bare phrase "the
+    // marshes" anywhere.
+    const modified = DETERMINER_BEFORE_RE.test(before) ? attributiveHeadLabel(after) : null;
+    const attributive = modified !== null || followingWordIsNoun(after, nouns);
+
+    if (PLACE_PREP_RE.test(before) || (PLACE_PREP_DET_RE.test(before) && !attributive)) placeScore += 1.25;
     if (PLACE_OF_RE.test(before))     placeScore += 2.5;
 
+    if (modified === "place") placeScore += ATTRIBUTIVE_WEIGHT;
+    else if (modified === "faction") factScore += ATTRIBUTIVE_WEIGHT;
+    else if (modified === "entity") entityScore += ATTRIBUTIVE_WEIGHT;
+
+    if (DETERMINER_BEFORE_RE.test(before)) determinedCount += 1;
     if (/\bthe\s*$/i.test(before) && FACTION_COLLECTIVE_RE.test(after)) factScore += 2;
     if (FACTION_PREFIX_RE.test(before)) factScore += 1.5;
 
@@ -529,6 +632,7 @@ function computeEntityContextSignals(text: string, name: string): EntityContextS
     placeScore,
     factScore,
     entityScore,
+    determinedCount,
     totalContext: charScore + placeScore + factScore + entityScore,
     previewBefore,
     previewAfter,
@@ -550,6 +654,14 @@ function shouldKeepEntityCandidate(
     return false;
   }
   if (occurrences >= minFreq + 2) return true;
+  // ★ A DETERMINED NAME IS STILL A NAME. Taking bare "the" out of the faction
+  //   and entity prefix lists was right — it said nothing about WHICH bucket —
+  //   but it also removed the only retention evidence some low-frequency names
+  //   had, and Dovesmoor (4 uses, all "the Dovesmoor <something>") fell out of
+  //   the scan entirely. Repeated "the X" is precisely how prose refers to a
+  //   named thing, so it belongs here, in the keep-or-drop decision, and
+  //   nowhere near the bucket comparison.
+  if (signals.determinedCount >= 2 && occurrences >= minFreq) return true;
   if (structural && occurrences >= minFreq) return true;
   if (structural && wordCount >= 3 && occurrences >= Math.max(1, minFreq - 1)) return true;
   if (signals.totalContext >= 2) return true;
@@ -728,6 +840,48 @@ const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|vall
 
 const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|wing|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant|school|conclave)\b/i;
 
+/**
+ * The three vocabularies again, anchored to a SINGLE word so they can be asked
+ * about the head instead of about the whole name. Derived from the same
+ * sources so the two can never drift apart.
+ */
+const asWholeWordRe = (re: RegExp) => new RegExp(`^(?:${re.source.slice(2, -2)})$`, "i");
+const PLACE_HEAD_RE = asWholeWordRe(PLACE_SUFFIX_RE);
+const FACTION_HEAD_RE = asWholeWordRe(FACTION_SUFFIX_RE);
+const ENTITY_HEAD_RE = asWholeWordRe(ENTITY_SUFFIX_RE);
+
+/** The last word, which in English is the head of a noun phrase. Possessives
+ *  strip so "the Hand Tower's stair" still reports `tower`. */
+function headWordOf(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return (words[words.length - 1] ?? "").toLowerCase().replace(/['’]s$/, "");
+}
+
+/**
+ * Which bucket a word argues for, when it argues for exactly one. A word in two
+ * vocabularies argues for neither, because a coin flip is not evidence.
+ *
+ * ★ THE VOCABULARIES ARE SINGULAR AND PROSE IS NOT. "The Northern Passes" is a
+ *   place and `pass` is in the list, but `\bpass\b` does not match "passes",
+ *   so the name arrived at the classifier with no name-internal evidence at
+ *   all and finished in the cast. Same for "Monastic Practices" and `practice`.
+ */
+function vocabularyLabelOf(word: string): "place" | "faction" | "entity" | null {
+  for (const form of singularForms(word)) {
+    const hits: Array<"place" | "faction" | "entity"> = [];
+    if (PLACE_HEAD_RE.test(form)) hits.push("place");
+    if (FACTION_HEAD_RE.test(form)) hits.push("faction");
+    if (ENTITY_HEAD_RE.test(form)) hits.push("entity");
+    if (hits.length === 1) return hits[0];
+    if (hits.length > 1) return null;
+  }
+  return null;
+}
+
+function headVocabularyLabel(name: string): "place" | "faction" | "entity" | null {
+  return vocabularyLabelOf(headWordOf(name));
+}
+
 const CHAR_TITLE_RE = /\b(lord|lady|sir|captain|master|doctor|dr|father|mother|queen|king|prince|princess|elder|chief|general|colonel|major|sergeant|inspector|professor|saint|magister|marshal|warden|goodman|goodwife|brother|sister|abbot|abbess|madam|mistress|dame)\s*$/i;
 
 /**
@@ -747,6 +901,86 @@ const PERSON_LEAD_RE = /^(?:prince|princess|king|queen|emperor|empress|duke|duch
 
 const PLACE_PREP_RE = /\b(in|at|from|to|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
 
+/**
+ * ★★ THE SAME PREPOSITIONS, ACROSS A DETERMINER.
+ *
+ *    `PLACE_PREP_RE` requires the preposition to touch the name, so "at the
+ *    Mosshollow" scored ZERO for place while "at Mosshollow" scored 1.25 — and
+ *    English requires the article for most named locations. The names with the
+ *    most place evidence in the prose were therefore the ones with the least
+ *    place score in the classifier, which is the inversion that sent a valley,
+ *    a village and a marsh into the entity bucket.
+ *
+ * ★ "to" IS DELIBERATELY ABSENT HERE, though it is present in the bare form
+ *   above. "turned to the marshal", "spoke to the elder" are person usage, and
+ *   the determined form is where that shape lives; entity-review paid for this
+ *   lesson already (a speaking character read as a location). The unambiguous
+ *   prepositions carry the signal on their own.
+ */
+const PLACE_PREP_DET_RE = /\b(in|at|from|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s+(?:the|a|an|this|that|his|her|its|their|our|my)\s+$/i;
+
+/**
+ * ★★ "in the Growth phrase" IS NOT A PLACE, AND THE NAME IS NOT WHAT THE
+ *    PREPOSITION GOVERNS.
+ *
+ *    Letting place prepositions reach across a determiner is what recovered
+ *    Mosshollow and Cymboll, and it immediately handed the same credit to
+ *    every ATTRIBUTIVE use: "from the Growth phrase", "the Dovesmoor marshes",
+ *    "the Mosswell loaves". There the name is a modifier and the preposition
+ *    governs the noun after it, so the casting classes went to the place
+ *    bucket — a new inversion in place of the old one.
+ *
+ *    The discriminator has to separate a following NOUN from a following VERB
+ *    ("to the Mosshollow was easy"), and the dictionary for that is the
+ *    manuscript itself, the same trick that decides which capitalised words
+ *    are names: collect every lowercase word this book writes directly after
+ *    an article. "phrase", "loaves" and "marshes" are all in it; "was", "had"
+ *    and "would" are in no book's. No word list, works on invented vocabulary,
+ *    works in any language that has articles.
+ */
+function buildNounLexicon(text: string): Set<string> {
+  const out = new Set<string>();
+  const re = /\b(?:the|a|an)\s+([a-z][a-z'’-]{1,})\b/g;
+  for (let m = re.exec(text); m; m = re.exec(text)) out.add(m[1]);
+  return out;
+}
+
+function followingWordIsNoun(after: string, nouns: ReadonlySet<string> | undefined): boolean {
+  if (!nouns) return false;
+  const next = /^\s+([a-z][a-z'’-]*)/.exec(after);
+  return !!next && nouns.has(next[1]);
+}
+
+/**
+ * ★★ AN ATTRIBUTIVE USE NAMES THE KIND OF THING IT MODIFIES.
+ *
+ *    Having decided that "the Dovesmoor marshes" is not the preposition
+ *    governing Dovesmoor, there is still a reader's inference sitting in
+ *    plain sight and it was being thrown away: whatever Dovesmoor is, the
+ *    prose just said the marshes belong to it. Same for "the Cymboll valley".
+ *    For a name whose every occurrence is attributive — which is exactly the
+ *    shape that has no direct evidence at all — this is the only evidence
+ *    there is.
+ *
+ *    Weighted at 0.75, below a direct sighting: a modified noun is a strong
+ *    hint about the referent and not a statement about it, and "the Anvas
+ *    market" would say place about a person's market stall just as readily.
+ */
+const ATTRIBUTIVE_WEIGHT = 0.75;
+
+/** Crude but sufficient: the vocabularies are singular, prose is not. */
+function singularForms(word: string): string[] {
+  const forms = [word];
+  if (word.endsWith("es")) forms.push(word.slice(0, -2));
+  if (word.endsWith("s")) forms.push(word.slice(0, -1));
+  return forms;
+}
+
+function attributiveHeadLabel(after: string): "place" | "faction" | "entity" | null {
+  const next = /^\s+([a-z][a-z'’-]*)/.exec(after);
+  return next ? vocabularyLabelOf(next[1]) : null;
+}
+
 const CHAR_VERB_RE = /^\s*(said|asked|replied|whispered|shouted|called|told|warned|answered|explained|nodded|shook|smiled|frowned|looked|stared|watched|turned|walked|ran|moved|stood|sat|fell|rose|felt|thought|knew|heard|saw|met|glanced|waved|reached|grabbed|held|spoke|cried|laughed|sighed|gasped|blinked|noticed|realized|remembered|decided|wondered|wanted|needed|found|returned|entered|left|opened|closed|pulled|pushed|drew|raised|pressed|touched|released|jumped|stepped|leaned|knelt|bowed|pointed|added|continued|interrupted)\b/i;
 
 const CHAR_PRONOUN_RE = /\b(he|she|they|him|her)\s*$/i;
@@ -758,6 +992,107 @@ export interface ScanResult {
   places:     string[];
   factions:   string[];
   entities:   string[];
+}
+
+type BucketLabel = "character" | "place" | "faction" | "entity";
+
+interface BucketDecision {
+  label: BucketLabel;
+  /** How far the winner sits from the runner-up, 0..1. Low means the scan is
+   *  guessing, and a guess is exactly what the review pass should read first. */
+  confidence: number;
+  reason: string;
+}
+
+/**
+ * ★★ ONE DECISION, MADE ONCE, WITH ITS OWN CONFIDENCE.
+ *
+ *    This replaces an argmax followed by a separate eviction cascade, and the
+ *    two-stage shape was itself a bug. The argmax required a STRICT maximum,
+ *    so a tie produced no label and fell through to the `character` default;
+ *    the eviction then noticed the name was determined, kicked it out of
+ *    character, and ran down a chain whose last rung was `entity`. Neither
+ *    stage ever decided anything for a tied name — `entity` was where names
+ *    went when nothing had been decided, which is why The Root Crown's entity
+ *    bucket held a valley, a village, a marsh, a transit line, a surname and
+ *    the magic system all at once.
+ *
+ *    The determiner test now runs BEFORE the comparison rather than after it,
+ *    which is where it belongs: "this is not a personal name" is a fact about
+ *    the candidate, not an appeal against a verdict. And when the evidence
+ *    genuinely does not separate the buckets, that is reported as a low
+ *    confidence instead of being laundered into a label — `selectReviewable`
+ *    ranks on exactly this number, so an honest shrug is what puts the name in
+ *    front of the model.
+ */
+function decideBucket(
+  name: string,
+  signals: EntityContextSignals,
+  determined: boolean,
+): BucketDecision {
+  const headIsPerson = PERSON_HEAD_RE.test(name) || PERSON_LEAD_RE.test(name);
+
+  // ★ TITLE REFERENCE IS THE ONE LEGITIMATE DETERMINED PERSON. "the Crown
+  //   Prince", "the Spore Warden", "Magister Volk" — a title takes an article
+  //   and still names somebody. Settled first so the determiner test below
+  //   cannot reach it.
+  if (headIsPerson) return { label: "character", confidence: 0.9, reason: "person-title" };
+
+  const scores: Array<[BucketLabel, number]> = [
+    ["character", determined ? 0 : signals.charScore],
+    ["place", signals.placeScore],
+    ["faction", signals.factScore],
+    ["entity", signals.entityScore],
+  ];
+  scores.sort((a, b) => b[1] - a[1]);
+  const [top, second] = scores;
+
+  // ★★ AN ARGMAX OVER ALMOST NO EVIDENCE IS A COIN FLIP, AND THE OLD ONE SAID
+  //    IT WAS CERTAIN. "Growth" appears 32 times in The Root Crown and follows
+  //    a place preposition ONCE; that single 1.25 beat three zeroes, so the
+  //    gap-based confidence read 1.0 and a casting class was filed as a
+  //    location — and Bind and Founding went with it on one sighting each.
+  //
+  //    Two floors, because one sighting and one-in-thirty are different
+  //    failures. MIN_DECIDING_SCORE is two independent sightings (or one "the
+  //    city of X", which is worth 2.5 on its own): one is a coincidence.
+  //    MIN_DECIDING_RATE asks that the evidence appear in a nontrivial share
+  //    of the uses at all — measured on this book, the names that clear it are
+  //    Mosshollow (0.21) and Cymboll (0.29), and the ones that do not are
+  //    Growth (0.13), Bind, Founding and Lift, which is exactly the split a
+  //    reader makes. Below either floor the answer is "undecided", which the
+  //    review pass reads as a question rather than as an answer.
+  //    A third rung, MIN_DOMINANT_RATE, exists because the absolute floor is
+  //    the wrong test for a name that is only used a few times: Dovesmoor
+  //    appears four times and two of them say "the Dovesmoor marshes", which
+  //    is 1.5 points and every bit as conclusive as Cymboll's twelve. When the
+  //    evidence covers better than a third of the uses, the count stops
+  //    mattering. Growth is at 0.13 and Founding at 0.21, so the gap is real.
+  const MIN_DECIDING_SCORE = 2.5;
+  const MIN_DECIDING_RATE = 0.15;
+  const MIN_DOMINANT_RATE = 0.35;
+  const rate = signals.occurrences > 0 ? top[1] / signals.occurrences : 0;
+  const enough = (top[1] >= MIN_DECIDING_SCORE && rate >= MIN_DECIDING_RATE) || rate >= MIN_DOMINANT_RATE;
+
+  if (enough && top[1] > 0 && top[1] > second[1]) {
+    return {
+      label: top[0],
+      confidence: Math.min(0.95, (top[1] - second[1]) / top[1]),
+      reason: determined ? "context-determined" : "context",
+    };
+  }
+
+  // Tied, or no context evidence at all. Name-internal vocabulary is weaker
+  // than prose but it is still evidence, and it is the last of it.
+  const byHead = headVocabularyLabel(name);
+  if (byHead) return { label: byHead, confidence: 0.4, reason: "head-vocabulary" };
+
+  // Nothing left. A bare repeated capitalised form with no determiner is
+  // overwhelmingly a person in a novel; a determined one is not, and there is
+  // no honest way to say which of the other three it is.
+  return determined
+    ? { label: "entity", confidence: 0.05, reason: "undecided-determined" }
+    : { label: "character", confidence: 0.2, reason: "undecided-bare" };
 }
 
 interface ScanAndClassifyOptions {
@@ -857,6 +1192,7 @@ function emptySignals(name: string): EntityContextSignals {
     placeScore: 0,
     factScore: 0,
     entityScore: 0,
+    determinedCount: 0,
     totalContext: 0,
     previewBefore: "",
     previewAfter: "",
@@ -871,6 +1207,7 @@ function mergeSignals(target: EntityContextSignals, next: EntityContextSignals):
   target.placeScore += next.placeScore;
   target.factScore += next.factScore;
   target.entityScore += next.entityScore;
+  target.determinedCount += next.determinedCount;
   target.totalContext = target.charScore + target.placeScore + target.factScore + target.entityScore;
   if ((!target.previewBefore && !target.previewAfter) && (next.previewBefore || next.previewAfter)) {
     target.previewBefore = next.previewBefore;
@@ -963,6 +1300,120 @@ function finalizeCandidates(
       && kept.some((other) => other !== name && containsWholeWordSequence(other, name))));
 }
 
+interface CastDecision {
+  name: string;
+  label: BucketLabel;
+  confidence: number;
+  determined: boolean;
+  dropped?: boolean;
+  spanIndex: number;
+  contextBefore: string;
+  contextAfter: string;
+  candidates: AdaptiveCandidateOption[];
+  rerankConfidence: number;
+  needsReview: boolean;
+  ambiguityGap: number;
+}
+
+/**
+ * ★★ THREE THINGS ONLY THE WHOLE CAST CAN SEE.
+ *
+ *    Every rule up to here judges one name against the prose around it, and
+ *    each of these three failures is invisible from there. They run once, after
+ *    every name has a label, because each one needs the OTHER names' labels as
+ *    its evidence.
+ *
+ *    1. A SURNAME IS A PERSON. "Mosswell" appears 40 times in The Root Crown
+ *       and 24 of them are "the Mosswell <something>" — the loaves, the house,
+ *       the kitchen. The determiner test reads that as a common noun and
+ *       evicts it from the cast, correctly by its own lights: the article in
+ *       "the Mosswell loaves" really does belong to the loaves. What settles it
+ *       is that "Tessa Mosswell" and "Brennan Mosswell" are in the same book,
+ *       and Tessa and Brennan are already known to be people.
+ *
+ *    2. A FAMILY PLURAL IS THE FAMILY. "the Vells had gone home" is the Vell
+ *       household, and filing it separately hands the writer two entries for
+ *       one referent plus a group that never existed. Vell is already in the
+ *       cast; that is the entire evidence needed.
+ *
+ *    3. INSTITUTIONS OF THE SAME KIND ARE THE SAME KIND OF THING. The scan put
+ *       "The Closed School" in places and "The Open School" in factions, off
+ *       nothing but which one more often followed a place preposition — people
+ *       walk to one and the other publishes findings, and both are true of a
+ *       school. A writer reads that split as the system being confused, and is
+ *       right. Only fires when the members DISAGREE: consistent prose beats a
+ *       vocabulary list, and the list only breaks a stalemate.
+ */
+function applyCastCoherence(decisions: CastDecision[], text: string): void {
+  const live = () => decisions.filter((d) => !d.dropped);
+
+  // One pass over the text for every Title-Case bigram, rather than a
+  // full-text regex per candidate. 660KB, one scan.
+  const followers = new Map<string, Map<string, number>>();
+  const bigram = /\b([A-Z][a-z]+)[ \t]+([A-Z][a-z]+)\b/g;
+  for (let m = bigram.exec(text); m; m = bigram.exec(text)) {
+    const [, first, second] = m;
+    let inner = followers.get(second);
+    if (!inner) { inner = new Map(); followers.set(second, inner); }
+    inner.set(first, (inner.get(first) ?? 0) + 1);
+  }
+
+  // 1 ── surname recovery
+  const confidentPeople = new Set(
+    live()
+      .filter((d) => d.label === "character" && !d.determined && !/\s/.test(d.name))
+      .map((d) => d.name),
+  );
+  for (const d of live()) {
+    if (d.label === "character" || /\s/.test(d.name)) continue;
+    // A generic noun that follows a name is that name's street or house, not
+    // its family: "Vell Street" must not make Street a person.
+    if (headVocabularyLabel(d.name)) continue;
+    let givenNameHits = 0;
+    for (const [first, count] of followers.get(d.name) ?? []) {
+      if (confidentPeople.has(first)) givenNameHits += count;
+    }
+    // Two, because one is a coincidence and a surname that appears with a
+    // given name only once has not been established as a family name.
+    if (givenNameHits >= 2) {
+      d.label = "character";
+      d.confidence = Math.max(d.confidence, 0.7);
+    }
+  }
+
+  // 2 ── family plurals
+  const peopleNow = new Set(live().filter((d) => d.label === "character").map((d) => d.name));
+  for (const d of live()) {
+    if (/\s/.test(d.name) || !/[a-z]s$/.test(d.name)) continue;
+    if (!peopleNow.has(d.name.slice(0, -1))) continue;
+    // Only when it is written as a group ("the Vells"). A plural used bare is
+    // doing something else and keeps its own entry.
+    if (d.determined) d.dropped = true;
+  }
+
+  // 3 ── head-family coherence
+  const byHead = new Map<string, CastDecision[]>();
+  for (const d of live()) {
+    if (!/\s/.test(d.name)) continue;
+    const head = headWordOf(d.name);
+    if (!headVocabularyLabel(d.name)) continue;
+    const group = byHead.get(head);
+    if (group) group.push(d);
+    else byHead.set(head, [d]);
+  }
+  for (const [, group] of byHead) {
+    if (group.length < 2) continue;
+    if (new Set(group.map((d) => d.label)).size === 1) continue;
+    const agreed = headVocabularyLabel(group[0].name);
+    if (!agreed) continue;
+    for (const d of group) {
+      if (d.label === agreed) continue;
+      d.label = agreed;
+      d.confidence = Math.min(d.confidence, 0.5);
+    }
+  }
+}
+
 /**
  * Scans `text` for Title-Case proper-noun candidates not already in `existing`,
  * then classifies each into character / place / faction using name-internal
@@ -1018,6 +1469,8 @@ export async function scanAndClassify(
     const wordCount = name.trim().split(/\s+/).filter(Boolean).length;
     return wordCount >= 3;
   });
+  // One pass over the whole manuscript, shared by every candidate.
+  const nouns = buildNounLexicon(chunks.join("\n"));
   const signalMap = new Map<string, EntityContextSignals>();
   const analyzeTotal = Math.max(1, candidateEntries.length);
   reportScanProgress(onProgress, "analyze", 0, analyzeTotal, candidateEntries.length === 0 ? "No viable candidates" : `Candidate 0 / ${candidateEntries.length}`);
@@ -1029,7 +1482,7 @@ export async function scanAndClassify(
 
     for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
       if (!perChunkFreq[chunkIndex]?.has(name)) continue;
-      mergeSignals(aggregate, computeEntityContextSignals(chunks[chunkIndex], name));
+      mergeSignals(aggregate, computeEntityContextSignals(chunks[chunkIndex], name, nouns));
     }
 
     signalMap.set(name, aggregate);
@@ -1043,6 +1496,7 @@ export async function scanAndClassify(
   const kept = finalizeCandidates(candidateEntries, signalMap, minFreq);
   const fullText = chunks.join("\n");
   const result: ScanResult = { characters: [], places: [], factions: [], entities: [] };
+  const decisions: CastDecision[] = [];
   if (predictionTraceOut) predictionTraceOut.value = [];
 
   const classifyTotal = Math.max(1, kept.length);
@@ -1157,11 +1611,17 @@ export async function scanAndClassify(
       },
     ];
 
-    const max = Math.max(charScore, placeScore, factScore, entityScore);
-    let predictedLabel: "character" | "place" | "faction" | "entity" = "character";
-    if (entityScore === max && entityScore > Math.max(charScore, placeScore, factScore)) predictedLabel = "entity";
-    else if (factScore === max && factScore > Math.max(charScore, placeScore, entityScore)) predictedLabel = "faction";
-    else if (placeScore === max && placeScore > Math.max(charScore, factScore, entityScore)) predictedLabel = "place";
+    // ★ A PERSONAL NAME TAKES NO DETERMINER — the same evidence that keeps
+    //   non-speakers out of attribution (filterSpeakerCandidates), read here
+    //   BEFORE the buckets are compared rather than as an appeal afterwards.
+    //   Measured on The Root Crown: "Lift" (18 of 20 uses are "the Lift"),
+    //   "Bind" (7 of 7), "Conclave" (20 of 24) and "Mosshollow" (41 of 42) all
+    //   reached the CHARACTER bucket, because character was the default a tie
+    //   fell into and nothing downstream could tell a tie from a decision.
+    const dr = determinerUsage(fullText, name);
+    const determined = dr.occurrences >= 3 && dr.ratio >= 0.4;
+    const decision = decideBucket(name, signals, determined);
+    const predictedLabel = decision.label;
 
     const ranked = rerankAdaptiveCandidates(options?.adaptiveContext, entityCandidates, {
       task: "entity",
@@ -1184,61 +1644,67 @@ export async function scanAndClassify(
       options?.semanticEntityAssist,
     );
 
-    // ── Bucket coherence: the determiner test, applied AT CLASSIFICATION ──
-    //
-    // ★★ A PERSONAL NAME TAKES NO DETERMINER — the same evidence that keeps
-    //    non-speakers out of attribution (filterSpeakerCandidates), finally
-    //    applied where the buckets are chosen. Measured on root-crown: the
-    //    CHARACTER bucket held "Lift" (18 of 20 uses are "the Lift"), "Bind"
-    //    (7 of 7), "Tower" (6 of 6), "Conclave" (20 of 24) and "Mosshollow"
-    //    (42 of 41 — a possessive form pushed it over), because the char-vs-
-    //    place scores were near zero and character is the default.
-    //
-    //    The one legitimate exception is TITLE REFERENCE: "the Crown Prince"
-    //    and "the Spore Warden" are people, and titles take determiners. So a
-    //    name whose head word denotes a person is exempt in both directions:
-    //    it stays a character despite the determiner, and it is RECOVERED to
-    //    character when the suffix heuristics banished it elsewhere.
-    const headIsPerson = PERSON_HEAD_RE.test(name) || PERSON_LEAD_RE.test(name);
-    if (finalLabel === "character" && !headIsPerson) {
-      const dr = determinerUsage(fullText, name);
-      if (dr.occurrences >= 3 && dr.ratio >= 0.4) {
-        finalLabel =
-          ENTITY_SUFFIX_RE.test(name) ? "entity"
-          : PLACE_SUFFIX_RE.test(name) ? "place"
-          : FACTION_SUFFIX_RE.test(name) ? "faction"
-          : placeScore > Math.max(factScore, entityScore) ? "place"
-          : factScore > entityScore ? "faction"
-          : "entity";
-      }
-    } else if (finalLabel !== "character" && headIsPerson && !PLACE_SUFFIX_RE.test(name) && !FACTION_SUFFIX_RE.test(name)) {
+    // ★ TITLE REFERENCE IS RECOVERED IN BOTH DIRECTIONS. "the Crown Prince"
+    //   and "Magister Volk" are people, and a title takes an article, so a
+    //   person-headed name keeps its bucket against the suffix heuristics too.
+    if (
+      finalLabel !== "character"
+      && (PERSON_HEAD_RE.test(name) || PERSON_LEAD_RE.test(name))
+      && !PLACE_HEAD_RE.test(headWordOf(name))
+      && !FACTION_HEAD_RE.test(headWordOf(name))
+    ) {
       finalLabel = "character";
     }
 
-    predictionTraceOut?.value.push({
-      task: "entity",
-      paragraphIndex: 0,
+    decisions.push({
+      name,
+      label: finalLabel,
+      confidence: decision.confidence,
+      determined,
       spanIndex: keptIndex,
-      spanText: name,
       contextBefore: previewBefore.slice(-120),
       contextAfter: previewAfter.slice(0, 120),
       candidates: ranked.candidates,
-      predictedLabel: finalLabel,
-      confidence: ranked.confidence,
-      needsReview: ranked.needsReview,
-      ambiguityGap: ranked.ambiguityGap,
-      source: "entity-scan",
+      // ★ THE SCAN'S OWN CONFIDENCE, NOT THE RERANKER'S, WHEN NOTHING LEARNED
+      //   IS IN PLAY. Without an adaptive context the reranker reports the
+      //   spread of four synthetic baseScores, which for a tied name is a
+      //   confident-looking number attached to a coin flip. `selectReviewable`
+      //   ranks on exactly this field, so reporting the deterministic
+      //   decision's own margin is what puts a genuine tie in front of the
+      //   model instead of burying it under 100 names it already knows.
+      rerankConfidence: options?.adaptiveContext ? ranked.confidence : decision.confidence,
+      needsReview: options?.adaptiveContext ? ranked.needsReview : decision.confidence < 0.3,
+      ambiguityGap: options?.adaptiveContext ? ranked.ambiguityGap : decision.confidence,
     });
-
-    if (finalLabel === "faction") result.factions.push(name);
-    else if (finalLabel === "place") result.places.push(name);
-    else if (finalLabel === "entity") result.entities.push(name);
-    else result.characters.push(name);
 
     reportScanProgress(onProgress, "classify", keptIndex + 1, classifyTotal, `Entity ${keptIndex + 1} / ${kept.length}`);
     if (keptIndex + 1 < kept.length && (keptIndex + 1) % yieldEvery === 0) {
       await yieldToMainThread();
     }
+  }
+
+  applyCastCoherence(decisions, fullText);
+
+  for (const d of decisions) {
+    if (d.dropped) continue;
+    predictionTraceOut?.value.push({
+      task: "entity",
+      paragraphIndex: 0,
+      spanIndex: d.spanIndex,
+      spanText: d.name,
+      contextBefore: d.contextBefore,
+      contextAfter: d.contextAfter,
+      candidates: d.candidates,
+      predictedLabel: d.label,
+      confidence: d.rerankConfidence,
+      needsReview: d.needsReview,
+      ambiguityGap: d.ambiguityGap,
+      source: "entity-scan",
+    });
+    if (d.label === "faction") result.factions.push(d.name);
+    else if (d.label === "place") result.places.push(d.name);
+    else if (d.label === "entity") result.entities.push(d.name);
+    else result.characters.push(d.name);
   }
 
   return result;

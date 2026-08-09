@@ -702,10 +702,20 @@ async function testHeadWordDecides(): Promise<Assertion[]> {
  */
 async function testSurnameRecovery(): Promise<Assertion[]> {
   // The determined uses have to OUTNUMBER the bare ones, or the eviction the
-  // fix exists to prevent never fires and the assertion proves nothing.
+  // fix exists to prevent never fires and the assertion proves nothing. And
+  // Tessa and Brennan have to be IN the cast: the rule reads a surname off a
+  // given name it already knows is a person, so a book where the given names
+  // appear once each cannot exercise it, and a fixture like that was silently
+  // passing before the family scenes below were written in.
   const text = [
     "Tessa Mosswell hesitated at the mention of the work, and then went on.",
     "Brennan Mosswell did not come in before he was finished, which was usual.",
+    "Tessa said nothing about the loom and went back to the kitchen.",
+    "Tessa had been at the loom since morning. Tessa turned when the door opened.",
+    "Brennan came in late and Brennan said nothing about where he had been.",
+    "She asked Brennan about the ford and he told her what he knew.",
+    "Brennan looked at the door for a while. Brennan said the obvious thing.",
+    "Brennan turned the bowl over twice and Brennan put it down again.",
     "The wedding bread was on the tables, the Vell loaves and the Mosswell loaves together.",
     "The Mosswell house sat at the end of the lane, past the second gate.",
     "The Mosswell kitchen smelled of yeast for two days after.",

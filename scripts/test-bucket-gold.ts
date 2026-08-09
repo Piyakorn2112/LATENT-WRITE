@@ -23,7 +23,7 @@ import { readFile } from "fs/promises";
 import { scanAndClassify } from "../src/lib/world-data";
 import {
   ROOT_CROWN_GOLD,
-  THIN_NAMES,
+  THIN_OCCURRENCE_FLOOR,
   MUST_FIND,
   type GoldLabel,
 } from "./fixtures/root-crown-buckets";
@@ -57,27 +57,37 @@ async function main() {
   const scan = await scanAndClassify(chapters, undefined, 2);
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   const got = bucketMap(scan);
-  const thin = new Set(THIN_NAMES);
+  const fullText = chapters.join("\n");
+  const occurrencesOf = (name: string) =>
+    (fullText.match(new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g")) ?? []).length;
+  const isThin = (name: string) => occurrencesOf(name) < THIN_OCCURRENCE_FLOOR;
 
   const correct: string[] = [];
   const wrong: Array<{ name: string; got: GoldLabel; want: GoldLabel[]; why?: string }> = [];
   const junk: Array<{ name: string; got: GoldLabel; why?: string }> = [];
   const missing: Array<{ name: string; want: GoldLabel[] }> = [];
   const unlabelled: Array<{ name: string; got: GoldLabel }> = [];
-  const thinSeen: string[] = [];
+  const thinRight: string[] = [];
+  const thinWrong: Array<{ name: string; got: GoldLabel; want: GoldLabel[] }> = [];
 
   for (const [name, label] of got) {
-    if (thin.has(name)) { thinSeen.push(name); continue; }
     const gold = ROOT_CROWN_GOLD[name];
     if (!gold) { unlabelled.push({ name, got: label }); continue; }
+    if (isThin(name)) {
+      if (gold.accept.includes(label)) thinRight.push(name);
+      else thinWrong.push({ name, got: label, want: gold.accept });
+      continue;
+    }
     if (gold.accept.includes(label)) { correct.push(name); continue; }
     if (gold.accept.includes("drop")) junk.push({ name, got: label, why: gold.why });
     else wrong.push({ name, got: label, want: gold.accept, why: gold.why });
   }
 
+  // A name the gold would accept dropping is not a recall miss when it is
+  // dropped — that is the preferred outcome, listed first in `accept`.
   for (const [name, gold] of Object.entries(ROOT_CROWN_GOLD)) {
-    if (gold.accept.includes("drop") && gold.accept.length === 1) continue;
-    if (!got.has(name)) missing.push({ name, want: gold.accept });
+    if (gold.accept.includes("drop")) continue;
+    if (!got.has(name) && !isThin(name)) missing.push({ name, want: gold.accept });
   }
 
   // A name the gold says to drop is scored as junk, never as a bucketing miss:
@@ -85,8 +95,9 @@ async function main() {
   const scored = correct.length + wrong.length;
   const accuracy = scored === 0 ? 0 : correct.length / scored;
   const goldNames = Object.entries(ROOT_CROWN_GOLD)
-    .filter(([, g]) => !(g.accept.length === 1 && g.accept[0] === "drop")).length;
+    .filter(([n, g]) => !g.accept.includes("drop") && !isThin(n)).length;
   const recall = (goldNames - missing.length) / goldNames;
+  const thinScored = thinRight.length + thinWrong.length;
 
   console.log(`\nThe Root Crown — ${chapters.length} chapters, ${got.size} names, ${elapsed}s\n`);
 
@@ -113,7 +124,14 @@ async function main() {
     for (const u of unlabelled) console.log(`  ${u.name.padEnd(26)} scan says ${u.got}`);
     console.log("");
   }
-  if (verbose && thinSeen.length) console.log(`thin, not scored (${thinSeen.length}): ${thinSeen.join(", ")}\n`);
+  // Reported, never gated, and never hidden: a fix that improves the gated
+  // number by wrecking these has still wrecked what the writer sees.
+  console.log(
+    `THIN (under ${THIN_OCCURRENCE_FLOOR} uses) — reported, not gated: `
+    + `${thinRight.length}/${thinScored} correct`,
+  );
+  for (const t of thinWrong) console.log(`  ${t.name.padEnd(26)} got ${t.got.padEnd(10)} want ${t.want.join("|")}`);
+  console.log("");
 
   const missedMust = MUST_FIND.filter((n) => !got.has(n));
 

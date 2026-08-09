@@ -12,10 +12,13 @@
  *   comment on each disputed entry is the sentence that decided it. A label
  *   nobody can point at a sentence for is not in here.
  *
- * ★ THIN NAMES ARE EXCLUDED FROM THE SCORE, NOT SILENTLY LABELLED. A name with
- *   one or two occurrences in 660KB has no usage pattern to be right or wrong
- *   about, and scoring it would mean tuning against noise. They are listed so
- *   the harness can report them separately.
+ * ★ THIN NAMES ARE EXCLUDED BY A RULE, NOT BY A LIST. A name appearing fewer
+ *   than THIN_OCCURRENCE_FLOOR times has been seen in fewer than three distinct
+ *   sentences, which is not a usage pattern. Gating on those means tuning against noise —
+ *   and a hand-written exclusion list is worse than useless, because the
+ *   temptation is to move whichever name is currently failing into it. The
+ *   harness computes the count from the manuscript and REPORTS the thin names
+ *   and their accuracy separately. They are never hidden, only ungated.
  *
  * ★ AMBIGUOUS NAMES CARRY EVERY DEFENSIBLE LABEL. "The Pale House" is a
  *   building and a bureau in the same sentences; a gold that insists on one is
@@ -31,32 +34,9 @@ export interface GoldEntry {
   why?: string;
 }
 
-/** Names with too few occurrences to have a usage pattern. Reported, not scored. */
-export const THIN_NAMES: readonly string[] = [
-  "The Spore Warden",        // 1 use: "the Spore Warden division"
-  "Pre-Imperial Monastic Practices",
-  "Greythorn Quarter Anomaly",
-  "Active Investigation",
-  "Aldren",                  // 4 uses, all "the Aldren woman"
-  "The Northern Passes",
-  "Blacksmith Oren",
-  "Sarn Tolen",
-  "Pala Drest",
-  "Magister Adena Volk",
-  "Crown Prince Sevren",
-  "Pale Marshal Halen",
-  "Magister Volk",
-  "Brother Ifian",
-  "Aunt Mira",
-  "Lila Vell",
-  "Anwen Vell",
-  "Tessa Mosswell",
-  "The Hand Tower",
-  "The Inner Ring",
-  "The Tessane Lane",
-  "Conclave Closed School",
-  "The Conclave Open School",
-];
+/** Below this many whole-word occurrences in the manuscript, a name is
+ *  reported but not gated. See the header. */
+export const THIN_OCCURRENCE_FLOOR = 3;
 
 export const ROOT_CROWN_GOLD: Record<string, GoldEntry> = {
   // ── people ───────────────────────────────────────────────────────────────
@@ -148,10 +128,6 @@ export const ROOT_CROWN_GOLD: Record<string, GoldEntry> = {
   "The Mycomedical College": { accept: ["faction"] },
   "The Mycoflora Guild":    { accept: ["faction"] },
   "The Sealed Order":       { accept: ["faction"] },
-  "Hollow Vein": {
-    accept: ["faction"],
-    why: '"There was a Hollow Vein contact in the transit district"',
-  },
   "The Pale House": {
     accept: ["place", "faction"],
     why: "a courtyard in one sentence, a bureau in the next",
@@ -165,6 +141,40 @@ export const ROOT_CROWN_GOLD: Record<string, GoldEntry> = {
   Founding: { accept: ["entity"], why: '"pre-Founding notation", "Founding-era standardization"' },
   Network: { accept: ["entity", "faction"], why: '"asked the Network to intervene"' },
   "Outer Ring Anomaly": { accept: ["entity"], why: "a case file, not a group" },
+
+  // ── named by their title, or by a family name ────────────────────────────
+  "Magister Adena Volk": { accept: ["character"] },
+  "Magister Volk":       { accept: ["character"] },
+  "Crown Prince Sevren": { accept: ["character"] },
+  "Pale Marshal Halen":  { accept: ["character"] },
+  "Blacksmith Oren":     { accept: ["character"] },
+  "Brother Ifian":       { accept: ["character"] },
+  "Aunt Mira":           { accept: ["character"] },
+  "Sarn Tolen":          { accept: ["character"] },
+  "Pala Drest":          { accept: ["character"] },
+  "Lila Vell":           { accept: ["character"] },
+  "Anwen Vell":          { accept: ["character"] },
+  "Tessa Mosswell":      { accept: ["character"] },
+  "The Spore Warden": {
+    accept: ["faction", "character"],
+    why: '"a memorandum from the Spore Warden division" — a bureau named by a title',
+  },
+
+  // ── thin, but read and labelled like everything else ─────────────────────
+  "Hollow Vein":  { accept: ["faction"], why: '"a Hollow Vein contact in the transit district"' },
+  "The Northern Passes":  { accept: ["place"] },
+  "The Hand Tower":       { accept: ["place"] },
+  "The Inner Ring":       { accept: ["place"] },
+  "The Tessane Lane":     { accept: ["place"] },
+  "Conclave Closed School":    { accept: ["faction"] },
+  "The Conclave Open School":  { accept: ["faction"] },
+  "Pre-Imperial Monastic Practices": { accept: ["entity"] },
+  "Greythorn Quarter Anomaly":       { accept: ["entity"] },
+  "Active Investigation":            { accept: ["entity"] },
+  Aldren: {
+    accept: ["place", "faction"],
+    why: '"the Aldren woman, the regional naming" — a region or the family from it',
+  },
 
   // ── not names at all ─────────────────────────────────────────────────────
   Day:      { accept: ["drop"], why: '"Day 1", "Day 23", "Day 27" — a date label' },
