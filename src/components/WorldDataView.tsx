@@ -39,6 +39,7 @@ import {
   DOSSIER_FIELDS,
   emptyProposal,
   type DossierEvidence,
+  type DossierKind,
   type DossierFieldKey,
   type DossierProposal,
   type ExtractiveCard,
@@ -135,13 +136,25 @@ const SCAN_CATEGORY_META: Record<ScanCategory, { label: string; Icon: typeof Use
   entities:   { label: "Entities",   Icon: ListIcon   },
 };
 
-// Orb color per intel mode — vivid but not over-saturated
-const ORB_COLOR: Record<IntelMode, string> = {
-  off:     "#888888",
-  auto:    "#2EA84A",
-  fast:    "#DC7B19",
-  default: "#1071D8",
-  high:    "#A828B8",
+/**
+ * ★ THE SCAN AND ALIAS ORBS ARE A LOADING STATE, NOT A MODE READOUT, so they
+ *   are the app's system blue and nothing else. They used to take the
+ *   intel-mode palette, which meant the default "auto" mode painted them
+ *   GREEN — a colour this app uses nowhere else for work-in-progress, and
+ *   which read as a status (success) rather than as activity. Every other
+ *   "the engine is busy" surface, the rewrite orb included, is
+ *   --control-value-fill; these now match it, theme token and all.
+ */
+const SCAN_ORB_COLOR = "var(--control-value-fill)";
+
+/** Which dossier question set each tab asks. A place is not asked what it is
+ *  LIKE as a person; the fields keep their wire names so the three grammars
+ *  stay cached across every type. */
+const TAB_KIND: Record<Tab, DossierKind> = {
+  characters: "character",
+  places: "place",
+  factions: "faction",
+  entities: "entity",
 };
 
 const emptySelected = (): Record<ScanCategory, Set<string>> => ({
@@ -315,7 +328,10 @@ function buildMovedEntity(target: Tab, source: Entity, existingTarget?: Entity):
 }
 
 export function WorldDataView({
-  novel, currentChapterId, worldData, intelMode, adaptiveContext,
+  // `intelMode` stays on Props (App passes it, and it is part of this
+  // panel's contract) but the panel no longer tints anything by it: the
+  // scan and alias orbs are a LOADING state and take the system blue.
+  novel, currentChapterId, worldData, adaptiveContext,
   onChange, onEntityPredictionBatch, onEntityPredictionFeedback, onRename, onClose,
 }: Props) {
   // ── Alias suggestions ───────────────────────────────────────────────────
@@ -387,14 +403,24 @@ export function WorldDataView({
    *   Only meaningful on the max tier; the extractive path is deterministic
    *   by design and offers no Regenerate.
    */
-  const generateDossier = async (entity: WorldCharacter, reroll = false) => {
+  const generateDossier = async (entity: WorldCharacter, kind: DossierKind = "character", reroll = false) => {
     const runId = ++dossierRunIdRef.current;
     const controller = new AbortController();
     dossierAbortRef.current?.abort();
     dossierAbortRef.current = controller;
     const alive = () => runId === dossierRunIdRef.current && !controller.signal.aborted;
 
-    const cast = wd.characters.map((c) => ({ name: c.name, aliases: c.aliases }));
+    // ★ ONE HARVEST FOR EVERY TYPE. The channels are type-neutral, so places,
+    //   factions and entities ride the same read as the cast: harvesting them
+    //   separately would mean four passes over the manuscript for one panel.
+    //   Characters stay FIRST in the list so their evidence and their
+    //   co-presence stats are unchanged by the addition.
+    const cast = [
+      ...wd.characters.map((c) => ({ name: c.name, aliases: c.aliases })),
+      ...wd.places.map((c) => ({ name: c.name, aliases: c.aliases })),
+      ...wd.factions.map((c) => ({ name: c.name, aliases: c.aliases })),
+      ...(wd.entities ?? []).map((c) => ({ name: c.name, aliases: c.aliases })),
+    ];
     const sig = dossierSignature(novel, cast);
 
     try {
@@ -418,15 +444,25 @@ export function WorldDataView({
         setDossier({ ...DOSSIER_IDLE, phase: "error", forName: entity.name, error: "This character is not in the cast list." });
         return;
       }
-      const rank = [...evidence.characters]
+      // Rank within this entity's OWN type: a place is not a minor character
+      // for being mentioned less often than the protagonist.
+      const sameKindNames = new Set(
+        (kind === "character" ? wd.characters
+          : kind === "place" ? wd.places
+          : kind === "faction" ? wd.factions
+          : (wd.entities ?? [])).map((c) => c.name),
+      );
+      const rank = evidence.characters
+        .filter((c) => sameKindNames.has(c.name))
         .sort((a, b) => b.counts.mentions - a.counts.mentions)
         .findIndex((c) => c.name === entity.name);
-      const card = buildExtractiveCard(ev, Math.max(0, rank));
+      const card = buildExtractiveCard(ev, Math.max(0, rank), kind);
       const pack = buildDossierPack(ev);
       // The deterministic composition: the manuscript's own phrases, joined.
       // It is the whole answer in "on" mode, and the fallback whenever the
-      // model produces nothing usable in max mode.
-      const extractive = composeExtractiveDescription(ev);
+      // model produces nothing usable in max mode. Other cast members are
+      // passed so a clause about one of THEM cannot land on this card.
+      const extractive = composeExtractiveDescription(ev, [...sameKindNames].filter((n) => n !== entity.name));
       const extractiveChapters = [...new Set(pack.spans.map((s) => s.chapter))].slice(0, 6);
 
       // "on" is a different product, not a smaller model: measured, the 1.7B
@@ -452,7 +488,7 @@ export function WorldDataView({
       const proposal: DossierProposal = emptyProposal(pack, card.role);
       for (const field of DOSSIER_FIELDS) {
         if (!alive()) return;
-        const request = buildFieldRequest(pack, field);
+        const request = buildFieldRequest(pack, field, kind);
         if (!request) continue; // gate closed: never asked, never invented
         setDossier({
           phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
@@ -482,13 +518,21 @@ export function WorldDataView({
         // ★ A refusal licenses ONE extractive retry (module rule): the line
         //   used words from outside the passages, so ask again for verbatim.
         if (answer.status === "refused") {
-          const retryReq = buildFieldRetryRequest(pack, field);
+          const retryReq = buildFieldRetryRequest(pack, field, kind);
           if (retryReq) {
             const second = await ask(retryReq);
             if (!alive()) return;
             if (second.ok) {
               const retried = normalizeFieldAnswer(second.json, pack, field);
-              if (retried.text) answer = retried;
+              // ★ A RETRY MAY ONLY REPLACE A REFUSAL WITH AN ACCEPTANCE.
+              //   Taking any non-empty retry was measured swapping the best
+              //   answers in the run for word salad, because the extractive
+              //   instruction makes the model list vocabulary when it cannot
+              //   quote a sentence. A retry that is itself refused leaves the
+              //   field empty, which is the honest outcome.
+              if (retried.status === "grounded" || retried.status === "repaired") {
+                answer = retried;
+              }
             }
           }
         }
@@ -1123,7 +1167,7 @@ export function WorldDataView({
     scanResults.characters.length + scanResults.places.length + scanResults.factions.length + scanResults.entities.length > 0;
 
   const currentChapter = novel.chapters.find((c) => c.id === currentChapterId);
-  const orbColor = ORB_COLOR[intelMode] ?? ORB_COLOR.default;
+  const orbColor = SCAN_ORB_COLOR;
   const orbActive = scanPhase === "scanning" || scanPhase === "alias-scanning";
 
   return (
@@ -1504,18 +1548,14 @@ export function WorldDataView({
                     }
                     onAcceptAlias={acceptAlias}
                     onDismissAlias={dismissAlias}
-                    dossier={
-                      tab === "characters"
-                        ? {
-                            state: dossier,
-                            llmMode: assistantMode(loadPrefs()),
-                            onGenerate: () => void generateDossier(current as WorldCharacter),
-                            onRegenerate: () => void generateDossier(current as WorldCharacter, true),
-                            onCancel: cancelDossier,
-                            onDismiss: () => setDossier(DOSSIER_IDLE),
-                          }
-                        : undefined
-                    }
+                    dossier={{
+                      state: dossier,
+                      llmMode: assistantMode(loadPrefs()),
+                      onGenerate: () => void generateDossier(current as WorldCharacter, TAB_KIND[tab]),
+                      onRegenerate: () => void generateDossier(current as WorldCharacter, TAB_KIND[tab], true),
+                      onCancel: cancelDossier,
+                      onDismiss: () => setDossier(DOSSIER_IDLE),
+                    }}
                   />
                 ) : (
                   <div className="world-edit-empty">
@@ -1869,7 +1909,7 @@ function EntityForm({
           acceptance is the provenance boundary, because these two fields are
           read back into the model packs and the gender inference as if the
           writer asserted them. */}
-      {isCharacter && dossier && dossier.llmMode !== "off" && (
+      {dossier && dossier.llmMode !== "off" && (
         <DossierCard
           entityName={entity.name}
           description={entity.description ?? ""}

@@ -97,8 +97,11 @@ async function main() {
   const texts = (c: Parameters<typeof buildDossierPack>[0], ch: keyof typeof c.byChannel) =>
     c.byChannel[ch].map((s) => s.text).join(" | ");
 
-  expect("copular: 'Marlow was a tall, gaunt man' harvested",
-    texts(marlow, "copular").includes("tall, gaunt man"), texts(marlow, "copular"));
+  // A copular with a NOUN-PHRASE complement is direct definition (identity);
+  // a bare adjective complement is a trait (copular). The split is what lets
+  // the card lead with what the book says the person IS.
+  expect("identity: 'Marlow was a tall, gaunt man' is direct definition",
+    texts(marlow, "identity").includes("tall, gaunt man"), texts(marlow, "identity"));
   expect("possessive: 'Marlow's grey eyes' harvested",
     texts(marlow, "possessive").includes("grey eyes"));
   expect("attributive: 'old Marlow' harvested",
@@ -276,11 +279,17 @@ async function main() {
   expect("composed twin: Osric composes to EMPTY, not to filler",
     composeExtractiveDescription(osric) === "", composeExtractiveDescription(osric));
 
-  expect("phrase extraction: 'with a weathered face' → 'weathered face'",
-    extractDescriptivePhrases("a tall man with a weathered face").includes("weathered face"));
+  expect("phrase extraction: possessive-bound 'his weathered face' is taken",
+    extractDescriptivePhrases("a tall man with his weathered face").includes("weathered face"));
+  expect("phrase extraction twin: an UNBOUND noun is not (the 'alley air' class)",
+    extractDescriptivePhrases("the cold alley air and the kitchen air").length === 0,
+    extractDescriptivePhrases("the cold alley air and the kitchen air").join("|"));
   expect("phrase extraction twin: the action participle does not ride along",
     extractDescriptivePhrases("she kissed her sallow cheek").join("|") === "sallow cheek",
     extractDescriptivePhrases("she kissed her sallow cheek").join("|"));
+  expect("phrase extraction twin: a body part in MOTION is not appearance",
+    extractDescriptivePhrases("her eye widened and she moved her hands").length === 0,
+    extractDescriptivePhrases("her eye widened and she moved her hands").join("|"));
   expect("phrase extraction twin: adverbs are not modifiers",
     extractDescriptivePhrases("waved her mournfully hand").length === 0,
     extractDescriptivePhrases("waved her mournfully hand").join("|"));

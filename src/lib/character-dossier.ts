@@ -44,36 +44,99 @@ import {
 import type { Novel, WorldCharacter } from "../types";
 
 export const DOSSIER_TASK = "character-dossier";
-export const DOSSIER_PROMPT_VERSION = 1;
+export const DOSSIER_PROMPT_VERSION = 2;
+
+/**
+ * ★★ THE OTHER THREE TYPES ARE THE SAME MACHINE WITH DIFFERENT QUESTIONS.
+ *    A place is not described by its temperament and a faction has no face,
+ *    so the harvest is shared (one pass, every channel) and only the FIELD
+ *    DEFINITIONS and the gates differ. Doing it the other way — a second
+ *    harvester per type — would be four things to keep in step, and the
+ *    channels themselves are type-neutral: an appositive is an appositive
+ *    whether it follows a woman or a guild.
+ *
+ *    Characters keep the exact behaviour they were measured with; the three
+ *    other types are additive and cannot change a character's card.
+ */
+export type DossierKind = "character" | "place" | "faction" | "entity";
 
 // ── channels ──────────────────────────────────────────────────────────────
 
+/**
+ * ★★ RIMMON-KENAN'S FOUR INDIRECT CHANNELS, PLUS DIRECT DEFINITION.
+ *
+ *    The narratology this converges on (and the computational work that
+ *    follows it: BookNLP's agent/patient inventory, the Portrayal system's
+ *    finding that "actions are essential ... and this indicator is missing
+ *    from existing solutions") splits characterization into DIRECT
+ *    definition, where the text states a trait outright, and INDIRECT
+ *    definition through ACTION, SPEECH, APPEARANCE and ENVIRONMENT.
+ *
+ *    v1 of this engine harvested appearance well and the other three barely,
+ *    and it showed. On the owner's own manuscript it produced "Widened eye;
+ *    small, mended scar; moved hands; extended hand; clear eye" for the
+ *    protagonist — a list of gestures — while the book's actual direct
+ *    definition, "Mira was the person who came when a birth needed more than
+ *    the family could give", sat in the pack unused. In modern literary and
+ *    web-novel registers, stock physical description is rare and identity
+ *    arrives through station, habit and act.
+ *
+ *    So: `identity` (direct definition) leads, `action` and `speech-manner`
+ *    carry indirect characterization, and appearance is demoted to what it
+ *    actually is in these registers — a supporting detail.
+ */
 export type DossierChannel =
+  | "identity"      // Name was the person who … / Name, the village midwife,
   | "appositive"    // Name, a country attorney, …
-  | "copular"       // Name was a tall man … / Name was stubborn
+  | "copular"       // Name was stubborn
   | "attributive"   // poor Anne / old Marley
   | "possessive"    // Name's long thin fingers …
   | "pronoun-attr"  // her grey eyes … in a sentence only Name is in
   | "pronoun-owned" // her dark eyes … referent resolved by the engine
   | "habitual"      // Name always / never / was in the habit of …
+  | "action"        // recurring things Name is the agent of
+  | "speech-manner" // the verbs the prose attributes their dialogue with
   | "relation"      // Name's brother / the daughter of Name
   | "lore-narrated" // narration, past-biography frame
   | "lore-spoken";  // the same, but inside quotation marks
 
 export const DOSSIER_CHANNELS: readonly DossierChannel[] = [
-  "appositive", "copular", "attributive", "possessive",
-  "pronoun-attr", "pronoun-owned", "habitual",
+  "identity", "appositive", "copular", "attributive", "possessive",
+  "pronoun-attr", "pronoun-owned", "habitual", "action", "speech-manner",
   "relation", "lore-narrated", "lore-spoken",
 ];
 
-/** Channels an APPEARANCE line could be written from. */
+/** Channels an APPEARANCE line could be written from. `identity` belongs
+ *  here as well as in traits: a direct definition routinely carries the
+ *  physical description with it ("Marilla was a tall, thin woman, with
+ *  angles and without curves"). */
 const VISUAL_CHANNELS: readonly DossierChannel[] = [
-  "appositive", "copular", "attributive", "possessive", "pronoun-attr", "pronoun-owned",
+  "identity", "appositive", "copular", "attributive", "possessive", "pronoun-attr", "pronoun-owned",
 ];
-/** Channels a PERSONALITY line could be written from. */
+/** Channels a PERSONALITY line could be written from. Action and speech
+ *  manner are indirect definition and belong here, not in appearance. */
 const TRAIT_CHANNELS: readonly DossierChannel[] = [
-  "appositive", "copular", "attributive", "habitual",
+  "identity", "appositive", "copular", "attributive", "habitual", "action", "speech-manner",
 ];
+
+/**
+ * ★ OCCUPATION AND STATION — what a character IS, in one word. This is the
+ *   head noun of a direct definition ("Mira was the person who…", "Brother
+ *   Ifian, the clinic's physician") and it is what makes a role SPECIFIC
+ *   instead of a presence tier. Open class, so the list ranks rather than
+ *   decides: an unlisted trade still reaches the model through the identity
+ *   channel, it just does not become the deterministic role word.
+ */
+const STATION_NOUN =
+  "(?:midwife|physician|doctor|healer|nurse|surgeon|apothecary|weaver|smith|blacksmith|" +
+  "baker|butcher|farmer|miller|carpenter|mason|tailor|cobbler|potter|brewer|innkeeper|" +
+  "merchant|trader|shopkeeper|clerk|scribe|scholar|student|apprentice|teacher|tutor|" +
+  "magister|professor|priest|priestess|monk|nun|abbot|acolyte|warden|marshal|constable|" +
+  "guard|soldier|captain|sergeant|knight|hunter|ranger|sailor|fisherman|shepherd|" +
+  "servant|maid|steward|cook|groom|driver|messenger|herald|spy|thief|assassin|" +
+  "king|queen|prince|princess|lord|lady|duke|duchess|elder|chief|mayor|magistrate|" +
+  "widow|widower|orphan|heir|heiress)";
+const STATION_RE = new RegExp(`${"(?<![A-Za-z0-9])"}(${STATION_NOUN})(?![A-Za-z0-9])`, "i");
 // Background candidates are computed in buildDossierPack and deliberately
 // EXCLUDE the relation channel — see the comment there.
 
@@ -106,12 +169,20 @@ const RELATION_NOUN =
 
 /** Past-biography predicates. Deliberately a PAST frame: the channel is "what
  *  is known about them", not "what they are doing". */
+/**
+ * ★ BARE `had been` IS NOT A BIOGRAPHY, and it was in this list. It matches
+ *   any past perfect at all, so "Kinoko had been sitting on the bench for
+ *   eleven minutes" and "her father came in at midday" arrived as background
+ *   — scene detail wearing a history's grammar. Every predicate here now
+ *   names a life event or an origin; the tense alone earns nothing.
+ */
 const LORE_PREDICATE =
-  "(?:was born|were born|grew up|had been|has been|used to|once was|was once|had once|" +
-  "came from|come from|hails? from|was raised|inherited|married|had married|served (?:in|as|under)|" +
-  "worked (?:as|for|at)|studied|trained|fought (?:in|at)|left (?:home|the|his|her)|" +
-  "arrived from|returned from|lost (?:his|her|their)|died|was killed|escaped|" +
-  "was sent|was taken|was known|is known|they say|it is said|rumou?red|legend)";
+  "(?:was born|were born|grew up|was raised|had been born|used to|once was|was once|had once|" +
+  "came from|come from|hails? from|inherited|married|had married|served (?:in|as|under)|" +
+  "worked (?:as|for|at)|studied|trained|apprenticed|fought (?:in|at)|left (?:home|the village|the city)|" +
+  "arrived from|returned from|lost (?:his|her|their) (?:father|mother|wife|husband|son|daughter|family|home)|" +
+  "died|was killed|escaped|was sent|was taken|was known (?:as|for)|is known (?:as|for)|" +
+  "they say|it is said|rumou?red|legend|had lived|has lived|spent (?:his|her|their) (?:life|childhood|youth))";
 
 /** Habit frames — durable personality evidence, not a moment. */
 const HABIT_FRAME =
@@ -204,6 +275,16 @@ export interface DossierCounts {
   /** Verbs this character is the grammatical agent of, most frequent first.
    *  The BookNLP attribute the earlier probe lacked. */
   agentVerbs: Array<[string, number]>;
+  /** Agent verbs that are frequent for THIS character and rare for the rest
+   *  of the cast — the ones that actually characterize. */
+  distinctiveVerbs: string[];
+  /** Marked speech-attribution verbs, most frequent first. */
+  speechVerbs: Array<[string, number]>;
+  /** Share of this character's dialogue attributed with the unmarked "said".
+   *  1 means the prose never colours their speech. */
+  plainSaidRatio: number;
+  /** Station or trade named for them in a direct definition, if any. */
+  station: string | null;
   /** Top co-present cast members, [name, shared chapter count]. */
   coPresent: Array<[string, number]>;
 }
@@ -311,6 +392,36 @@ const NON_CONDUCT_VERB = new Set([
   "appeared", "looked", "became", "used", "continued", "remained", "turned",
 ]);
 
+/**
+ * ★★ THE DISTINCTIVE VERBS ARE THE CHARACTERIZATION; THE COMMON ONES ARE THE
+ *    LANGUAGE. Measured on root-crown, every character's top agent verb was
+ *    `said` (42, 35, 43 …) followed by went/came/sat — the verbs of prose
+ *    itself, identical for the whole cast and therefore worth nothing. Same
+ *    problem the entity scanner solved with IDF, and the same solution: a
+ *    verb earns its place by being frequent FOR THIS CHARACTER and rare
+ *    across the rest of the cast.
+ */
+const AMBIENT_VERB = new Set([
+  "said", "asked", "replied", "answered", "told", "spoke", "added", "repeated",
+  "went", "came", "got", "put", "took", "made", "did", "gave", "let",
+  "saw", "looked", "watched", "heard", "felt", "knew", "thought", "wanted",
+  "found", "kept", "held", "stood", "sat", "walked", "moved", "turned",
+  "started", "stopped", "began", "finished", "tried", "waited", "left",
+]);
+
+/** Speech verbs whose CHOICE characterizes: Rimmon-Kenan's speech channel.
+ *  `said` is deliberately absent — it is the unmarked default and carries no
+ *  signal (138 of 163 attributions in the owner's manuscript). */
+const MARKED_SPEECH_VERB = new Set([
+  "snapped", "muttered", "murmured", "whispered", "shouted", "yelled", "barked",
+  "insisted", "admitted", "conceded", "confessed", "protested", "objected",
+  "demanded", "ordered", "commanded", "pleaded", "begged", "urged", "warned",
+  "teased", "joked", "laughed", "sighed", "groaned", "grumbled", "complained",
+  "observed", "noted", "remarked", "offered", "suggested", "agreed", "allowed",
+  "corrected", "countered", "pressed", "prompted", "explained", "announced",
+  "declared", "hissed", "growled", "drawled", "stammered", "blurted",
+]);
+
 function agentVerbAfter(narration: string, nameRe: RegExp): string | null {
   const m = nameRe.exec(narration);
   if (!m) return null;
@@ -355,22 +466,29 @@ function harvestSentence(
 
   // APPOSITIVE. "Mr. Bennet, a gentleman of small fortune, …". The determiner
   // after the comma is required so "Elizabeth, and her sister" cannot qualify.
-  if (inNarration && new RegExp(`${NAME},\\s+(?:an?|the|his|her|their|its)\\s+[a-z]`).test(narration)) {
-    push("appositive", sentence);
+  // An appositive naming a STATION is direct definition and files as identity,
+  // which is what the role word and the card's first line read.
+  const appos = new RegExp(`${NAME},\\s+((?:an?|the|his|her|their|its)\\s+[a-z][^,.;]{0,60})`).exec(narration);
+  if (inNarration && appos) {
+    push(STATION_RE.test(appos[1]) ? "identity" : "appositive", sentence);
   }
   if (inNarration && new RegExp(`${NAME},\\s+who\\s+(?:was|is|had|has)\\b`).test(narration)) {
     push("appositive", sentence);
   }
 
-  // COPULAR, complement first. "Anne was a thin little thing" keeps; "Holmes
-  // was pacing up and down" and "was met by the doctor" do not.
-  const cop = new RegExp(`${NAME}\\s+(?:was|is|had been|seemed|appeared)\\s+(.{0,40})`).exec(narration);
-  if (inNarration && cop) {
-    const tail = cop[1].replace(/^(?:very|quite|so|too|not|no|still|already|always|never|rather|somewhat)\s+/, "");
-    const head = tail.match(/^(?:an?|the)\s+([a-z-]+)|^([a-z-]+)/i);
-    const word = (head?.[1] ?? head?.[2] ?? "").toLowerCase();
-    if (word && !VERBAL_COMPLEMENT.test(tail) && (isAdjectiveShaped(word) || /^(?:an?|the)\s/.test(tail))) {
-      push("copular", sentence);
+  // ★★ IDENTITY — DIRECT DEFINITION, and it leads the card. A copular whose
+  //    complement is a NOUN PHRASE says what this person IS ("Mira was the
+  //    person who came when a birth needed more than the family could give");
+  //    a copular whose complement is a bare adjective says what they are LIKE
+  //    and belongs in `copular`. v1 pooled the two and then built descriptions
+  //    only from appearance nouns, so the strongest line in the book never
+  //    reached the writer.
+  const copular = new RegExp(`${NAME}\\s+(?:was|is|had been|remains?|became)\\s+(.{0,60})`).exec(narration);
+  if (inNarration && copular) {
+    const tail = copular[1].replace(/^(?:very|quite|so|too|not|no|still|already|always|never|rather|somewhat)\s+/, "");
+    if (!VERBAL_COMPLEMENT.test(tail)) {
+      if (/^(?:an?|the)\s+[a-z]/i.test(tail)) push("identity", sentence);
+      else if (isAdjectiveShaped((tail.match(/^([a-z-]+)/i)?.[1] ?? "").toLowerCase())) push("copular", sentence);
     }
   }
 
@@ -505,7 +623,8 @@ export async function harvestDossierEvidence(
     forms: [c.name, ...c.aliases.filter((a) => a.toLowerCase() !== c.name.toLowerCase())],
     counts: {
       mentions: 0, chapters: [], chapterTotal: novel.chapters.length,
-      speechLines: 0, meanLineWords: 0, agentVerbs: [], coPresent: [],
+      speechLines: 0, meanLineWords: 0, agentVerbs: [], distinctiveVerbs: [],
+      speechVerbs: [], plainSaidRatio: 0, station: null, coPresent: [],
     },
     byChannel: emptyByChannel(),
   }));
@@ -533,6 +652,9 @@ export async function harvestDossierEvidence(
         return others.length ? new RegExp(`${LB}(?:${others.map(esc).join("|")})${RB}`) : /$^/;
       })(),
       verbCounts: new Map<string, number>(),
+      speechVerbCounts: new Map<string, number>(),
+      saidCount: 0,
+      station: null as string | null,
       lineWords: [] as number[],
     };
   });
@@ -625,6 +747,28 @@ export async function harvestDossierEvidence(
           harvestSentence(pc.ev, s, sMasked, narration, chapter.number, pc.othersRe, pc.klass);
           const verb = agentVerbAfter(narration, pc.formsRe);
           if (verb) pc.verbCounts.set(verb, (pc.verbCounts.get(verb) ?? 0) + 1);
+
+          // Speech attribution, BOTH orders: "Mira said" dominates modern
+          // prose, "said Mira" the 19th-century corpus, and a channel that
+          // reads only one of them is blind to half the register range.
+          const nameAlt = pc.ev.forms.map(esc).join("|");
+          const tag = new RegExp(
+            `${LB}(?:${nameAlt})${RB}\\s+([a-z]+)|${LB}([a-z]+)\\s+(?:${nameAlt})${RB}`,
+          ).exec(narration);
+          const tagVerb = (tag?.[1] ?? tag?.[2] ?? "").toLowerCase();
+          if (tagVerb === "said") pc.saidCount += 1;
+          else if (MARKED_SPEECH_VERB.has(tagVerb) && /["“”]/.test(s)) {
+            pc.speechVerbCounts.set(tagVerb, (pc.speechVerbCounts.get(tagVerb) ?? 0) + 1);
+          }
+
+          // Station, from the first direct definition that names one.
+          if (!pc.station) {
+            const def = new RegExp(
+              `${LB}(?:${nameAlt})${RB}(?:,|\\s+(?:was|is|had been))\\s+(?:an?|the)\\s+([^,.;]{0,60})`,
+            ).exec(narration);
+            const hit = def ? STATION_RE.exec(def[1]) : null;
+            if (hit) pc.station = hit[1].toLowerCase();
+          }
         }
       }
     });
@@ -634,10 +778,38 @@ export async function harvestDossierEvidence(
     }
   }
 
+  // How often does the whole cast use each verb? The denominator for
+  // distinctiveness, so "said" cancels and "delivered" survives.
+  const castVerbTotals = new Map<string, number>();
+  for (const pc of perChar) {
+    for (const [verb, n] of pc.verbCounts) {
+      castVerbTotals.set(verb, (castVerbTotals.get(verb) ?? 0) + n);
+    }
+  }
+
   for (const pc of perChar) {
     pc.ev.counts.agentVerbs = [...pc.verbCounts.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6);
+    // Distinctive = this character owns most of the cast's uses of it, and
+    // it is not an ambient verb of prose. Two uses minimum: one is a moment.
+    pc.ev.counts.distinctiveVerbs = [...pc.verbCounts.entries()]
+      .filter(([verb, n]) => {
+        if (AMBIENT_VERB.has(verb) || n < 2) return false;
+        const castTotal = castVerbTotals.get(verb) ?? n;
+        return n / castTotal >= 0.6;
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([verb]) => verb);
+    pc.ev.counts.speechVerbs = [...pc.speechVerbCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5);
+    const markedTotal = [...pc.speechVerbCounts.values()].reduce((a, b) => a + b, 0);
+    pc.ev.counts.plainSaidRatio = pc.saidCount + markedTotal > 0
+      ? pc.saidCount / (pc.saidCount + markedTotal)
+      : 0;
+    pc.ev.counts.station = pc.station;
     pc.ev.counts.meanLineWords = pc.lineWords.length
       ? Math.round(pc.lineWords.reduce((a, b) => a + b, 0) / pc.lineWords.length)
       : 0;
@@ -647,6 +819,23 @@ export async function harvestDossierEvidence(
       .filter(([, n]) => n > 0)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 3);
+
+    // The two derived channels are written here, not per sentence, because
+    // both are DISTRIBUTIONS: neither is knowable until the whole book has
+    // been read and the rest of the cast counted.
+    if (pc.ev.counts.distinctiveVerbs.length > 0) {
+      pc.ev.byChannel.action.push({
+        channel: "action", chapter: pc.ev.counts.chapters[0] ?? 1,
+        text: `Across the book ${pc.ev.name} is the one who ${pc.ev.counts.distinctiveVerbs.join(", ")}.`,
+      });
+    }
+    const marked = pc.ev.counts.speechVerbs.filter(([v]) => v !== "said");
+    if (marked.length > 0 && pc.ev.counts.speechLines >= 4) {
+      pc.ev.byChannel["speech-manner"].push({
+        channel: "speech-manner", chapter: pc.ev.counts.chapters[0] ?? 1,
+        text: `${pc.ev.name}'s dialogue is attributed with ${marked.map(([v, n]) => `${v} (${n})`).join(", ")}.`,
+      });
+    }
   }
 
   options.onProgress?.({ fraction: 1, chapter: chapterTotal, chapterTotal });
@@ -658,8 +847,12 @@ export async function harvestDossierEvidence(
 /** Information density per channel, best first, used only to order the
  *  round-robin; never to starve a channel (see selectDossierSpans). */
 const CHANNEL_RANK: Record<DossierChannel, number> = {
-  appositive: 0, possessive: 1, "pronoun-owned": 2, "pronoun-attr": 3,
-  copular: 4, attributive: 5, habitual: 2,
+  // Direct definition outranks everything: it is what the book says outright.
+  identity: 0,
+  appositive: 1, possessive: 2, "pronoun-owned": 3, "pronoun-attr": 4,
+  copular: 5, attributive: 6,
+  // Indirect definition through conduct, the channel modern prose leans on.
+  habitual: 1, action: 2, "speech-manner": 3,
   relation: 0, "lore-narrated": 1, "lore-spoken": 2,
 };
 
@@ -671,8 +864,13 @@ const PER_CHANNEL_QUOTA = 3;
  *  marks speech about the character (can be wrong in-world); `pronoun` marks a
  *  machine-resolved referent (can be wrong mechanically). */
 const PROVENANCE: Record<DossierChannel, string> = {
+  identity: "named",
   appositive: "named", copular: "named", attributive: "named", possessive: "named",
   "pronoun-attr": "pronoun", "pronoun-owned": "pronoun", habitual: "named",
+  // `counted` marks a span the harness DERIVED from whole-book statistics
+  // rather than lifted from a sentence — the reader must be able to tell a
+  // quotation from a tally.
+  action: "counted", "speech-manner": "counted",
   relation: "named", "lore-narrated": "named", "lore-spoken": "said",
 };
 
@@ -858,7 +1056,9 @@ export const DOSSIER_FIELD_SCHEMAS: Record<DossierFieldKey, ReturnType<typeof fi
   background: fieldSchema("background"),
 };
 
-const FIELD_ASK: Record<DossierFieldKey, { definition: string; question: string }> = {
+type FieldAsk = { definition: string; question: string };
+
+const CHARACTER_ASK: Record<DossierFieldKey, FieldAsk> = {
   appearance: {
     definition: `spans: FIRST. The numbers of the passages that state what this person LOOKS
   LIKE — body, face, hair, eyes, age, clothing. A passage where they merely do
@@ -870,9 +1070,9 @@ appearance: at most 20 words, from ONLY those passages, their own words where
   personality: {
     definition: `spans: FIRST. The numbers of the passages that show what this person is
   LIKE — temperament, habits, manner, how they treat people. [] if none do.
-personality: at most 25 words, from ONLY those passages. The counted facts may
-  inform the emphasis, but every claim must trace to a passage. "" if spans
-  is [].`,
+personality: at most 25 words. Name the TRAITS the passages show. You may use
+  your own words for a trait, but never invent a name, a place or a number
+  that is not in the passages. "" if spans is [].`,
     question: "What is {name} like?",
   },
   background: {
@@ -885,19 +1085,94 @@ background: at most 25 words, from ONLY those passages. A passage tagged
   },
 };
 
-function fieldSystem(field: DossierFieldKey): string {
-  return `You fill in ONE field of a character card for a novel, from evidence a search
-has already gathered. You cannot read the manuscript. The numbered passages
-${field === "personality" ? "and counted facts " : ""}are all the evidence there is.
+/**
+ * ★ THE FIELD NAMES STAY THE SAME ON THE WIRE across all four types, and
+ *   that is deliberate: the schemas are fixed, so the grammar cache is hit
+ *   on every call regardless of type. Only the DEFINITIONS change. Renaming
+ *   `appearance` to `look` for places would mint a second grammar for no
+ *   gain and lose the cache — the repeated-schema lesson from the batch
+ *   loop, applied here before it costs anything.
+ */
+const PLACE_ASK: Record<DossierFieldKey, FieldAsk> = {
+  appearance: {
+    definition: `spans: FIRST. The numbers of the passages that state what this place is LIKE
+  to be in — its look, size, sound, smell, weather, buildings. [] if none do.
+appearance: at most 20 words, from ONLY those passages, their own words where
+  you can. "" if spans is [].`,
+    question: "What is {name} like to be in?",
+  },
+  personality: {
+    definition: `spans: FIRST. The numbers of the passages that show what this place is FOR
+  and who is in it — its purpose, who lives or works there, what happens
+  there. [] if none do.
+personality: at most 25 words. Never invent a name, a place or a number that
+  is not in the passages. "" if spans is [].`,
+    question: "What happens at {name}, and who is there?",
+  },
+  background: {
+    definition: `spans: FIRST. The numbers of the passages that state this place's HISTORY —
+  who built or founded it, what happened here before, what it used to be.
+  [] if none do.
+background: at most 25 words, from ONLY those passages. A passage tagged
+  (said) is a character's claim; report it as "said to …". "" if spans is [].`,
+    question: "What is known about the history of {name}?",
+  },
+};
+
+const GROUP_ASK: Record<DossierFieldKey, FieldAsk> = {
+  appearance: {
+    definition: `spans: FIRST. The numbers of the passages that state how this group is
+  RECOGNISED — its colours, marks, dress, seat, or anything worn or shown.
+  [] if none do.
+appearance: at most 20 words, from ONLY those passages. "" if spans is [].`,
+    question: "How is {name} recognised?",
+  },
+  personality: {
+    definition: `spans: FIRST. The numbers of the passages that show what this group DOES
+  and how it behaves — what it controls, demands, forbids, or is trying to
+  achieve. [] if none do.
+personality: at most 25 words. Never invent a name, a place or a number that
+  is not in the passages. "" if spans is [].`,
+    question: "What does {name} do, and how does it behave?",
+  },
+  background: {
+    definition: `spans: FIRST. The numbers of the passages that state this group's ORIGIN —
+  who founded it, when, out of what. [] if none do.
+background: at most 25 words, from ONLY those passages. A passage tagged
+  (said) is a character's claim; report it as "said to …". "" if spans is [].`,
+    question: "Where did {name} come from?",
+  },
+};
+
+const ASK_BY_KIND: Record<DossierKind, Record<DossierFieldKey, FieldAsk>> = {
+  character: CHARACTER_ASK,
+  place: PLACE_ASK,
+  faction: GROUP_ASK,
+  // A doctrine, protocol or institution behaves like a group for these
+  // three questions: what marks it, what it does, where it came from.
+  entity: GROUP_ASK,
+};
+
+const SUBJECT_WORD: Record<DossierKind, string> = {
+  character: "person", place: "place", faction: "group", entity: "thing",
+};
+
+function fieldSystem(field: DossierFieldKey, kind: DossierKind): string {
+  const ask = ASK_BY_KIND[kind][field];
+  const subject = SUBJECT_WORD[kind];
+  return `You fill in ONE field of a ${subject === "person" ? "character" : subject} card for a novel, from evidence a
+search has already gathered. You cannot read the manuscript. The numbered
+passages ${field === "personality" ? "and counted facts " : ""}are all the evidence there is.
 
 Answer as JSON: {"spans","${field}","confidence"} in that order.
-${FIELD_ASK[field].definition}
+${ask.definition}
 confidence: 0 to 1, how much the passages actually settle this. Never above 1.
 
 A passage tagged (pronoun) had its subject resolved by a machine and may
-belong to someone else; trust it less. Passage numbers are not consecutive;
-cite them exactly as printed.
-An empty answer is a correct answer. Writing something true of most people is
+belong to something else; trust it less. A passage tagged (counted) is a
+tally the search made across the whole book, not a quotation. Passage numbers
+are not consecutive; cite them exactly as printed.
+An empty answer is a correct answer. Writing something true of most ${subject === "person" ? "people" : `${subject}s`} is
 NOT an answer. Never use anything you know about this book from elsewhere.`;
 }
 
@@ -924,12 +1199,15 @@ export function fieldCandidates(pack: DossierPack, field: DossierFieldKey): numb
 export function buildFieldRequest(
   pack: DossierPack,
   field: DossierFieldKey,
+  kind: DossierKind = "character",
 ): DossierFieldRequest | null {
   const candidates = fieldCandidates(pack, field);
   if (candidates.length === 0) return null;
   const subset = pack.spans.filter((s) => candidates.includes(s.n));
+  const label = kind === "character" ? "CHARACTER"
+    : kind === "place" ? "PLACE" : kind === "faction" ? "GROUP" : "THING";
   const lines = [
-    `CHARACTER: ${pack.name}`,
+    `${label}: ${pack.name}`,
     ...(pack.aliases.length ? [`ALSO WRITTEN: ${pack.aliases.join(", ")}`] : []),
     ...(field === "personality" ? ["", "COUNTED FACTS (measured, not opinion)", pack.stats] : []),
     "",
@@ -938,8 +1216,8 @@ export function buildFieldRequest(
   ];
   return {
     field,
-    systemPrompt: fieldSystem(field),
-    userText: `${lines.join("\n")}\n\n${FIELD_ASK[field].question.replace("{name}", pack.name)}`,
+    systemPrompt: fieldSystem(field, kind),
+    userText: `${lines.join("\n")}\n\n${ASK_BY_KIND[kind][field].question.replace("{name}", pack.name)}`,
     schema: DOSSIER_FIELD_SCHEMAS[field],
     maxTokens: 512,
   };
@@ -1036,6 +1314,41 @@ function normalizeSpanList(raw: unknown, legal: ReadonlySet<number>): number[] {
 }
 
 /**
+ * ★★ A TRAIT IS AN INFERENCE; A FEATURE IS A FACT. THEY NEED DIFFERENT
+ *    CHECKS, and conflating them was the worst bug this feature has had.
+ *
+ *    Measured on the owner's manuscript, the 4B's first personality answers
+ *    were the best output this engine has ever produced — "Systematic and
+ *    decisive", "meticulous about her work, values her creations", "Solemn,
+ *    patient, and methodical" — and word-level grounding REFUSED every one
+ *    of them, because "meticulous" is precisely what the prose does not say.
+ *    The extractive retry then replaced each with a bag of verbs ("worked,
+ *    died, made it, good, embroidery"). The check was destroying the product.
+ *
+ *    Extractive and abstractive claims need different faithfulness tests.
+ *    Appearance and background are FACTUAL: a physical feature or a piece of
+ *    history must be stated somewhere, so word containment is right. A trait
+ *    is a reading OF evidence and its words will not be in the evidence. What
+ *    must still hold is that it invents no CONCRETE PARTICULARS — no names,
+ *    places or numbers the manuscript never gave it — and that it cites the
+ *    spans it read. That is checkable, and it is the whole check.
+ */
+function ungroundedParticulars(line: string, texts: readonly string[]): string[] {
+  const hay = texts.join(" ").toLowerCase();
+  const out: string[] = [];
+  // Proper nouns, skipping the sentence-initial position (which is
+  // capitalised by punctuation, not by being a name).
+  for (const m of line.matchAll(/(?<=[a-z,;]\s)([A-Z][a-z]{2,})/g)) {
+    if (!hay.includes(m[1].toLowerCase())) out.push(m[1]);
+  }
+  // Numbers, spelled or written, are particulars too.
+  for (const m of line.matchAll(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|hundred)\b/gi)) {
+    if (!hay.includes(m[1].toLowerCase())) out.push(m[1]);
+  }
+  return [...new Set(out)];
+}
+
+/**
  * Ground one field: check against its citations, repair against the whole
  * pack, refuse only what locates nowhere.
  *
@@ -1052,6 +1365,7 @@ function groundField(
   candidates: readonly number[],
   useful: (line: string) => boolean,
   maxLen: number,
+  abstractive: boolean,
 ): DossierField {
   // THE GATE, accepting side. No eligible evidence: the field is empty no
   // matter what the model wrote. This is the code half of the fix for the
@@ -1074,6 +1388,15 @@ function groundField(
   const legal = new Set(pack.spans.map((s) => s.n));
   const cited = normalizeSpanList(rawSpans, legal);
   const citedTexts = cited.map((n) => pack.spans.find((s) => s.n === n)?.text ?? "");
+
+  // ABSTRACTIVE field: the words are a reading, the particulars are the
+  // claim. Cite something legal and invent no names or numbers.
+  if (abstractive) {
+    if (cited.length === 0) return { text: "", spans: [], status: "refused" };
+    const invented = ungroundedParticulars(text, pack.spans.map((s) => s.text));
+    if (invented.length > 0) return { text: "", spans: [], status: "refused" };
+    return { text, spans: cited, status: "grounded" };
+  }
 
   if (cited.length > 0 && missingWords(text, citedTexts).length === 0) {
     return { text, spans: cited, status: "grounded" };
@@ -1117,7 +1440,10 @@ export function normalizeFieldAnswer(
   const grounded = groundField(
     value[field], value.spans, pack, fieldCandidates(pack, field),
     field === "appearance" ? usefulAppearance : usefulProse,
-    FIELD_MAX[field]);
+    FIELD_MAX[field],
+    // Personality is the only abstractive field: appearance and background
+    // are factual claims and must locate word for word.
+    field === "personality");
   const confRaw = typeof value.confidence === "number" && Number.isFinite(value.confidence)
     ? value.confidence : 0;
   return { ...grounded, confidence: Math.min(1, Math.max(0, confRaw)) };
@@ -1138,8 +1464,9 @@ export const DOSSIER_FIELDS: readonly DossierFieldKey[] = ["appearance", "person
 export function buildFieldRetryRequest(
   pack: DossierPack,
   field: DossierFieldKey,
+  kind: DossierKind = "character",
 ): DossierFieldRequest | null {
-  const base = buildFieldRequest(pack, field);
+  const base = buildFieldRequest(pack, field, kind);
   if (!base) return null;
   return {
     ...base,
@@ -1206,12 +1533,45 @@ export interface ExtractiveCard {
  * share and speech are things the engine measures reliably, and the labels
  * claim no more than the numbers show.
  */
-export function deriveRoleFromCounts(counts: DossierCounts, castRank: number): string {
+/**
+ * ★★ A ROLE SHOULD NAME THE PERSON, NOT RANK THEM. v1 emitted four presence
+ *    tiers — "central character", "major character" — which the owner
+ *    correctly called too generic: every book has one of each and none of
+ *    them tells a writer anything they did not already know.
+ *
+ *    A specific role has two parts, and both come from evidence already
+ *    counted: WHAT they are (a station the prose states outright) and WHO
+ *    they are to the story (the cast member they share most of the book
+ *    with). Presence is demoted to the fallback it should always have been —
+ *    used only when the manuscript has named neither.
+ */
+export function deriveRoleFromCounts(
+  counts: DossierCounts,
+  castRank: number,
+  kind: DossierKind = "character",
+): string {
   const presence = counts.chapterTotal > 0 ? counts.chapters.length / counts.chapterTotal : 0;
-  if (castRank === 0 && presence >= 0.6) return "central character";
-  if (castRank <= 2 || presence >= 0.5) return "major character";
-  if (presence >= 0.25 || counts.speechLines >= 10) return "recurring character";
-  return "minor character";
+  // A place is never a "character", and calling one a minor character is the
+  // kind of tell that makes a whole feature feel unfinished.
+  const noun = kind === "character" ? "character"
+    : kind === "place" ? "location" : kind === "faction" ? "group" : "element";
+  const tier = castRank === 0 && presence >= 0.6 ? `central ${noun}`
+    : castRank <= 2 || presence >= 0.5 ? `major ${noun}`
+    : presence >= 0.25 || counts.speechLines >= 10 ? `recurring ${noun}`
+    : `minor ${noun}`;
+  // Station is a person's trade; a place or a group has none to state.
+  if (kind !== "character") return tier;
+
+  // The station the prose stated. This is the specific answer, and it is the
+  // only one the manuscript actually licenses.
+  if (counts.station) return `the ${counts.station}`;
+
+  // ★ NO STATION MEANS FALL BACK TO THE TIER, and a relational fallback was
+  //   tried here and reverted. "Vey's counterpart", "viewpoint, with Osric":
+  //   co-presence says two people share chapters, which in a two-hander is
+  //   true of everyone and names no role at all. A vague-but-true tier beats
+  //   a specific-sounding invention.
+  return tier;
 }
 
 /**
@@ -1238,61 +1598,196 @@ const STOP_MODIFIER = new Set([
   "own", "other", "certain", "several", "said",
 ]);
 
+/**
+ * ★★ A PARTICIPLE OF MOTION IS NEVER A STATIVE MODIFIER, and this is the
+ *    single biggest source of junk descriptions. Measured on root-crown, the
+ *    protagonist's whole description read "Widened eye; small, mended scar;
+ *    moved hands; extended hand; clear eye": every one of `widened`,
+ *    `moved`, `extended` is an -ed form, passes the adjective SHAPE test, and
+ *    describes a GESTURE rather than a person. Appearance is what is stable
+ *    about someone; a body part in motion is an action beat.
+ */
+const MOTION_PARTICIPLE = new Set([
+  "widened", "narrowed", "moved", "extended", "raised", "lowered", "opened",
+  "closed", "shut", "turned", "lifted", "dropped", "shifted", "tightened",
+  "loosened", "clenched", "unclenched", "shook", "nodded", "tilted", "bowed",
+  "crossed", "folded", "spread", "stretched", "reached", "waved", "pointed",
+  "pressed", "rubbed", "touched", "covered", "wiped", "brushed", "flicked",
+  "blinked", "flushed", "paled", "twitched", "curled", "settled", "came",
+  "went", "fell", "rose", "held", "caught", "found", "took", "put", "set",
+]);
+
 const phraseModifier = (w: string): boolean => {
   const lc = w.toLowerCase();
-  if (STOP_MODIFIER.has(lc) || NP_OPENER.has(lc)) return false;
+  if (STOP_MODIFIER.has(lc) || NP_OPENER.has(lc) || MOTION_PARTICIPLE.has(lc)) return false;
   if (/ly$/.test(lc)) return false; // adverbs read as adjectives by shape
   return isAdjectiveShaped(lc);
 };
 
+/**
+ * Descriptive phrases, and ONLY out of a possessive-bound noun phrase:
+ * `POSSESSIVE + modifiers + APPEARANCE NOUN`.
+ *
+ * ★★ THE BINDING IS THE FIX FOR POLYSEMY. `air`, `look`, `manner`, `walk` and
+ *    `figure` all mean a bearing AND something else entirely, so an unbound
+ *    match harvested "alley air", "kitchen air" and "cold air" as descriptions
+ *    of a person. A possessive binds the noun to somebody; nothing else in
+ *    this vocabulary does. The cost is real (a predicative "her hair was
+ *    black" no longer yields a phrase) and it is worth it: measured on
+ *    root-crown the predicative form contributed one usable phrase and four
+ *    fragments, because a complement runs on past where the phrase ends
+ *    ("Hand was cold from the").
+ */
 export function extractDescriptivePhrases(text: string): string[] {
   const out: string[] = [];
-  const all = new RegExp(`((?:[a-z-]+(?:,\\s+|\\s+)){0,3})(${APPEARANCE_NOUN})${RB}(\\s+(?:was|were|is|are|seemed|looked)\\s+(?:[a-z-]+(?:,?\\s+(?:and\\s+)?[a-z-]+){0,2}))?`, "gi");
+  const all = new RegExp(
+    `${LB}(?:his|her|their|its|my|your|our|[A-Z][a-z]+['’]s)\\s+((?:[a-z-]+(?:,\\s+|\\s+)){0,3})(${APPEARANCE_NOUN})${RB}`,
+    "g");
   for (let m = all.exec(text); m; m = all.exec(text)) {
-    const pre = (m[1] ?? "").trim();
-    const noun = m[2];
-    const post = (m[3] ?? "").trim();
-    // Leading modifiers: an NP opener or non-modifier RESTARTS the run, so
-    // "with a weathered" yields "weathered" and "kissed, sallow" yields
-    // "sallow" without dragging the verb along.
-    const preWords = pre.split(/[\s,]+/).filter(Boolean);
+    const preWords = (m[1] ?? "").trim().split(/[\s,]+/).filter(Boolean);
+    // A non-modifier RESTARTS the run, so "small, mended" survives intact
+    // while "cold from the" contributes nothing.
     const adjectives: string[] = [];
     for (const word of preWords) {
       if (phraseModifier(word)) adjectives.push(word);
       else adjectives.length = 0;
     }
-    if (adjectives.length > 0) {
-      out.push(`${adjectives.join(", ")} ${noun}`);
-    } else if (post) {
-      const complementWords = post.replace(/^(?:was|were|is|are|seemed|looked)\s+/, "").split(/\s+/);
-      if (phraseModifier(complementWords[0] ?? "")) {
-        out.push(`${noun} ${post}`.replace(/\s+/g, " "));
-      }
-    }
+    if (adjectives.length > 0) out.push(`${adjectives.join(", ")} ${m[2]}`);
   }
   return out;
 }
 
-/** A clause worth putting in a description: long enough to claim something,
- *  not a conjunction or participle fragment, not cut at an honorific's
- *  abbreviation point ("married to Mr." was observed). */
-function usableClause(clause: string, source: string): boolean {
+/** Function words a clause must never END on: the phrase continues past the
+ *  cut, so what was taken is a fragment. */
+const DANGLING_TAIL = new Set([
+  "a", "an", "the", "and", "or", "but", "nor", "so", "yet", "of", "to", "in",
+  "on", "at", "by", "for", "with", "from", "as", "that", "which", "who",
+  "than", "then", "before", "after", "when", "while", "into", "onto", "over",
+  "under", "about", "her", "his", "their", "its", "my", "your", "our", "no",
+  "not", "very", "more", "most", "such", "this", "these", "those", "is",
+  "was", "were", "are", "be", "been", "had", "has", "have", "mr", "mrs",
+  "ms", "dr", "st", "if", "because", "though", "although", "since", "up",
+]);
+
+/** A finite verb somewhere in the clause: without one it is a noun pile
+ *  ("A child and before that"), not a claim about anybody. */
+const FINITE_VERB_RE =
+  /\b(?:is|was|were|are|am|be|been|being|has|had|have|does|did|do|can|could|will|would|shall|should|may|might|must|[a-z]{3,}(?:ed|es|s))\b/i;
+
+/**
+ * ★★ A CLAUSE MUST BE A CLAIM, NOT A CUT. Measured on the owner's manuscript,
+ *    the lenient version emitted "A child and before that.", "Eight feet
+ *    ahead, watching without asking, and she had caught up" and "Had never
+ *    fully answered even to herself." — every one a fragment lifted out of a
+ *    longer sentence, and every one of them reads as a bug to a writer. Four
+ *    independent tests, all cheap: enough words, a finite verb, no dangling
+ *    function word at the cut, and no opener that presupposes what came
+ *    before it.
+ */
+function usableClause(clause: string): boolean {
   const words = clause.split(/\s+/).filter(Boolean);
-  if (words.length < 5) return false;
-  if (/^(?:and|or|but|nor|so|yet|[a-z]+ing)\b/i.test(clause)) return false;
-  const cutAt = source.indexOf(clause) + clause.length;
-  if (/\b(?:Mr|Mrs|Ms|Dr|St)$/.test(clause)) return false;
-  void cutAt;
+  if (words.length < 6 || words.length > 30) return false;
+  if (!FINITE_VERB_RE.test(clause)) return false;
+  const last = words[words.length - 1].toLowerCase().replace(/[^a-z]/g, "");
+  if (DANGLING_TAIL.has(last)) return false;
+  if (/^(?:and|or|but|nor|so|yet|because|which|that|who|then|before|after|[a-z]+ing)\b/i.test(clause)) return false;
+  // A clause that opens on a bare number or measurement is mid-sentence
+  // scene-setting ("Eight feet ahead, …"), never a definition.
+  if (/^[A-Z]?[a-z]*\s*\d|^(?:one|two|three|four|five|six|seven|eight|nine|ten)\b/i.test(clause)) return false;
   return true;
 }
 
-export function composeExtractiveDescription(ev: CharacterDossierEvidence): string {
-  const pack = buildDossierPack(ev);
-  const byN = new Map(pack.spans.map((s) => [s.n, s]));
+/**
+ * ★★ IDENTITY FIRST, THEN CONDUCT, THEN APPEARANCE. v1 built the description
+ *    out of appearance phrases alone and led with them, which on modern prose
+ *    produced a list of gestures and buried what the book actually said the
+ *    person WAS. A reader meeting a character wants the same order a novel
+ *    gives them: who they are, what they do, then what they look like.
+ */
+export function composeExtractiveDescription(
+  ev: CharacterDossierEvidence,
+  otherCastNames: readonly string[] = [],
+): string {
+  const nameAlt = ev.forms.map(esc).join("|");
+  const others = otherCastNames.filter((n) => !ev.forms.includes(n));
+  const otherCastRe = others.length
+    ? new RegExp(`${LB}(?:${others.map(esc).join("|")})${RB}`)
+    : null;
 
-  // Appearance: unique phrases from the visual candidates, in span order.
+  /**
+   * ★★ THE CHARACTER MUST BE THE SUBJECT OF THE CLAUSE, and nothing weaker
+   *    works. Two rounds of this were measured on the owner's manuscript and
+   *    both produced grammatical sentences about the wrong person, because
+   *    "text after the name" is not "what the name does":
+   *
+   *      Gareth  ← "The kind of negotiation Lyssa conducted well…"
+   *      Mira    ← "…two people in it, the kitchen their primary room"
+   *      Tessa   ← "Loom and bolts of wool and the accumulated tools…"
+   *
+   *    In each the name sits inside a possessive or a prepositional phrase
+   *    and the predicate belongs to something else. The test is positional:
+   *    the name, then at most an adverb, then a FINITE VERB — and the name
+   *    must not itself be governed by a preposition, or "since the generation
+   *    before Gareth was…" reads as Gareth being something.
+   */
+  const PREP_BEFORE = /\b(?:before|after|since|than|with|for|to|from|near|beside|beyond|about|against|toward|towards|of|by|at|in|on|into|onto|unlike|like|behind|between)\s+$/i;
+  const clauseFrom = (spans: readonly DossierSpan[], maxLen: number): string | null => {
+    const subjectRe = new RegExp(
+      `${LB}(?:${nameAlt})${RB}\\s+(?:[a-z]+ly\\s+)?((?:was|is|were|are|had been|has been|became|remains?|always|never|seldom|often|usually|[a-z]{3,}(?:ed|es|s))\\b[^.;]{6,${maxLen}})`,
+    );
+    for (const span of spans.slice(0, 5)) {
+      const m = subjectRe.exec(span.text);
+      if (!m) continue;
+      // A name governed by a preposition is not the subject of what follows.
+      if (PREP_BEFORE.test(span.text.slice(Math.max(0, m.index - 24), m.index))) continue;
+      let clause = m[1].trim()
+        // ★ AN EM-DASH OR COLON INTRODUCES A NEW FOCUS. "Mira was a child —
+        //   two people in it, the kitchen their primary room" predicates
+        //   Mira for four words and the house for twenty.
+        .split(/\s*[—–:]\s*/)[0]
+        .replace(/^(?:was|is|were|are|had been|has been)\s+(?=an?\b|the\b|in\b)/, "")
+        .replace(/^(?:had|has)\s+been\s+/, "");
+      // ★ A CLAUSE THAT NAMES ANOTHER CAST MEMBER IS ABOUT THEM. This is the
+      //   same failure as the subject test one level out: "…which was the
+      //   kind of thing people said about Tessa" arrived under Mira.
+      if (otherCastRe && otherCastRe.test(clause)) continue;
+      // A cut at maxLen lands mid-word; fall back to the last whole word.
+      if (span.text.indexOf(clause) + clause.length < span.text.length
+          && /\w$/.test(clause) && !/[.!?]$/.test(clause)) {
+        const nextChar = span.text[span.text.indexOf(clause) + clause.length];
+        if (nextChar && /\w/.test(nextChar)) clause = clause.replace(/\s*\S+$/, "");
+      }
+      // Trim trailing words until the tail is not a dangling function word.
+      for (let guard = 0; guard < 6; guard++) {
+        if (usableClause(clause)) return clause;
+        const words = clause.split(/\s+/);
+        if (words.length <= 6) break;
+        clause = words.slice(0, -1).join(" ").replace(/[,:;]$/, "");
+      }
+    }
+    return null;
+  };
+
+  const sentences: string[] = [];
+
+  // 1 — IDENTITY. Direct definition: what the book says this person IS.
+  const identity = clauseFrom(ev.byChannel.identity, 130);
+  if (identity) sentences.push(identity.replace(/^./, (c) => c.toUpperCase()) + ".");
+
+  // 2 — CONDUCT. Only a habit the prose STATES. A bare verb tally was tried
+  //     here and reverted: "Most often seen to filed, considered, agreed"
+  //     is ungrammatical and says nothing, and "worked, died" as a
+  //     characterization is worse than silence. The verbs stay a counted
+  //     fact in the pack, where the model can weigh them as evidence and
+  //     phrase them itself; extraction may not compose.
+  const habit = clauseFrom(ev.byChannel.habitual, 100);
+  if (habit) sentences.push(habit.replace(/^./, (c) => c.toUpperCase()) + ".");
+
+  // 3 — APPEARANCE, last and only if the manuscript bound some to them.
   const seen = new Set<string>();
   const phrases: string[] = [];
+  const pack = buildDossierPack(ev);
+  const byN = new Map(pack.spans.map((s) => [s.n, s]));
   for (const n of pack.visualCandidates) {
     for (const phrase of extractDescriptivePhrases(byN.get(n)?.text ?? "")) {
       const key = phrase.toLowerCase();
@@ -1303,32 +1798,19 @@ export function composeExtractiveDescription(ev: CharacterDossierEvidence): stri
     }
     if (phrases.length >= PHRASE_CAP) break;
   }
+  if (phrases.length > 0) sentences.push(`${phrases.join("; ")}.`.replace(/^./, (c) => c.toUpperCase()));
 
-  const sentences: string[] = [];
-  if (phrases.length > 0) {
-    const joined = phrases.join("; ");
-    sentences.push(joined.charAt(0).toUpperCase() + joined.slice(1) + ".");
-  }
+  // 4 — BACKGROUND. Narrated only; a spoken claim is someone's opinion and
+  //     does not belong in a description written as fact.
+  const lore = clauseFrom(ev.byChannel["lore-narrated"], 120);
+  if (lore) sentences.push(lore.replace(/^./, (c) => c.toUpperCase()) + ".");
 
-  // One habit clause and one narrated lore clause, verbatim from the name
-  // onward. Spoken lore is someone's claim and stays out of a description
-  // written as fact. Each channel scans its first few spans for a clause
-  // that survives the usability tests, rather than betting on span zero.
-  const clauseFrom = (spans: readonly DossierSpan[], maxLen: number): string | null => {
-    for (const span of spans.slice(0, 3)) {
-      const m = new RegExp(`${LB}(?:${ev.forms.map(esc).join("|")})${RB}(?:['’]s)?\\s+(.{10,${maxLen}}?)(?:[.;]|$)`).exec(span.text);
-      if (!m) continue;
-      const clause = m[1].trim().replace(/^(?:was|is)\s+(?=in\b|a\b)/, "").replace(/^(?:had|has)\s+been\s+/, "");
-      if (usableClause(clause, span.text)) return clause;
-    }
-    return null;
-  };
-  const habitClause = clauseFrom(ev.byChannel.habitual, 90);
-  if (habitClause) sentences.push(habitClause.replace(/^./, (c) => c.toUpperCase()) + ".");
-  const loreClause = clauseFrom(ev.byChannel["lore-narrated"], 110);
-  if (loreClause) sentences.push(loreClause.replace(/^./, (c) => c.toUpperCase()) + ".");
-
-  return sentences.join(" ");
+  // ★ A SINGLE APPEARANCE FRAGMENT IS NOT A DESCRIPTION. "Outer coat." was
+  //   the whole of one character's card; a writer reads that as the feature
+  //   failing, not as the manuscript being thin. Below the floor, say
+  //   nothing and let the honest empty state do its job.
+  const out = sentences.join(" ");
+  return out.split(/\s+/).filter(Boolean).length >= 6 ? out : "";
 }
 
 /** The generated fields as ONE description block, for the single-accept UI.
@@ -1346,6 +1828,7 @@ export function composeProposalDescription(p: DossierProposal): string {
 export function buildExtractiveCard(
   ev: CharacterDossierEvidence,
   castRank: number,
+  kind: DossierKind = "character",
 ): ExtractiveCard {
   const pack = buildDossierPack(ev);
   const byN = new Map(pack.spans.map((s) => [s.n, s]));
@@ -1369,7 +1852,7 @@ export function buildExtractiveCard(
   }
 
   return {
-    role: deriveRoleFromCounts(ev.counts, castRank),
+    role: deriveRoleFromCounts(ev.counts, castRank, kind),
     factLine: pack.stats,
     quotes,
   };
