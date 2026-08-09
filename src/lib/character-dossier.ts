@@ -1214,6 +1214,135 @@ export function deriveRoleFromCounts(counts: DossierCounts, castRank: number): s
   return "minor character";
 }
 
+/**
+ * ★ ONE DESCRIPTION, NOT A PILE OF QUOTES — owner feedback from live testing.
+ *   The first card offered the manuscript's sentences as separate "Add" rows,
+ *   and reading it felt like search results, not a character description. The
+ *   conservative tier still may not GENERATE (measured: the 1.7B fabricates
+ *   or abstains), so this composes a description from EXTRACTED PHRASES: the
+ *   adjective-plus-noun fragments the descriptive test already anchors on,
+ *   the habit clause, the lore clause. Every phrase is the manuscript's own
+ *   words; only the joining punctuation is ours.
+ */
+const PHRASE_CAP = 5;
+
+/** Words the adjective SHAPE test admits that are never descriptive
+ *  modifiers in a phrase: adverbs of sequence, frequency and degree, and the
+ *  frequent action participles that put "kissed, sallow cheek" and "turned
+ *  look" into composed descriptions. A closed list is safe here because it
+ *  only prunes; the shape test still admits the open class. */
+const STOP_MODIFIER = new Set([
+  "then", "over", "never", "ever", "again", "once", "twice", "very", "every",
+  "kissed", "turned", "fixed", "directed", "seen", "left", "established",
+  "brushed", "opened", "closed", "raised", "lowered", "reached", "pressed",
+  "own", "other", "certain", "several", "said",
+]);
+
+const phraseModifier = (w: string): boolean => {
+  const lc = w.toLowerCase();
+  if (STOP_MODIFIER.has(lc) || NP_OPENER.has(lc)) return false;
+  if (/ly$/.test(lc)) return false; // adverbs read as adjectives by shape
+  return isAdjectiveShaped(lc);
+};
+
+export function extractDescriptivePhrases(text: string): string[] {
+  const out: string[] = [];
+  const all = new RegExp(`((?:[a-z-]+(?:,\\s+|\\s+)){0,3})(${APPEARANCE_NOUN})${RB}(\\s+(?:was|were|is|are|seemed|looked)\\s+(?:[a-z-]+(?:,?\\s+(?:and\\s+)?[a-z-]+){0,2}))?`, "gi");
+  for (let m = all.exec(text); m; m = all.exec(text)) {
+    const pre = (m[1] ?? "").trim();
+    const noun = m[2];
+    const post = (m[3] ?? "").trim();
+    // Leading modifiers: an NP opener or non-modifier RESTARTS the run, so
+    // "with a weathered" yields "weathered" and "kissed, sallow" yields
+    // "sallow" without dragging the verb along.
+    const preWords = pre.split(/[\s,]+/).filter(Boolean);
+    const adjectives: string[] = [];
+    for (const word of preWords) {
+      if (phraseModifier(word)) adjectives.push(word);
+      else adjectives.length = 0;
+    }
+    if (adjectives.length > 0) {
+      out.push(`${adjectives.join(", ")} ${noun}`);
+    } else if (post) {
+      const complementWords = post.replace(/^(?:was|were|is|are|seemed|looked)\s+/, "").split(/\s+/);
+      if (phraseModifier(complementWords[0] ?? "")) {
+        out.push(`${noun} ${post}`.replace(/\s+/g, " "));
+      }
+    }
+  }
+  return out;
+}
+
+/** A clause worth putting in a description: long enough to claim something,
+ *  not a conjunction or participle fragment, not cut at an honorific's
+ *  abbreviation point ("married to Mr." was observed). */
+function usableClause(clause: string, source: string): boolean {
+  const words = clause.split(/\s+/).filter(Boolean);
+  if (words.length < 5) return false;
+  if (/^(?:and|or|but|nor|so|yet|[a-z]+ing)\b/i.test(clause)) return false;
+  const cutAt = source.indexOf(clause) + clause.length;
+  if (/\b(?:Mr|Mrs|Ms|Dr|St)$/.test(clause)) return false;
+  void cutAt;
+  return true;
+}
+
+export function composeExtractiveDescription(ev: CharacterDossierEvidence): string {
+  const pack = buildDossierPack(ev);
+  const byN = new Map(pack.spans.map((s) => [s.n, s]));
+
+  // Appearance: unique phrases from the visual candidates, in span order.
+  const seen = new Set<string>();
+  const phrases: string[] = [];
+  for (const n of pack.visualCandidates) {
+    for (const phrase of extractDescriptivePhrases(byN.get(n)?.text ?? "")) {
+      const key = phrase.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      phrases.push(phrase);
+      if (phrases.length >= PHRASE_CAP) break;
+    }
+    if (phrases.length >= PHRASE_CAP) break;
+  }
+
+  const sentences: string[] = [];
+  if (phrases.length > 0) {
+    const joined = phrases.join("; ");
+    sentences.push(joined.charAt(0).toUpperCase() + joined.slice(1) + ".");
+  }
+
+  // One habit clause and one narrated lore clause, verbatim from the name
+  // onward. Spoken lore is someone's claim and stays out of a description
+  // written as fact. Each channel scans its first few spans for a clause
+  // that survives the usability tests, rather than betting on span zero.
+  const clauseFrom = (spans: readonly DossierSpan[], maxLen: number): string | null => {
+    for (const span of spans.slice(0, 3)) {
+      const m = new RegExp(`${LB}(?:${ev.forms.map(esc).join("|")})${RB}(?:['’]s)?\\s+(.{10,${maxLen}}?)(?:[.;]|$)`).exec(span.text);
+      if (!m) continue;
+      const clause = m[1].trim().replace(/^(?:was|is)\s+(?=in\b|a\b)/, "").replace(/^(?:had|has)\s+been\s+/, "");
+      if (usableClause(clause, span.text)) return clause;
+    }
+    return null;
+  };
+  const habitClause = clauseFrom(ev.byChannel.habitual, 90);
+  if (habitClause) sentences.push(habitClause.replace(/^./, (c) => c.toUpperCase()) + ".");
+  const loreClause = clauseFrom(ev.byChannel["lore-narrated"], 110);
+  if (loreClause) sentences.push(loreClause.replace(/^./, (c) => c.toUpperCase()) + ".");
+
+  return sentences.join(" ");
+}
+
+/** The generated fields as ONE description block, for the single-accept UI.
+ *  Order is the card's order; empty fields simply do not appear. */
+export function composeProposalDescription(p: DossierProposal): string {
+  const parts = [p.appearance.text, p.personality.text, p.background.text]
+    .filter(Boolean)
+    .map((t) => {
+      const s = t.trim().replace(/^./, (c) => c.toUpperCase());
+      return /[.!?…]$/.test(s) ? s : `${s}.`;
+    });
+  return parts.join(" ");
+}
+
 export function buildExtractiveCard(
   ev: CharacterDossierEvidence,
   castRank: number,

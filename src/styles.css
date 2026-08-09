@@ -15711,6 +15711,11 @@ body.electron-window-unfocused .wc-panel::after {
   letter-spacing: 0.03em;
 }
 
+/* The single-description row: the text is the card, so it may wrap freely
+   and the accept button rides its first line. */
+.world-dossier-desc { align-items: flex-start; }
+.world-dossier-desc .world-alias-actions { padding-top: 1px; }
+
 .world-dossier-note {
   display: flex;
   align-items: baseline;

@@ -16,8 +16,11 @@ import {
   buildExtractiveCard,
   buildFieldRequest,
   buildFieldRetryRequest,
+  composeExtractiveDescription,
+  composeProposalDescription,
   deriveRoleFromCounts,
   dossierSignature,
+  extractDescriptivePhrases,
   harvestDossierEvidence,
   hasDescriptiveAppearance,
   honorificClassOf,
@@ -25,6 +28,7 @@ import {
   normalizeFieldAnswer,
   usefulAppearance,
   type DossierPack,
+  type DossierProposal,
 } from "../src/lib/character-dossier";
 import type { Novel } from "../src/types";
 
@@ -260,6 +264,37 @@ async function main() {
   expect("extractive twin: Osric's card has a role but ZERO quotes",
     osricCard.role.length > 0 && osricCard.quotes.length === 0,
     JSON.stringify(osricCard.quotes));
+
+  console.log("\n══ composed description — one text, the manuscript's own words ══");
+  const composed = composeExtractiveDescription(marlow);
+  expect("Marlow's description composes from his phrases",
+    composed.includes("tall, gaunt") || composed.includes("weathered face"), composed);
+  expect("…and carries the habit clause",
+    /habit of counting/.test(composed), composed);
+  expect("…and the narrated lore, never the spoken rumour",
+    /fishing quarter/.test(composed) && !/wreck/.test(composed), composed);
+  expect("composed twin: Osric composes to EMPTY, not to filler",
+    composeExtractiveDescription(osric) === "", composeExtractiveDescription(osric));
+
+  expect("phrase extraction: 'with a weathered face' → 'weathered face'",
+    extractDescriptivePhrases("a tall man with a weathered face").includes("weathered face"));
+  expect("phrase extraction twin: the action participle does not ride along",
+    extractDescriptivePhrases("she kissed her sallow cheek").join("|") === "sallow cheek",
+    extractDescriptivePhrases("she kissed her sallow cheek").join("|"));
+  expect("phrase extraction twin: adverbs are not modifiers",
+    extractDescriptivePhrases("waved her mournfully hand").length === 0,
+    extractDescriptivePhrases("waved her mournfully hand").join("|"));
+
+  const proposal: DossierProposal = {
+    appearance: { text: "dark eyes", spans: [3], status: "grounded" },
+    personality: { text: "clever and superior in understanding", spans: [4], status: "grounded" },
+    background: { text: "", spans: [], status: "gated" },
+    role: "central character",
+    confidence: 0.8,
+  };
+  expect("proposal composes to one sentence-cased block, empty fields skipped",
+    composeProposalDescription(proposal) === "Dark eyes. Clever and superior in understanding.",
+    composeProposalDescription(proposal));
 
   console.log("\n══ cache signature ══");
   const sig1 = dossierSignature(NOVEL, CAST);

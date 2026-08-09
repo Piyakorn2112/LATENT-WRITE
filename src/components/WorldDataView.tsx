@@ -31,6 +31,8 @@ import {
   buildExtractiveCard,
   buildFieldRequest,
   buildFieldRetryRequest,
+  composeExtractiveDescription,
+  composeProposalDescription,
   dossierSignature,
   harvestDossierEvidence,
   normalizeFieldAnswer,
@@ -82,16 +84,20 @@ interface DossierUiState {
   forName: string | null;
   progress: HarvestProgress | null;
   fieldInFlight: DossierFieldKey | null;
-  /** Max-tier generated card, already gated and grounded. Null in "on". */
-  proposal: DossierProposal | null;
-  /** Deterministic card: counted-facts role + the manuscript's own quotes. */
+  /** ONE composed description — generated (max) or extractive (on). */
+  descriptionText: string;
+  /** Chapter numbers behind the description, for the provenance tooltip. */
+  citedChapters: number[];
+  /** True when the description came from the model rather than extraction. */
+  generated: boolean;
+  /** Deterministic role + counted-facts line. */
   card: ExtractiveCard | null;
   error?: string;
 }
 
 const DOSSIER_IDLE: DossierUiState = {
   phase: "idle", forName: null, progress: null, fieldInFlight: null,
-  proposal: null, card: null,
+  descriptionText: "", citedChapters: [], generated: false, card: null,
 };
 type ScanCategory = "characters" | "places" | "factions" | "entities";
 type ScanLabel = "character" | "place" | "faction" | "entity";
@@ -370,10 +376,18 @@ export function WorldDataView({
     cancelWhere((info) => info.task === DOSSIER_TASK);
   }, []);
 
-  /** The whole flow: read the manuscript once, then in max mode ask the model
-   *  one FIELD at a time over only that field's eligible spans. Every result
-   *  is gated and grounded by the module before the writer sees it. */
-  const generateDossier = async (entity: WorldCharacter) => {
+  /**
+   * The whole flow: read the manuscript once, then in max mode ask the model
+   * one FIELD at a time over only that field's eligible spans, compose the
+   * grounded fields into ONE description. Every result is gated and grounded
+   * by the module before the writer sees it.
+   *
+   * ★ `reroll` re-asks at sampling temperature — the writing tool's re-roll
+   *   precedent — because a deterministic decode regenerates the same words.
+   *   Only meaningful on the max tier; the extractive path is deterministic
+   *   by design and offers no Regenerate.
+   */
+  const generateDossier = async (entity: WorldCharacter, reroll = false) => {
     const runId = ++dossierRunIdRef.current;
     const controller = new AbortController();
     dossierAbortRef.current?.abort();
@@ -409,14 +423,23 @@ export function WorldDataView({
         .findIndex((c) => c.name === entity.name);
       const card = buildExtractiveCard(ev, Math.max(0, rank));
       const pack = buildDossierPack(ev);
+      // The deterministic composition: the manuscript's own phrases, joined.
+      // It is the whole answer in "on" mode, and the fallback whenever the
+      // model produces nothing usable in max mode.
+      const extractive = composeExtractiveDescription(ev);
+      const extractiveChapters = [...new Set(pack.spans.map((s) => s.chapter))].slice(0, 6);
 
-      // "on" is a different product, not a smaller model: counted-facts role
-      // plus the manuscript's own sentences. Measured: the 1.7B abstains or
-      // fabricates on this task and points at the right person about half the
-      // time, so it plays no part here.
+      // "on" is a different product, not a smaller model: measured, the 1.7B
+      // abstains or fabricates on this task, so it plays no part here.
       const mode = assistantMode(loadPrefs());
       if (mode !== "max" || !(await assistantAvailable())) {
-        if (alive()) setDossier({ phase: "ready", forName: entity.name, progress: null, fieldInFlight: null, proposal: null, card });
+        if (alive()) {
+          setDossier({
+            phase: "ready", forName: entity.name, progress: null, fieldInFlight: null,
+            descriptionText: extractive, citedChapters: extractive ? extractiveChapters : [],
+            generated: false, card,
+          });
+        }
         return;
       }
 
@@ -425,7 +448,10 @@ export function WorldDataView({
         if (!alive()) return;
         const request = buildFieldRequest(pack, field);
         if (!request) continue; // gate closed: never asked, never invented
-        setDossier({ phase: "writing", forName: entity.name, progress: null, fieldInFlight: field, proposal: null, card });
+        setDossier({
+          phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
+          descriptionText: "", citedChapters: [], generated: false, card,
+        });
 
         const ask = async (req: typeof request) => assistantRunJSON<Record<string, unknown>>({
           task: DOSSIER_TASK,
@@ -438,6 +464,9 @@ export function WorldDataView({
           schema: req.schema,
           maxTokens: req.maxTokens,
           timeoutMs: 120_000,
+          // A re-roll must be able to land somewhere new; deterministic
+          // decoding would reproduce the answer the writer just declined.
+          ...(reroll ? { temperature: 0.7, minP: 0.05 } : {}),
         });
 
         const first = await ask(request);
@@ -461,7 +490,20 @@ export function WorldDataView({
         proposal.confidence = Math.max(proposal.confidence, answer.confidence);
       }
 
-      if (alive()) setDossier({ phase: "ready", forName: entity.name, progress: null, fieldInFlight: null, proposal, card });
+      const generatedText = composeProposalDescription(proposal);
+      const citedSpans = [...proposal.appearance.spans, ...proposal.personality.spans, ...proposal.background.spans];
+      const citedChapters = [...new Set(citedSpans
+        .map((n) => pack.spans.find((s) => s.n === n)?.chapter)
+        .filter((c): c is number => c !== undefined))];
+      if (alive()) {
+        setDossier({
+          phase: "ready", forName: entity.name, progress: null, fieldInFlight: null,
+          descriptionText: generatedText || extractive,
+          citedChapters: generatedText ? citedChapters : (extractive ? extractiveChapters : []),
+          generated: !!generatedText,
+          card,
+        });
+      }
     } catch (error) {
       if ((error as Error)?.name === "AbortError") return;
       if (alive()) {
@@ -1459,6 +1501,7 @@ export function WorldDataView({
                             state: dossier,
                             llmMode: assistantMode(loadPrefs()),
                             onGenerate: () => void generateDossier(current as WorldCharacter),
+                            onRegenerate: () => void generateDossier(current as WorldCharacter, true),
                             onCancel: cancelDossier,
                             onDismiss: () => setDossier(DOSSIER_IDLE),
                           }
@@ -1506,29 +1549,19 @@ interface DossierFormProps {
   state: DossierUiState;
   llmMode: "off" | "on" | "max";
   onGenerate: () => void;
+  onRegenerate: () => void;
   onCancel: () => void;
   onDismiss: () => void;
 }
 
-const DOSSIER_FIELD_LABEL: Record<DossierFieldKey, string> = {
-  appearance: "Appearance",
-  personality: "Personality",
-  background: "Background",
-};
-
-const DOSSIER_QUOTE_LABEL: Record<"appearance" | "personality" | "background", string> = {
-  appearance: "looks",
-  personality: "manner",
-  background: "history",
-};
-
 /**
  * The card under the Description field. Three phases: a quiet offer, the
- * rewrite tool's own orb while working, then proposals that do nothing until
- * clicked. Max mode shows generated lines with their citations; "on" mode
- * shows the deterministic card only — the counted-facts role and the
- * manuscript's own sentences — because the small model measurably cannot do
- * this job and plays no part in it.
+ * rewrite tool's own orb while working, then ONE description and a role,
+ * each with a single accept — owner feedback replaced the earlier
+ * pick-a-quote rows ("character description, not prose pulled from
+ * chapters"). Max mode generates and can REGENERATE (a sampled re-roll);
+ * "on" mode composes deterministically from the manuscript's own phrases,
+ * which has one right answer and therefore no re-roll.
  */
 function DossierCard({
   entityName, description, dossier, onPatch,
@@ -1542,24 +1575,16 @@ function DossierCard({
   const mine = state.forName === entityName;
   const busy = mine && (state.phase === "reading" || state.phase === "writing");
   const ready = mine && state.phase === "ready";
+  const nothingFound = ready && !state.descriptionText;
 
-  const appendToDescription = (text: string) => {
+  const acceptDescription = () => {
     const current = description.trim();
-    onPatch({ description: current ? `${current}\n${text}` : text } as Partial<Entity>);
+    // An empty field is filled; existing writer text is never overwritten,
+    // the proposal lands under it on its own line.
+    onPatch({
+      description: current ? `${current}\n${state.descriptionText}` : state.descriptionText,
+    } as Partial<Entity>);
   };
-
-  const fields = ready && state.proposal
-    ? DOSSIER_FIELDS
-        .map((key) => ({ key, field: state.proposal![key] }))
-        .filter(({ field }) => field.text.length > 0)
-    : [];
-  // Quotes cover what generation left blank: everything in "on" mode, the
-  // gated or empty fields in max mode.
-  const quotes = ready && state.card
-    ? state.card.quotes.filter((q) =>
-        !state.proposal || state.proposal[q.kind as DossierFieldKey]?.text.length === 0)
-    : [];
-  const nothingFound = ready && fields.length === 0 && quotes.length === 0;
 
   return (
     <div className="world-field">
@@ -1571,8 +1596,8 @@ function DossierCard({
             className="world-alias-btn"
             onClick={dossier.onGenerate}
             title={llmMode === "max"
-              ? "Read the whole manuscript for this character and draft role and description lines, each cited to its passage"
-              : "Read the whole manuscript and offer this character's role and the passages that describe them"}
+              ? "Read the whole manuscript and write this character's role and description, grounded in cited passages"
+              : "Read the whole manuscript and compose this character's role and description from its own words"}
           >
             Read from manuscript
           </button>
@@ -1622,58 +1647,33 @@ function DossierCard({
             </div>
           )}
 
-          {fields.map(({ key, field }) => (
-            <div key={key} className="world-dossier-row">
-              <span className="world-alias-kind" title={
-                field.status === "repaired"
-                  ? "Every word locates in the cited passages; the citation was corrected in code"
-                  : "Every word locates in the cited passages"
+          {state.descriptionText && (
+            <div className="world-dossier-row world-dossier-desc">
+              <span className="world-dossier-text" title={
+                state.generated
+                  ? "Written by the local model from cited passages; every word was located in the manuscript before it reached you"
+                  : "Composed from the manuscript's own phrases; only the joining punctuation is added"
               }>
-                {DOSSIER_FIELD_LABEL[key]}
-              </span>
-              <span className="world-dossier-text">
-                {field.text}
-                <span className="world-dossier-cites">
-                  {field.spans.map((n) => ` [${n}]`).join("")}
-                </span>
+                {state.descriptionText}
+                {state.citedChapters.length > 0 && (
+                  <span className="world-dossier-cites">
+                    {"  ch "}{state.citedChapters.join(", ")}
+                  </span>
+                )}
               </span>
               <span className="world-alias-actions">
                 <button
                   className="world-alias-btn"
-                  onClick={() => appendToDescription(field.text)}
-                  title="Append this line to the Description"
+                  onClick={acceptDescription}
+                  title={description.trim()
+                    ? "Add this under your existing description"
+                    : "Set the Description field to this"}
                 >
-                  Add
+                  Use
                 </button>
               </span>
             </div>
-          ))}
-
-          {quotes.map((quote) => (
-            <div key={`${quote.kind}:${quote.chapter}:${quote.text.slice(0, 24)}`} className="world-dossier-row">
-              <span className="world-alias-kind" title={
-                quote.provenance === "said"
-                  ? "Spoken by a character about them; may be unfair or wrong in-world"
-                  : quote.provenance === "pronoun"
-                    ? "The passage names them by pronoun; the referent was resolved by the engine"
-                    : "The manuscript's own sentence"
-              }>
-                {DOSSIER_QUOTE_LABEL[quote.kind]}
-              </span>
-              <span className="world-dossier-text world-dossier-quote" title={quote.text}>
-                “{quote.text}” <span className="world-dossier-cites">ch {quote.chapter}</span>
-              </span>
-              <span className="world-alias-actions">
-                <button
-                  className="world-alias-btn"
-                  onClick={() => appendToDescription(`“${quote.text}” (ch ${quote.chapter})`)}
-                  title="Append this passage to the Description, quoted"
-                >
-                  Add
-                </button>
-              </span>
-            </div>
-          ))}
+          )}
 
           {nothingFound && (
             <div className="world-dossier-note">
@@ -1685,9 +1685,15 @@ function DossierCard({
 
           <div className="world-dossier-foot">
             <button className="world-alias-btn" onClick={dossier.onDismiss}>Dismiss</button>
-            <button className="world-alias-btn" onClick={dossier.onGenerate} title="Read the manuscript again">
-              Refresh
-            </button>
+            {llmMode === "max" && state.descriptionText && (
+              <button
+                className="world-alias-btn"
+                onClick={dossier.onRegenerate}
+                title="Write it again from the same evidence — a different draft, same grounding rules"
+              >
+                Regenerate
+              </button>
+            )}
           </div>
         </div>
       )}

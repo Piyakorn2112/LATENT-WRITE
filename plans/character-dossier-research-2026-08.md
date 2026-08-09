@@ -454,3 +454,40 @@ against the running component.
 - `verify:assistant-tasks` 30/30 (no regression)
 - alias UI verifiers 12/12 and full-pass (no regression)
 - `tsc` clean, `vite build` clean
+
+---
+
+# Addendum 2: live-testing feedback round (2026-08-09)
+
+Owner testing produced two corrections, both applied and verified.
+
+**One description, not a pile of quotes.** The first card offered the
+manuscript's sentences as separate accept-a-quote rows, which read as search
+results. The card now shows exactly two rows: the counted-facts role and ONE
+composed description with a single "Use" (fills the empty field, appends
+under existing text, never overwrites). Max mode generates it from the
+grounded fields and offers "Regenerate", a sampled re-roll at the writing
+tool's 0.7/0.05, since deterministic decoding would reproduce the declined
+draft. The "on" tier composes deterministically from extracted phrases (the
+adjective-noun fragments, the habit clause, the narrated lore clause; spoken
+lore stays out of a description written as fact), so it has one right answer
+and no re-roll. Example, from the harness manuscript: "Grey eyes; weathered
+face; thin face. Walked the tide line, and was in the habit of counting the
+boats twice. Born in the fishing quarter."
+
+**The scan was confused on root-crown.** Reproduced on the owner's live
+manuscript: 72 "characters" including "Lift" (18 of 20 uses are "the Lift"),
+"Bind" (7 of 7), "Tower", "Conclave", "Mosshollow", "The Listenfold Clinic"
+and "Alright", with "Magister Adena Volk" filed under places. Fixes, all
+positional or closed-class: the determiner test now runs at classification
+(>=40% determined usage over >=3 occurrences reroutes a "character", with a
+person-denoting head or lead word exempt in both directions, which is what
+recovers titled people); interjections stop-listed; suffix vocabulary gaps
+closed (school, clinic, anomaly, practice...); bare generic suffix words
+("College" beside "The Mycomedical College") folded as anaphora. Result:
+characters 72 to 56 with every departure verified against its own determiner
+counts. Gates: entity-scan 100%, known-names pass, name-bucket-accuracy
+100%, cast-corpus and attribution-corpus byte-identical.
+
+Suite now 59/59; UI verifier 18/18 (two-row card, Use semantics, append not
+overwrite, no Regenerate in the deterministic tier, honest empty state).

@@ -62,36 +62,49 @@ app.whenReady().then(async () => {
   gate(mid.waiting && mid.orbMounted,
     "while reading, the rewrite tool's orb indicator is mounted",
     `waiting=${mid.waiting} orb=${mid.orbMounted}`);
-  gate(p.rowCount >= 3, `${p.rowCount} rows rendered`,
-    "without this every gate below is vacuous");
+  gate(p.rowCount === 2, `exactly 2 rows: the role and ONE description (got ${p.rowCount})`,
+    "the pick-a-quote pile is gone; without rows every gate below is vacuous");
   gate(!p.waiting, "the wait row is gone when the card is ready");
   gate(p.texts.some((t) => /central character|major character/.test(t)),
     "the role row derives from counted facts", p.texts.join(" | "));
-  gate(p.kinds.includes("looks"), "a LOOKS quote is offered", p.kinds.join(", "));
-  gate(p.texts.some((t) => t.includes("tall, gaunt")),
-    "…and it is the manuscript's own description");
+  gate(p.texts.some((t) => /tall, gaunt|weathered face/.test(t)),
+    "the description is composed from the manuscript's own phrases",
+    p.texts.join(" | "));
+  gate(p.texts.some((t) => /habit of counting/.test(t)),
+    "…and reaches beyond looks into habits");
+  gate(p.texts.every((t) => !t.includes("“")),
+    "…as a description, not quoted prose", p.texts.join(" | "));
   gate(p.texts.every((t) => !t.includes("murmured Marlow")),
-    "the dialogue-tag sentence is not offered as description");
+    "the dialogue-tag sentence contributed nothing");
+  gate(!p.buttons.includes("Regenerate"),
+    "no Regenerate in the deterministic tier (one right answer)",
+    p.buttons.join(", "));
   gate(p.overflowing === 0, "no row overflows its container",
     `${p.overflowing} overflow`);
 
-  // "Use" writes the Role field.
+  // Role "Use" writes the Role field.
   const roleBefore = p.roleValue;
-  await js(`[...document.querySelectorAll(".world-dossier-row .world-alias-btn")].find((b) => b.textContent === "Use")?.click()`);
+  await js(`[...document.querySelectorAll(".world-dossier-row .world-alias-btn")][0]?.click()`);
   await wait(250);
   p = await probe();
   gate(roleBefore === "" && /character/.test(p.roleValue),
-    `"Use" wrote the Role field: "${p.roleValue}"`,
+    `role "Use" wrote the Role field: "${p.roleValue}"`,
     `before "${roleBefore}" after "${p.roleValue}"`);
 
-  // "Add" appends a quote to the Description, quoted and cited.
+  // Description "Use" fills the empty Description with ONE block.
   const descBefore = p.descriptionValue;
-  await js(`[...document.querySelectorAll(".world-dossier-row .world-alias-btn")].find((b) => b.textContent === "Add")?.click()`);
+  await js(`[...document.querySelectorAll(".world-dossier-desc .world-alias-btn")][0]?.click()`);
   await wait(250);
   p = await probe();
-  gate(descBefore === "" && p.descriptionValue.length > 0 && /\(ch \d\)/.test(p.descriptionValue),
-    `"Add" appended a cited quote to the Description`,
+  gate(descBefore === "" && p.descriptionValue.length > 20 && !p.descriptionValue.includes("\n"),
+    `description "Use" filled the field with one block`,
     `desc: "${p.descriptionValue.slice(0, 80)}"`);
+  const descOnce = p.descriptionValue;
+  await js(`[...document.querySelectorAll(".world-dossier-desc .world-alias-btn")][0]?.click()`);
+  await wait(250);
+  p = await probe();
+  gate(p.descriptionValue.startsWith(descOnce) && p.descriptionValue.includes("\n"),
+    "a second Use appends under the writer's text instead of overwriting it");
 
   // ── Osric: the never-described character ────────────────────────────────
   await js(`[...document.querySelectorAll(".world-row")].find((r) => r.textContent.includes("Osric"))?.click()`);
@@ -101,8 +114,8 @@ app.whenReady().then(async () => {
   await wait(900);
   p = await probe();
   console.log(`\n  Osric: ${p.rowCount} rows · note "${p.noteText.slice(0, 80)}"`);
-  gate(p.kinds.every((k) => k === "(role)"), "Osric gets no description rows",
-    p.kinds.join(", "));
+  gate(p.rowCount === 1 && !p.hasDescRow, "Osric gets the role row and NO description row",
+    `rows ${p.rowCount} desc ${p.hasDescRow}`);
   gate(/does not describe Osric/.test(p.noteText),
     "…and the honest empty state instead of an invention");
   gate(p.texts.some((t) => /minor|recurring|major|central/.test(t)),
