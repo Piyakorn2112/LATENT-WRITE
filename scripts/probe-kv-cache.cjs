@@ -50,6 +50,7 @@ const assistant = require(path.join(ROOT, 'electron', 'assistant.cjs'));
 const TIER = process.env.TIER || 'small';
 const CONFIGS = {
   f16:        { label: 'f16, no flash',   kvCacheType: null, flashAttention: undefined },
+  fa:         { label: 'flash only, f16 KV', kvCacheType: null, flashAttention: true },
   q8:         { label: 'Q8_0 + flash',    kvCacheType: 'Q8_0', flashAttention: true },
   'q8k-q4v':  { label: 'Q8_0 K / Q4_0 V', kvCacheType: { k: 'Q8_0', v: 'Q4_0' }, flashAttention: true },
 };

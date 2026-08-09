@@ -1022,6 +1022,33 @@ host accepts a `{ k, v }` pair so this stays re-measurable; nothing uses it.
 **Q8_0 on the 1.7B** saves ~180 MB but changes the answers, and that tier is
 not the memory driver (the 4B's 2.4 GB resident is). It stays on f16.
 
+★★ BUT FLASH ATTENTION IS NOT KV QUANTIZATION, and testing them together
+nearly cost the free half. Isolated, flash attention alone on the 1.7B ran
+1402/1429ms against 1437/1403ms plain — no separation at all — with
+**byte-identical** output. It is an exact-math kernel, not an approximation.
+Both tiers have it now; only the 4B quantizes its KV.
+
+#### The 4B's footprint: an idle host is not memory in use
+
+The preemption between the in-process host and the llama-server sidecar was
+one-directional. Interactive work that cannot fit stops the sidecar and retries
+(`yield-to-interactive`), but the sidecar had no equivalent: it read the idle
+host's ~2.4 GB as consumed and **halved its own slots**, 4 to 2 to 1, until the
+remainder fit. That is a throughput degradation the app inflicted on itself to
+protect a model nobody was using.
+
+It now reclaims an idle host holding the same model before it starts. The guard
+is narrow on purpose: only when the full slot count would otherwise be cut,
+only on an idle host, only for the same model. When memory is plentiful nothing
+changes, and a host with work in flight is never touched. The cost is at most
+one warm reload (~1.3s, the page cache still holds the weights) and only if
+interactive work returns.
+
+Two adjacent levers were checked and are already pulled: the sidecar caps
+`--cache-ram` at 1024 MB against llama-server's 8 GB default, and the 4B's
+context is caller-driven rather than fixed at 8192, so the dossier loads 4096
+and only the ask popover asks for the full window.
+
 ★★ AND RSS DOES NOT MEASURE A KV CACHE ON THIS PLATFORM. Two runs of the
 identical f16 configuration on the 4B, each in a fresh process, read 1930 MB
 and 2534 MB — **604 MB apart**, wider than any gap between the configurations

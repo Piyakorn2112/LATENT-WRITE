@@ -67,6 +67,25 @@ const MODEL_REGISTRY = {
     //    range, MORE than the entire 1.06 GB weights file. Without it in the
     //    budget below, the guard thinks a long context is free.
     kvBytesPerToken: 103 * 1024,
+    /**
+     * ★★ FLASH ATTENTION YES, KV QUANTIZATION NO, AND THE SPLIT IS MEASURED.
+     *
+     *    The two were first tested TOGETHER and the pair looked bad on this
+     *    tier, which nearly cost the free half of it. Isolated
+     *    (probe:kv-cache, one configuration per process, control runs either
+     *    side of each):
+     *
+     *      flash alone   1402/1429ms against 1437/1403ms plain — no separation
+     *                    at all — and BYTE-IDENTICAL output. It is an
+     *                    exact-math kernel, not an approximation.
+     *      + Q8_0 KV     1749ms, and the answer CHANGED.
+     *
+     *    So the 1.7B takes the lossless half and leaves the lossy half to the
+     *    4B, which is the tier whose 2.4 GB resident actually drives the
+     *    memory ceiling. Bundling two changes into one verdict is how a free
+     *    win hides behind a costly one.
+     */
+    flashAttention: true,
   },
   /**
    * ★ THE "MAX" TIER — a real reasoning model, chosen against the 8 GB ceiling
@@ -978,7 +997,35 @@ async function trySidecarRun(opts) {
   }
 
   const { slots: wantSlots, slotContext } = entry.sidecar;
-  const available = availableMemoryBytes();
+  let available = availableMemoryBytes();
+
+  // ★★ AN IDLE HOST HOLDING THE SAME MODEL IS NOT "MEMORY IN USE".
+  //
+  //    The preemption between these two engines was one-directional.
+  //    Interactive work that cannot fit stops the sidecar and retries
+  //    (`yield-to-interactive`, above), but the sidecar had no equivalent: it
+  //    read the idle in-process host's ~2.4 GB as consumed and HALVED ITS OWN
+  //    SLOTS, 4 → 2 → 1, until the remainder fit. That is a throughput
+  //    degradation the app inflicted on itself to protect a model nobody was
+  //    using, and it is the memory equivalent of the review pass asking
+  //    questions with no answer in them.
+  //
+  // ★  IT ONLY FIRES WHEN THE FULL SLOT COUNT WOULD OTHERWISE BE CUT, and only
+  //    on an IDLE host holding the SAME model. When memory is plentiful
+  //    nothing changes, and a host with work in flight is never touched — the
+  //    single-flight queue owns that request and its answer is already paid
+  //    for. Reclaiming this costs at most one warm reload (~1.3s, the OS page
+  //    cache still holds the weights) and only if interactive work returns.
+  const fullCost = loadCostBytes(entry, modelPath, wantSlots * slotContext);
+  if (
+    available < fullCost
+    && _hostAlive && _hostLoaded && _hostLoaded.modelPath === modelPath && !_inflight
+  ) {
+    await unload();
+    await new Promise((r) => setTimeout(r, 400));
+    available = availableMemoryBytes();
+  }
+
   let slots = wantSlots;
   while (slots >= 1 && available < loadCostBytes(entry, modelPath, slots * slotContext)) {
     slots = Math.floor(slots / 2);
