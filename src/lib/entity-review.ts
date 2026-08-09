@@ -370,9 +370,21 @@ export function selectReviewable(
     entry,
     priority: reviewPriority(entry, opts.text ? usageSignals(opts.text, entry.name) : undefined),
   }));
+  // ★★ A QUESTION WITH NO ANSWER IN IT IS PURE COST — AND PURE RISK. Priority
+  //    zero means the scan did not doubt this name AND its own usage counts do
+  //    not contradict the label, so there is nothing to ask. Measured on The
+  //    Root Crown: eleven of the twenty-four slots went to names in exactly
+  //    that state, which is 45% of the pass spent on questions whose only
+  //    possible outcome is churning a correct answer.
+  //
+  // ★  ONLY WHEN THE TEXT WAS PROVIDED. Without it there is no contradiction
+  //    score to compute, so priority zero means "unknown", not "nothing to
+  //    ask", and filtering on it would silently disable the whole pass for
+  //    every caller that does not pass a span.
+  const eligible = opts.text ? scored.filter((s) => s.priority > 0) : scored;
   // Stable within a priority so a rerun of the same scan asks the same
   // questions in the same order.
-  return scored
+  return eligible
     .map((s, index) => ({ ...s, index }))
     .sort((a, b) => (b.priority - a.priority) || (a.index - b.index))
     .slice(0, cap)
@@ -534,15 +546,26 @@ export async function reviewEntities(
       opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       signals,
     );
-    const result = await opts.run<unknown>({
-      task: ENTITY_REVIEW_TASK,
-      tag: entry.name,
-      systemPrompt: request.systemPrompt,
-      userText: request.userText,
-      schema: request.schema,
-      maxTokens: request.maxTokens,
-      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    });
+    // ★★ ONE BAD CALL COSTS ONE NAME. `run` is a bridge to another process and
+    //    it can reject — the host dies, the socket closes, a timeout races.
+    //    Unguarded, that rejection propagated out of `reviewEntities` and the
+    //    caller's try/catch threw away EVERY proposal in the pass, including
+    //    the ones already collected and correct. The failure of one name is
+    //    not evidence about the others.
+    let result: Awaited<ReturnType<typeof opts.run<unknown>>>;
+    try {
+      result = await opts.run<unknown>({
+        task: ENTITY_REVIEW_TASK,
+        tag: entry.name,
+        systemPrompt: request.systemPrompt,
+        userText: request.userText,
+        schema: request.schema,
+        maxTokens: request.maxTokens,
+        timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      });
+    } catch {
+      continue;
+    }
     if (!result.ok) continue;
 
     const proposal = normalizeProposal(entry, result.json, signals.occurrences);
@@ -614,8 +637,15 @@ export function applyProposalsToScanResult(
   };
   const changes: EntityReviewChange[] = [];
   const keys: ScanBucketKey[] = ["characters", "places", "factions", "entities"];
+  // ★ ONE ANSWER PER NAME. Two proposals for the same name applied in order
+  //   would move it twice, and the second reads the bucket the FIRST one put
+  //   it in — so a name could be walked across three buckets by a model that
+  //   answered inconsistently. Selection is stable and priority-ordered, so
+  //   the first proposal is the best-motivated one.
+  const settled = new Set<string>();
 
   for (const proposal of proposals) {
+    if (settled.has(proposal.name)) continue;
     const bar = proposal.scanDoubted
       ? minConfidence
       : Math.max(minConfidence, OVERTURN_CONFIDENT_MIN);
@@ -638,11 +668,15 @@ export function applyProposalsToScanResult(
       && proposal.occurrences < MIN_MOVE_OCCURRENCES
     ) continue;
 
-    next[fromKey] = next[fromKey].filter((n) => n !== proposal.name);
+    // ★ REMOVE FROM EVERY BUCKET, not just the one it was found in. A name the
+    //   scan managed to file twice would otherwise be COPIED by the move
+    //   rather than moved, leaving the writer one referent under two types.
+    for (const key of keys) next[key] = next[key].filter((n) => n !== proposal.name);
     if (proposal.proposedType !== "not-a-name") {
       const toKey = BUCKET_OF[proposal.proposedType];
       if (!next[toKey].includes(proposal.name)) next[toKey].push(proposal.name);
     }
+    settled.add(proposal.name);
     changes.push({
       name: proposal.name,
       from,
