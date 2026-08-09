@@ -604,7 +604,13 @@ function harvestSentence(
   // At most three words between name and predicate: room for an adverb or a
   // relative pronoun, not for a second clause. That constraint is what keeps
   // the drawing-room blinds out of Holmes's biography.
-  const loreActive = new RegExp(`${NAME}(?:['’]s)?\\s+(?:[a-z]+\\s+){0,3}${LORE_PREDICATE}`, "i");
+  // ★★ NO POSSESSIVE SUBJECT IN THE LORE CHANNEL. "Vey's kettle had been in
+  //    the safe-house kitchen longer than…" is a history OF THE KETTLE, and
+  //    it reached the writer as Vey's background. The possessive was allowed
+  //    so "Marlow's brother worked the nets" could count as his background,
+  //    but that same permission hands the character every object and relative
+  //    the sentence owns. A biography needs the person as its subject.
+  const loreActive = new RegExp(`${NAME}\\s+(?:[a-z]+\\s+){0,3}${LORE_PREDICATE}`, "i");
   const lorePassive = new RegExp(`${LORE_PREDICATE}\\s+(?:[a-z]+\\s+){0,3}${NAME}`, "i");
   const activeHit = loreActive.test(sentence);
   const passiveHit = !activeHit && lorePassive.test(sentence);
@@ -1486,6 +1492,11 @@ export function missingWords(line: string, texts: readonly string[]): string[] {
  *   pass, the Darcy line fails).
  */
 export function usefulAppearance(line: string): boolean {
+  // ★ A TRUNCATION MARKER MEANS THE ANSWER NEVER FINISHED. The 4B returned
+  //   "a person who i…" for a character, which tidyTruncatedText had already
+  //   cut back as far as it could; three words and an ellipsis is not a
+  //   description whatever else it contains.
+  if (/…$/.test(line.trim())) return false;
   if (APPEARANCE_NOUN_RE.test(line)) return true;
   return (line.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [])
     .some((w) => !STOP_WORDS.has(w) && isAdjectiveShaped(w));
@@ -1956,13 +1967,6 @@ function usableClause(clause: string): boolean {
 function subjectPronoun(ev: CharacterDossierEvidence): string {
   return ev.pronounClass === "masc" ? "He" : ev.pronounClass === "fem" ? "She" : "They";
 }
-function possessive(ev: CharacterDossierEvidence): string {
-  return ev.pronounClass === "masc" ? "his" : ev.pronounClass === "fem" ? "her" : "their";
-}
-function beVerb(ev: CharacterDossierEvidence): string {
-  return ev.pronounClass === "unknown" ? "are" : "is";
-}
-
 /** Lower-case a clause's first letter unless it opens on a proper noun. */
 function lowerFirst(text: string): string {
   return /^[A-Z][a-z]+\s/.test(text) && /^(?:The|A|An)\s/.test(text) === false
@@ -2037,19 +2041,35 @@ export function composeExtractiveDescription(
     return null;
   };
 
+  // ★★ HOW A CHARACTER DESCRIPTION ACTUALLY READS. A story bible does not
+  //    write "She is described by her weathered face" — it writes "The
+  //    village midwife. Weathered face, grey eyes that miss nothing." Bare
+  //    noun phrases are the NATIVE register of a character card, and the
+  //    frame that was wrapped around them to stop a semicolon pile reading
+  //    as broken was solving the wrong problem: what read as broken was the
+  //    JUNK phrases, and those are gone. Fragments of the right kind are not
+  //    a failure of prose, they are the form.
+  //
+  // ★ AND THE DEPTH ADAPTS TO WHAT EXISTS. A character the book never
+  //   describes physically should not get a short card — they should get
+  //   MORE of whatever the book does give, because a thin card reads as the
+  //   feature failing rather than as the manuscript being quiet. Budgets
+  //   below are raised when a neighbouring aspect is empty.
   const sentences: string[] = [];
+  const pack = buildDossierPack(ev);
+  const hasVisual = pack.visualCandidates.length > 0;
 
-  // 1 — IDENTITY. Direct definition: what the book says this person IS. A
-  //     bare clause ("The person who came when a birth needed…") is a
-  //     fragment on its own, so it gets a subject; the station opens the
-  //     paragraph when the prose named one.
+  // 1 — IDENTITY. Direct definition: what the book says this person IS. The
+  //     station alone is the cleanest possible opener when the prose named
+  //     one; the clause carries it when it did not.
   const identity = clauseFrom(ev.byChannel.identity, 130);
-  if (ev.counts.station && identity) {
-    sentences.push(`${ev.name} is the ${ev.counts.station}, ${lowerFirst(identity.replace(/^(?:was|is|had been)\s+/, ""))}.`);
+  const identityBody = identity ? lowerFirst(identity.replace(/^(?:was|is|had been)\s+/, "")) : "";
+  if (ev.counts.station && identityBody) {
+    sentences.push(`The ${ev.counts.station}, ${identityBody}.`);
   } else if (ev.counts.station) {
-    sentences.push(`${ev.name} is the ${ev.counts.station}.`);
-  } else if (identity) {
-    sentences.push(`${ev.name} ${lowerFirst(identity)}.`);
+    sentences.push(`The ${ev.counts.station}.`);
+  } else if (identityBody) {
+    sentences.push(`${identityBody.replace(/^./, (c) => c.toUpperCase())}.`);
   }
 
   // 2 — CONDUCT. Only a habit the prose STATES. A bare verb tally was tried
@@ -2061,11 +2081,22 @@ export function composeExtractiveDescription(
   const habit = clauseFrom(ev.byChannel.habitual, 100);
   if (habit) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(habit)}.`);
 
-  // 3 — APPEARANCE, last and only if the manuscript bound some to them.
+  // ★ WHEN THE BOOK NEVER DESCRIBES THEM, GIVE MORE OF WHAT IT DOES GIVE.
+  //   A viewpoint character has no appearance evidence by construction, and
+  //   a two-line card for the protagonist reads as the feature failing. Her
+  //   interior is what the book offers instead, so it fills the gap rather
+  //   than being held back for symmetry.
+  if (!hasVisual) {
+    const interior = clauseFrom(ev.byChannel.interiority, 110);
+    if (interior) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(interior)}.`);
+  }
+
+  // 3 — APPEARANCE, in the register a character card actually uses.
   const seen = new Set<string>();
   const phrases: string[] = [];
-  const pack = buildDossierPack(ev);
   const byN = new Map(pack.spans.map((s) => [s.n, s]));
+  // More phrases when nothing else carried the card.
+  const phraseBudget = sentences.length === 0 ? PHRASE_CAP + 2 : PHRASE_CAP;
   for (const n of pack.visualCandidates) {
     const span = byN.get(n);
     if (!span) continue;
@@ -2078,21 +2109,15 @@ export function composeExtractiveDescription(
       if (seen.has(key)) continue;
       seen.add(key);
       phrases.push(phrase);
-      if (phrases.length >= PHRASE_CAP) break;
+      if (phrases.length >= phraseBudget) break;
     }
-    if (phrases.length >= PHRASE_CAP) break;
+    if (phrases.length >= phraseBudget) break;
   }
-  // ★★ A SEMICOLON PILE IS NOT PROSE. "Small, mended scar; warm face;
-  //    different look" is a search result with punctuation. The phrases are
-  //    the manuscript's own and must stay verbatim, but they can be placed
-  //    inside a frame that reads as a sentence — extraction supplies the
-  //    words, the template supplies the grammar, and nothing is invented
-  //    because the frame states only that the book describes them.
+  // The phrases are the manuscript's own words, listed as a card lists
+  // them. Sentence-cased and stopped, so they read as a line rather than a
+  // query result, and joined with commas rather than semicolons.
   if (phrases.length > 0) {
-    const list = phrases.length === 1
-      ? phrases[0]
-      : `${phrases.slice(0, -1).join(", ")} and ${phrases[phrases.length - 1]}`;
-    sentences.push(`${subjectPronoun(ev)} ${beVerb(ev)} described by ${possessive(ev)} ${list}.`);
+    sentences.push(`${phrases.join(", ").replace(/^./, (c) => c.toUpperCase())}.`);
   }
 
   // 4 — BACKGROUND. Narrated only; a spoken claim is someone's opinion and
@@ -2105,7 +2130,11 @@ export function composeExtractiveDescription(
   //   failing, not as the manuscript being thin. Below the floor, say
   //   nothing and let the honest empty state do its job.
   const out = sentences.join(" ");
-  return out.split(/\s+/).filter(Boolean).length >= 6 ? out : "";
+  // ★ FIVE, not six. The natural register is shorter than the frame it
+  //   replaced: "Small mended scar, warm face." is a real card line at five
+  //   words and was being discarded by a floor tuned to the wordier version.
+  //   "Outer coat." still is not.
+  return out.split(/\s+/).filter(Boolean).length >= 5 ? out : "";
 }
 
 /** The generated fields as ONE description block, for the single-accept UI.

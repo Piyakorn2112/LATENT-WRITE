@@ -57,6 +57,8 @@ const CH1 = [
   "Marlow had been born in the fishing quarter, and Marlow's brother still worked the nets there.",
   // Interiority: the viewpoint channel. Osric acts throughout and never thinks.
   "Marlow knew the tide would turn early. Marlow wondered whether the boats would come back at all. Marlow remembered the year they had not, and Marlow had never liked the look of that water.",
+  // The kettle's history, not Marlow's. Only the possessive form appears.
+  "Marlow's kettle had been in the harbour kitchen longer than anyone could say.",
   "Osric waited by the gate. Osric said nothing, and Osric left before the bell.",
 ].join("\n\n");
 
@@ -347,6 +349,44 @@ async function main() {
     traitPack, "personality");
   expect("floor twin: the one-word over-compression is still vacuous",
     oneWord.status === "vacuous", oneWord.status);
+
+  console.log("\n══ the card's register, and the regressions this pass caused ══");
+  const marlowCard = composeExtractiveDescription(marlow, ["Wren", "Osric", "Tam"]);
+  expect("no clinical frame — a card lists, it does not narrate itself",
+    !/is described by|are described by/.test(marlowCard), marlowCard);
+  expect("an apposition after a station carries its comma",
+    !/\bThe [a-z]+ the\b/.test(marlowCard), marlowCard);
+  expect("nothing ends on a dangling function word",
+    marlowCard.split(/(?<=\.)\s+/).every((s) =>
+      !/\b(?:a|an|the|of|to|in|on|at|by|for|with|and|or|but)\.$/.test(s.trim())), marlowCard);
+  expect("no doubled punctuation from joining",
+    !/[,;]\s*\.|\.\s*\./.test(marlowCard), marlowCard);
+  expect("no double space from an empty segment",
+    !/ {2}/.test(marlowCard), marlowCard);
+  expect("every sentence still opens capitalised and closes on a stop",
+    marlowCard.split(/(?<=\.)\s+/).every((s) => /^[A-Z]/.test(s.trim()) && /\.$/.test(s.trim())),
+    marlowCard);
+
+  // ★ THE FLOOR MUST ADMIT A SHORT CARD AND REFUSE A TRIVIAL ONE. Both sides
+  //   come from real output: "Small mended scar, warm face." is a card line
+  //   at five words; "Outer coat." is not one at two.
+  expect("floor admits a five-word card line",
+    "Small mended scar, warm face.".split(/\s+/).length >= 5);
+  expect("floor twin: refuses a two-word fragment",
+    "Outer coat.".split(/\s+/).length < 5);
+
+  console.log("\n══ adaptive depth — a quiet aspect must not shorten the card ══");
+  expect("interiority is reachable by the composer and sits in the trait gate",
+    marlow.byChannel.interiority.length > 0
+      && buildDossierPack(marlow).traitCandidates.length > 0);
+
+  expect("a truncated answer is never a description",
+    !usefulAppearance("a person who i…"), "a person who i…");
+  expect("truncation twin: the same shape finished IS one",
+    usefulAppearance("a person with a weathered face"));
+  expect("lore twin: a possessive subject is the OBJECT's history, not the person's",
+    !texts(marlow, "lore-narrated").includes("kettle had been"),
+    texts(marlow, "lore-narrated"));
 
   console.log("\n══ cache signature ══");
   const sig1 = dossierSignature(NOVEL, CAST);

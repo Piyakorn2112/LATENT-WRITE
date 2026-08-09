@@ -101,6 +101,16 @@ export async function runThinkPass(
     schema: object;
     budget: number;
     timeoutMs?: number;
+    /**
+     * ★ PASS THIS WHENEVER THE CALLER'S OTHER REQUESTS SET ONE, AND PASS THE
+     *   SAME VALUE. `ensureLoaded` reuses a session when the loaded context
+     *   is >= the wanted one, so a small answer call after a big think pass
+     *   is free — but a big think pass after a small answer call RELOADS the
+     *   model. A caller that sizes its answers down and leaves this unset
+     *   therefore pays a full reload mid-card, which is the opposite of what
+     *   sizing down was for. Omitted keeps the tier default.
+     */
+    contextSize?: number;
   },
 ): Promise<string | null> {
   const result = await run<{ text?: unknown }>({
@@ -115,6 +125,7 @@ export async function runThinkPass(
     tier: "max",
     maxTokens: req.budget,
     timeoutMs: req.timeoutMs ?? 60_000,
+    ...(req.contextSize ? { contextSize: req.contextSize } : {}),
   });
   if (!result.ok) return null;
   const raw = typeof result.json?.text === "string" ? result.json.text : "";

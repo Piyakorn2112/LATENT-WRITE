@@ -805,6 +805,24 @@ a character being *in the room*, and treating them as the same thing makes the c
 The app decides about **90%** of these cases with rules alone and asks the local
 model only about the genuinely ambiguous remainder.
 
+**Filling in a character card.** Every world entry has a **Read from
+manuscript** button. It reads the whole book once and offers a role and one
+description, each with a single Use. It works for places, factions and other
+entries too, asking each the questions that suit it. A place is asked what
+it is like to be in, a group what it does and controls.
+
+The rule the whole feature is built on: **it will leave a field empty rather
+than guess.** A character the book has not described yet gets a card that
+says so. That sounds like a small thing and it is the entire design, because
+both local models, handed no evidence at all, will confidently invent a beard
+and a robe and cite a passage that does not exist. Everything the model
+writes is checked against the passages before you see it, and the passages
+are the manuscript's own sentences.
+
+If the book never pauses to describe someone, which is normal for the
+character a story is told *through*, the card leans on what the book does
+give: what they think, what they habitually do, and what is known about them.
+
 ---
 
 
@@ -866,6 +884,104 @@ flowchart LR
 - Whole-book scans on very large novels are still expensive even without semantic assist.
 - Semantic assist remains runtime-gated and cannot be used in plain Vite/web dev.
 - Moving entries between buckets is cheap, but rescans remain the dominant cost.
+
+#### Bucketing: the determiner test
+
+A name usually written **"the X"** is not a person. That positional fact,
+already used to keep non-speakers out of dialogue attribution, now decides
+buckets too: a candidate filed as a character whose usage is 40% or more
+determined over at least three occurrences is rerouted by suffix and score.
+The exemption is a closed class of role words and runs both ways, because
+titles legitimately take determiners. "The Crown Prince" stays a character,
+and "Magister Adena Volk" is recovered from Places.
+
+Measured on a 30-chapter manuscript this moved the character bucket from 72
+entries to 56: `Lift` (18 of 20 uses are "the Lift"), `Bind` (7 of 7),
+`Conclave`, `Mosshollow` and `The Listenfold Clinic` all left. Interjections
+are stop-listed as a closed class, because `Alright` had reached the cast by
+opening dialogue, never appearing lowercase, and counting an opening quote as
+mid-sentence evidence. A bare generic suffix word beside its own multi-word
+name ("College" next to "The Mycomedical College") is anaphora, and folds.
+
+</details>
+
+
+<details>
+<summary><b>Under the hood</b> · full technical detail</summary>
+
+### System 15: The Character Dossier
+
+Reads the manuscript and offers a **role** and one **description** for any
+world entry, each with a single accept. `character-dossier.ts` owns it; the
+panel only wires it. Nothing enters the fields until clicked, because both
+fields are read back into the model packs and the gender inference as if the
+writer had asserted them.
+
+#### The finding that shaped it
+
+Prose almost never describes a character in a sentence containing their name.
+Every physical description of Elizabeth Bennet arrives by pronoun ("the
+beautiful expression of her dark eyes", "Her face is too thin"), so a
+name-anchored search returned fourteen spans for her, none about her. The
+harvest therefore rides `resolvePronounOwners`, the engine's own pronoun
+resolution, at its two trusted confidence rungs.
+
+#### The channels
+
+Thirteen, grouped the way narratology groups characterization: **direct
+definition** (`identity`, as in "Mira was the person who came when a birth needed
+more than the family could give") and indirect definition through
+**appearance**, **action**, **speech** and habit. `interiority` is the
+viewpoint channel: a novel told through someone never stops to describe them
+but opens their thoughts constantly, and the *rate* of cognition verbs
+identifies which characters those are. Both viewpoints of a dual-POV
+manuscript are found and nobody else is.
+
+#### What each tier does
+
+| mode | role | description |
+|---|---|---|
+| off | card hidden | card hidden |
+| on | counted facts, or the station the prose names | the 1.7B writes the appearance line when it can ground one; deterministic composition supplies the rest |
+| max | same | the 4B, one call per field, with a real reasoning pass on personality |
+
+#### The gates, which are code and not prompt text
+
+Handed a pack with **zero** evidence, both shipping models invented a full
+physical description and cited a passage number that did not exist, at
+confidence 0.8, with "an empty answer is a correct answer" already in the
+prompt. So a field with no eligible spans is never asked and never accepted,
+and `GATE=off` in the probe reproduces the fabrication it prevents.
+
+Behind the model every claim is checked in code. Appearance and background
+are **factual** and must locate word for word; a claim that fails its own
+citations is repaired against the whole pack before it is refused, because
+both tiers were measured writing a correct description from a span they read
+but failed to number. Personality is **abstractive**, since "meticulous" is
+precisely what the prose does not say, so it is checked for invented
+particulars instead. Getting that distinction wrong was the worst bug this
+feature had: word grounding refused every good trait answer, and the retry
+replaced them with word salad.
+
+#### Performance Paths
+
+- One harvest per novel covers the whole cast, cached on a content plus cast
+  signature: 121k words in 2.3s, 535k words in 5.3s at 114 MB.
+- Model calls run at `contextSize: 4096`, measured against real prompts of
+  335 to 777 tokens; the tier's 8192 default is half a gigabyte of KV cache for
+  nothing. The reasoning pass takes the same window deliberately, because
+  `ensureLoaded` reuses a session only when the loaded context is at least
+  the wanted one. A small answer after a big think is free, a big think
+  after a small answer reloads the model.
+- Only `personality` spends a reasoning pass, and only with two or more
+  candidate spans to weigh.
+
+#### Current Bottlenecks
+
+- The reasoning pass costs ~30s on top of a ~10s card, for two answers
+  materially richer out of five. `decideDossierThinking` is one function.
+- A character the manuscript never describes gets an honest empty card. That
+  is correct, and below roughly 15k words it is still the common outcome.
 
 </details>
 
@@ -1832,6 +1948,9 @@ Four words are used throughout, so they are worth defining once.
 | Presence review (model) † | the 7 cases rules would not decide | 4 answered correctly, 3 declined, **0 answered wrongly**. Needs the model downloaded, so it is not part of the automated run. |
 | Alias linking † | 47 characters, 6 books | 8 proposals, **8 correct, 0 wrong merges**. The automated probe reports the 8 proposals and their refusals; the correctness scoring was done by hand. |
 | Local prose review | 8 patterns, 120 expectations | **100%** recall and precision |
+| Character dossier | evidence coverage, top-10 cast, 6 books | **88%** have some appearance evidence, **75%** have three spans or more |
+| Character dossier † | the empty-pack gate, both tiers | ungated, **both models invent** a description and cite a passage that does not exist, at confidence 0.8. Gated, neither is asked and nothing is produced. `GATE=off` reproduces it. |
+| Character dossier † | max tier on a 30-chapter manuscript | every field either grounded in its cited passages or honestly refused, **0 fabrications** |
 
 **The two speech numbers are the most important thing on this page.** The
 curated suite is hand-written cases, and scoring 100% on examples you wrote
@@ -2056,6 +2175,14 @@ npm run test:event-detect                     # events vs the gold set
 npx tsx scripts/test-character-presence.ts    # presence vs mention
 npx tsx scripts/test-alias-propose.ts         # alias linking and its vetoes
 npx tsx scripts/scan-accuracy-suite.ts        # local prose-review patterns
+npm run test:character-dossier                # the dossier engine, 85 assertions
+
+# The dossier, measured rather than asserted
+npm run probe:character-dossier               # evidence coverage across the corpus
+npm run probe:character-dossier -- --growth   # coverage as a draft accrues
+npm run probe:character-dossier -- --top1     # the no-model baseline, for hand judging
+TIERS=max ./node_modules/.bin/electron scripts/probe-dossier-model.cjs
+GATE=off TIERS=max ./node_modules/.bin/electron scripts/probe-dossier-model.cjs  # the canary
 
 # Behaviour gates
 npx tsx scripts/verify-annotation-pins.ts     # corrections stick, and touch nothing else
@@ -2105,6 +2232,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run test:auto-format` | `scripts/test-auto-format.ts` |
 | `npm run test:cast-corpus` | `scripts/test-cast-corpus.ts` |
 | `npm run test:cast-roles` | `scripts/test-cast-roles.ts` |
+| `npm run test:character-dossier` | `scripts/test-character-dossier.ts` |
 | `npm run test:chapter-brief` | `scripts/test-chapter-brief.ts` |
 | `npm run test:chapter-observation` | `scripts/test-chapter-observation.ts` |
 | `npm run test:chapter-roles` | `scripts/test-chapter-roles.ts` |
@@ -2162,6 +2290,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run verify:assistant-runtime` | `scripts/verify-assistant-runtime.cjs` |
 | `npm run verify:assistant-tasks` | `scripts/verify-assistant-tasks.cjs` |
 | `npm run verify:cross-widgets` | `scripts/verify-cross-widgets.mjs` |
+| `npm run verify:dossier-ui` | `scripts/verify-dossier-ui.cjs` |
 | `npm run verify:knowledge-e2e` | `scripts/verify-knowledge-e2e.mjs` |
 | `npm run verify:max-ask-e2e` | `scripts/verify-max-ask-e2e.mjs` |
 | `npm run verify:model-manage` | `scripts/verify-model-manage.cjs` |
@@ -2304,6 +2433,8 @@ then craft detail from coarse to fine.
 - `src/lib/use-analysis.ts`, analysis hook and worker dispatch.
 - `src/lib/chapter-analysis-runner.ts`, pure analysis pipeline.
 - `src/lib/world-data.ts`, world/entity scanning and name resolution.
+- `src/lib/character-dossier.ts`, the character card: evidence harvest, field gates, grounding. Read its header before changing it; every rule is a response to a measured failure, and the gates are what stop the models inventing people.
+- `plans/character-dossier-research-2026-08.md`, the investigation, the funnel counts, and why the small tier is not a smaller version of the big one.
 - `src/lib/narrative-events.ts`, event detection. Read its header before changing it; every rule is a response to a measured failure.
 - `src/lib/chapter-observation.ts`, the "This chapter" brief above the widgets.
 - `src/lib/story-graph.ts`, chapter graph generation and persistence.

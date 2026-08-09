@@ -498,6 +498,7 @@ export function WorldDataView({
             task: DOSSIER_TASK, tag: entity.name, tier: "small",
             systemPrompt: smallReq.systemPrompt, userText: smallReq.userText,
             schema: smallReq.schema, maxTokens: smallReq.maxTokens, timeoutMs: 60_000,
+            contextSize: 4096,
           });
           if (!alive()) return;
           const answer = res.ok ? normalizeFieldAnswer(res.json, pack, "appearance") : null;
@@ -563,6 +564,9 @@ export function WorldDataView({
               schema: thinkReq.schema,
               budget: policy.budget,
               timeoutMs: 90_000,
+              // Same window as the answer calls, or the first answer at 4096
+              // would make this one reload the model. See runThinkPass.
+              contextSize: 4096,
             });
             if (!alive()) return;
           }
@@ -585,6 +589,14 @@ export function WorldDataView({
           schema: req.schema,
           maxTokens: req.maxTokens,
           timeoutMs: 120_000,
+          // ★ 4096, NOT THE MAX TIER'S 8192 DEFAULT. Measured, the dossier
+          //   prompts run 335-777 tokens and the worst case — personality
+          //   carrying a full 1024-token note block plus a 512-token answer —
+          //   reaches ~2400. The other half of an 8k window is ~530 MB of KV
+          //   cache allocated for nothing, which the alias-referent layer
+          //   already established on this same panel.
+          contextSize: 4096,
+
           // A re-roll must be able to land somewhere new; deterministic
           // decoding would reproduce the answer the writer just declined.
           ...(reroll ? { temperature: 0.7, minP: 0.05 } : {}),
