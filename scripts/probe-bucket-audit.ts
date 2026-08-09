@@ -14,6 +14,13 @@
 import { readFile } from "fs/promises";
 import { scanAndClassify, determinerUsage } from "../src/lib/world-data";
 import type { AdaptivePredictionTrace } from "../src/types";
+import {
+  selectReviewable,
+  reviewPriority,
+  usageSignals,
+  REVIEW_CAP,
+  type EntityType,
+} from "../src/lib/entity-review";
 
 const DEFAULT_BOOK = "/Users/piyakorn/Desktop/Testwriting/novel-reader/public/novels/root-crown.txt";
 
@@ -59,6 +66,35 @@ async function main() {
 
   const total = result.characters.length + result.places.length + result.factions.length + result.entities.length;
   console.log(`\n${total} names in ${(ms / 1000).toFixed(1)}s`);
+
+  // ── what the review pass would actually be asked ────────────────────────
+  //
+  // The scan's confidence is what `selectReviewable` ranks on, so this is
+  // where an honest low confidence turns into a question the model gets to
+  // answer. A name the scan guessed at and the queue never reaches is a name
+  // nobody will ever fix.
+  const entries = traceOut.value.map((t) => ({
+    name: t.spanText,
+    currentType: t.predictedLabel as EntityType,
+    needsReview: t.needsReview,
+    ambiguityGap: t.ambiguityGap,
+  }));
+  const selected = selectReviewable(entries, { text: fullText });
+  console.log(`\n── review queue (cap ${REVIEW_CAP} of ${entries.length}) ──────────────────`);
+  for (const [i, e] of selected.entries()) {
+    const t = traceByName.get(e.name);
+    const s = usageSignals(fullText, e.name);
+    console.log(
+      `  ${String(i + 1).padStart(2)}. ${e.name.padEnd(30)} ${e.currentType.padEnd(10)}`
+      + ` conf ${(t?.confidence ?? 0).toFixed(2)}  prio ${reviewPriority(e, s).toFixed(2)}`
+      + `  speaks ${s.spoken} to ${s.addressed} place ${s.placePrep} det ${s.determiner}`,
+    );
+  }
+  const missed = entries.filter((e) => e.needsReview && !selected.some((s) => s.name === e.name));
+  if (missed.length) {
+    console.log(`\n  ${missed.length} name(s) the scan doubted but the cap excluded:`);
+    for (const m of missed) console.log(`    ${m.name} (${m.currentType})`);
+  }
 }
 
 if (process.argv[1] && process.argv[1].endsWith("probe-bucket-audit.ts")) {

@@ -939,6 +939,7 @@ function headVocabularyLabel(name: string): "place" | "faction" | "entity" | nul
   return vocabularyLabelOf(headWordOf(name));
 }
 
+
 const CHAR_TITLE_RE = /\b(lord|lady|sir|captain|master|doctor|dr|father|mother|queen|king|prince|princess|elder|chief|general|colonel|major|sergeant|inspector|professor|saint|magister|marshal|warden|goodman|goodwife|brother|sister|abbot|abbess|madam|mistress|dame)\s*$/i;
 
 /**
@@ -955,6 +956,23 @@ const PERSON_HEAD_RE = /\b(prince|princess|king|queen|emperor|empress|duke|duche
 /** The title can also LEAD the name: "Magister Adena Volk", "Aunt Mira",
  *  "Blacksmith Oren". Same closed class, tested at the front. */
 const PERSON_LEAD_RE = /^(?:prince|princess|king|queen|emperor|empress|duke|duchess|lord|lady|marshal|warden|magister|master|mistress|captain|colonel|general|sergeant|doctor|dr|professor|priest|priestess|monk|abbot|abbess|brother|sister|father|mother|elder|chief|blacksmith|goodman|goodwife|aunt|uncle|madam|madame|mistress|dame|inspector|saint)\.?\s+\S/i;
+
+/**
+ * ★ A TITLE ANYWHERE IN A NAME MAKES IT A PERSON'S NAME. PERSON_HEAD_RE reads
+ *   the end and PERSON_LEAD_RE reads the front, so "Crown Prince Sevren" — the
+ *   title in the middle — matched neither and was filed as a character only by
+ *   the no-evidence default, at confidence 0.20, which then spent a review slot.
+ *
+ *   Guarded on the head: "The Guard Tower" contains `guard` and is a building,
+ *   and the head word is the thing that settles it.
+ */
+const PERSON_TITLE_WORD_RE = new RegExp(`^${/\((?:[a-z|]+)\)/.exec(PERSON_HEAD_RE.source)?.[0] ?? "(?!)"}$`, "i");
+
+function nameCarriesPersonTitle(name: string): boolean {
+  if (headVocabularyLabel(name)) return false;
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  return words.length >= 2 && words.some((w) => PERSON_TITLE_WORD_RE.test(w));
+}
 
 const PLACE_PREP_RE = /\b(in|at|from|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
 
@@ -1105,7 +1123,8 @@ function decideBucket(
   signals: EntityContextSignals,
   determined: boolean,
 ): BucketDecision {
-  const headIsPerson = PERSON_HEAD_RE.test(name) || PERSON_LEAD_RE.test(name);
+  const headIsPerson =
+    PERSON_HEAD_RE.test(name) || PERSON_LEAD_RE.test(name) || nameCarriesPersonTitle(name);
 
   // ★ TITLE REFERENCE IS THE ONE LEGITIMATE DETERMINED PERSON. "the Crown
   //   Prince", "the Spore Warden", "Magister Volk" — a title takes an article
@@ -1165,8 +1184,17 @@ function decideBucket(
   // Nothing left. A bare repeated capitalised form with no determiner is
   // overwhelmingly a person in a novel; a determined one is not, and there is
   // no honest way to say which of the other three it is.
-  return determined
-    ? { label: "entity", confidence: 0.05, reason: "undecided-determined" }
+  if (determined) return { label: "entity", confidence: 0.05, reason: "undecided-determined" };
+
+  // ★ ZERO DETERMINERS ACROSS MANY SIGHTINGS IS NOT "NO EVIDENCE" — it is the
+  //   strongest person signal this codebase has, and the whole basis of
+  //   `filterSpeakerCandidates`. A name written bare twenty times running is a
+  //   person even when nothing else fired, and calling that a 0.2 guess sent
+  //   real minor characters into the review queue ahead of names nobody could
+  //   classify at all.
+  const neverDetermined = signals.determinedCount === 0 && signals.occurrences >= 5;
+  return neverDetermined
+    ? { label: "character", confidence: 0.45, reason: "never-determined" }
     : { label: "character", confidence: 0.2, reason: "undecided-bare" };
 }
 
@@ -1388,8 +1416,8 @@ interface CastDecision {
   contextAfter: string;
   candidates: AdaptiveCandidateOption[];
   rerankConfidence: number;
-  needsReview: boolean;
-  ambiguityGap: number;
+  rerankNeedsReview: boolean;
+  rerankAmbiguityGap: number;
 }
 
 /**
@@ -1456,6 +1484,26 @@ function applyCastCoherence(decisions: CastDecision[], text: string): void {
       d.label = "character";
       d.confidence = Math.max(d.confidence, 0.7);
     }
+  }
+
+  // 1b ── full names
+  //
+  // ★★ THE SAME EVIDENCE, READ FORWARD. "Tessa Mosswell", "Halen Drust",
+  //    "Anwen Vell" and "Pala Drest" appear two or three times each and never
+  //    beside a speech verb, so they arrived at the decision with no context
+  //    at all and were filed as characters by the bare-name default — right
+  //    answer, no confidence, and NINE of the review pass's twenty-four slots
+  //    spent asking the model about people it had no reason to doubt.
+  //
+  //    A multi-word name containing a token the cast already knows is a person
+  //    is that person's full name. The head-vocabulary guard is what keeps
+  //    "Kinoko Street" and "Anvas Market" out.
+  for (const d of live()) {
+    if (!/\s/.test(d.name) || headVocabularyLabel(d.name)) continue;
+    const words = d.name.split(/\s+/).filter(Boolean);
+    if (!words.some((w) => confidentPeople.has(w))) continue;
+    d.label = "character";
+    d.confidence = Math.max(d.confidence, 0.75);
   }
 
   // 2 ── family plurals
@@ -1742,16 +1790,9 @@ export async function scanAndClassify(
       contextBefore: previewBefore.slice(-120),
       contextAfter: previewAfter.slice(0, 120),
       candidates: ranked.candidates,
-      // ★ THE SCAN'S OWN CONFIDENCE, NOT THE RERANKER'S, WHEN NOTHING LEARNED
-      //   IS IN PLAY. Without an adaptive context the reranker reports the
-      //   spread of four synthetic baseScores, which for a tied name is a
-      //   confident-looking number attached to a coin flip. `selectReviewable`
-      //   ranks on exactly this field, so reporting the deterministic
-      //   decision's own margin is what puts a genuine tie in front of the
-      //   model instead of burying it under 100 names it already knows.
-      rerankConfidence: options?.adaptiveContext ? ranked.confidence : decision.confidence,
-      needsReview: options?.adaptiveContext ? ranked.needsReview : decision.confidence < 0.3,
-      ambiguityGap: options?.adaptiveContext ? ranked.ambiguityGap : decision.confidence,
+      rerankConfidence: ranked.confidence,
+      rerankNeedsReview: ranked.needsReview,
+      rerankAmbiguityGap: ranked.ambiguityGap,
     });
 
     reportScanProgress(onProgress, "classify", keptIndex + 1, classifyTotal, `Entity ${keptIndex + 1} / ${kept.length}`);
@@ -1762,6 +1803,20 @@ export async function scanAndClassify(
 
   applyCastCoherence(decisions, fullText);
 
+  // ★★ THE SCAN'S OWN CONFIDENCE, NOT THE RERANKER'S, WHEN NOTHING LEARNED IS
+  //    IN PLAY — AND READ AFTER THE COHERENCE PASS, NOT BEFORE IT.
+  //
+  //    Without an adaptive context the reranker reports the spread of four
+  //    synthetic baseScores, which for a tied name is a confident-looking
+  //    number attached to a coin flip. `selectReviewable` ranks on exactly
+  //    this field, so the deterministic decision's own margin is what puts a
+  //    genuine tie in front of the model instead of burying it under ninety
+  //    names it already knows.
+  //
+  //    Emitting it inside the classify loop published the confidence a name
+  //    had BEFORE the cast-wide rules ran, so every name those rules settled
+  //    still looked like a guess and kept its slot in the queue.
+  const adaptive = !!options?.adaptiveContext;
   for (const d of decisions) {
     if (d.dropped) continue;
     predictionTraceOut?.value.push({
@@ -1773,9 +1828,9 @@ export async function scanAndClassify(
       contextAfter: d.contextAfter,
       candidates: d.candidates,
       predictedLabel: d.label,
-      confidence: d.rerankConfidence,
-      needsReview: d.needsReview,
-      ambiguityGap: d.ambiguityGap,
+      confidence: adaptive ? d.rerankConfidence : d.confidence,
+      needsReview: adaptive ? d.rerankNeedsReview : d.confidence < 0.3,
+      ambiguityGap: adaptive ? d.rerankAmbiguityGap : d.confidence,
       source: "entity-scan",
     });
     if (d.label === "faction") result.factions.push(d.name);
