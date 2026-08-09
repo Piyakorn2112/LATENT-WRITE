@@ -78,7 +78,25 @@ export interface EntityReviewProposal {
   reason: string;
   /** True when the scan itself was unsure. Sets which overturn bar applies. */
   scanDoubted: boolean;
+  /** Whole-word sightings across the reviewed span. Gates bucket MOVES. */
+  occurrences?: number;
 }
+
+/**
+ * ★★ A NAME NOBODY USES THREE TIMES HAS NO USAGE PATTERN TO READ, so a
+ *    proposal to MOVE it between buckets is a coin flip however confident it
+ *    sounds. Measured on The Root Crown against the 4B: of the accepted
+ *    proposals that were wrong, every single one was a name with one or two
+ *    sightings ("Hollow Vein", both Conclave Schools, "Greythorn Quarter
+ *    Anomaly"), while every proposal that was right had four or more.
+ *
+ * ★ DELETIONS ARE DELIBERATELY NOT GATED, and the asymmetry is the point. At
+ *   two sightings the snippets ARE the name's entire life in the book, so
+ *   "this is not a name at all" is the one question that evidence can settle —
+ *   it is the four-way bucket choice that it cannot. "Classify Crown Prince"
+ *   appears once and deleting it was correct.
+ */
+export const MIN_MOVE_OCCURRENCES = 3;
 
 /**
  * ★★ THE CATCH-ALL IS CALLED "object" ON THE WIRE, NOT "entity".
@@ -435,6 +453,7 @@ const TYPES: readonly ProposedType[] = ["character", "place", "faction", "entity
 function normalizeProposal(
   entry: EntityReviewEntry,
   raw: unknown,
+  occurrences?: number,
 ): EntityReviewProposal | null {
   if (!raw || typeof raw !== "object") return null;
   const value = raw as Record<string, unknown>;
@@ -455,6 +474,7 @@ function normalizeProposal(
     confidence: Math.min(1, Math.max(0, confidenceRaw)),
     reason,
     scanDoubted: scanDoubted(entry),
+    occurrences,
   };
 }
 
@@ -486,11 +506,12 @@ export async function reviewEntities(
     );
     if (snippets.length === 0) continue;
 
+    const signals = usageSignals(input.text, entry.name);
     const request = buildEntityReviewRequest(
       entry,
       snippets,
       opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-      usageSignals(input.text, entry.name),
+      signals,
     );
     const result = await opts.run<unknown>({
       task: ENTITY_REVIEW_TASK,
@@ -503,7 +524,7 @@ export async function reviewEntities(
     });
     if (!result.ok) continue;
 
-    const proposal = normalizeProposal(entry, result.json);
+    const proposal = normalizeProposal(entry, result.json, signals.occurrences);
     if (!proposal) continue;
     proposals.push(proposal);
     opts.onProposal?.(proposal);
@@ -586,6 +607,15 @@ export function applyProposalsToScanResult(
     if (!fromKey) continue;
     const from = TYPE_OF[fromKey];
     if (proposal.proposedType === from) continue;
+
+    // See MIN_MOVE_OCCURRENCES: a four-way bucket choice needs a usage
+    // pattern, and two sightings are not one. Deleting is exempt, because at
+    // two sightings the snippets are the name's whole life in the book.
+    if (
+      proposal.proposedType !== "not-a-name"
+      && proposal.occurrences !== undefined
+      && proposal.occurrences < MIN_MOVE_OCCURRENCES
+    ) continue;
 
     next[fromKey] = next[fromKey].filter((n) => n !== proposal.name);
     if (proposal.proposedType !== "not-a-name") {

@@ -19,6 +19,7 @@ import {
   buildEntityReviewRequest,
   ENTITY_REVIEW_SCHEMA,
   ENTITY_REVIEW_SYSTEM,
+  MIN_MOVE_OCCURRENCES,
   OVERTURN_CONFIDENT_MIN,
   OVERTURN_DOUBTED_MIN,
   type EntityReviewEntry,
@@ -129,6 +130,29 @@ console.log("═".repeat(70));
 
   const silent = applyProposalsToScanResult(scan, [{ ...proposal(0.95, true), reason: "  " }]);
   gate(silent.changes.length === 0, "a change with no reason is refused", "reason was whitespace");
+
+  // ★★ A NAME NOBODY USES THREE TIMES HAS NO USAGE PATTERN, so a four-way
+  //    bucket choice about it is a coin flip. Measured on The Root Crown: with
+  //    this gate off, EVERY wrong accepted proposal on the 4B was a name with
+  //    one or two sightings, and every right one had four or more. Adding it
+  //    took the 4B from 4-right-5-wrong to 4-right-1-wrong.
+  const thinMove = applyProposalsToScanResult(scan, [{ ...proposal(0.95, true), occurrences: 2 }]);
+  gate(thinMove.changes.length === 0, "a MOVE is refused below the occurrence floor",
+    `${MIN_MOVE_OCCURRENCES} sightings needed, proposal had 2`);
+
+  // The twin, or the gate would pass by refusing everything.
+  const solidMove = applyProposalsToScanResult(scan, [{ ...proposal(0.95, true), occurrences: 9 }]);
+  gate(solidMove.changes.length === 1, "a MOVE with enough sightings still applies",
+    `${solidMove.changes.length} change(s) at 9 sightings`);
+
+  // ★ AND DELETION IS EXEMPT ON PURPOSE. At two sightings the snippets are the
+  //   name's whole life in the book, so "not a name at all" is the one
+  //   question that evidence CAN settle.
+  const thinDrop = applyProposalsToScanResult(scan, [
+    { ...proposal(0.9, true), proposedType: "not-a-name", occurrences: 1 },
+  ]);
+  gate(thinDrop.changes.length === 1 && thinDrop.scan.characters.length === 0,
+    "a DELETION is not gated by the occurrence floor", "one sighting, still deleted");
 
   const dropped = applyProposalsToScanResult(scan, [
     { ...proposal(0.9, false), proposedType: "not-a-name" },
