@@ -55,6 +55,8 @@ const CH1 = [
   "The dockhands nodded to old Marlow at dawn. Marlow walked the tide line, and Marlow was in the habit of counting the boats twice.",
   '"You are early," murmured Marlow, folding his coat.',
   "Marlow had been born in the fishing quarter, and Marlow's brother still worked the nets there.",
+  // Interiority: the viewpoint channel. Osric acts throughout and never thinks.
+  "Marlow knew the tide would turn early. Marlow wondered whether the boats would come back at all. Marlow remembered the year they had not, and Marlow had never liked the look of that water.",
   "Osric waited by the gate. Osric said nothing, and Osric left before the bell.",
 ].join("\n\n");
 
@@ -318,6 +320,33 @@ async function main() {
   expect("proposal composes to one sentence-cased block, empty fields skipped",
     composeProposalDescription(proposal) === "Dark eyes. Clever and superior in understanding.",
     composeProposalDescription(proposal));
+
+  console.log("\n══ the viewpoint channel ══");
+  // Marlow's fixture gives him thoughts; Osric acts and never thinks.
+  expect("interiority: 'Marlow knew' is harvested",
+    texts(marlow, "interiority").length > 0, texts(marlow, "interiority"));
+  expect("interiority twin: Osric, who never thinks on the page, has none",
+    osric.byChannel.interiority.length === 0);
+  expect("the viewpoint character is flagged, and only them",
+    marlow.counts.isViewpoint && !osric.counts.isViewpoint,
+    `marlow=${marlow.counts.isViewpoint} osric=${osric.counts.isViewpoint}`);
+  expect("…and the pack tells the model so, because thin looks are expected",
+    /viewpoint character/.test(buildDossierPack(marlow).text));
+  expect("interiority reaches the personality gate",
+    buildDossierPack(marlow).traitCandidates.length > 0);
+
+  console.log("\n══ per-field usefulness floors ══");
+  const traitPack = { ...marlowPack, traitCandidates: [marlowPack.spans[0].n] };
+  const triple = normalizeFieldAnswer(
+    { spans: [marlowPack.spans[0].n], personality: "curious, analytical, observant", confidence: 0.7 },
+    traitPack, "personality");
+  expect("a three-word trait list is a real personality answer",
+    triple.status === "grounded", triple.status);
+  const oneWord = normalizeFieldAnswer(
+    { spans: [marlowPack.spans[0].n], personality: "forgotten", confidence: 0.7 },
+    traitPack, "personality");
+  expect("floor twin: the one-word over-compression is still vacuous",
+    oneWord.status === "vacuous", oneWord.status);
 
   console.log("\n══ cache signature ══");
   const sig1 = dossierSignature(NOVEL, CAST);

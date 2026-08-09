@@ -96,6 +96,7 @@ export type DossierChannel =
   | "pronoun-owned" // her dark eyes … referent resolved by the engine
   | "habitual"      // Name always / never / was in the habit of …
   | "action"        // recurring things Name is the agent of
+  | "interiority"   // Name thought / knew / wanted — the POV channel
   | "speech-manner" // the verbs the prose attributes their dialogue with
   | "relation"      // Name's brother / the daughter of Name
   | "lore-narrated" // narration, past-biography frame
@@ -103,7 +104,7 @@ export type DossierChannel =
 
 export const DOSSIER_CHANNELS: readonly DossierChannel[] = [
   "identity", "appositive", "copular", "attributive", "possessive",
-  "pronoun-attr", "pronoun-owned", "habitual", "action", "speech-manner",
+  "pronoun-attr", "pronoun-owned", "habitual", "action", "interiority", "speech-manner",
   "relation", "lore-narrated", "lore-spoken",
 ];
 
@@ -117,7 +118,7 @@ const VISUAL_CHANNELS: readonly DossierChannel[] = [
 /** Channels a PERSONALITY line could be written from. Action and speech
  *  manner are indirect definition and belong here, not in appearance. */
 const TRAIT_CHANNELS: readonly DossierChannel[] = [
-  "identity", "appositive", "copular", "attributive", "habitual", "action", "speech-manner",
+  "identity", "appositive", "copular", "attributive", "habitual", "action", "interiority", "speech-manner",
 ];
 
 /**
@@ -192,6 +193,31 @@ const LORE_PREDICATE =
   //   complement decides: a locative or a role is a life, a progressive is
   //   a moment.
   "had been (?:in|at|on|with|among|of) (?!this|that|these|those)|had been (?:an?|the)\\b)";
+
+/**
+ * ★★ THE VIEWPOINT CHARACTER IS DESCRIBED LEAST AND THOUGHT MOST.
+ *
+ *    The protagonist of the owner's manuscript produced the thinnest card in
+ *    the cast, and the reason is structural rather than a bug: a novel is
+ *    told THROUGH its viewpoint character, so the narration has no occasion
+ *    to describe her. Nobody says what she looks like because we are behind
+ *    her eyes; nobody sums her up because we already have her judgements.
+ *
+ *    But the same vantage gives something no other character gets: direct
+ *    access to what she thinks, wants, notices and refuses. Measured on
+ *    root-crown, cognition verbs separate the cast cleanly — Kinoko 8 and
+ *    Mira 12 against Vey 1 and Gareth 0 — so interiority is both the missing
+ *    evidence AND the signal that identifies who the viewpoint belongs to.
+ *
+ *    Note the honest limit: this finds the character whose interior the book
+ *    opens, which in a multi-viewpoint novel is more than one person. That
+ *    is a correct answer, not a tie to be broken.
+ */
+const INTERIORITY_VERB =
+  "(?:thought|wondered|felt|knew|realized|realised|remembered|decided|noticed|" +
+  "understood|considered|wanted|needed|hated|liked|loved|preferred|hoped|feared|" +
+  "expected|suspected|doubted|regretted|resented|admired|envied|missed|recognised|" +
+  "recognized|imagined|assumed|believed|minded|dreaded|longed|intended|meant)";
 
 /** Habit frames — durable personality evidence, not a moment. */
 const HABIT_FRAME =
@@ -292,6 +318,12 @@ export interface DossierCounts {
   /** Share of this character's dialogue attributed with the unmarked "said".
    *  1 means the prose never colours their speech. */
   plainSaidRatio: number;
+  /** Sentences opening this character's interior (thought/knew/wanted). */
+  interiorityCount: number;
+  /** True when the book opens this character's interior far more often than
+   *  the rest of the cast: the viewpoint. More than one may qualify, which
+   *  in a multi-viewpoint novel is the right answer. */
+  isViewpoint: boolean;
   /** Station or trade named for them in a direct definition, if any. */
   station: string | null;
   /** Top co-present cast members, [name, shared chapter count]. */
@@ -548,6 +580,13 @@ function harvestSentence(
     }
   }
 
+  // INTERIORITY. The name as subject of a cognition or emotion verb. This is
+  // the viewpoint character's channel, and it is where their characterization
+  // lives when the narration never stops to describe them.
+  if (inNarration && new RegExp(`${NAME}\\s+(?:[a-z]+ly\\s+)?(?:had\\s+)?${INTERIORITY_VERB}${RB}`, "i").test(narration)) {
+    push("interiority", sentence);
+  }
+
   // HABITUAL. "Marilla always …", "he was in the habit of …" with the name as
   // the frame's subject: durable conduct, the personality channel's backbone.
   if (inNarration && new RegExp(`${NAME}\\s+(?:[a-z]+\\s+){0,2}${HABIT_FRAME}${RB}`, "i").test(narration)) {
@@ -637,7 +676,8 @@ export async function harvestDossierEvidence(
     counts: {
       mentions: 0, chapters: [], chapterTotal: novel.chapters.length,
       speechLines: 0, meanLineWords: 0, agentVerbs: [], distinctiveVerbs: [],
-      speechVerbs: [], plainSaidRatio: 0, station: null, coPresent: [],
+      speechVerbs: [], plainSaidRatio: 0, interiorityCount: 0, isViewpoint: false,
+      station: null, coPresent: [],
     },
     byChannel: emptyByChannel(),
   }));
@@ -833,6 +873,7 @@ export async function harvestDossierEvidence(
     pc.ev.counts.plainSaidRatio = pc.saidCount + markedTotal > 0
       ? pc.saidCount / (pc.saidCount + markedTotal)
       : 0;
+    pc.ev.counts.interiorityCount = pc.ev.byChannel.interiority.length;
     pc.ev.counts.station = pc.station;
     // Honorific dominance first (whole-book, strongest); the resolver's own
     // possessive assignments second; "unknown" -> they/their, which is
@@ -869,6 +910,23 @@ export async function harvestDossierEvidence(
     }
   }
 
+  // ★ VIEWPOINT IS RELATIVE TO THE CAST, so it can only be decided once every
+  //   character has been counted. The rate matters, not the raw count: a
+  //   character named 400 times will out-count one named 40 on any measure,
+  //   and what marks a viewpoint is how often their NAME comes with their
+  //   INTERIOR rather than how often it appears.
+  const rates = perChar.map((pc) => ({
+    pc,
+    rate: pc.ev.counts.mentions > 0 ? pc.ev.counts.interiorityCount / pc.ev.counts.mentions : 0,
+  }));
+  const median = [...rates].map((r) => r.rate).sort((a, b) => a - b)[Math.floor(rates.length / 2)] ?? 0;
+  for (const { pc, rate } of rates) {
+    // Twice the cast median and at least three openings: enough to be a
+    // pattern rather than two stray sentences, and loose enough that a
+    // second viewpoint is not squeezed out by the first.
+    pc.ev.counts.isViewpoint = pc.ev.counts.interiorityCount >= 3 && rate >= Math.max(0.008, median * 2);
+  }
+
   options.onProgress?.({ fraction: 1, chapter: chapterTotal, chapterTotal });
   return { characters, byName, signature: dossierSignature(novel, cast) };
 }
@@ -883,7 +941,7 @@ const CHANNEL_RANK: Record<DossierChannel, number> = {
   appositive: 1, possessive: 2, "pronoun-owned": 3, "pronoun-attr": 4,
   copular: 5, attributive: 6,
   // Indirect definition through conduct, the channel modern prose leans on.
-  habitual: 1, action: 2, "speech-manner": 3,
+  habitual: 1, action: 2, interiority: 1, "speech-manner": 3,
   relation: 0, "lore-narrated": 1, "lore-spoken": 2,
 };
 
@@ -902,6 +960,7 @@ const PROVENANCE: Record<DossierChannel, string> = {
   // rather than lifted from a sentence — the reader must be able to tell a
   // quotation from a tally.
   action: "counted", "speech-manner": "counted",
+  interiority: "named",
   relation: "named", "lore-narrated": "named", "lore-spoken": "said",
 };
 
@@ -999,6 +1058,10 @@ export function buildDossierPack(ev: CharacterDossierEvidence): DossierPack {
     c.coPresent.length
       ? `most often on the page with ${c.coPresent.map(([n, k]) => `${n} (${k} ch)`).join(", ")}`
       : "shares no chapter with another cast member",
+    // Told to the model plainly: a viewpoint character is described less by
+    // construction, so thin appearance evidence is expected rather than a
+    // sign the search failed.
+    c.isViewpoint ? "the book opens this character's thoughts — a viewpoint character" : "",
   ].filter(Boolean);
   const stats = statBits.join(" · ");
 
@@ -1549,7 +1612,17 @@ function groundField(
  *  cited, and useless-to-misleading. Prose fields need enough words to state
  *  a claim; appearance keeps its own noun-or-adjective test instead ("dark
  *  eyes" is two words and perfect). */
-const usefulProse = (line: string) => (line.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length >= 4;
+const wordCount = (line: string) => (line.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
+/**
+ * ★ THE FLOOR IS PER FIELD, because a legitimate answer has a different
+ *   shape in each. A trait list is a real personality answer at three words
+ *   ("curious, analytical, observant") and a flat 4-word floor was measured
+ *   throwing exactly those away; background is a claim about history and
+ *   needs a clause. The single word "forgotten" — the over-compressed retry
+ *   that prompted the floor — still fails both.
+ */
+const usefulTrait = (line: string) => wordCount(line) >= 3;
+const usefulProse = (line: string) => wordCount(line) >= 4;
 
 /**
  * Route one field's raw JSON through its gate, grounding and repair. Never
@@ -1564,7 +1637,8 @@ export function normalizeFieldAnswer(
   const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const grounded = groundField(
     value[field], value.spans, pack, fieldCandidates(pack, field),
-    field === "appearance" ? usefulAppearance : usefulProse,
+    field === "appearance" ? usefulAppearance
+      : field === "personality" ? usefulTrait : usefulProse,
     FIELD_MAX[field],
     // Personality is the only abstractive field: appearance and background
     // are factual claims and must locate word for word.

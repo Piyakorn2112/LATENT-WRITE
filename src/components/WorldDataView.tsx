@@ -472,9 +472,55 @@ export function WorldDataView({
       const extractive = composeExtractiveDescription(ev, [...sameKindNames].filter((n) => n !== entity.name));
       const extractiveChapters = [...new Set(pack.spans.map((s) => s.chapter))].slice(0, 6);
 
-      // "on" is a different product, not a smaller model: measured, the 1.7B
-      // abstains or fabricates on this task, so it plays no part here.
       const mode = assistantMode(loadPrefs());
+
+      // ★★ "ON" NOW USES THE 1.7B FOR ONE FIELD, AND ONLY BECAUSE THE PACKS
+      //    GOT BETTER. When the small tier was first measured it abstained on
+      //    three of four rich packs and fabricated on the fourth — but it was
+      //    reading a noisy pool. Re-measured on the current evidence it gives
+      //    grounded, correct APPEARANCE lines ("Kinoko's face was warm",
+      //    "wool-stained at the knuckles and the tips of the fingers") for
+      //    three of five characters and abstains on the other two, with ZERO
+      //    fabrications. Personality it still cannot do: it answers without
+      //    citing, so every trait line is refused.
+      //
+      //    So: one field, with the deterministic composition standing behind
+      //    it. A model that abstains costs a second and changes nothing; a
+      //    model that answers hands the writer the manuscript's own sentence.
+      if (mode === "on" && await assistantAvailable("small")) {
+        const smallReq = buildFieldRequest(pack, "appearance", kind);
+        if (smallReq && alive()) {
+          setDossier({
+            phase: "writing", forName: entity.name, progress: null, fieldInFlight: "appearance",
+            descriptionText: "", citedChapters: [], generated: false, card,
+          });
+          const res = await assistantRunJSON<Record<string, unknown>>({
+            task: DOSSIER_TASK, tag: entity.name, tier: "small",
+            systemPrompt: smallReq.systemPrompt, userText: smallReq.userText,
+            schema: smallReq.schema, maxTokens: smallReq.maxTokens, timeoutMs: 60_000,
+          });
+          if (!alive()) return;
+          const answer = res.ok ? normalizeFieldAnswer(res.json, pack, "appearance") : null;
+          if (answer && (answer.status === "grounded" || answer.status === "repaired")) {
+            const chapters = [...new Set(answer.spans
+              .map((n) => pack.spans.find((s) => s.n === n)?.chapter)
+              .filter((c): c is number => c !== undefined))];
+            setDossier({
+              phase: "ready", forName: entity.name, progress: null, fieldInFlight: null,
+              // The model's line leads; the deterministic composition still
+              // supplies identity, habit and history behind it.
+              descriptionText: [
+                composeProposalDescription({ ...emptyProposal(pack, card.role), appearance: answer }),
+                extractive,
+              ].filter(Boolean).join(" "),
+              citedChapters: chapters.length ? chapters : extractiveChapters,
+              generated: true, card,
+            });
+            return;
+          }
+        }
+      }
+
       // ★ ASK ABOUT THE TIER THIS IS ABOUT TO RUN ON. The parameterless form
       //   checks the SMALL model, and this branch runs on max — the exact
       //   trap assistantAvailable's own comment names. It fails both ways:
