@@ -885,23 +885,75 @@ flowchart LR
 - Semantic assist remains runtime-gated and cannot be used in plain Vite/web dev.
 - Moving entries between buckets is cheap, but rescans remain the dominant cost.
 
-#### Bucketing: the determiner test
+#### Bucketing: what decides character vs place vs faction vs entity
 
 A name usually written **"the X"** is not a person. That positional fact,
-already used to keep non-speakers out of dialogue attribution, now decides
-buckets too: a candidate filed as a character whose usage is 40% or more
-determined over at least three occurrences is rerouted by suffix and score.
-The exemption is a closed class of role words and runs both ways, because
-titles legitimately take determiners. "The Crown Prince" stays a character,
-and "Magister Adena Volk" is recovered from Places.
+already used to keep non-speakers out of dialogue attribution, decides buckets
+too. The exemption is a closed class of role words and runs both ways, because
+titles legitimately take determiners: "The Crown Prince" stays a character and
+"Magister Adena Volk" is recovered from Places.
 
-Measured on a 30-chapter manuscript this moved the character bucket from 72
-entries to 56: `Lift` (18 of 20 uses are "the Lift"), `Bind` (7 of 7),
-`Conclave`, `Mosshollow` and `The Listenfold Clinic` all left. Interjections
-are stop-listed as a closed class, because `Alright` had reached the cast by
-opening dialogue, never appearing lowercase, and counting an opening quote as
-mid-sentence evidence. A bare generic suffix word beside its own multi-word
-name ("College" next to "The Mycomedical College") is anaphora, and folds.
+The determiner is evidence of **exactly one thing**, though, and for a long
+time it was quietly deciding the whole bucket. `\bthe\s*$` led both the faction
+prefix list and the entity prefix list, worth +1.5 each, while the
+place-preposition test required the preposition to touch the name and so scored
+**zero** on "at the Mosshollow". Every name a novel writes as "the X" therefore
+built two equal piles of evidence and no place evidence at all, tied at the
+top, and the tie fell through to `character` and out of the determiner check
+into `entity`. That is how a valley, a village, a marsh, a transit line and a
+surname all ended up filed beside the magic system.
+
+What decides a bucket now:
+
+| Evidence | Weight | Why |
+|---|---|---|
+| Head word in a suffix vocabulary | 4 | English puts the head last: "Outer Ring Anomaly" is an anomaly |
+| Non-head vocabulary word | 1 | still evidence, never enough to outvote the head |
+| `"of X"` after a place noun | 2.5 | "the city of Myrhold" |
+| Place preposition **across a determiner** | 1.25 | "to the Mosshollow" cannot be a person |
+| Place preposition, **bare** | 0.5 | "to Jane", "near Jane", "past Jane" all take people |
+| The noun an attributive name modifies | 0.75 | "the Dovesmoor **marshes**" is the only evidence some names have |
+| Determiner count | 0 | never a bucket score, for the reason below |
+
+A determiner tells you the name is not a personal name and nothing else, so it
+feeds the decision and the keep-or-drop check and no bucket. **Retention counts
+hits, not score**, so reweighting the buckets can never quietly change which
+names survive.
+
+Three rules need the whole cast as evidence, so they run after every name has
+a label. A **surname is a person**, and nothing else routes "Mosswell" to the
+cast when 24 of its 40 uses are "the Mosswell loaves". A **family plural is the
+family**, so "the Vells" is not a faction. And **institutions sharing a head
+word agree**, because "The Closed School" in Places beside "The Open School" in
+Factions reads as the system being confused, and is.
+
+Three classes of non-name (`Don't`, `pre-Imperial`, `Day 23`) are rejected at
+the occurrence rather than at the name, so a book with a real Don keeps him.
+
+Against a hand-labelled gold on a 30-chapter manuscript this reaches **96.6%**
+bucket accuracy with zero junk names, up from 91.5% with four. On four
+published novels nobody tuned against it reaches **100%** (30/30). `npm run test:bucket-gold` and
+`npm run test:bucket-corpus`; `npm run probe:bucket-audit` dumps every name
+with the evidence the classifier saw.
+
+#### Bucketing: what the review pass is allowed to do
+
+The scan reports an honest **confidence** and `selectReviewable` ranks on it,
+so a name the classifier could not decide is what reaches the model, not a
+name it already knows. Measured end to end against both shipping tiers
+(`npm run probe:bucket-review`), which had never been done. The review was
+taking the scan from 96.6% **down** to 93.1%, and on the max tier it deleted
+eight real names. Both tiers now reach 98.3%.
+
+Model confidence carried no signal at all, with right and wrong answers alike
+sitting between 0.70 and 0.95 on both tiers, so the acceptance bars could never
+have fixed this. Two prompt faults did it. `not-a-name` collided with the counts note
+"after the/a suggests it is not a **personal** name", and the model carried
+"not a … name" onto the label. It is `common-word` on the wire now, the second
+time this file has paid for a label the prompt primes. And **when there are two
+escape hatches, the irreversible one goes last**. `object` files a name the
+writer can drag out of a bucket, `common-word` deletes it, and the ladder ends
+where the model stops reading.
 
 </details>
 
@@ -2230,6 +2282,8 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run test:assist-reviews` | `scripts/test-assist-reviews.ts` |
 | `npm run test:attribution-corpus` | `scripts/test-attribution-corpus.ts` |
 | `npm run test:auto-format` | `scripts/test-auto-format.ts` |
+| `npm run test:bucket-corpus` | `scripts/test-bucket-corpus.ts` |
+| `npm run test:bucket-gold` | `scripts/test-bucket-gold.ts` |
 | `npm run test:cast-corpus` | `scripts/test-cast-corpus.ts` |
 | `npm run test:cast-roles` | `scripts/test-cast-roles.ts` |
 | `npm run test:character-dossier` | `scripts/test-character-dossier.ts` |
@@ -2269,6 +2323,8 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run probe:alias-referent` | `scripts/probe-alias-referent.cjs` |
 | `npm run probe:assist-funnels` | `scripts/probe-assist-funnels.ts` |
 | `npm run probe:chip-quality` | `scripts/probe-chip-quality.cjs` |
+| `npm run probe:bucket-audit` | `scripts/probe-bucket-audit.ts` |
+| `npm run probe:bucket-review` | `scripts/probe-bucket-review.cjs` |
 | `npm run probe:entity-funnel` | `scripts/probe-entity-funnel.ts` |
 | `npm run probe:lm-blend` | `scripts/probe-lm-blend.ts` |
 | `npm run probe:lm-cost` | `scripts/probe-lm-cost.ts` |
@@ -2432,7 +2488,9 @@ then craft detail from coarse to fine.
 - `src/components/HighlightLayer.tsx`, overlay rendering.
 - `src/lib/use-analysis.ts`, analysis hook and worker dispatch.
 - `src/lib/chapter-analysis-runner.ts`, pure analysis pipeline.
-- `src/lib/world-data.ts`, world/entity scanning and name resolution.
+- `src/lib/world-data.ts`, world/entity scanning and name resolution. `decideBucket` and `applyCastCoherence` are where character vs place vs faction vs entity is settled; read their headers before adjusting a weight, because the current set was measured on a real book and on four published novels.
+- `scripts/fixtures/root-crown-buckets.ts`, the hand-labelled bucket gold, carrying the sentence that decided each disputed label.
+- `src/lib/entity-review.ts`, the model pass over the names the scan could not classify. Its ladder order is load-bearing: the irreversible answer goes last.
 - `src/lib/character-dossier.ts`, the character card: evidence harvest, field gates, grounding. Read its header before changing it; every rule is a response to a measured failure, and the gates are what stop the models inventing people.
 - `plans/character-dossier-research-2026-08.md`, the investigation, the funnel counts, and why the small tier is not a smaller version of the big one.
 - `src/lib/narrative-events.ts`, event detection. Read its header before changing it; every rule is a response to a measured failure.
