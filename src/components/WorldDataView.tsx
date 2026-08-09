@@ -9,8 +9,9 @@ import type {
   WorldFaction,
   WorldPlace,
 } from "../types";
-import { ensureWorldData, scanAndClassify, resolveSpeakerCandidates, extractNameCandidatesFast, type ScanProgress, type ScanResult } from "../lib/world-data";
-import { proposeAliases, proposalsFor, coordinated, type AliasProposal } from "../lib/alias-propose";
+import { ensureWorldData, scanAndClassify, extractNameCandidatesFast, type ScanProgress, type ScanResult } from "../lib/world-data";
+import { proposalsFor, coordinated, type AliasProposal } from "../lib/alias-propose";
+import { useAliasSuggestions, useProgressiveCount } from "../lib/alias-suggestions";
 import { scanAliases, type AliasCandidate, type AliasScanResult } from "../lib/alias-scan";
 import {
   REFERENT_CAP,
@@ -985,6 +986,8 @@ export function WorldDataView({
 
   const list: Entity[] = wd[tab] as Entity[];
   const current = selected !== null ? list[selected] : null;
+  /** Rows to paint this frame; grows a batch per frame on a long list. */
+  const visibleRows = useProgressiveCount(list.length);
 
   const updateList = (next: Entity[]) => onChange({ ...wd, [tab]: next });
 
@@ -1014,43 +1017,17 @@ export function WorldDataView({
 
   // ── Alias suggestions ───────────────────────────────────────────────────
   //
-  // Computed only while the CHARACTERS tab is open and keyed on the cast's
-  // names, not on the novel object: proposeAliases walks the whole book once
-  // per candidate name, and re-running it on every keystroke in a description
-  // field would be a scan nobody asked for.
-  const castKey = wd.characters.map((c) => `${c.name}|${(c.aliases ?? []).join(",")}`).join("¶");
-  const aliasResult = useMemo(() => {
-    if (tab !== "characters" || wd.characters.length === 0) return null;
-    const text = novel.chapters.map((c) => c.content).join("\n");
-    if (text.trim().length < 200) return null;
-    try {
-      // ★★ THE UNION, AND THE UNION IS THE WHOLE FIX. resolveSpeakerCandidates
-      //    goes through resolveKnownNames, which returns the writer's OWN cast
-      //    once worldData is non-empty — so on any real book the proposer would
-      //    only ever see names already in the list. It could offer to merge two
-      //    entries and could never offer "Lizzy", which is the case the feature
-      //    exists for. autoExtractEntities is what reads the manuscript.
-      //    Caught only by looking at a render that showed nothing.
-      // ★★ AND THE SAME STALL WAS ALREADY HERE, on a memo that re-runs whenever
-      //    the cast changes while the characters tab is open — so typing a name
-      //    into the panel froze the app for 17s on Pride and Prejudice and 39s
-      //    on Dracula. Measured, not suspected. The classification was always
-      //    discarded: proposeAliases wants candidate NAMES.
-      const candidates = [...new Set([
-        ...resolveSpeakerCandidates(novel),
-        ...extractNameCandidatesFast(novel, 3, 60),
-      ])];
-      return proposeAliases(wd.characters, candidates, text);
-    } catch (err) {
-      // ★ SAY SO OUT LOUD. A bare `catch {}` here would report "no suggestions"
-      //   for a thrown error and for a book with genuinely nothing to suggest,
-      //   identically and forever. This repo has already lost months to that
-      //   shape once, in the story-graph LM pass.
-      console.warn("[WorldData] alias proposals failed —", err);
-      return null;   // a proposal list is a nicety; it never breaks the editor
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, castKey, novel]);
+  // ★★ OFF THE RENDER PATH ENTIRELY. This was a `useMemo`, which React runs
+  //    synchronously WHILE RENDERING — so the whole-book analysis behind it ran
+  //    before the overlay existed and the writer sat looking at the old screen.
+  //    Measured on hollow-iris with 80 characters: 9.3s, and 654ms even after
+  //    the scan fixes. The hook schedules the same work on idle, debounces the
+  //    keystroke case, and caches the manuscript half by chapters identity, so
+  //    opening the panel and switching tabs cost nothing. See
+  //    src/lib/alias-suggestions.ts for the measurements and the cache rules.
+  const { result: aliasResult } = useAliasSuggestions(
+    novel, wd.characters, tab === "characters" && scanPhase === null,
+  );
 
   /** Fold a proposed name into a character, and for a merge remove the entry
    *  it came from. Everything the writer confirms happens HERE — alias-propose
@@ -1585,7 +1562,11 @@ export function WorldDataView({
                     No {TAB_META[tab].label.toLowerCase()} yet
                   </div>
                 ) : (
-                  list.map((e, i) => {
+                  /* ★ THE FIRST BATCH PAINTS, THE REST STREAM IN BEHIND IT.
+                     A cast of eighty is eighty rows with an icon button each,
+                     and the writer can only read the top of it. Below the batch
+                     size this slice is the whole list and costs nothing. */
+                  list.slice(0, visibleRows).map((e, i) => {
                     const roleish =
                       (e as WorldCharacter).role ?? (e as WorldPlace).type ?? (e as WorldGenericEntity).type ?? "";
                     return (
@@ -1611,6 +1592,11 @@ export function WorldDataView({
                       </button>
                     );
                   })
+                )}
+                {visibleRows < list.length && (
+                  <div className="world-list-streaming" aria-live="polite">
+                    {list.length - visibleRows} more…
+                  </div>
                 )}
                 <button className="world-add-btn" onClick={handleAdd}>
                   <PlusIcon size={14} />

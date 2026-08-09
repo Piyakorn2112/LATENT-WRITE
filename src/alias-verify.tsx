@@ -125,6 +125,108 @@ const DOSSIER_INITIAL: WorldData = {
   places: [], factions: [], entities: [],
 };
 
+/**
+ * ?perf=1 — HOW LONG DOES THE PANEL TAKE TO APPEAR, on a real manuscript with
+ * a real cast, in a real browser.
+ *
+ * ★★ THIS HAS TO BE THE BOOTED COMPONENT, not a Node benchmark of the
+ *    functions it calls. The bug being measured was that `useMemo` runs DURING
+ *    RENDER, so the only honest question is "how long after the click does the
+ *    overlay exist", and only React can answer it. scripts/bench-world-panel.ts
+ *    measures the compute; this measures the wait.
+ *
+ * The book text and the cast are injected by scripts/verify-world-panel-perf.cjs
+ * so the page carries no 3MB fixture of its own.
+ */
+const perfMode = typeof location !== "undefined" && new URLSearchParams(location.search).has("perf");
+
+interface PerfWindow extends Window {
+  __perfSeed?: (text: string, castNames: string[]) => void;
+  __perfOpen?: () => Promise<{ ms: number; rows: number; panels: number }>;
+  __perfSetTab?: (label: string) => Promise<{ ms: number; rows: number }>;
+  __perfTypeName?: (value: string) => Promise<{ ms: number }>;
+  __perfAliasRows?: () => number;
+}
+
+function PerfHarness() {
+  const [seed, setSeed] = useState<{ text: string; cast: string[] } | null>(null);
+  const [open, setOpen] = useState(false);
+  const [wd, setWd] = useState<WorldData>({ characters: [], places: [], factions: [], entities: [] });
+
+  (window as PerfWindow).__perfSeed = (text, castNames) => {
+    setSeed({ text, cast: castNames });
+    setWd({
+      characters: castNames.map((name) => ({ name, aliases: [], role: "", description: "" })),
+      places: [], factions: [], entities: [],
+    });
+  };
+  // Two frames: one for React to commit, one for the compositor to paint it.
+  // A single rAF resolves before the pixels exist and would flatter the result.
+  const afterPaint = <T,>(value: () => T): Promise<T> =>
+    new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(value()))));
+
+  (window as PerfWindow).__perfOpen = () => {
+    const t0 = performance.now();
+    setOpen(true);
+    return afterPaint(() => ({
+      ms: performance.now() - t0,
+      rows: document.querySelectorAll(".world-row").length,
+      panels: document.querySelectorAll(".world-panel").length,
+    }));
+  };
+
+  (window as PerfWindow).__perfSetTab = (label) => {
+    const btn = [...document.querySelectorAll<HTMLButtonElement>(".world-tab")]
+      .find((b) => (b.textContent ?? "").includes(label));
+    const t0 = performance.now();
+    btn?.click();
+    return afterPaint(() => ({
+      ms: performance.now() - t0,
+      rows: document.querySelectorAll(".world-row").length,
+    }));
+  };
+
+  (window as PerfWindow).__perfTypeName = (value) => {
+    const row = document.querySelector<HTMLButtonElement>(".world-row");
+    row?.click();
+    return afterPaint(() => {
+      const input = document.querySelector<HTMLInputElement>(".world-input");
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      const t0 = performance.now();
+      setter?.call(input, value);
+      input?.dispatchEvent(new Event("input", { bubbles: true }));
+      return { ms: performance.now() - t0 };
+    });
+  };
+
+  (window as PerfWindow).__perfAliasRows = () => document.querySelectorAll(".world-alias-row").length;
+
+  if (!seed || !open) return <div id="perf-idle" style={{ padding: 20, font: "12px system-ui" }}>ready</div>;
+
+  const perfNovel: Novel = {
+    meta: { title: "Perf", author: "Harness", description: "" },
+    // One chapter per 20k characters, which is the shape of a real draft and
+    // keeps the chapter loop honest rather than handing it one giant string.
+    chapters: Array.from({ length: Math.max(1, Math.ceil(seed.text.length / 20_000)) }, (_, i) => ({
+      id: `ch${i + 1}`, number: i + 1, title: `Chapter ${i + 1}`,
+      content: seed.text.slice(i * 20_000, (i + 1) * 20_000),
+    })),
+    worldData: wd,
+  };
+
+  return (
+    <WorldDataView
+      novel={perfNovel}
+      currentChapterId="ch1"
+      worldData={wd}
+      intelMode="high"
+      onChange={setWd}
+      onRename={() => {}}
+      onClose={() => {}}
+    />
+  );
+}
+
 function Harness() {
   const [wd, setWd] = useState<WorldData>(
     dossierMode ? DOSSIER_INITIAL : scanMode ? SCAN_INITIAL : INITIAL);
@@ -144,7 +246,13 @@ function Harness() {
 
 document.body.style.margin = "0";
 createRoot(document.getElementById("stage")!).render(
-  <StrictMode><Harness /></StrictMode>,
+  // ★ NO StrictMode IN PERF MODE. StrictMode double-invokes render and effects
+  //   in development, which would report twice the work the writer actually
+  //   pays for. The correctness harnesses keep it precisely because that
+  //   double-invocation surfaces bugs.
+  perfMode
+    ? <PerfHarness />
+    : <StrictMode><Harness /></StrictMode>,
 );
 
 interface W extends Window {

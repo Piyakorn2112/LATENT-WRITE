@@ -5733,6 +5733,16 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   font-style: italic;
 }
 
+/* The tail of a long cast, still streaming in. Deliberately quiet: it is a
+   progress note, not a row, and it disappears once the last batch lands. */
+.world-list-streaming {
+  padding: 8px 10px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.7;
+}
+
 .world-row {
   display: flex;
   align-items: center;
