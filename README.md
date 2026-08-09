@@ -947,13 +947,25 @@ eight real names. Both tiers now reach 98.3%.
 
 Model confidence carried no signal at all, with right and wrong answers alike
 sitting between 0.70 and 0.95 on both tiers, so the acceptance bars could never
-have fixed this. Two prompt faults did it. `not-a-name` collided with the counts note
+have fixed this. Two prompt faults and one code gate did. `not-a-name` collided with the counts note
 "after the/a suggests it is not a **personal** name", and the model carried
 "not a … name" onto the label. It is `common-word` on the wire now, the second
 time this file has paid for a label the prompt primes. And **when there are two
 escape hatches, the irreversible one goes last**. `object` files a name the
 writer can drag out of a bucket, `common-word` deletes it, and the ladder ends
 where the model stops reading.
+
+The code gate is an occurrence floor on bucket MOVES. Every wrong accepted
+proposal on the 4B was a name with one or two sightings in 660KB and every
+right one had four or more, so a name nobody uses three times does not get
+moved between buckets on a model's say-so. Deleting is exempt, because at two
+sightings the snippets are the name's whole life in the book and "this is not a
+name at all" is the one question that evidence can settle.
+
+Both tiers reach **98.3%** and neither degrades anything. The review runs on
+the **default (1.7B) tier in both "on" and "max" modes**, since `reviewEntities`
+is called without one; routing it to the 4B would buy two more correct moves
+and one correct deletion for roughly three times the wall time.
 
 </details>
 
