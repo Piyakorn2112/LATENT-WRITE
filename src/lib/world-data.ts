@@ -24,6 +24,18 @@ interface EntityContextSignals {
   entityScore: number;
   /** Occurrences preceded by the/a/an. Never a bucket score — see FACTION_PREFIX_RE. */
   determinedCount: number;
+  /**
+   * ★ HOW MANY CONTEXT RULES FIRED, INDEPENDENT OF WHAT THEY ARE WORTH.
+   *
+   *   Retention asks "did the prose say anything at all about this name"; the
+   *   buckets ask "what did it say". Mixing them means every reweighting
+   *   silently changes which names survive — measured: dropping bare place
+   *   prepositions from 1.25 to 0.5 (right, because "to Jane" is ambiguous)
+   *   took Darkholm's context under the keep threshold and lost an invented
+   *   place name that had four sightings, on a change that was never about
+   *   retention.
+   */
+  signalHits: number;
   totalContext: number;
   previewBefore: string;
   previewAfter: string;
@@ -451,21 +463,29 @@ function collectTitleCaseCandidates(text: string, maxWords: number): Map<string,
     // whole-book scale is a better trade than a regression in the ranking the app
     // depends on to know who the characters are.
     if (shouldRejectCandidateName(name)) {
-      // ★ "The Ordinance." AT A SENTENCE START IS THE ORDINANCE.
+      // ★★ "Within Darkholm." AT A SENTENCE START IS DARKHOLM.
       //
-      //   The candidate regex is greedy, so it swallows the article into a
-      //   two-word candidate, and `allowLeadingArticle` then rejects the pair
-      //   for having only one meaningful word — which is right for the pair
-      //   and loses the name. Every occurrence of a name that always opens its
-      //   sentence this way disappears with it.
+      //    The candidate regex is greedy, so a capitalised sentence-opener
+      //    swallows the name that follows it into a two-word candidate, and
+      //    that candidate is then thrown away whole because its first word is
+      //    a stopword. Measured: Darkholm has four sightings in the fixture
+      //    and reached the classifier with TWO, because "Within Darkholm" and
+      //    "From Darkholm" both vanished — enough to drop it under the
+      //    retention floor and lose an invented place name outright.
       //
-      //   The tail is retried, and ONLY the tail: the article is dropped, the
-      //   position stays sentence-initial, and so the tail still has to pass
-      //   the never-lowercase test like any other candidate. That is what
-      //   keeps "The Basement" out while letting "The Ordinance" through, and
-      //   it is why this cannot be generalised to leading verbs and adverbs
-      //   (measured: doing so breaks the cold-start name ranking).
-      const tail = words.length === 2 && LEADING_ARTICLES.has(words[0]) ? words[1] : "";
+      // ★  ONLY ON THE PATH WHERE THE CANDIDATE IS ALREADY BEING DISCARDED,
+      //    which is what makes this safe where a general "trim the leading
+      //    ordinary word" rule was measured and reverted twice. Nothing that
+      //    survives today changes; this can only add back occurrences that
+      //    were about to be dropped. The tail still faces
+      //    `shouldRejectCandidateName` and, because the position stays
+      //    sentence-initial, still has to earn its place through the
+      //    never-lowercase test — which is exactly what keeps "The Basement"
+      //    and "Within Reach" out while letting Darkholm through.
+      const leadIsWhyItFailed =
+        words.length === 2
+        && (STOPLIST.has(words[0]) || COMMON_CAPITALIZED.has(words[0]) || LEADING_ARTICLES.has(words[0]));
+      const tail = leadIsWhyItFailed ? words[1] : "";
       if (!tail || shouldRejectCandidateName(tail)) continue;
       total.set(tail, (total.get(tail) ?? 0) + 1);
       continue;
@@ -565,6 +585,7 @@ function computeEntityContextSignals(
   let factScore = 0;
   let entityScore = 0;
   let determinedCount = 0;
+  let signalHits = 0;
   let previewBefore = "";
   let previewAfter = "";
 
@@ -594,6 +615,8 @@ function computeEntityContextSignals(
       previewAfter = after;
     }
 
+    const hitsBefore = { char: charScore, place: placeScore, fact: factScore, entity: entityScore };
+
     if (CHAR_TITLE_RE.test(before))   charScore += 3;
     if (CHAR_PRONOUN_RE.test(before)) charScore += 2;
     if (CHAR_VERB_RE.test(after))     charScore += 1.25;
@@ -609,7 +632,24 @@ function computeEntityContextSignals(
     const modified = DETERMINER_BEFORE_RE.test(before) ? attributiveHeadLabel(after) : null;
     const attributive = modified !== null || followingWordIsNoun(after, nouns);
 
-    if (PLACE_PREP_RE.test(before) || (PLACE_PREP_DET_RE.test(before) && !attributive)) placeScore += 1.25;
+    // ★★ A BARE PREPOSITION BEFORE A PROPER NOUN IS AMBIGUOUS; THE SAME
+    //    PREPOSITION BEFORE "the X" IS NOT.
+    //
+    //    "to the Mosshollow" cannot be a person. "to Jane" can, and so can
+    //    "near Jane", "beside Jane", "past Jane", "from Jane" — English lets
+    //    every one of these take a person as easily as a location. Scoring
+    //    them equally is what put the second lead of Pride and Prejudice in
+    //    the PLACES bucket on 34 sightings against 28 person signals, and
+    //    Renfield in Dracula on a margin of 0.75. Both were near-ties the
+    //    classifier reported as decisions.
+    //
+    //    So the determined form keeps full weight and the bare form is worth
+    //    less than half of it. Netherfield, Longbourn, Pemberley and Meryton
+    //    are unaffected: nothing competes with them, because nobody ever
+    //    speaks to an estate.
+    if (PLACE_PREP_DET_RE.test(before) && !attributive) placeScore += 1.25;
+    else if (PLACE_PREP_RE.test(before)) placeScore += 0.5;
+    else if (PLACE_TO_RE.test(before) && !TO_GOVERNED_BY_PERSON_VERB.test(before)) placeScore += 0.5;
     if (PLACE_OF_RE.test(before))     placeScore += 2.5;
 
     if (modified === "place") placeScore += ATTRIBUTIVE_WEIGHT;
@@ -624,6 +664,13 @@ function computeEntityContextSignals(
     if (ENTITY_OF_RE.test(before)) entityScore += 2.5;
     if (ENTITY_PREP_RE.test(before)) entityScore += 1.25;
     if (ENTITY_AFTER_RE.test(after)) entityScore += 1.1;
+
+    if (
+      charScore + placeScore + factScore + entityScore
+      > hitsBefore.char + hitsBefore.place + hitsBefore.fact + hitsBefore.entity
+    ) {
+      signalHits += 1;
+    }
   }
 
   return {
@@ -633,6 +680,7 @@ function computeEntityContextSignals(
     factScore,
     entityScore,
     determinedCount,
+    signalHits,
     totalContext: charScore + placeScore + factScore + entityScore,
     previewBefore,
     previewAfter,
@@ -650,7 +698,13 @@ function shouldKeepEntityCandidate(
   const strongest = Math.max(signals.charScore, signals.placeScore, signals.factScore, signals.entityScore);
   const structural = signals.isMultiWord || signals.hasJoiner || PLACE_SUFFIX_RE.test(name) || FACTION_SUFFIX_RE.test(name) || ENTITY_SUFFIX_RE.test(name);
   const wordCount = name.trim().split(/\s+/).filter(Boolean).length;
-  if (wordCount === 1 && occurrences < Math.max(2, minFreq + 1) && strongest < 2 && signals.totalContext < 2.75) {
+  if (
+    wordCount === 1
+    && occurrences < Math.max(2, minFreq + 1)
+    && strongest < 2
+    && signals.signalHits < 2
+    && signals.totalContext < 2.75
+  ) {
     return false;
   }
   if (occurrences >= minFreq + 2) return true;
@@ -663,6 +717,9 @@ function shouldKeepEntityCandidate(
   //   nowhere near the bucket comparison.
   if (signals.determinedCount >= 2 && occurrences >= minFreq) return true;
   if (structural && occurrences >= minFreq) return true;
+  // Two occurrences the prose said something about. Counted as HITS, not as
+  // score, so a reweighting of the buckets cannot quietly change who survives.
+  if (signals.signalHits >= 2) return true;
   if (structural && wordCount >= 3 && occurrences >= Math.max(1, minFreq - 1)) return true;
   if (signals.totalContext >= 2) return true;
   if (strongest >= 1.5 && occurrences >= minFreq) return true;
@@ -899,7 +956,25 @@ const PERSON_HEAD_RE = /\b(prince|princess|king|queen|emperor|empress|duke|duche
  *  "Blacksmith Oren". Same closed class, tested at the front. */
 const PERSON_LEAD_RE = /^(?:prince|princess|king|queen|emperor|empress|duke|duchess|lord|lady|marshal|warden|magister|master|mistress|captain|colonel|general|sergeant|doctor|dr|professor|priest|priestess|monk|abbot|abbess|brother|sister|father|mother|elder|chief|blacksmith|goodman|goodwife|aunt|uncle|madam|madame|mistress|dame|inspector|saint)\.?\s+\S/i;
 
-const PLACE_PREP_RE = /\b(in|at|from|to|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
+const PLACE_PREP_RE = /\b(in|at|from|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
+
+/**
+ * ★★ "to" IS NOT A PLACE PREPOSITION ON ITS OWN, AND THIS BUG WAS ALREADY
+ *    PAID FOR ONCE.
+ *
+ *    entity-review's `placePrep` carries the same guard and the same comment;
+ *    the scan's copy of the list never got it, and while the determiner was
+ *    flooding faction and entity with score the place signal was too drowned
+ *    for it to matter. With that removed it matters immediately: measured on
+ *    books nobody tuned against, "said to Jane" and "wrote to Jane" put the
+ *    second lead of Pride and Prejudice in the PLACES bucket, and "spoke to
+ *    Renfield" did the same in Dracula.
+ *
+ *    A speech or attention verb governing "to" makes the object a person, not
+ *    a destination. The unambiguous prepositions above need no such guard.
+ */
+const PLACE_TO_RE = /\bto\s*$/i;
+const TO_GOVERNED_BY_PERSON_VERB = /\b(?:turn|turns|turned|turning|spoke|speak|speaks|speaking|said|says|say|told|tell|tells|talk|talks|talked|listen|listens|listened|whisper|whispers|whispered|shout|shouts|shouted|gesture|gestures|gestured|nod|nods|nodded|point|points|pointed|reply|replies|replied|wrote|write|writes|writing|read|reads|according|close|closer|next|back|married|introduced|attached|known|belong|belongs|belonged|happened|explained|answered|admitted|confessed|owe|owes|owed)\s+to\s*$/i;
 
 /**
  * ★★ THE SAME PREPOSITIONS, ACROSS A DETERMINER.
@@ -1193,6 +1268,7 @@ function emptySignals(name: string): EntityContextSignals {
     factScore: 0,
     entityScore: 0,
     determinedCount: 0,
+    signalHits: 0,
     totalContext: 0,
     previewBefore: "",
     previewAfter: "",
@@ -1208,6 +1284,7 @@ function mergeSignals(target: EntityContextSignals, next: EntityContextSignals):
   target.factScore += next.factScore;
   target.entityScore += next.entityScore;
   target.determinedCount += next.determinedCount;
+  target.signalHits += next.signalHits;
   target.totalContext = target.charScore + target.placeScore + target.factScore + target.entityScore;
   if ((!target.previewBefore && !target.previewAfter) && (next.previewBefore || next.previewAfter)) {
     target.previewBefore = next.previewBefore;
