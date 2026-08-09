@@ -85,6 +85,14 @@ const STOPLIST = new Set([
   "Yes", "Well", "Okay", "Sure", "Hello", "Hi", "Hey", "Please", "Thanks", "Thank",
   "Because", "Maybe", "Though", "Although", "Unless", "Meanwhile", "Otherwise", "Later",
   "Chapter",
+  // ★ INTERJECTIONS ARE A CLOSED CLASS, and they beat both name tests on a
+  //   technicality: "Alright" opens dialogue lines, never appears lowercase in
+  //   a webnovel register, and an opening quote counts as mid-sentence
+  //   evidence. Measured on root-crown: "Alright" reached the CHARACTER
+  //   bucket. Listing a closed class is safe where listing nouns was not.
+  "Alright", "Yeah", "Nah", "Nope", "Yep", "Yup", "Hmm", "Huh", "Ugh", "Whoa",
+  "Aye", "Ah", "Oh", "Um", "Er", "Eh", "Uh", "Phew", "Psst", "Shh", "Hush",
+  "Wow", "Ooh", "Aah", "Hah", "Heh", "Hm", "Mm", "Mmm",
 ]);
 
 // ── Hard discrete filter — commonly-capitalised non-entity English words ───
@@ -557,7 +565,7 @@ function candidateSortScore(
   return occurrences * 14 + signals.totalContext * 6 + (signals.isMultiWord ? 5 : 0) + (signals.hasJoiner ? 3 : 0) + idf * 4;
 }
 
-const ENTITY_SUFFIX_RE = /\b(directive|framework|orthodoxy|protocol|act|policy|program|system|charter|doctrine|standard|authority|shell|compact|accord|network|initiative|unit|processing|committee|commission|board|bureau|directorate|registry)\b/i;
+const ENTITY_SUFFIX_RE = /\b(directive|framework|orthodoxy|protocol|act|policy|program|system|charter|doctrine|standard|authority|shell|compact|accord|network|initiative|unit|processing|committee|commission|board|bureau|directorate|registry|anomaly|investigation|incident|outbreak|practice|practices|script)\b/i;
 const INSTITUTIONAL_TERM_RE = /\b(executive|hierarchical|administrative|continuity|distributed|adaptive|civic|informed|processing|authority|framework|directive|orthodoxy|protocol|program|policy|system)\b/i;
 const ENTITY_SEMANTIC_ANCHORS = {
   entity: "a doctrine, directive, framework, act, policy, protocol, institution, committee, commission, board, bureau, directorate, registry office, executive directive, governing framework, ideology, orthodoxy, administrative program",
@@ -716,11 +724,26 @@ function autoExtractKnownNamesFast(novel: Novel, minFreq = 2, max = 30): string[
 
 // ── Contextual entity classifier ──────────────────────────────────────────
 
-const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|valley|plains|plain|desert|island|islands|lake|river|sea|ocean|bay|gulf|cove|creek|brook|stream|falls|harbor|harbour|port|city|town|village|hamlet|castle|keep|tower|gate|bridge|road|street|avenue|square|market|hall|inn|tavern|temple|shrine|palace|manor|estate|fortress|citadel|dungeon|ruins|cave|cavern|mine|district|quarter|ward|sector|ring|zone|corridor|region|territory|province|country|land|field|fields|garden|gardens|cliff|pass|hills|hill|marsh|swamp|bog|inlet|basin|station|hub|outpost|terminal|platform|crossing|junction|checkpoint|settlement|colony|depot|compound|encampment|sanctuary|lookout)\b/i;
+const PLACE_SUFFIX_RE = /\b(forest|wood|woods|mountain|mountains|peak|ridge|valley|plains|plain|desert|island|islands|lake|river|sea|ocean|bay|gulf|cove|creek|brook|stream|falls|harbor|harbour|port|city|town|village|hamlet|castle|keep|tower|gate|bridge|road|street|avenue|square|market|hall|inn|tavern|temple|shrine|palace|manor|estate|fortress|citadel|dungeon|ruins|cave|cavern|mine|district|quarter|ward|sector|ring|zone|corridor|region|territory|province|country|land|field|fields|garden|gardens|cliff|pass|hills|hill|marsh|swamp|bog|inlet|basin|station|hub|outpost|terminal|platform|crossing|junction|checkpoint|settlement|colony|depot|compound|encampment|sanctuary|lookout|clinic|hospital|infirmary|office|shop|store|mill|forge|dock|docks|wharf|pier|lane|alley|yard)\b/i;
 
-const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|wing|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant)\b/i;
+const FACTION_SUFFIX_RE = /\b(order|guild|house|council|brotherhood|sisterhood|society|alliance|clan|legion|corps|division|union|academy|circle|court|agency|federation|confederation|republic|dynasty|tribe|cult|sect|guard|watch|wing|militia|syndicate|collective|assembly|parliament|senate|commission|committee|board|ministry|institute|college|chapter|covenant|school|conclave)\b/i;
 
-const CHAR_TITLE_RE = /\b(lord|lady|sir|captain|master|doctor|dr|father|mother|queen|king|prince|princess|elder|chief|general|colonel|major|sergeant|inspector|professor|saint)\s*$/i;
+const CHAR_TITLE_RE = /\b(lord|lady|sir|captain|master|doctor|dr|father|mother|queen|king|prince|princess|elder|chief|general|colonel|major|sergeant|inspector|professor|saint|magister|marshal|warden|goodman|goodwife|brother|sister|abbot|abbess|madam|mistress|dame)\s*$/i;
+
+/**
+ * ★ A NAME WHOSE HEAD WORD DENOTES A PERSON IS A PERSON, determiner or not.
+ *   "the Crown Prince", "the Pale Marshal" and "the Spore Warden" are people
+ *   referred to by title, and title reference takes a determiner — exactly
+ *   the usage the determiner test below reads as "not a personal name". This
+ *   closed-ish class of role nouns is the guard that keeps titled characters
+ *   out of the entity bucket, and it also recovers a titled person the
+ *   suffix heuristics banished to places.
+ */
+const PERSON_HEAD_RE = /\b(prince|princess|king|queen|emperor|empress|duke|duchess|lord|lady|marshal|warden|magister|master|mistress|captain|colonel|general|sergeant|doctor|professor|priest|priestess|monk|nun|abbot|abbess|brother|sister|father|mother|elder|chief|smith|blacksmith|scribe|clerk|steward|herald|hunter|keeper|rider|guard|prefect|magistrate|alderman)\s*$/i;
+
+/** The title can also LEAD the name: "Magister Adena Volk", "Aunt Mira",
+ *  "Blacksmith Oren". Same closed class, tested at the front. */
+const PERSON_LEAD_RE = /^(?:prince|princess|king|queen|emperor|empress|duke|duchess|lord|lady|marshal|warden|magister|master|mistress|captain|colonel|general|sergeant|doctor|dr|professor|priest|priestess|monk|abbot|abbess|brother|sister|father|mother|elder|chief|blacksmith|goodman|goodwife|aunt|uncle|madam|madame|mistress|dame|inspector|saint)\.?\s+\S/i;
 
 const PLACE_PREP_RE = /\b(in|at|from|to|near|through|outside|inside|across|toward|towards|beyond|into|within|upon|above|below|around|beside|along|between|past)\s*$/i;
 
@@ -919,7 +942,25 @@ function finalizeCandidates(
       kept.push(name);
     }
   }
-  return kept;
+
+  // ★ A BARE GENERIC SUFFIX WORD IS ANAPHORA, NOT A NAME. Root-crown's scan
+  //   listed "College", "Guild" and "Tower" beside "The Mycomedical College",
+  //   "The Mycoflora Guild" and "The Hand Tower" — the bare word is how prose
+  //   refers BACK to the named thing ("the College decided"), so it always
+  //   out-counts its own full name and the count-based absorption above can
+  //   never fold it. When the word alone is generic (it IS one of the suffix
+  //   vocabulary words) and a kept multi-word name contains it, the bare
+  //   entry is the same referent and is dropped. A bare NON-generic word
+  //   ("Conclave") is left alone: it may name a thing no longer form covers.
+  const isGenericSuffixWord = (word: string) =>
+    !/\s/.test(word) && (
+      new RegExp(`^(?:${PLACE_SUFFIX_RE.source.slice(2, -2)})$`, "i").test(word)
+      || new RegExp(`^(?:${FACTION_SUFFIX_RE.source.slice(2, -2)})$`, "i").test(word)
+      || new RegExp(`^(?:${ENTITY_SUFFIX_RE.source.slice(2, -2)})$`, "i").test(word)
+    );
+  return kept.filter((name) =>
+    !(isGenericSuffixWord(name)
+      && kept.some((other) => other !== name && containsWholeWordSequence(other, name))));
 }
 
 /**
@@ -1000,6 +1041,7 @@ export async function scanAndClassify(
   }
 
   const kept = finalizeCandidates(candidateEntries, signalMap, minFreq);
+  const fullText = chunks.join("\n");
   const result: ScanResult = { characters: [], places: [], factions: [], entities: [] };
   if (predictionTraceOut) predictionTraceOut.value = [];
 
@@ -1141,6 +1183,37 @@ export async function scanAndClassify(
       finalLabel,
       options?.semanticEntityAssist,
     );
+
+    // ── Bucket coherence: the determiner test, applied AT CLASSIFICATION ──
+    //
+    // ★★ A PERSONAL NAME TAKES NO DETERMINER — the same evidence that keeps
+    //    non-speakers out of attribution (filterSpeakerCandidates), finally
+    //    applied where the buckets are chosen. Measured on root-crown: the
+    //    CHARACTER bucket held "Lift" (18 of 20 uses are "the Lift"), "Bind"
+    //    (7 of 7), "Tower" (6 of 6), "Conclave" (20 of 24) and "Mosshollow"
+    //    (42 of 41 — a possessive form pushed it over), because the char-vs-
+    //    place scores were near zero and character is the default.
+    //
+    //    The one legitimate exception is TITLE REFERENCE: "the Crown Prince"
+    //    and "the Spore Warden" are people, and titles take determiners. So a
+    //    name whose head word denotes a person is exempt in both directions:
+    //    it stays a character despite the determiner, and it is RECOVERED to
+    //    character when the suffix heuristics banished it elsewhere.
+    const headIsPerson = PERSON_HEAD_RE.test(name) || PERSON_LEAD_RE.test(name);
+    if (finalLabel === "character" && !headIsPerson) {
+      const dr = determinerUsage(fullText, name);
+      if (dr.occurrences >= 3 && dr.ratio >= 0.4) {
+        finalLabel =
+          ENTITY_SUFFIX_RE.test(name) ? "entity"
+          : PLACE_SUFFIX_RE.test(name) ? "place"
+          : FACTION_SUFFIX_RE.test(name) ? "faction"
+          : placeScore > Math.max(factScore, entityScore) ? "place"
+          : factScore > entityScore ? "faction"
+          : "entity";
+      }
+    } else if (finalLabel !== "character" && headIsPerson && !PLACE_SUFFIX_RE.test(name) && !FACTION_SUFFIX_RE.test(name)) {
+      finalLabel = "character";
+    }
 
     predictionTraceOut?.value.push({
       task: "entity",
@@ -1300,6 +1373,22 @@ export function resolveKnownNames(novel: Novel): string[] {
  */
 const DETERMINER_BEFORE_RE = /\b(?:the|a|an)\s$/i;
 const MAX_DETERMINER_RATIO = 0.10;
+
+/** How often is this name preceded by the/a/an? Shared evidence for speaker
+ *  filtering (threshold 0.10, recall-first) and bucket coherence in
+ *  scanAndClassify (threshold 0.4, precision-first) — same measurement, two
+ *  deliberately different bars. */
+export function determinerUsage(text: string, name: string): { occurrences: number; ratio: number } {
+  const re = new RegExp(`(.{0,4})\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g");
+  let occurrences = 0;
+  let determined = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    occurrences++;
+    if (DETERMINER_BEFORE_RE.test(m[1])) determined++;
+  }
+  return { occurrences, ratio: occurrences === 0 ? 0 : determined / occurrences };
+}
 
 export function filterSpeakerCandidates(names: readonly string[], text: string): string[] {
   if (!text) return [...names];
