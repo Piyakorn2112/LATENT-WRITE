@@ -226,14 +226,61 @@ export function genderConflict(a: NameParts, b: NameParts): boolean {
  *    many times over, so a majority would confidently return "male" and merge
  *    Georgiana anyway. The presence of both is the signal; the ratio is noise.
  */
+/** The longest title above, and the bound on how far back the reader looks. */
+const MAX_TITLE_LEN = 12; // "mademoiselle"
+
+/**
+ * The title token immediately in front of `at`, lower-cased, or "".
+ *
+ * This is `(?:title)\.?\s+` read backwards, and every piece of that pattern is
+ * preserved deliberately: `\s` matches newlines, the dot is optional, and the
+ * title must itself start on a word boundary so "xmademoiselle" is not a title.
+ */
+function titleImmediatelyBefore(text: string, at: number): string {
+  let i = at;
+  while (i > 0 && /\s/.test(text[i - 1])) i--;
+  if (i === at) return "";              // `\s+` needs at least one
+  if (i > 0 && text[i - 1] === ".") i--; // `\.?`
+  let j = i;
+  while (j > 0 && /[A-Za-z]/.test(text[j - 1]) && i - j < MAX_TITLE_LEN) j--;
+  if (j === i) return "";
+  if (j > 0 && /[A-Za-z0-9]/.test(text[j - 1])) return ""; // LB
+  return text.slice(j, i).toLowerCase();
+}
+
+/**
+ * ★★ SEARCH FOR THE NAME, NOT FOR THE TITLE, AND IT IS WORTH 13x. This asked
+ *    `LB(?:mr|sir|lord|…)\.?\s+NAME RB` — a thirteen-way literal alternation in
+ *    FRONT of the name, which leaves the engine no single literal to search
+ *    for, so it attempts a match at every position in the book. Measured on
+ *    hollow-iris (3.37M chars): 16.3ms per pattern and the function ran two of
+ *    them, against 2.3ms to scan the same book for a plain name literal. At 32
+ *    ms a call it was the largest single cost in `proposeAliases`.
+ *
+ *    Walking the name's own occurrences and reading backwards asks the same
+ *    question in the direction the regex engine is fast in, and answers it in
+ *    ONE pass instead of two. Same family of fix as `forEachNamePrefix` in
+ *    world-data.ts; scripts/test-name-usage-scan.ts holds both to the old
+ *    implementation's answers on seven books.
+ *
+ *    The name is matched case-INSENSITIVELY because the old pattern carried a
+ *    single `i` flag across the whole regex, title and name alike. Dropping
+ *    that would have been a silent narrowing.
+ */
 export function surnameSharedByFamily(text: string, bare: string): boolean {
   if (!bare || bare.includes(" ")) return false;
-  const n = esc(bare);
-  const has = (titles: Iterable<string>) => {
-    const alt = [...titles].join("|");
-    return new RegExp(`${LB}(?:${alt})\\.?\\s+${n}${RB}`, "i").test(text);
-  };
-  return has(MALE_TITLES) && has(FEMALE_TITLES);
+  const re = new RegExp(`${LB}${esc(bare)}${RB}`, "gi");
+  let male = false;
+  let female = false;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const title = titleImmediatelyBefore(text, m.index);
+    if (!title) continue;
+    if (MALE_TITLES.has(title)) male = true;
+    else if (FEMALE_TITLES.has(title)) female = true;
+    if (male && female) return true;
+  }
+  return false;
 }
 
 /**

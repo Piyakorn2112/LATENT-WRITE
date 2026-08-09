@@ -303,10 +303,61 @@ export function nameBoundaryRe(name: string, flags = "g"): RegExp {
   return new RegExp(`${WORD_BEFORE}${escapeForRe(name)}${WORD_AFTER}`, `${flags}u`);
 }
 
-/** The same, capturing the four characters in front — what the determiner and
- *  bracket tests read. */
-function namePrefixRe(name: string): RegExp {
-  return new RegExp(`(.{0,4})${WORD_BEFORE}${escapeForRe(name)}${WORD_AFTER}`, "gu");
+/** Exactly the characters `.` refuses to match, written as escapes so the two
+ *  invisible ones cannot be lost to a copy-paste. */
+const LINE_BREAK_RE = /[\n\r\u2028\u2029]/;
+
+/**
+ * Walk every occurrence of `name`, handing the visitor the four characters in
+ * front of it — what the determiner and bracket tests read.
+ *
+ * ★★ THE PREFIX IS SLICED, NEVER CAPTURED, AND THAT IS WORTH 30x. This was
+ *    `(.{0,4})${WORD_BEFORE}NAME${WORD_AFTER}`, and a regex whose first term is
+ *    an unanchored `.{0,4}` cannot use V8's literal-prefix search: the engine
+ *    attempts a match at every position in the book rather than jumping to the
+ *    name. Measured on hollow-iris (3.37M chars) it cost a FLAT 107ms per name
+ *    whether the name occurred 3074 times or zero times, and the zero case is
+ *    the proof — a scanner that skipped would have returned at once. Slicing by
+ *    index reads 2.5-5.0ms. Same lesson as the context-window capture in
+ *    `scanAndClassify` below; this caller was missed when that one was fixed.
+ *
+ * ★★ AND THE PREFIX WINDOW IS NOT SIMPLY `slice(at - 4, at)`. Two rules of the
+ *    old regex are load-bearing and both are invisible until a book breaks:
+ *
+ *    A LINE BREAK ENDS THE WINDOW, because `.` never matched one. Hard-wrapped
+ *    Gutenberg text puts "…the\nAssembly" on the page constantly, and the old
+ *    scanner read that prefix as EMPTY. A plain slice reads "the\n", the
+ *    determiner test fires, and the ratio that decides who is allowed to speak
+ *    moves on five of the seven corpus books.
+ *
+ *    THE PREVIOUS MATCH ENDS IT TOO, because `exec` resumes at `lastIndex` and
+ *    the leftmost match can never start before it. For "The The" scanning the
+ *    name "The", the old prefix was " " and an unclamped slice gives "The " —
+ *    which the determiner test accepts. Clamping to `prevEnd` makes the two
+ *    implementations identical by construction rather than identical on the
+ *    books that happened to be tested.
+ *
+ * Returns the occurrence count so callers need no second pass.
+ */
+function forEachNamePrefix(
+  text: string,
+  name: string,
+  visit: (prefix: string) => void,
+): number {
+  const re = nameBoundaryRe(name, "g");
+  let occurrences = 0;
+  let prevEnd = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    occurrences++;
+    let prefix = text.slice(Math.max(prevEnd, m.index - 4), m.index);
+    for (let i = prefix.length - 1; i >= 0; i--) {
+      if (LINE_BREAK_RE.test(prefix[i])) { prefix = prefix.slice(i + 1); break; }
+    }
+    visit(prefix);
+    prevEnd = m.index + m[0].length;
+  }
+  return occurrences;
 }
 
 const TITLE_TOKEN_PATTERN = `\\p{Lu}[\\p{Ll}\\p{M}]{1,}(?:['’-]\\p{Lu}[\\p{Ll}\\p{M}]{1,})*`;
@@ -2050,28 +2101,22 @@ const MAX_DETERMINER_RATIO = 0.10;
  *  scanAndClassify (threshold 0.4, precision-first) — same measurement, two
  *  deliberately different bars. */
 export function determinerUsage(text: string, name: string): { occurrences: number; ratio: number } {
-  const re = namePrefixRe(name);
-  let occurrences = 0;
   let determined = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    occurrences++;
-    if (DETERMINER_BEFORE_RE.test(m[1])) determined++;
-  }
+  const occurrences = forEachNamePrefix(text, name, (prefix) => {
+    if (DETERMINER_BEFORE_RE.test(prefix)) determined++;
+  });
   return { occurrences, ratio: occurrences === 0 ? 0 : determined / occurrences };
 }
+
+const BRACKETED_BEFORE_RE = /\[\s*$/;
 
 export function filterSpeakerCandidates(names: readonly string[], text: string): string[] {
   if (!text) return [...names];
   return names.filter((name) => {
-    const re = namePrefixRe(name);
-    let occ = 0;
     let determined = 0;
     let bracketed = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(text)) !== null) {
-      occ++;
-      if (DETERMINER_BEFORE_RE.test(m[1])) determined++;
+    const occ = forEachNamePrefix(text, name, (prefix) => {
+      if (DETERMINER_BEFORE_RE.test(prefix)) determined++;
       // ★ A NAME THAT LIVES INSIDE SQUARE BRACKETS IS A DOCUMENT ARTIFACT.
       // Gutenberg texts carry `[Illustration: ...]`, `[Copyright ...]`,
       // `[Transcriber's note ...]` — and "Illustration" passed the determiner
@@ -2079,8 +2124,8 @@ export function filterSpeakerCandidates(names: readonly string[], text: string):
       // Prejudice's cast, where it WON dialogue lines. Same family of test as
       // the determiner: no word list, positional evidence the text itself
       // supplies. Prose never brackets a person's name; markup always does.
-      if (/\[\s*$/.test(m[1])) bracketed++;
-    }
+      if (BRACKETED_BEFORE_RE.test(prefix)) bracketed++;
+    });
     if (occ === 0) return true;
     if (bracketed / occ >= 0.5) return false;
     return determined / occ < MAX_DETERMINER_RATIO;
