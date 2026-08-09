@@ -158,13 +158,28 @@ async function handleLoad(msg) {
     //   instead of pretending. Q8_0 on both K and V halves the KV cache —
     //   which on the 8 GB floor is the difference between the guard refusing
     //   the max tier and the answer arriving.
+    // ★ K AND V ARE SET SEPARATELY BY THE BINDING, so `kvCacheType` accepts
+    //   either one string for both or `{ k, v }`. Nothing in the registry uses
+    //   the pair form, and this is the note saying why not rather than an
+    //   invitation to try it.
+    //
+    // ★★ ASYMMETRIC Q8_0 K / Q4_0 V IS MEASURED AND REJECTED on this hardware.
+    //    scripts/probe-kv-cache.cjs, 4B, fresh process per configuration:
+    //    generation went 4081ms → 9386ms, a 2.3x penalty, and the answer
+    //    CHANGED ("streets and fog" where f16 and Q8_0 both said "streets and
+    //    empty streets"). Metal has no flash-attention kernel for a q4_0 V
+    //    cache, so it dequantizes per step and pays for the compression twice.
+    //    Q8_0 on both sides is byte-identical to f16 for +6% generation time,
+    //    which is why that is what the registry asks for.
     const extra = {};
     if (flashAttentionRequested !== null) extra.flashAttention = flashAttentionRequested;
     let kvApplied = null;
-    if (kvCacheTypeRequested) {
-      extra.experimentalKvCacheKeyType = kvCacheTypeRequested;
-      extra.experimentalKvCacheValueType = kvCacheTypeRequested;
-    }
+    const kvKey = kvCacheTypeRequested && typeof kvCacheTypeRequested === 'object'
+      ? kvCacheTypeRequested.k : kvCacheTypeRequested;
+    const kvValue = kvCacheTypeRequested && typeof kvCacheTypeRequested === 'object'
+      ? kvCacheTypeRequested.v : kvCacheTypeRequested;
+    if (kvKey) extra.experimentalKvCacheKeyType = kvKey;
+    if (kvValue) extra.experimentalKvCacheValueType = kvValue;
     try {
       context = await model.createContext({ contextSize, sequences: 1, ...extra });
       kvApplied = kvCacheTypeRequested || null;

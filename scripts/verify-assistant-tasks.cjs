@@ -23,7 +23,8 @@
  *   3. the clearly-plausible case answers anything BUT break
  *   4. the canary case — same pack plus an author-asserted prior ruling —
  *      answers anything BUT break
- *   5. place usage → place, person usage → character, non-name → not-a-name
+ *   5. place usage → place, person usage → character, non-name → common-word
+ *      (the WIRE label; entity-review maps it back to the stored "not-a-name")
  *   6. every reason is non-empty (deliberately NOT guaranteed by the grammar —
  *      the schemas carry no minLength, so this stays a measured behaviour)
  *   7. the adjudication verdicts are not all the same label
@@ -381,8 +382,16 @@ async function main() {
     `got ${proposals.place ? proposals.place.type : 'nothing'}`);
   gate('person usage → "character"', proposals.person && proposals.person.type === 'character',
     `got ${proposals.person ? proposals.person.type : 'nothing'}`);
-  gate('non-name → "not-a-name"', proposals['not-a-name'] && proposals['not-a-name'].type === 'not-a-name',
-    `got ${proposals['not-a-name'] ? proposals['not-a-name'].type : 'nothing'}`);
+  // ★ THE WIRE LABEL IS "common-word", NOT "not-a-name". It was renamed after
+  //   the 4B was measured carrying the prompt's own phrase "not a PERSONAL
+  //   name" straight onto the label and deleting six real names. The old
+  //   spelling is still accepted by WIRE_TO_TYPE, so both pass here — what
+  //   must not pass is the model choosing a bucket for a word that is not a
+  //   name at all.
+  const nonName = proposals['not-a-name'];
+  gate('non-name → "common-word"',
+    !!nonName && (nonName.type === 'common-word' || nonName.type === 'not-a-name'),
+    `got ${nonName ? nonName.type : 'nothing'}`);
 
   const blank = responses.filter((r) => !r.json || typeof r.json.reason !== 'string' || r.json.reason.trim() === '');
   gate('every response carries a non-empty reason', blank.length === 0,

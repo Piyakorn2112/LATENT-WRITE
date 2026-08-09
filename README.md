@@ -993,14 +993,51 @@ the decode and structural whitespace is a rounding error: 726ms against 724ms
 per call over twelve calls, so it was reverted rather than shipped as an
 unmeasured knob.
 
-The largest lever left is **continuous batching**, and it is architecturally
-unavailable today: `assistant-host.cjs` creates its context with
-`sequences: 1` and hard-rejects a second request as `busy`. Decode on Apple
-Silicon is memory-bandwidth-bound, so concurrent sequences share the per-token
-weight read almost for free; published Apple-Silicon numbers put aggregate
-throughput at ~4.3x for 16 concurrent requests, and four would plausibly take
-this pass from ~9s to ~3s. It is a change to the runtime every other task
-shares, so it is written down here rather than done.
+The largest lever left is **continuous batching**, and the app already has it
+for the 4B: the llama-server sidecar runs 4 slots x 2048 tokens with true
+batching across them, measured at 1.75x on four concurrent chip calls. What it
+does not cover is this pass, which runs on the in-process host, and that host
+creates its context with `sequences: 1` and hard-rejects a second request as
+`busy`. Decode on Apple Silicon is memory-bandwidth-bound, so concurrent
+sequences share the per-token weight read almost for free. Routing review
+through the sidecar is the obvious next step and is a change to a path every
+other task shares, so it is written down here rather than done.
+
+#### KV-cache compression, and how much of it is reachable
+
+Already shipped on the 4B: `kvCacheType: 'Q8_0'` on both K and V, plus flash
+attention, applied through the binding's experimental option and falling back
+to a plain context (reported, never silently) if it refuses. Measured with
+`npm run probe:kv-cache`, one configuration per process: **byte-identical
+answers to f16** for **+6%** generation time.
+
+Two things were measured and rejected.
+
+**Asymmetric Q8_0 K / Q4_0 V**, the standard next step, is much worse here than
+the literature suggests: generation went 4081ms to **9386ms**, a 2.3x penalty,
+and the answer *changed*. Metal has no flash-attention kernel for a q4_0 V
+cache, so it dequantizes per step and pays for the compression twice. The
+host accepts a `{ k, v }` pair so this stays re-measurable; nothing uses it.
+
+**Q8_0 on the 1.7B** saves ~180 MB but changes the answers, and that tier is
+not the memory driver (the 4B's 2.4 GB resident is). It stays on f16.
+
+★★ AND RSS DOES NOT MEASURE A KV CACHE ON THIS PLATFORM. Two runs of the
+identical f16 configuration on the 4B, each in a fresh process, read 1930 MB
+and 2534 MB — **604 MB apart**, wider than any gap between the configurations
+being compared. The weights are mmapped, so how much of the 2.5 GB counts as
+resident depends on system pressure, and Metal's unified memory is not
+attributed to the process at all. Repeating the first configuration last is
+what exposed it. Generation time is the trustworthy signal: the two f16 runs
+agreed to 3ms.
+
+Beyond Q8_0 the answer is "public, but not reachable from here". Google
+DeepMind's TurboQuant (ICLR 2026) has been reimplemented in several llama.cpp
+forks as `TQ3_0` and friends, reporting 4.6-4.9x K-cache compression at ~4.6%
+perplexity cost with throughput within 1%. None of it is upstream, and none of
+it is in node-llama-cpp, so adopting it means vendoring and maintaining a
+custom llama.cpp build for every platform this app ships to. That is a
+distribution decision, not an inference one.
 
 Speculative decoding is the one that looks applicable and is not. It reaches
 ~2.4x on predictable workloads with acceptance above 65%, and this workload
@@ -2423,6 +2460,7 @@ suite that nobody knows exists is a suite that stops being run.
 | `npm run probe:chip-quality` | `scripts/probe-chip-quality.cjs` |
 | `npm run probe:bucket-audit` | `scripts/probe-bucket-audit.ts` |
 | `npm run probe:bucket-review` | `scripts/probe-bucket-review.cjs` |
+| `npm run probe:kv-cache` | `scripts/probe-kv-cache.cjs` |
 | `npm run probe:entity-funnel` | `scripts/probe-entity-funnel.ts` |
 | `npm run probe:lm-blend` | `scripts/probe-lm-blend.ts` |
 | `npm run probe:lm-cost` | `scripts/probe-lm-cost.ts` |
