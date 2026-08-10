@@ -251,41 +251,131 @@ function ExportHero() {
   );
 }
 
+// ─── Right-click hero: the two menus the writer actually gets ─────────────
+//
+// ★★ THE REAL CLASSES, NOT A LOOKALIKE. These reuse `.max-ask`, `.max-ask-item`
+//    and `.max-ask-item-hint` from the shipping popovers, so the mock inherits
+//    the same glass, radii, type and spacing, and it cannot drift from them
+//    without the drift being visible here too. The labels and hints below are
+//    copied verbatim from MENU in MaxAskPopover.tsx and the choose phase in
+//    WritingToolPopover.tsx — a tour that invents its own wording teaches a
+//    menu the writer will not find.
+const ASK_MENU = [
+  { label: "Check against the story", hint: "does anything here conflict?" },
+  { label: "What is this doing?", hint: "the work this paragraph performs" },
+  { label: "What could follow?", hint: "grounded in what is established" },
+] as const;
+
+const WRITE_MENU = [
+  { label: "Proofread", hint: "fix typos and grammar, keep every word choice" },
+  { label: "Rewrite", hint: "smooth clarity and flow, keep the meaning" },
+] as const;
+
+function RightClickHero() {
+  return (
+    <div className="onb-askpair">
+      <figure className="onb-askcard">
+        <figcaption className="onb-askcard-cap">
+          Right-click a paragraph
+        </figcaption>
+        <div className="max-ask onb-askmock" aria-hidden="true">
+          <div className="max-ask-inner">
+            <div className="max-ask-context">She turned and walked into the dark.</div>
+            {ASK_MENU.map((m) => (
+              <div key={m.label} className="max-ask-item">
+                <span className="max-ask-item-label">{m.label}</span>
+                <span className="max-ask-item-hint">{m.hint}</span>
+              </div>
+            ))}
+            <div className="max-ask-question-input onb-askmock-input">
+              Ask about this paragraph…
+            </div>
+          </div>
+        </div>
+      </figure>
+
+      <figure className="onb-askcard">
+        <figcaption className="onb-askcard-cap">
+          Select first, then right-click
+        </figcaption>
+        <div className="max-ask onb-askmock" aria-hidden="true">
+          <div className="max-ask-inner">
+            <div className="max-ask-context">
+              the rain caught him at the bridge
+              <span className="max-ask-item-hint"> · 34 chars</span>
+            </div>
+            {WRITE_MENU.map((m) => (
+              <div key={m.label} className="max-ask-item">
+                <span className="max-ask-item-label">{m.label}</span>
+                <span className="max-ask-item-hint">{m.hint}</span>
+              </div>
+            ))}
+            <div className="max-ask-question-input onb-askmock-input">
+              Or describe a change…
+            </div>
+          </div>
+        </div>
+      </figure>
+    </div>
+  );
+}
+
 // ─── Local model hero: the three modes, with their real sizes ─────────────
 //
 // ★ THE NUMBERS ARE THE ONES IN THE SETTINGS ROW, because a writer who reads
 //   "1.1 GB" here and sees a different figure at the moment of downloading has
 //   been told a story rather than a fact. Kept in step with MODE_OPTIONS and
 //   MODE_SIZE in AnalysisPanel.tsx.
+/**
+ * ★★ THE THREE MODES SEPARATED BY WHAT THEY DO, not by adjectives. "On" and
+ *    "Max" were a size and a slogan, which leaves the writer choosing between
+ *    "1.1 GB" and "2.5 GB" with no idea what the extra gigabyte buys. Each row
+ *    now names the jobs that mode actually performs, taken from the engines
+ *    that call it: entity review and continuity on the 1.7B; the abstractive
+ *    dossier, alias referents and paragraph asks on the 4B.
+ *
+ * ★ MAX IS THE ONLY GATED ONE, which is a product decision worth stating in
+ *   the tour rather than discovering at the track. Off and On are the free
+ *   build and every measured number in the README comes from them.
+ */
 const LOCAL_MODES = [
-  { name: "Off", size: "no download", desc: "Rules only. Instant.", isSize: false },
-  { name: "On", size: "1.1 GB", desc: "Names, continuity, summaries.", isSize: true },
-  { name: "Max", size: "2.5 GB", desc: "Reads for meaning.", isSize: true },
+  {
+    name: "Off", size: "no download", isSize: false, pro: false,
+    does: "Every engine still runs. Marks, tension, pacing, the scan.",
+  },
+  {
+    name: "On", size: "1.1 GB", isSize: true, pro: false,
+    does: "Adds a reader: sorts scanned names, checks continuity, writes chapter summaries.",
+  },
+  {
+    name: "Max", size: "2.5 GB", isSize: true, pro: true,
+    does: "Adds judgement: answers questions about a paragraph and writes from cited passages.",
+  },
 ] as const;
 
 function LocalModelHero() {
   return (
     <div className="onb-modes-wrap">
       <div className="onb-modes" aria-label="Local model options">
-        {LOCAL_MODES.map((m, i) => (
+        {LOCAL_MODES.map((m) => (
           <div
             key={m.name}
-            className={`onb-mode-card${i === 1 ? " onb-mode-card--pick" : ""}`}
+            className={`onb-mode-row${m.name === "On" ? " onb-mode-row--pick" : ""}`}
           >
-            <div className="onb-mode-card-name">{m.name}</div>
-            {/* ★ ONLY A REAL SIZE GETS THE ACCENT. "no download" in the same
-                blue read as a figure of the same kind, which is the one thing
-                the Off card is saying it is not. */}
-            <div className={`onb-mode-card-size${m.isSize ? " onb-mode-card-size--real" : ""}`}>
-              {m.size}
+            <div className="onb-mode-row-head">
+              <span className="onb-mode-row-name">{m.name}</span>
+              {/* ★ ONLY A REAL SIZE GETS THE ACCENT. "no download" in the same
+                  blue read as a figure of the same kind, which is the one
+                  thing the Off row is saying it is not. */}
+              <span className={`onb-mode-row-size${m.isSize ? " onb-mode-row-size--real" : ""}`}>
+                {m.size}
+              </span>
+              {m.pro && <span className="onb-mode-row-pro">PRO</span>}
             </div>
-            <div className="onb-mode-card-desc">{m.desc}</div>
+            <div className="onb-mode-row-does">{m.does}</div>
           </div>
         ))}
       </div>
-      <p className="onb-modes-note">
-        Downloaded once, run here, and never uploaded. No account and no key.
-      </p>
     </div>
   );
 }
@@ -371,7 +461,7 @@ const ONBOARDING_OVERLAY_BODY_CLASS = "onboarding-overlay-freeze";
 
 export function Onboarding({ onClose, onTierChange }: Props) {
   const [page, setPage] = useState(0);
-  const total = 6;
+  const total = 7;
   const pageWidth = 100 / total;
   const isElectron = !!window.electronAPI;
 
@@ -525,13 +615,26 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               </p>
             </OnbPage>
 
-            {/* PAGE 4 — The local model.
-                ★ THE PAGE THIS ONBOARDING WAS MISSING. Three modes, their real
-                  download sizes, and the two promises that make the choice safe:
-                  the rules answer first, and the model reads snippets rather
-                  than the book. Desktop only, because the browser build has no
-                  runtime to opt into. */}
-            <OnbPage active={page === 3} widthPercent={pageWidth}>
+            {/* PAGE 4 — Right-click, the two AI actions in the page itself. */}
+            <OnbPage active={page === 3} widthPercent={pageWidth} variant="dense">
+              <div className="onb-hero onb-hero--ask">
+                <RightClickHero />
+              </div>
+              <h1 className="onb-title onb-title--small">Right-click, and ask</h1>
+              <p className="onb-subtitle">
+                <strong>Right-click a paragraph</strong> to ask what it is doing, what could
+                follow, or whether it contradicts anything you have already written.{" "}
+                <strong>Select a passage first</strong> and the same click offers to proofread or
+                rewrite it, or to do whatever you type. Nothing is replaced until you accept it.
+              </p>
+            </OnbPage>
+
+            {/* PAGE 5 — The local model.
+                ★ THE PAGE THIS ONBOARDING WAS MISSING. Three modes separated by
+                  what they DO, their real download sizes, and the two promises
+                  that make the choice safe: the rules answer first, and the
+                  model reads snippets rather than the book. */}
+            <OnbPage active={page === 4} widthPercent={pageWidth} variant="dense">
               <div className="onb-hero onb-hero--modes">
                 <LocalModelHero />
               </div>
@@ -539,23 +642,23 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               <p className="onb-subtitle">
                 {isElectron ? (
                   <>
-                    Most of the app is plain rules and needs no model at all. For deeper reading,
-                    add a local one under <strong>Settings</strong> in the Analysis panel. It sees
-                    short passages rather than your whole book, and only sharpens what the rules
-                    already found, so turning it off never breaks anything.
+                    Set this under <strong>Settings</strong> in the Analysis panel. Whichever you
+                    pick, it runs here, sees short passages rather than your whole book, and only
+                    sharpens an answer the rules already gave. Nothing is uploaded, and there is
+                    no account or key.
                   </>
                 ) : (
                   <>
-                    Everything here is plain rules running in your own browser. The desktop app
-                    adds an optional language model for deeper reading, and that runs on your
-                    machine too.
+                    Everything here is plain rules running in your own browser, with no account
+                    and no key. The desktop app adds these optional local models for deeper
+                    reading, and they run on your machine too.
                   </>
                 )}
               </p>
             </OnbPage>
 
             {/* PAGE 5 — Renderer (desktop) / Export (browser) */}
-            <OnbPage active={page === 4} widthPercent={pageWidth}>
+            <OnbPage active={page === 5} widthPercent={pageWidth}>
               {isElectron ? (
                 <>
                   <div className="onb-hero onb-hero--renderer">
@@ -638,9 +741,9 @@ export function Onboarding({ onClose, onTierChange }: Props) {
             </OnbPage>
 
             {/* PAGE 6 — Three things to do first */}
-            <OnbPage active={page === 5} widthPercent={pageWidth}>
+            <OnbPage active={page === 6} widthPercent={pageWidth}>
               <div className="onb-hero onb-hero--checklist">
-                <ChecklistHero active={page === 5} items={checklist} />
+                <ChecklistHero active={page === 6} items={checklist} />
               </div>
               <h1 className="onb-title onb-title--small">Three things to do first</h1>
               <p className="onb-subtitle">

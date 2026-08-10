@@ -8056,55 +8056,132 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   gap: 10px;
   width: 100%;
 }
-.onb-mode-card {
+/* ★★ ROWS, NOT THREE COLUMNS. Side-by-side cards forced each mode's answer
+   into three words, which is how "On" and "Max" ended up separated by nothing
+   but a file size. A stacked row gives each one a full line to say what it
+   actually adds, and the eye compares them down a single left edge. */
+.onb-modes {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px 12px 16px;
-  border-radius: 14px;
+  gap: 6px;
+  width: 100%;
+}
+.onb-mode-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px 10px;
+  border-radius: 12px;
   border: 1px solid var(--divider-line);
   background: color-mix(in srgb, var(--panel-text) 3%, transparent);
   text-align: left;
 }
-/* ★ ONE CARD CARRIES WEIGHT, and it is the middle one, because "On" is the
-   mode every prompt in the app was measured against. A row of three equal
-   cards asks the writer to research a decision; a row with a recommendation
-   answers it and still shows the alternatives. */
-.onb-mode-card--pick {
+/* ★ ONE ROW CARRIES WEIGHT, and it is "On", the mode every prompt in the app
+   was measured against. Three equal rows ask the writer to research a
+   decision; a recommendation answers it and still shows the alternatives. */
+.onb-mode-row--pick {
   border-color: color-mix(in srgb, var(--control-value-fill) 55%, var(--divider-line));
   background: color-mix(in srgb, var(--control-value-fill) 8%, transparent);
 }
-.onb-mode-card-name {
+.onb-mode-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.onb-mode-row-name {
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text);
 }
-.onb-mode-card-size {
+.onb-mode-row-size {
   font-family: var(--font-ui);
   font-size: 11px;
   font-weight: 500;
   color: var(--text-tertiary);
 }
-.onb-mode-card-size--real {
+.onb-mode-row-size--real {
   color: color-mix(in srgb, var(--control-value-fill) 75%, var(--text-secondary));
 }
-.onb-modes-wrap {
-  width: 100%;
-}
-/* The promise, quietly, under the choice it applies to. */
-.onb-modes-note {
+/* The same mark the mode track carries, so the tour and the control agree. */
+.onb-mode-row-pro {
+  margin-left: auto;
   font-family: var(--font-ui);
-  font-size: 11.5px;
-  color: var(--text-tertiary);
-  margin: 12px 0 0;
-  text-align: center;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 3px 5px 2px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--panel-text) 52%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 11%, transparent);
 }
-.onb-mode-card-desc {
+.onb-mode-row-does {
   font-family: var(--font-ui);
   font-size: 11.5px;
   line-height: 1.45;
   color: var(--text-tertiary);
+}
+.onb-modes-wrap {
+  width: 100%;
+}
+
+/* ─── Right-click hero ──────────────────────────────────────────────────── */
+.onb-hero--ask {
+  width: min(100%, 620px);
+  margin-left: auto;
+  margin-right: auto;
+}
+.onb-askpair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+  align-items: start;
+}
+.onb-askcard {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.onb-askcard-cap {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-tertiary);
+  text-align: left;
+}
+/* ★★ THE MOCK REUSES `.max-ask`, WHICH IS `position: fixed`. Left alone it
+   tears out of the page and pins itself to the viewport corner. Everything
+   else about the class is exactly what should be inherited — the glass, the
+   radius, the type — so only the positioning is undone.
+   ★★ AND THE SELECTOR IS DOUBLED ON PURPOSE. `.onb-askmock` alone is the same
+   specificity as `.max-ask`, which is declared ~8000 lines LATER in this file
+   and therefore wins: the first attempt measured the hero at 12px because the
+   mock was still fixed-positioned. Same cascade trap as the grouped
+   `transition` shorthand in the glass controls. */
+.max-ask.onb-askmock {
+  position: static;
+  z-index: auto;
+  width: 100%;
+  height: auto;
+  animation: none;
+  text-align: left;
+  /* ★ A STAND-IN SURFACE, NOT `.liquid-glass`. The real popover is glass, but
+     the tour card is glass too, and nesting the engine inside itself means a
+     second backdrop-filter pass reading a backdrop that is already refracted.
+     A quiet border and tint give the popover its edge for a tenth of the cost
+     and none of the stacking risk. */
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+}
+/* The two inputs are real controls in the app; here they are labels, so they
+   take the field's shape without pretending to accept a caret. */
+.onb-askmock-input {
+  color: var(--text-tertiary);
+  cursor: default;
 }
 .onb-hero--widgets {
   display: grid;
@@ -15899,6 +15976,27 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 .glass-mode-option:disabled { cursor: default; }
+
+/* ★ A LOCK MARK ON THE STOP ITSELF, sized to the track rather than reusing
+   .pro-badge — the track's own label is 9.5px, so the panel's badge would sit
+   taller than the word it qualifies. It rides the top-right corner so the
+   centred label keeps its optical position and the stops stay even. */
+.glass-mode-lock {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-family: var(--font-ui);
+  font-size: 5.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  padding: 1.5px 3px 1px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--panel-text) 52%, transparent);
+  background: color-mix(in srgb, var(--panel-text) 11%, transparent);
+  user-select: none;
+  pointer-events: none;
+}
 
 .glass-mode-label {
   font-family: var(--font-ui);

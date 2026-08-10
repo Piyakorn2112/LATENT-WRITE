@@ -17,6 +17,15 @@ export interface ModeOption<T extends string> {
   label: string;
   /** Offered but not selectable — the reason is shown, never a silent grey. */
   disabled?: boolean;
+  /**
+   * ★★ LOCKED IS NOT DISABLED, and the difference is the whole affordance. A
+   *    `disabled` stop swallows the press, so the writer taps it, nothing
+   *    happens, and the app has said nothing at all. A locked stop stays
+   *    pressable, carries a PRO badge, and the CALLER refuses the change and
+   *    explains why — the pattern the intelligence grid in AnalysisPanel
+   *    already uses.
+   */
+  locked?: boolean;
   /** One line under the track when this option is current. */
   note?: string;
   title?: string;
@@ -279,6 +288,10 @@ export function GlassModeSelector<T extends string>({
                 these from the live DOM, with their real font and colour, and
                 paints them into the buffer it then refracts. */}
             <span className="glass-mode-label glass-refract-text">{o.label}</span>
+            {/* ★ NOT `glass-refract-text`. The badge must not be painted into
+                the refraction buffer: the knob would then carry a PRO mark
+                across every stop it slides over. */}
+            {o.locked && <span className="glass-mode-lock" aria-label="Pro">PRO</span>}
           </button>
         ))}
 

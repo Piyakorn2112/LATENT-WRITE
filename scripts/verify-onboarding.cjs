@@ -103,7 +103,7 @@ app.whenReady().then(async () => {
   if (!present) { console.log(`\n${pass} passed, ${fail} failed\n`); win.destroy(); app.exit(1); return; }
 
   const dots = await js(`document.querySelectorAll(".onb-dot").length`);
-  gate(dots === 6, `six pages (${dots})`);
+  gate(dots === 7, `seven pages (${dots})`);
 
   fs.mkdirSync(OUT, { recursive: true });
   const seen = [];

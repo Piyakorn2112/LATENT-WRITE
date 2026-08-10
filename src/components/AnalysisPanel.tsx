@@ -180,7 +180,7 @@ const MODE_OPTIONS: ReadonlyArray<ModeOption<AssistantMode>> = [
   {
     value: "max",
     label: "Max",
-    title: "Qwen3 4B Thinking, 2.5 GB. Reads for meaning. Needs about 3.7 GB free.",
+    title: "Pro. Qwen3 4B Thinking, 2.5 GB. Reads for meaning. Needs about 3.7 GB free.",
   },
 ];
 
@@ -234,9 +234,14 @@ function modeNote(
  * for any one task. Desktop only: the browser build has no runtime to opt into,
  * so the row does not exist there rather than existing and refusing.
  */
-function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSetPrefs: (next: Preferences) => void }) {
+function AssistantSettingsRow({ prefs, onSetPrefs, licenseTier }: {
+  prefs: Preferences;
+  onSetPrefs: (next: Preferences) => void;
+  licenseTier: Tier;
+}) {
   const mode = assistantMode(prefs);
   const enabled = mode !== "off";
+  const [lockedHint, setLockedHint] = useState(false);
   /** Per-tier presence, so each mode can say whether ITS model is on disk. */
   const [tierStatus, setTierStatus] = useState<Record<string, AssistantStatus | null>>({});
   const [status, setStatus] = useState<AssistantStatus | null>(null);
@@ -296,6 +301,24 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
    *   silently reverts the choice they made.
    */
   const handleMode = (next: AssistantMode) => {
+    /**
+     * ★★ MAX IS THE ONLY GATED THING HERE, and the refusal happens in the
+     *    HANDLER rather than by disabling the stop. A disabled control swallows
+     *    the press and says nothing, which reads as a broken app; this accepts
+     *    the press, leaves the mode where it was, and puts the reason on
+     *    screen.
+     *
+     * ★ OFF AND ON STAY FREE FOREVER. The deterministic engines and the 1.7B
+     *   are what the app IS — every measured number in the README is the free
+     *   build — and gating the part that makes the product work would make it a
+     *   demo rather than a free tier. Max is a bigger download and a slower,
+     *   deeper read on top of an answer the writer already has.
+     */
+    if (next === "max" && licenseTier === "free") {
+      setLockedHint(true);
+      return;
+    }
+    setLockedHint(false);
     const tier = next === "off" ? undefined : MODE_TIER[next];
     onSetPrefs({
       ...prefs,
@@ -393,10 +416,18 @@ function AssistantSettingsRow({ prefs, onSetPrefs }: { prefs: Preferences; onSet
           value={mode}
           options={MODE_OPTIONS.map((o) => ({
             ...o,
+            locked: o.value === "max" && licenseTier === "free",
             note: o.value === mode ? modeNote(o, tierStatus, status) : undefined,
           }))}
           onChange={handleMode}
           ariaLabel="Local enhancement mode"
+        />
+        {/* ★ SAY WHAT MAX IS, not just that it is locked. A padlock with no
+            sentence beside it reads as a paywall on the whole feature, when
+            what is actually free is everything the writer has been using. */}
+        <LockedHint
+          visible={lockedHint}
+          message="Max is Pro. Off and On stay free — enter your code in Settings, Account."
         />
       </div>
 
@@ -537,7 +568,7 @@ function SettingsPanel({ intelMode, onSetIntelMode, prefs, onSetPrefs, onImportT
       </div>
       <LockedHint visible={lockedHintFor !== null} />
 
-      {isDesktopApp() && <AssistantSettingsRow prefs={prefs} onSetPrefs={onSetPrefs} />}
+      {isDesktopApp() && <AssistantSettingsRow prefs={prefs} onSetPrefs={onSetPrefs} licenseTier={tier} />}
 
       <p className="settings-section-label">Typography</p>
 
