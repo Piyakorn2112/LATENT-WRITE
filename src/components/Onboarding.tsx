@@ -209,7 +209,7 @@ function StructureHero() {
         </div>
         <div className="world-tabs onb-panelmock-tabs">
           <span className="world-tab world-tab--active">
-            <span>Chapters</span><span className="world-tab-count">4</span>
+            <span>Chapters</span><span className="world-tab-count">3</span>
           </span>
           <span className="world-tab"><span>Book Info</span></span>
         </div>

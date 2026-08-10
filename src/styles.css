@@ -7565,7 +7565,11 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   gap: 4px;
   overflow-y: auto;
   padding: 2px;
-  margin: 2 -2px;
+  /* ★ `margin: 2 -2px` shipped here: the unitless 2 makes the WHOLE shorthand
+     invalid, so CSS dropped it and the intended -2px horizontal bleed never
+     applied anywhere in the Index panel. Caught by a pixel review of a mock
+     that reuses this class. */
+  margin: 2px -2px;
 }
 .chapter-card-wrap { position: relative; }
 .chapter-card {
@@ -8007,7 +8011,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   flex-direction: column;
   align-items: center;
   justify-content: flex-start;
-  padding: 56px 56px 28px;
+  padding: 34px 56px 28px;
   text-align: center;
   /* All pages stay opaque — the track's translate (clipped by the stage's
      overflow:hidden) is what shows/hides them. A separate opacity gate
@@ -8031,13 +8035,22 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 }
 
 /* ─── Hero areas ────────────────────────────────────────────────────────── */
+/* ★★ ONE RESERVED BAND FOR EVERY HERO, BOTTOM-ALIGNED. Hero heights ran 164 to
+   293px and three pages carried a denser top padding, so the serif title, which
+   is the one fixed thing the eye returns to on a horizontal slide track, moved
+   through 102px across the seven pages: adjacent jumps of 42, 45, 57, 75 and 64,
+   or up to three body lines per press of Next. Reserving the second-tallest
+   hero (244) and bottom-aligning inside it pins the title for six of seven.
+   Page 3 is the deliberate exception, because it carries a real production
+   widget and shrinking that would misrepresent the panel. */
 .onb-hero {
   flex: 0 0 auto;
   display: flex;
-  align-items: center;
+  min-height: 244px;
+  align-items: flex-end;
   justify-content: center;
   width: 100%;
-  margin-bottom: 28px;
+  margin-bottom: 22px;
 }
 .onb-hero--orb {
   height: 240px;
@@ -8100,8 +8113,11 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   font-weight: 500;
   color: var(--text-tertiary);
 }
+/* ★ THE ACCENT OWNS ONE JOB PER SURFACE. Blue was marking the recommended row
+   AND both download sizes, so the same colour meant "this one is picked" on one
+   row and "this is a real size" on two others. The recommendation keeps it. */
 .onb-mode-row-size--real {
-  color: color-mix(in srgb, var(--control-value-fill) 75%, var(--text-secondary));
+  color: var(--text-secondary);
 }
 /* ★★ EVERY ROW CARRIES A PRICE, IN ONE COLUMN, AT A SIZE THAT CAN BE READ.
    The first version put a 7px PRO on Max alone, which said "this one is
@@ -8239,7 +8255,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   width: 100%;
 }
 .onb-hero--renderer {
-  align-items: stretch;
+  align-items: flex-end;
   width: 100%;
   max-width: 700px;
   height: 228px;
@@ -8256,7 +8272,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 
 .onb-renderer-preview {
   width: 100%;
-  height: 100%;
+  height: 228px;
   border-radius: 22px;
   border: 1px solid var(--divider-line);
   background:
@@ -8752,6 +8768,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 /* ─── Title + subtitle ──────────────────────────────────────────────────── */
 .onb-title {
   font-family: var(--font-body);
+  text-wrap: balance;
   font-size: 30px;
   font-weight: 500;
   letter-spacing: -0.01em;
@@ -8829,7 +8846,14 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 @media (prefers-color-scheme: light) {
   .onb-dot { background: rgba(0, 0, 0, 0.18); }
 }
+/* ★★ THE HOVER HAD NO LIGHT OVERRIDE while the base state did, so pointing at
+   an inactive dot painted 40% white on a near-white card and the dot VANISHED
+   under the cursor at about 1.02:1. Every other hover in this tour carries its
+   light pair; this one was missed. */
 .onb-dot:hover { background: rgba(255, 255, 255, 0.4); }
+@media (prefers-color-scheme: light) {
+  .onb-dot:hover { background: rgba(0, 0, 0, 0.38); }
+}
 .onb-dot--active {
   background: var(--text);
   width: 22px;
@@ -8906,14 +8930,15 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 
 /* PAGE 1 — Editor mock */
 .onb-hero--editor {
-  height: 200px;
-  align-items: stretch;
+  height: auto;
+  align-items: flex-end;
   width: 100%;
   max-width: 580px;
   margin-left: auto;
   margin-right: auto;
 }
 .onb-editor-mock {
+  height: 200px;
   width: 100%;
   height: 100%;
   border-radius: 18px;
@@ -8987,8 +9012,8 @@ body.electron-window-unfocused .toolbar-ambient-orb {
    through its number and the panel read as broken glass rather than as a list
    that continues. Measured against the rendered card, not guessed. */
 .onb-hero--structure {
-  height: 244px;
-  align-items: stretch;
+  height: auto;
+  align-items: flex-end;
   width: 100%;
   max-width: 600px;
   margin-left: auto;
@@ -8998,7 +9023,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   display: flex;
   gap: 12px;
   width: 100%;
-  height: 100%;
+  height: 244px;
   align-items: stretch;
 }
 
@@ -9051,6 +9076,17 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   gap: 2px;
   min-height: 0;
   overflow: hidden;
+}
+/* ★★ THE BORROWED CLASS BROUGHT A SCROLL AFFORDANCE WITH IT. `.chapter-list`
+   carries a bottom fade mask that says "more below", and measured on the mock
+   it dimmed the third row's word count from rgb(145,145,147) to rgb(164,165,166)
+   so the row read as disabled. Nothing scrolls here and nothing is hidden, so
+   the fade was telling the reader something untrue about real content. This is
+   the cost of reusing a shipping class, and it is worth paying with eyes open. */
+.onb-panelmock .chapter-list {
+  -webkit-mask-image: none;
+  mask-image: none;
+  overflow: visible;
 }
 .onb-panelmock-row {
   cursor: default;
@@ -9151,15 +9187,14 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   gap: 10px;
   margin-bottom: 12px;
 }
-.onb-page--dense {
-  padding-top: 34px;
-}
+/* Superseded by the shared band: every page now starts at the same padding. */
+.onb-page--dense { padding-top: 34px; }
 .onb-intel-widgets .widget-card {
   margin: 0;
   width: 100%;
 }
 .onb-intel-highlight {
-  max-width: 480px;
+  max-width: 430px;
   width: 100%;
   padding: 12px 16px;
   border-radius: 12px;
@@ -9202,9 +9237,13 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 }
 
 /* PAGE 5 browser — Export formats */
+/* ★ AUTO, NOT 190px. A fixed band with `height: 100%` cards stretched three
+   flex children to fill it, leaving ~115px of empty box under the last line of
+   each. Three tall hollow boxes read as content that failed to load, which is
+   the worst impression available on the page that sells exports. */
 .onb-hero--export {
-  height: 190px;
-  align-items: stretch;
+  height: auto;
+  align-items: flex-end;
   width: 100%;
   max-width: 620px;
   margin-left: auto;
@@ -9214,7 +9253,8 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   display: flex;
   gap: 10px;
   width: 100%;
-  height: 100%;
+  /* Default `align-items: stretch` still squares the three to the tallest. */
+  height: auto;
 }
 .onb-export-card {
   flex: 1;
@@ -9234,6 +9274,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   letter-spacing: 0.02em;
 }
 .onb-export-card-desc {
+  color: var(--text-secondary);
   font-family: var(--font-ui);
   font-size: 11px;
   line-height: 1.55;
@@ -9243,7 +9284,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 
 /* PAGE 6 — Getting-started checklist */
 .onb-hero--checklist {
-  align-items: stretch;
+  align-items: flex-end;
   width: 100%;
   max-width: 520px;
   margin-left: auto;
@@ -9292,7 +9333,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 .onb-checklist-where {
   display: block;
   font-size: 11.5px;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   margin-top: 1px;
 }
 

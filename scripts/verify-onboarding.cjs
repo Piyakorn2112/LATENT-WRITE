@@ -117,6 +117,8 @@ app.whenReady().then(async () => {
         title: (p.querySelector(".onb-title")?.textContent ?? "").trim(),
         words: (p.querySelector(".onb-subtitle")?.textContent ?? "").trim().split(/\\s+/).length,
         heroPixels: (p.querySelector(".onb-hero")?.getBoundingClientRect().height ?? 0),
+        titleTop: Math.round((p.querySelector(".onb-title")?.getBoundingClientRect().top ?? 0)
+          - (document.querySelector(".onb-card")?.getBoundingClientRect().top ?? 0)),
         overflowing: p.scrollHeight > p.clientHeight + 2,
       };
     })()`);
@@ -139,6 +141,21 @@ app.whenReady().then(async () => {
   gate(longest <= 62, `no page runs long (worst is ${longest} words, cap 62)`);
   const shortest = Math.min(...seen.map((p) => p.words));
   gate(shortest >= 18, `no page is a stub (thinnest is ${shortest} words, floor 18)`);
+  // ★★ THE TITLE IS THE ONE FIXED THING ON A HORIZONTAL SLIDE TRACK, and it
+  //    used to move 102px across the seven pages (adjacent jumps of 42, 45,
+  //    57, 75 and 64), so every press of Next read as a different screen
+  //    rather than the next page of one thing. A shared hero band pins it.
+  //    Page 3 is the deliberate exception: it carries a real production
+  //    widget, and shrinking that to match would misrepresent the panel.
+  const tops = seen.map((p) => p.titleTop);
+  const pinned = tops.filter((_, i) => i !== 2);
+  const spread = Math.max(...pinned) - Math.min(...pinned);
+  gate(
+    spread <= 8,
+    `the title holds its place across the set (${spread}px spread, cap 8)`,
+    `title tops: ${tops.join(", ")} — index 2 is the allowed outlier`,
+  );
+
   const overflow = seen.map((p, i) => (p.overflowing ? i + 1 : 0)).filter(Boolean);
   gate(overflow.length === 0, `no page scrolls its own content`, `overflowing: page ${overflow.join(", ")} — the body copy is below the fold there`);
   gate(errors.length === 0, `no console errors`, errors.slice(0, 2).join(" | "));
