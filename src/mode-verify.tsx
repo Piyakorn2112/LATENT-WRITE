@@ -19,6 +19,14 @@ const OPTIONS: ReadonlyArray<ModeOption<Mode>> = [
 
 function Harness() {
   const [mode, setMode] = useState<Mode>("on");
+  /**
+   * ★ THE LOCKED TRACK KEEPS ITS OWN STATE AND REFUSES, exactly as
+   *   AnalysisPanel's handleMode does. A harness that let the press through
+   *   would prove the badge renders and nothing about whether the gate holds,
+   *   which is the half that matters.
+   */
+  const [lockedMode, setLockedMode] = useState<Mode>("on");
+  const [refused, setRefused] = useState(0);
   return (
     <div style={{ padding: 40, display: "flex", flexDirection: "column", gap: 28, width: 380 }}>
       <GlassModeSelector value={mode} options={OPTIONS} onChange={setMode} ariaLabel="Assistant mode" />
@@ -28,6 +36,18 @@ function Harness() {
         onChange={setMode}
         ariaLabel="Assistant mode, max unavailable"
       />
+      {/* The free tier: Max stays pressable, is marked PRO, and is refused. */}
+      <div id="locked-track" data-refused={refused} data-mode={lockedMode}>
+        <GlassModeSelector
+          value={lockedMode}
+          options={OPTIONS.map((o) => (o.value === "max" ? { ...o, locked: true } : o))}
+          onChange={(next) => {
+            if (next === "max") { setRefused((n) => n + 1); return; }
+            setLockedMode(next);
+          }}
+          ariaLabel="Assistant mode, max is pro"
+        />
+      </div>
     </div>
   );
 }

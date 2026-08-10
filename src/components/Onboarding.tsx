@@ -126,7 +126,7 @@ const MOCK_TENSION_ANALYSIS = {
   highModeAnalysis: undefined,
 } as unknown as ChapterAnalysis;
 
-const MOCK_PROSE_TEXT = `The rain caught him at the bridge. He pulled his coat tight and pressed forward into the wind. Sarah's voice still echoed in his head — soft, unsure, the way she had said his name. A car hissed past, headlights bleached against wet stone. He thought of turning back. He did not turn back. The river beneath ran black and silver, swollen with the storm. Somewhere downstream a bell tolled three quick beats, then silence. He counted his steps to the far end and walked them without looking up.`;
+const MOCK_PROSE_TEXT = `The rain caught him at the bridge. He pulled his coat tight and pressed forward into the wind. Sarah's voice still echoed in his head, soft and unsure, the way she had said his name. A car hissed past, headlights bleached against wet stone. He thought of turning back. He did not turn back. The river beneath ran black and silver, swollen with the storm. Somewhere downstream a bell tolled three quick beats, then silence. He counted his steps to the far end and walked them without looking up.`;
 
 function MockTensionWidget() {
   return <TensionWidget analysis={MOCK_TENSION_ANALYSIS} />;
@@ -211,7 +211,7 @@ function StructureHero() {
           <span className="world-tab world-tab--active">
             <span>Chapters</span><span className="world-tab-count">4</span>
           </span>
-          <span className="world-tab"><span>Info</span></span>
+          <span className="world-tab"><span>Book Info</span></span>
         </div>
         <div className="chapter-list onb-panelmock-body">
           {STRUCT_CHAPTERS.map((c) => (
@@ -238,6 +238,7 @@ function StructureHero() {
             <span>Places</span><span className="world-tab-count">2</span>
           </span>
           <span className="world-tab"><span>Factions</span></span>
+          <span className="world-tab"><span>Entities</span></span>
         </div>
         <div className="onb-panelmock-body">
           {STRUCT_CAST.map((c) => (
@@ -276,8 +277,8 @@ function EntityHighlightMock() {
 // ─── Page 5 hero: Export formats (browser only) ───────────────────────────
 const EXPORT_FORMATS = [
   { fmt: "PDF",      desc: "6 format presets, professional typesetting, custom covers" },
-  { fmt: "Markdown", desc: "Portable .md — opens in Bear, Obsidian, iA Writer, anywhere" },
-  { fmt: "DOCX",     desc: "Double-spaced manuscript — for editors, agents, and reviewers" },
+  { fmt: "Markdown", desc: "Portable .md that opens in Bear, Obsidian, iA Writer, anywhere" },
+  { fmt: "DOCX",     desc: "Double-spaced manuscript for editors, agents and reviewers" },
 ];
 
 function ExportHero() {
@@ -313,12 +314,22 @@ const WRITE_MENU = [
   { label: "Rewrite", hint: "smooth clarity and flow, keep the meaning" },
 ] as const;
 
-function RightClickHero() {
+/**
+ * ★★ BOTH MENUS ARE MAX-ONLY, AND THE TOUR HAS TO SAY SO. App.tsx gates them
+ *    at one place — `maxAskAvailable = assistantMode(prefs) === "max" &&
+ *    !!window.electronAPI` — so on Off, on On, and in the browser, right-click
+ *    does nothing at all. Teaching the gesture without the condition is the
+ *    same defect as the phantom ⌘⇧A: a control the reader presses and no
+ *    response comes back. It matters more now that Max is Pro, because an
+ *    undisclosed gate one page before the price page is the bait sequence.
+ */
+function RightClickHero({ desktop }: { desktop: boolean }) {
   return (
     <div className="onb-askpair">
       <figure className="onb-askcard">
         <figcaption className="onb-askcard-cap">
           Right-click a paragraph
+          <span className="onb-askcard-tag">{desktop ? "Max" : "Desktop, Max"}</span>
         </figcaption>
         <div className="max-ask onb-askmock" aria-hidden="true">
           <div className="max-ask-inner">
@@ -339,6 +350,7 @@ function RightClickHero() {
       <figure className="onb-askcard">
         <figcaption className="onb-askcard-cap">
           Select first, then right-click
+          <span className="onb-askcard-tag">{desktop ? "Max" : "Desktop, Max"}</span>
         </figcaption>
         <div className="max-ask onb-askmock" aria-hidden="true">
           <div className="max-ask-inner">
@@ -382,16 +394,16 @@ function RightClickHero() {
  */
 const LOCAL_MODES = [
   {
-    name: "Off", size: "no download", isSize: false, pro: false,
+    name: "Off", size: "no download", isSize: false, price: "Free",
     does: "Every engine still runs. Marks, tension, pacing, the scan.",
   },
   {
-    name: "On", size: "1.1 GB", isSize: true, pro: false,
-    does: "Adds a reader: sorts scanned names, checks continuity, writes chapter summaries.",
+    name: "On", size: "1.1 GB", isSize: true, price: "Free",
+    does: "Adds a reader. Sorts scanned names, checks continuity, writes chapter summaries.",
   },
   {
-    name: "Max", size: "2.5 GB", isSize: true, pro: true,
-    does: "Adds judgement: answers questions about a paragraph and writes from cited passages.",
+    name: "Max", size: "2.5 GB", isSize: true, price: "Pro",
+    does: "Adds judgement. Answers questions about a paragraph, writes from cited passages.",
   },
 ] as const;
 
@@ -423,7 +435,14 @@ function LocalModelHero({ desktop }: { desktop: boolean }) {
               <span className={`onb-mode-row-size${m.isSize ? " onb-mode-row-size--real" : ""}`}>
                 {m.size}
               </span>
-              {m.pro && <span className="onb-mode-row-pro">PRO</span>}
+              {/* ★★ ALL THREE ROWS CARRY A PRICE, not just the gated one. One
+                  badge on one row reads as "this one is restricted" and never
+                  as "the other two are free", which is the fact the writer
+                  most needs. Three marks in one right-hand column give the
+                  whole gating story in a single downward scan. */}
+              <span className={`onb-mode-row-price${m.price === "Pro" ? " onb-mode-row-price--pro" : ""}`}>
+                {m.price}
+              </span>
             </div>
             <div className="onb-mode-row-does">{m.does}</div>
           </div>
@@ -593,7 +612,7 @@ export function Onboarding({ onClose, onTierChange }: Props) {
     { do: "Write or paste one scene", where: "the marks appear as you go" },
     { do: "Open World and press Auto-Scan", where: isElectron ? "⌘J, then tick your cast" : "tick the names it finds" },
     isElectron
-      ? { do: "Turn on Local enhancements", where: "Analysis panel, Settings" }
+      ? { do: "Turn on Local enhancements", where: "Analysis settings" }
       : { do: "Open the Analysis panel", where: "read the Tension curve" },
   ];
 
@@ -625,10 +644,14 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               </div>
               <h1 className="onb-title">Write. It reads along.</h1>
               <p className="onb-subtitle">
+                {/* ★ NO ABSOLUTE PRIVACY CLAIM HERE. This said "it never leaves
+                    this machine", which page 6 then contradicts by describing
+                    the one screen that does send something. Page 5 owns the
+                    promise and page 6 owns its exception; page 1 owns the file. */}
                 A novel editor with a reader built in. Start typing, or bring an existing draft
                 in from the <strong>toolbar</strong> <Kbd desktop={isElectron}>⌘O</Kbd>. Your book
-                is saved as plain text in a folder you choose, it never leaves this machine, and
-                it exports to PDF, Word or Markdown when you are done.
+                is saved as plain text, in a folder you choose, and it exports to PDF, Word or
+                Markdown when you are done.
               </p>
             </OnbPage>
 
@@ -670,14 +693,25 @@ export function Onboarding({ onClose, onTierChange }: Props) {
             {/* PAGE 4 — Right-click, the two AI actions in the page itself. */}
             <OnbPage active={page === 3} widthPercent={pageWidth} variant="dense">
               <div className="onb-hero onb-hero--ask">
-                <RightClickHero />
+                <RightClickHero desktop={isElectron} />
               </div>
-              <h1 className="onb-title onb-title--small">Right-click, and ask</h1>
+              <h1 className="onb-title onb-title--small">It answers, it does not overwrite</h1>
               <p className="onb-subtitle">
-                <strong>Right-click a paragraph</strong> to ask what it is doing, what could
-                follow, or whether it contradicts anything you have already written.{" "}
-                <strong>Select a passage first</strong> and the same click offers to proofread or
-                rewrite it, or to do whatever you type. Nothing is replaced until you accept it.
+                {/* ★★ THE ACCEPT STEP DOES NOT EXIST. This said "nothing is
+                    replaced until you accept it", and App.tsx splices the
+                    revision in the moment the run finishes — the popover's own
+                    line is "The new text is in place; press ⌘Z to bring the old
+                    text back." A safety promise the code does not keep is the
+                    worst sentence a tour can carry. */}
+                {/* ★ THE HERO ALREADY PRINTS ALL FIVE MENU ITEMS in the reader's
+                    eyeline, so listing them again in prose spent the paragraph
+                    on what the picture had said. The words go to what the
+                    picture cannot show: what happens after, and the gate. */}
+                <strong>Right-click a paragraph</strong> and it answers from the story you have
+                already written. <strong>Select a passage first</strong> and the same menu
+                rewrites it instead. The new text goes straight in,
+                and <kbd className="onb-inline-kbd">⌘Z</kbd> puts the old text back. Both menus
+                need <strong>Max</strong>.
               </p>
             </OnbPage>
 
@@ -690,14 +724,14 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               <div className="onb-hero onb-hero--modes">
                 <LocalModelHero desktop={isElectron} />
               </div>
-              <h1 className="onb-title onb-title--small">Your book stays on this machine</h1>
+              <h1 className="onb-title onb-title--small">Your book stays here</h1>
               <p className="onb-subtitle">
                 {isElectron ? (
                   <>
-                    Set this under <strong>Settings</strong> in the Analysis panel. Whichever you
-                    pick, it runs here, sees short passages rather than your whole book, and only
-                    sharpens an answer the rules already gave. Nothing is uploaded, and there is
-                    no account or key.
+                    <strong>Off and On are free, forever. Max is Pro.</strong> Whichever you pick,
+                    the model runs on this machine and sees short passages, never your whole book.
+                    Nothing you write is uploaded, and there is no account and no key. Change it
+                    any time under <strong>Analysis settings</strong>.
                   </>
                 ) : (
                   <>
@@ -709,7 +743,7 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               </p>
             </OnbPage>
 
-            {/* PAGE 5 — Renderer (desktop) / Export (browser) */}
+            {/* PAGE 6 — Renderer (desktop) / Export (browser) */}
             <OnbPage active={page === 5} widthPercent={pageWidth}>
               {isElectron ? (
                 <>
@@ -772,9 +806,13 @@ export function Onboarding({ onClose, onTierChange }: Props) {
                   <p className="onb-subtitle">
                     The <strong>Renderer</strong> runs a Claude session against your project, with
                     slash commands like <strong>/review</strong> for a prose critique
-                    and <strong>/draft</strong> from your outline. It is the one part of the app
-                    that sends anything anywhere, it uses the Claude login you already have, and
-                    if you never open it, it never runs.
+                    and <strong>/draft</strong> from your outline. {/* ★ NOT "the only part that
+                    sends anything anywhere" — the model weights come from Hugging Face and the
+                    engine binary from GitHub, so that claim is false the first time a writer
+                    switches On. What is true, and is what they are actually asking, is that this
+                    is the only place their WRITING goes. */}
+                    It is the only part that sends your writing off this machine. It uses the
+                    Claude login you already have, and if you never open it, it never runs.
                   </p>
                 </>
               ) : (
@@ -792,7 +830,7 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               )}
             </OnbPage>
 
-            {/* PAGE 6 — Three things to do first */}
+            {/* PAGE 7 — Three things to do first */}
             <OnbPage active={page === 6} widthPercent={pageWidth}>
               <div className="onb-hero onb-hero--checklist">
                 <ChecklistHero active={page === 6} items={checklist} />

@@ -8103,24 +8103,49 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 .onb-mode-row-size--real {
   color: color-mix(in srgb, var(--control-value-fill) 75%, var(--text-secondary));
 }
-/* The same mark the mode track carries, so the tour and the control agree. */
-.onb-mode-row-pro {
+/* ★★ EVERY ROW CARRIES A PRICE, IN ONE COLUMN, AT A SIZE THAT CAN BE READ.
+   The first version put a 7px PRO on Max alone, which said "this one is
+   restricted" and never "the other two are free" — and at 7px against 52%
+   alpha it barely said anything. Three marks down one right-hand edge give the
+   whole gating story in a single downward scan, and Max stops being the
+   exception and becomes the third price. */
+.onb-mode-row-price {
   margin-left: auto;
   font-family: var(--font-ui);
-  font-size: 7px;
+  font-size: 9.5px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   line-height: 1;
-  padding: 3px 5px 2px;
+  padding: 3px 7px;
   border-radius: 999px;
-  color: color-mix(in srgb, var(--panel-text) 52%, transparent);
-  background: color-mix(in srgb, var(--panel-text) 11%, transparent);
+  color: var(--text-tertiary);
+  background: color-mix(in srgb, var(--panel-text) 7%, transparent);
+  white-space: nowrap;
 }
+.onb-mode-row-price--pro {
+  color: color-mix(in srgb, var(--control-value-fill) 88%, var(--text));
+  background: color-mix(in srgb, var(--control-value-fill) 14%, transparent);
+}
+/* Which build and which mode a demonstrated gesture needs. */
+.onb-askcard-tag {
+  margin-left: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--control-value-fill) 88%, var(--text));
+  background: color-mix(in srgb, var(--control-value-fill) 14%, transparent);
+  white-space: nowrap;
+}
+/* ★ THIS SENTENCE IS THE ENTIRE ANSWER to "what separates On from Max", and
+   it was the quietest ink on the page. 13px in secondary, not 11.5 in
+   tertiary. */
 .onb-mode-row-does {
   font-family: var(--font-ui);
-  font-size: 11.5px;
+  font-size: 13px;
   line-height: 1.45;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
 }
 .onb-modes-wrap {
   width: 100%;
@@ -8155,11 +8180,13 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   gap: 6px;
 }
 .onb-askcard-cap {
+  display: flex;
+  align-items: center;
   font-family: var(--font-ui);
-  font-size: 10.5px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   text-align: left;
 }
 /* ★★ THE MOCK REUSES `.max-ask`, WHICH IS `position: fixed`. Left alone it
@@ -8737,10 +8764,13 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   font-size: 24px;
   margin-bottom: 10px;
 }
+/* ★ 15px, NOT 13.5. This is the primary reading content of a full-screen
+   first-run modal and it was set at caption size, two steps below the app's
+   own body register. The 56ch measure holds the line length where it was. */
 .onb-subtitle {
   font-family: var(--font-ui);
-  font-size: 13.5px;
-  line-height: 1.65;
+  font-size: 15px;
+  line-height: 1.6;
   color: var(--text-secondary);
   letter-spacing: 0.01em;
   max-width: 56ch;
@@ -16055,19 +16085,23 @@ body.electron-window-unfocused .wc-panel::after {
    .pro-badge — the track's own label is 9.5px, so the panel's badge would sit
    taller than the word it qualifies. It rides the top-right corner so the
    centred label keeps its optical position and the stops stay even. */
+/* ★ 8px AND THE ACCENT, NOT 5.5px AT 52% ALPHA. The first pass sized this to
+   disappear, which meant the writer met the gate by being REFUSED rather than
+   by being told. A mark nobody can read is not a disclosure. It carries the
+   same accent as the tour's Pro badge so the control and the tour agree. */
 .glass-mode-lock {
   position: absolute;
-  top: 1px;
-  right: 3px;
+  top: 0;
+  right: 2px;
   font-family: var(--font-ui);
-  font-size: 5.5px;
+  font-size: 8px;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   line-height: 1;
-  padding: 1.5px 3px 1px;
+  padding: 2px 4px 1.5px;
   border-radius: 999px;
-  color: color-mix(in srgb, var(--panel-text) 52%, transparent);
-  background: color-mix(in srgb, var(--panel-text) 11%, transparent);
+  color: color-mix(in srgb, var(--control-value-fill) 90%, var(--panel-text));
+  background: color-mix(in srgb, var(--control-value-fill) 18%, transparent);
   user-select: none;
   pointer-events: none;
 }
