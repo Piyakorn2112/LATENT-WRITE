@@ -395,14 +395,25 @@ const LOCAL_MODES = [
   },
 ] as const;
 
-function LocalModelHero() {
+/**
+ * ★★ THE BROWSER BUILD MUST NOT PRE-SELECT A MODE IT CANNOT HONOUR. The
+ *    recommended-row highlight is an offer, and there is no runtime behind it
+ *    in a browser: the page would be showing a chosen 1.1 GB download above
+ *    copy explaining that the desktop app is what provides it. The rows stay,
+ *    because they are a true description of what the desktop app adds, but
+ *    nothing is marked as picked and the caption says whose choice it is.
+ */
+function LocalModelHero({ desktop }: { desktop: boolean }) {
   return (
     <div className="onb-modes-wrap">
+      {!desktop && (
+        <p className="onb-modes-cap">In the desktop app</p>
+      )}
       <div className="onb-modes" aria-label="Local model options">
         {LOCAL_MODES.map((m) => (
           <div
             key={m.name}
-            className={`onb-mode-row${m.name === "On" ? " onb-mode-row--pick" : ""}`}
+            className={`onb-mode-row${desktop && m.name === "On" ? " onb-mode-row--pick" : ""}`}
           >
             <div className="onb-mode-row-head">
               <span className="onb-mode-row-name">{m.name}</span>
@@ -615,9 +626,9 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               <h1 className="onb-title">Write. It reads along.</h1>
               <p className="onb-subtitle">
                 A novel editor with a reader built in. Start typing, or bring an existing draft
-                in from the <strong>toolbar</strong> <Kbd desktop={isElectron}>⌘O</Kbd>.
-                Your book is saved as plain text in a folder you choose, and it never leaves
-                this machine.
+                in from the <strong>toolbar</strong> <Kbd desktop={isElectron}>⌘O</Kbd>. Your book
+                is saved as plain text in a folder you choose, it never leaves this machine, and
+                it exports to PDF, Word or Markdown when you are done.
               </p>
             </OnbPage>
 
@@ -677,7 +688,7 @@ export function Onboarding({ onClose, onTierChange }: Props) {
                   model reads snippets rather than the book. */}
             <OnbPage active={page === 4} widthPercent={pageWidth} variant="dense">
               <div className="onb-hero onb-hero--modes">
-                <LocalModelHero />
+                <LocalModelHero desktop={isElectron} />
               </div>
               <h1 className="onb-title onb-title--small">Your book stays on this machine</h1>
               <p className="onb-subtitle">

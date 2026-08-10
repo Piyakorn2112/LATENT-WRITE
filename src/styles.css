@@ -8125,6 +8125,15 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 .onb-modes-wrap {
   width: 100%;
 }
+/* Whose choice this is, on the build that cannot make it. */
+.onb-modes-cap {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  margin: 0 0 6px;
+  text-align: left;
+}
 
 /* ─── Right-click hero ──────────────────────────────────────────────────── */
 .onb-hero--ask {
