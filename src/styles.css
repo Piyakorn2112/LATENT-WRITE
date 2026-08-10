@@ -8943,8 +8943,12 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 }
 
 /* PAGE 2 — Structure (Chapter Index + World Data) */
+/* ★ 244, NOT 210. The rows here are the REAL `.chapter-card-wrap`, which is
+   taller than the invented row it replaced: at 210 the third card was sliced
+   through its number and the panel read as broken glass rather than as a list
+   that continues. Measured against the rendered card, not guessed. */
 .onb-hero--structure {
-  height: 210px;
+  height: 244px;
   align-items: stretch;
   width: 100%;
   max-width: 600px;
@@ -8956,7 +8960,68 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   gap: 12px;
   width: 100%;
   height: 100%;
+  align-items: stretch;
 }
+
+/* ─── Panel mocks that borrow the real panels' own classes ──────────────────
+   The rows, tabs and titles inside come from `.world-*` and `.chapter-card-*`,
+   so they inherit the shipping type and spacing. Only the CHROME is restated
+   here, because the real panels are full-height overlays and these are two
+   thumbnails side by side. */
+.onb-panelmock {
+  flex: 1;
+  min-width: 0;
+  border-radius: 16px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  overflow: hidden;
+}
+/* The real header carries a close button and a row of actions; at thumbnail
+   size that is noise, so the title keeps its type and loses its furniture. */
+.onb-panelmock-header {
+  padding: 0;
+  border: 0;
+  min-height: 0;
+  margin: 0;
+}
+.onb-panelmock .world-title {
+  font-size: 14px;
+  margin: 0;
+}
+.onb-panelmock-tabs {
+  padding: 0;
+  margin: 0 0 2px;
+  border: 0;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+.onb-panelmock .world-tab {
+  padding: 3px 7px;
+  font-size: 9.5px;
+  cursor: default;
+  white-space: nowrap;
+}
+.onb-panelmock-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow: hidden;
+}
+.onb-panelmock-row {
+  cursor: default;
+  padding: 4px 6px;
+}
+.onb-panelmock .chapter-card-num { font-size: 9.5px; }
+.onb-panelmock .chapter-card-title { font-size: 11.5px; }
+.onb-panelmock .chapter-card-meta { font-size: 9.5px; }
+.onb-panelmock .world-row-name { font-size: 11.5px; }
+.onb-panelmock .world-row-role { font-size: 9.5px; }
 .onb-struct-panel {
   flex: 1;
   border-radius: 16px;

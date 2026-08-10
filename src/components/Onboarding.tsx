@@ -172,39 +172,81 @@ function EditorMockHero({ active }: { active: boolean }) {
   );
 }
 
-// ─── Page 2 hero: Structure (Chapter Index + World Data) ──────────────────
-const STRUCT_CHAPTERS = ["The Bridge", "City Plaza", "Glass Tower", "The Storm"];
-const STRUCT_CHARS    = ["Nora", "Mira"];
-const STRUCT_PLACES   = ["Myrhold Bridge", "Glass Tower"];
+// ─── Page 2 hero: the Index and World panels ──────────────────────────────
+//
+// ★★ REBUILT FROM THE REAL MARKUP. The old mock invented two side-by-side
+//    cards headed "Chapter Index" and "World Data", and neither panel is
+//    called that or looks like that: both are full overlays titled "Index" and
+//    "World", both carry TABS with counts, and the chapter rows are
+//    zero-padded numbers with a word count under the title. A writer who
+//    learned this picture then opened the real panel would be looking for
+//    furniture that was never there.
+//
+//    So these use the shipping classes — `.world-header`, `.world-title`,
+//    `.world-tabs`, `.world-tab`, `.world-tab-count`, `.chapter-card-*`,
+//    `.world-row-*` — and inherit the real type, spacing and states.
+/** ★ THREE ROWS, BECAUSE THREE IS WHAT FITS. Four clipped the last card
+ *   mid-height and the panel read as broken rather than as scrolled. The tab
+ *   count still says 4, which is what a real panel with more rows than window
+ *   does. */
+const STRUCT_CHAPTERS: Array<{ n: number; title: string; words: string }> = [
+  { n: 1, title: "The Bridge", words: "2,140 words" },
+  { n: 2, title: "City Plaza", words: "1,880 words" },
+  { n: 3, title: "Glass Tower", words: "2,305 words" },
+];
+const STRUCT_CAST: Array<{ name: string; role: string }> = [
+  { name: "Nora", role: "Protagonist" },
+  { name: "Mira", role: "Sister" },
+  { name: "Kestrel", role: "" },
+];
 
 function StructureHero() {
   return (
     <div className="onb-struct-panels">
-      <div className="onb-struct-panel">
-        <div className="onb-struct-panel-header">Chapter Index</div>
-        {STRUCT_CHAPTERS.map((title, i) => (
-          <div key={i} className={`onb-struct-row${i === 0 ? " onb-struct-row--active" : ""}`}>
-            <span className="onb-struct-num">{i + 1}</span>
-            <span className="onb-struct-label">{title}</span>
-          </div>
-        ))}
+      <div className="onb-panelmock">
+        <div className="world-header onb-panelmock-header">
+          <h2 className="world-title">Index</h2>
+        </div>
+        <div className="world-tabs onb-panelmock-tabs">
+          <span className="world-tab world-tab--active">
+            <span>Chapters</span><span className="world-tab-count">4</span>
+          </span>
+          <span className="world-tab"><span>Info</span></span>
+        </div>
+        <div className="chapter-list onb-panelmock-body">
+          {STRUCT_CHAPTERS.map((c) => (
+            <div key={c.n} className="chapter-card-wrap onb-panelmock-row">
+              <span className="chapter-card-num">{String(c.n).padStart(2, "0")}</span>
+              <span className="chapter-card-body">
+                <span className="chapter-card-title">{c.title}</span>
+                <span className="chapter-card-meta">{c.words}</span>
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
-      <div className="onb-struct-panel">
-        <div className="onb-struct-panel-header">World Data</div>
-        <div className="onb-struct-section-label">Characters</div>
-        {STRUCT_CHARS.map((name) => (
-          <div key={name} className="onb-struct-row">
-            <span className="onb-struct-icon">◉</span>
-            <span className="onb-struct-label">{name}</span>
-          </div>
-        ))}
-        <div className="onb-struct-section-label">Places</div>
-        {STRUCT_PLACES.map((name) => (
-          <div key={name} className="onb-struct-row">
-            <span className="onb-struct-icon">◎</span>
-            <span className="onb-struct-label">{name}</span>
-          </div>
-        ))}
+
+      <div className="onb-panelmock">
+        <div className="world-header onb-panelmock-header">
+          <h2 className="world-title">World</h2>
+        </div>
+        <div className="world-tabs onb-panelmock-tabs">
+          <span className="world-tab world-tab--active">
+            <span>Characters</span><span className="world-tab-count">3</span>
+          </span>
+          <span className="world-tab">
+            <span>Places</span><span className="world-tab-count">2</span>
+          </span>
+          <span className="world-tab"><span>Factions</span></span>
+        </div>
+        <div className="onb-panelmock-body">
+          {STRUCT_CAST.map((c) => (
+            <div key={c.name} className="world-row onb-panelmock-row">
+              <span className="world-row-name">{c.name}</span>
+              {c.role && <span className="world-row-role">{c.role}</span>}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -586,11 +628,10 @@ export function Onboarding({ onClose, onTierChange }: Props) {
               </div>
               <h1 className="onb-title onb-title--small">Your chapters, and your cast</h1>
               <p className="onb-subtitle">
-                The <strong>Chapter Index</strong> <Kbd desktop={isElectron}>⌘I</Kbd> holds the
-                book. The <strong>World panel</strong> <Kbd desktop={isElectron}>⌘J</Kbd> holds who
-                and what is in it. Press <strong>Auto-Scan</strong> there and the app reads your
-                draft, finds the names, and sorts them into the same four tabs you see in the
-                panel, for you to tick.
+                The <strong>Index</strong> <Kbd desktop={isElectron}>⌘I</Kbd> holds the book. The{" "}
+                <strong>World</strong> panel <Kbd desktop={isElectron}>⌘J</Kbd> holds who and what
+                is in it. Press <strong>Auto-Scan</strong> there and the app reads your draft,
+                finds the names, and sorts them into those tabs for you to tick.
               </p>
             </OnbPage>
 
