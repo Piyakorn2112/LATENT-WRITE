@@ -84,6 +84,7 @@
     "verify:model-manage": "electron scripts/verify-model-manage.cjs",
     "test:alias-scan": "tsx scripts/test-alias-scan.ts",
     "test:name-usage-scan": "tsx scripts/test-name-usage-scan.ts",
+    "verify:onboarding": "electron scripts/verify-onboarding.cjs",
     "bench:world-panel": "tsx scripts/bench-world-panel.ts",
     "verify:world-panel-perf": "electron scripts/verify-world-panel-perf.cjs",
     "verify:alias-scan-ui": "electron scripts/verify-alias-scan-ui.cjs",
