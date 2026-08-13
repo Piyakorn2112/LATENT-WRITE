@@ -215,3 +215,17 @@ a fraction of the surgery); a Renderer-panel guard in sample mode (the
 panel operates on the real project; a first-run sample user has
 neither project nor login, noted as a residual); the 5-writer
 moderated protocol (a template in §3, to be run with real writers).
+
+**Critic round (designers-package visual critic, 2026-08-13):** verdict
+ship-after-should-fixes; all fixed same day. The blocker — the sample
+badge's single-row pill ran 400px+ into the prose column at the default
+window size and its buttons stole clicks from live text — became a
+252px two-row card sharing the checklist's edge (which also healed the
+dock's ragged left edge, finding 3). Door 2's top-anchored short copy
+(one line for a returning writer) read as an unloaded box → doors
+center their content in the stretched cell. Light-theme dock captured
+to close the coverage gap (THEME env on capture-app-shots). Accepted
+as-is: the app-wide --text-tertiary quiet register (~3:1, a system
+token used consistently, duplicated information at full contrast
+nearby) and the badge's fuller glass vs the word-count pill (it is
+interactive and temporary; the pill is inert and permanent).

@@ -35,7 +35,8 @@ fs.writeFileSync(path.join(DATA, 'last-project.json'),
 fs.mkdirSync(OUT, { recursive: true });
 process.env.LW_USER_DATA = DATA;
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, nativeTheme } = require('electron');
+if (process.env.THEME) nativeTheme.themeSource = process.env.THEME;
 
 // The real main process, verbatim.
 require(path.join(ROOT, 'electron', 'main.cjs'));
