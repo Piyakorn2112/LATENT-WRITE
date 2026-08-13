@@ -440,6 +440,22 @@ export function buildWritingRequest(
   if (op === "custom" && context.instruction) {
     lines.push(`INSTRUCTION: ${context.instruction}`, "");
   }
+  // ★ THE CONTRACTS THE GATE WILL CHECK, STATED UP FRONT. The instruction
+  //   already says them; naming them as checkable requirements is the
+  //   constraint-listing pattern the instruction-following literature
+  //   measures gains from — and it converts what used to be a retry
+  //   diagnosis into an attempt-0 demand. Derived purely from the writer's
+  //   own words (readContracts); nothing new is asserted.
+  if (op === "custom" && reading && (reading.protectDialogue || reading.endOn)) {
+    lines.push("REQUIREMENTS the editor's check will enforce:");
+    if (reading.protectDialogue) {
+      lines.push("- every line inside quotation marks must appear EXACTLY as written, unchanged");
+    }
+    if (reading.endOn) {
+      lines.push(`- the passage must END on: ${reading.endOn} (make it the final sentence)`);
+    }
+    lines.push("");
+  }
   if (reading?.scrub) {
     const hint = scrubHint(batch.text, reading.scrub.kind);
     if (hint) lines.push(`WHAT TO CHANGE: ${hint}`, "");
