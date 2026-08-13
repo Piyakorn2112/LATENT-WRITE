@@ -223,8 +223,56 @@ Everything measured above graduated into `src/lib/character-dossier.ts` and
   retired — its ~30s bought less than the ~100-token reason field),
   opposite-pronoun code gate on factual fields, then the fusion pass with
   the containment gate and one named-words retry. Composed fields remain
-  the fallback whenever fusion fails, so fusion can only add. Net: a
-  richer, connected card at roughly HALF the old latency (~17-20s vs 38.5s).
+  the fallback whenever fusion fails, so fusion can only add.
+
+**Definitive numbers, the shipped wiring measured end to end** (the same
+14 dev cards, one code version, fresh process):
+
+```
+                    core   ext  anti  invented  frag  words  s/card
+on   shipped         14%    5%    0      0       32%    24     0.9   (was 4% / 1% / 11w)
+max  shipped         14%    5%    0      0        5%    44    21.4   (was 10% / 0% / 20w / 38.5s)
+```
+
+Fusion passed its gate on 5 of 13 attempted cards; every failure fell back
+to the composed fields. Cards worth quoting, verbatim from the run:
+
+> "Darcy is a fine, tall person with handsome features and a noble mien.
+> He is superior, clever, and continually gives offence. Darcy speaks at
+> length. He is most often found on the page with Elizabeth and Jane."
+
+> "Van Helsing has bushy brows and a dark figure with great brown hands.
+> He moves with fury of strength when he swoops upon someone. His face is
+> often agonised, and he speaks at length."
+
+Verification ledger: suite 85/85 (tidy fixture rebuilt at the new cap),
+verify:dossier-ui 18/18 (Osric contract updated: counted lines are facts,
+and ONLY counted lines may appear for a never-described character),
+verify:assistant-tasks 30/30, tsc and vite build clean.
+
+## 8. Residuals, recorded not patched
+
+- **Background at 35 words invites the ramble.** Scrooge's card carries the
+  locomotive-hearse sentence, Mira's her father's standing lunches (the
+  span's strong predicate is "before Mira was born"; the model quotes its
+  surroundings). A tighter budget or a scene-clause veto on the ANSWER side
+  is the next measured experiment.
+- **The extractive retry can compress to a gerund list** ("Sighing,
+  drawing, realizing" passed the three-word trait floor). A
+  no-bare-gerund-list test on usefulTrait would close it.
+- **Fusion sometimes stumbles on its own repetition** ("Kinoko considered
+  the question. Kinoko considered.") — all words licensed, so the gate
+  passes it; a repeated-clause check would catch it.
+- **The fragment-shape reject is the top fusion failure** (the card's
+  noun-phrase register collides with the gate's every-sentence-finite-verb
+  rule when the model keeps a bare appearance line). Letting ONE
+  noun-phrase sentence through when it carries an appearance noun would
+  roughly double the pass rate; needs measuring against the invention risk.
+- **Long-sweep environment degradation**: after ~90 minutes of continuous
+  model load, individual calls ballooned to 10-35 minutes despite a 180s
+  request timeout (the assistant layer's reload path evidently exceeds it).
+  Ops observation for any future long bench: run sweeps in fresh processes,
+  and treat tail-of-sweep latency as suspect.
 
 ## Reproduce
 

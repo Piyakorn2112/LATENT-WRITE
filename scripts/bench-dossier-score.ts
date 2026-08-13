@@ -26,7 +26,10 @@ import { missingWords } from "../src/lib/character-dossier";
 import { loadBook } from "./print-chapter";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const GOLD_DIR = path.join(HERE, "fixtures", "dossier-gold");
+/** GOLD_DIR=fixtures/dossier-gold-heldout for the one-shot final eval. */
+const GOLD_DIR = process.env.GOLD_DIR
+  ? path.resolve(process.env.GOLD_DIR)
+  : path.join(HERE, "fixtures", "dossier-gold");
 
 interface GoldFact { kind: string; weight: "core" | "extended"; fact: string; keys: string[]; quote: string }
 interface GoldAnti { claim: string; keys: string[]; why: string }
