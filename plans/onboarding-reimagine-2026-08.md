@@ -90,12 +90,85 @@ first session:
 4. **Design review**: the designers-package critics against the app's
    glass system, to the pixel.
 
-## 4. The redesign (to be completed from the research)
+## 4. The research, landed (2026-08-13)
 
-Direction under evaluation, pending the two research syntheses:
-philosophy compressed to 1-2 cards; the tour's remaining teaching moved
-INTO the real app over a purpose-built sample story (learn by doing:
-spotlight steps that ask for the real gesture on real prose); the cast
-dialog absorbed into the flow instead of stacked after it; a small
-finishable checklist for J1-J3; every remaining illustration rendered
-from real components or real classes, gated by structural diffs.
+Two syntheses: a creative-tool teardown (Scrivener, Obsidian, Notion,
+Superhuman, Cursor, Logic, Linear and peers) and a deep UX pass over NN/g
+primary pages, CHI papers and the large onboarding benchmark reports.
+The convergent findings that decide the design:
+
+- **No serious tool ships a card slideshow any more.** The pattern is a
+  real, resettable practice space (Scrivener's tutorial IS a project;
+  Obsidian's sandbox vault resets on reopen and advertises it), teaching
+  inside the real workspace (Notion), one flagship personalized moment
+  (Superhuman), and convention-matching to reduce tutorial need at all.
+- **Auto-fired linear tours lose 2-3x to user-triggered contextual help**
+  (Chameleon, 550M interactions); a tour launched FROM a checklist item
+  converts ~67% vs ~23% standalone. Working memory holds an unused
+  instruction ~20 seconds (NN/g), so a page-4 gesture card is forgotten
+  before the editor ever opens.
+- **In-place contextual teaching produces durable learning**: ToolClips
+  (CHI 2010) users completed 7x more unfamiliar tasks and stayed faster a
+  week later; trial-and-error is professionals' preferred mode (CHI 2022,
+  Autodesk), improved by TRACKING what the user has and hasn't tried.
+- **Invisible gestures need redundancy** (NN/g contextual-menus rule):
+  every right-click action must also exist as a visible affordance;
+  a gesture taught once in a card and never reinforced is lost within the
+  session (forgetting-curve + marking-menu literature).
+- **Checklists**: median completion 10-19%; 3-5 items is the cliff edge;
+  pre-completing one item nearly doubles completion for identical effort
+  (endowed progress, Nunes & Dreze 2006, field experiment); non-blocking,
+  collapsible, guilt-free skip, never nags.
+- **A philosophy screen survives only as a single screen with a few
+  sentences** that set the one mental model the doing will lean on.
+- **Activation for a no-telemetry tool**: define it qualitatively (the
+  moment the tool demonstrably improved the writer's own work), check it
+  as local proxy gates against an on-device log, validate with 5-writer
+  moderated sessions (NN/g: 5 users surface ~85% of problems) plus a
+  written heuristic self-audit.
+
+## 5. The design
+
+The 7-card carousel retires. The onboarding becomes four cooperating
+pieces, all inside the real app:
+
+**A. One welcome screen** (the only full-screen moment). The orb hero,
+the app's one mental model in a few sentences (a novel editor with a
+reader built in; everything runs on this machine), and two doors:
+**"Open the sample story"** and **"Start your own book"** (plus the
+quiet import path). No forced order, Esc works, skip is guilt-free.
+The Pro-code row survives here, folded quiet.
+
+**B. The sample story, purpose-built.** "The Ferrier Light", ~1,400
+words, 4 chapters, written FOR the surfaces: 7 named characters, 5
+places, dialogue density for the marks, tension shaped low/rise/simmer/
+peak, and four planted teaching moments the flow points at, each doubling
+as story texture (a stranger whose eye colour contradicts itself Ch2 vs
+Ch3; the Lantern Bridge renamed Lamplight in Ch3; "three days on his
+feet" against "two nights ago" in the same scene; one ledger sentence
+misspelled for Proofread). It lives in its own scratch project,
+resettable in one click, edits never touch a real project, and the
+safety is ADVERTISED in its own description text.
+
+**C. Teaching at the moment of relevance, not in advance.** Single
+anchored hints (never a sequence): the right-click hint appears once,
+only when the caret first rests in a paragraph, only on tiers where the
+menu exists; each hinted gesture also has its visible affordance so the
+invisible path is never the only path; a local record of which gestures
+have actually been tried gates one respectful re-surface. The cast
+dialog is ABSORBED: it stops firing as a stacked modal at tour close and
+becomes the World panel's own first-open moment (Finding 1 dies by
+sequencing ownership, not by a timer).
+
+**D. A 4-item checklist, finishable.** Corner widget, collapsible,
+re-summonable from help, never blocking, never nagging. Items map to
+J1-J3: open a story (pre-checked at creation, the endowed-progress
+lift), try one gesture on the sample's flagged spots, watch the reader
+react in World/Analysis, write your own first words. Completing it
+offers the "first session" recap drawn from the local log, so the
+instrumentation is a feature, not hidden telemetry.
+
+**Local funnel log** (J-gates, §3) records structural events only, on
+device, inspectable. Activation = the five proxy gates checked against
+it in moderated sessions; ship-gate = 4/5 writers clear all gates
+unassisted.
