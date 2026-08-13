@@ -274,6 +274,29 @@ verify:assistant-tasks 30/30, tsc and vite build clean.
   Ops observation for any future long bench: run sweeps in fresh processes,
   and treat tail-of-sweep latency as suspect.
 
+## 9. The held-out one-shot (hollow-iris, sealed gold, run ONCE, 2026-08-13)
+
+Six characters, gold written blind by an agent before the config froze,
+never iterated against. Reported verbatim:
+
+```
+                    core   ext  anti  invented  frag  words  s/card
+on   shipped         25%   24%    4      0        9%    31     1.0
+max  shipped         38%   27%    4      0        0%    69    20.4
+```
+
+Coverage generalized UPWARD from the dev books (the draft's institutional
+register states more outright). Invented particulars stayed zero. The four
+anti-fact hits were read one by one: three are gold-key artifacts (the
+sealed gold's keys were never calibrated — "often" fires on "often
+mirroring", and the counted company line "most often on the page with Nora"
+trips a "they never meet in person" claim), and one is a REAL residual
+worth its own line: Kael's card carries "shielded eyes", a scene moment
+grounded in the pack and presented as durable appearance — the
+scene-as-feature class again, this time surviving on the model side. It
+joins §8 as the next measured experiment (the same veto family the
+composer's appearance channel already applies, at the answer side).
+
 ## Reproduce
 
 ```bash
