@@ -1,0 +1,89 @@
+{
+  "book": "anne",
+  "characters": [
+    {
+      "name": "Anne",
+      "aliases": ["Anne Shirley"],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "two thick braids of very red hair", "keys": ["red hair", "braids"], "quote": "two braids of very thick, decidedly red hair"},
+        {"kind": "appearance", "weight": "core", "fact": "small freckled face with eyes that look green or gray depending on the light", "keys": ["freckles", "green eyes", "gray eyes"], "quote": "her eyes, which looked green in some lights and moods and gray in others"},
+        {"kind": "personality", "weight": "core", "fact": "vivid, romantic imagination that colors everything she sees", "keys": ["imagination", "imaginative", "imagin"], "quote": "There was more scope for imagination"},
+        {"kind": "personality", "weight": "core", "fact": "prone to dramatic, sweeping despair over small setbacks", "keys": ["depths of despair", "dramatic"], "quote": "in the depths of despair"},
+        {"kind": "background", "weight": "core", "fact": "orphan; her parents Walter and Bertha Shirley, both teachers, died of fever when she was an infant", "keys": ["orphan", "parents died", "fever"], "quote": "She died of fever when I was just three months old."},
+        {"kind": "action", "weight": "core", "fact": "saves Minnie May Barry from croup using nursing know-how learned from the Hammond twins", "keys": ["croup", "minnie may", "ipecac"], "quote": "I know exactly what to do for croup."},
+        {"kind": "voice", "weight": "core", "fact": "talks torrentially and admits herself that she talks too much", "keys": ["talk too much", "talkative", "chatter"], "quote": "People are always telling me I do."},
+        {"kind": "relationship", "weight": "core", "fact": "swears an oath of eternal 'bosom friend' loyalty with Diana Barry", "keys": ["diana", "bosom friend", "kindred spirit"], "quote": "I solemnly swear to be faithful to my bosom friend, Diana Barry, as long as the sun and moon shall endure."},
+        {"kind": "appearance", "weight": "extended", "fact": "by the end of the book her hair is called auburn and her freckles have mostly faded", "keys": ["auburn", "freckles gone"], "quote": "people are nice enough to tell me my hair is auburn now"},
+        {"kind": "personality", "weight": "extended", "fact": "has a quick, fiery temper", "keys": ["temper"], "quote": "Did anybody ever see such a temper!"},
+        {"kind": "personality", "weight": "extended", "fact": "stubborn and strong-willed once she makes up her mind", "keys": ["stubborn", "determined", "make up my mind"], "quote": "I can _stop_ when I make up my mind to it"},
+        {"kind": "background", "weight": "extended", "fact": "before Green Gables she was passed between Mrs. Thomas and Mrs. Hammond's households and finally sent to the orphan asylum at Hopeton", "keys": ["mrs. thomas", "mrs. hammond", "hopeton", "asylum"], "quote": "I had to go to the asylum at Hopeton, because nobody would take me."},
+        {"kind": "background", "weight": "extended", "fact": "wins a First Class teaching license and the Avery scholarship at Queen's Academy", "keys": ["avery scholarship", "queen's", "first class license"], "quote": "To take First Class License in one year and win the Avery scholarship"},
+        {"kind": "background", "weight": "extended", "fact": "gives up going to Redmond College to stay home and teach after Marilla's eyesight begins failing", "keys": ["redmond", "college", "stay home"], "quote": "Anne Shirley had given up the idea of going to college and intended to stay home and teach"},
+        {"kind": "action", "weight": "extended", "fact": "accidentally dyes her hair green with a peddler's dye she believed would turn it raven black", "keys": ["dye", "green hair"], "quote": "I dyed it."},
+        {"kind": "action", "weight": "extended", "fact": "breaks her slate over Gilbert Blythe's head after he calls her 'carrots'", "keys": ["slate", "gilbert", "carrots"], "quote": "and cracked it--slate not head--clear across."},
+        {"kind": "relationship", "weight": "extended", "fact": "her years-long feud with Gilbert Blythe, who mocked her red hair, ends in friendship", "keys": ["gilbert", "friends", "carrots"], "quote": "We are going to be the best of friends"}
+      ],
+      "antiFacts": [
+        {"claim": "blue eyes", "keys": ["blue eyes"], "why": "her eyes are described as green or gray depending on light, never blue"},
+        {"claim": "blonde or golden hair", "keys": ["blonde hair", "golden hair"], "why": "her hair is famously red (later called auburn), not golden or blonde"},
+        {"claim": "shy, quiet personality", "keys": ["shy", "quiet"], "why": "Anne is established as relentlessly talkative and dramatic, not shy or quiet"},
+        {"claim": "comes from a wealthy family", "keys": ["wealthy family", "rich parents"], "why": "she is a penniless orphan raised in poverty before being adopted"},
+        {"claim": "marries Gilbert Blythe in this book", "keys": ["married gilbert", "marriage"], "why": "the book ends with them merely becoming friends again after years of feuding, not marrying"}
+      ]
+    },
+    {
+      "name": "Marilla",
+      "aliases": ["Marilla Cuthbert"],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "tall, thin, angular woman with dark, gray-streaked hair twisted into a hard knot", "keys": ["tall", "thin", "angles"], "quote": "Marilla was a tall, thin woman, with angles and without curves"},
+        {"kind": "personality", "weight": "core", "fact": "narrow experience and rigid conscience, though with a hidden sense of humor", "keys": ["rigid", "conscience", "strict"], "quote": "She looked like a woman of narrow experience and rigid conscience, which she was"},
+        {"kind": "personality", "weight": "core", "fact": "no-nonsense and impatient with Anne's imaginings, insists on plain facts", "keys": ["practical", "bald facts", "no-nonsense"], "quote": "Just you stick to bald facts. Begin at the beginning."},
+        {"kind": "background", "weight": "core", "fact": "an unmarried 'old maid' who has never before raised a child", "keys": ["old maid", "unmarried"], "quote": "Perhaps an old maid"},
+        {"kind": "action", "weight": "core", "fact": "decides, despite having never raised a child, to keep Anne rather than send her to the harsh Mrs. Blewett", "keys": ["decide", "keep anne", "never brought up a child"], "quote": "never brought up a child, especially a girl, and I dare say"},
+        {"kind": "relationship", "weight": "core", "fact": "eventually declares outright that she loves Anne as her own flesh and blood", "keys": ["anne", "love", "flesh and blood"], "quote": "I love you as dear as if you were my own flesh and blood"},
+        {"kind": "voice", "weight": "core", "fact": "speaks in short, dry, sharp retorts", "keys": ["fiddlesticks", "sharp", "dry"], "quote": "Unromantic fiddlesticks!"},
+        {"kind": "appearance", "weight": "extended", "fact": "her eyesight fails later in the book, risking total blindness", "keys": ["blind", "eyesight", "glasses"], "quote": "Blind! Anne, just think of it!"},
+        {"kind": "personality", "weight": "extended", "fact": "softens noticeably over the course of the book, becoming warmer and less crisp", "keys": ["mellow", "softened"], "quote": "Marilla Cuthbert has got _mellow_."},
+        {"kind": "background", "weight": "extended", "fact": "as a young woman she was informally courted by John Blythe, Gilbert's father, but quarreled with him and never married", "keys": ["john blythe", "beau", "romance"], "quote": "People called him my beau."},
+        {"kind": "action", "weight": "extended", "fact": "considers selling Green Gables after Matthew's death and the bank failure, until Anne intervenes", "keys": ["sell green gables", "bank failure"], "quote": "He heard that I was going to sell Green Gables and he wants to buy it."},
+        {"kind": "action", "weight": "extended", "fact": "disciplines Anne by making her apologize to Mrs. Rachel Lynde for her temper", "keys": ["discipline", "apologize", "rachel lynde"], "quote": "you must go to her and tell her you are very sorry for your bad temper and ask her to forgive you."},
+        {"kind": "relationship", "weight": "extended", "fact": "is Matthew's sister and runs the Green Gables household with him", "keys": ["matthew", "brother", "sister"], "quote": "always been such a good, kind brother to me"},
+        {"kind": "voice", "weight": "extended", "fact": "capable of a rare, reluctant smile that softens her grim exterior", "keys": ["reluctant smile", "rusty smile"], "quote": "Something like a reluctant smile, rather rusty from long disuse, mellowed"}
+      ],
+      "antiFacts": [
+        {"claim": "warm and openly affectionate from the very start", "keys": ["warm", "affectionate"], "why": "Marilla is established as stern and undemonstrative, only softening gradually over the book"},
+        {"claim": "Anne's biological aunt or blood relative", "keys": ["biological aunt", "blood relative"], "why": "she and Matthew adopt Anne from an orphan asylum; there is no blood relation"},
+        {"claim": "married to Matthew", "keys": ["married to matthew", "husband"], "why": "Matthew is her brother, not her husband; she is called an unmarried 'old maid'"},
+        {"claim": "young woman", "keys": ["young woman"], "why": "she is repeatedly described as an aging, graying 'old maid,' not young"},
+        {"claim": "curly red hair", "keys": ["curly red hair", "red hair"], "why": "her hair is dark with gray streaks, worn in a hard knot, not red or curly"}
+      ]
+    },
+    {
+      "name": "Matthew",
+      "aliases": ["Matthew Cuthbert"],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "odd-looking, ungainly figure with long iron-gray hair and a full soft brown beard", "keys": ["gray hair", "beard", "ungainly"], "quote": "an odd-looking personage, with an ungainly figure and long iron-gray hair that touched his stooping shoulders"},
+        {"kind": "personality", "weight": "core", "fact": "the shyest man alive, dreads strangers and especially women", "keys": ["shy", "shyness"], "quote": "he was the shyest man alive and hated to have to go among strangers or to any place where he might have to talk."},
+        {"kind": "personality", "weight": "core", "fact": "quiet and silent, like his own father before him", "keys": ["silent", "quiet"], "quote": "shy and silent as his son after him"},
+        {"kind": "background", "weight": "core", "fact": "a farmer who lives at Green Gables in Avonlea with his sister Marilla", "keys": ["green gables", "farm", "avonlea"], "quote": "Green Gables was built at the furthest edge of his cleared land"},
+        {"kind": "action", "weight": "core", "fact": "secretly arranges through Mrs. Lynde to buy Anne a dress with puffed sleeves for Christmas", "keys": ["puffed sleeves", "dress", "christmas present"], "quote": "a Christmas present for you, Anne"},
+        {"kind": "voice", "weight": "core", "fact": "his catchphrase is a hesitant 'Well now'", "keys": ["well now"], "quote": "Well now, I dunno"},
+        {"kind": "relationship", "weight": "core", "fact": "brother to Marilla; the two of them run Green Gables together", "keys": ["marilla", "sister", "brother"], "quote": "Matthew dreaded all women except Marilla and Mrs. Rachel"},
+        {"kind": "appearance", "weight": "extended", "fact": "looked much the same at sixty as he did at twenty", "keys": ["aged", "appearance"], "quote": "he had looked at twenty very much as he looked at sixty, lacking a little of the grayness."},
+        {"kind": "personality", "weight": "extended", "fact": "quietly advocates to keep Anne despite Marilla's objections, and is proud of her later achievements", "keys": ["advocate", "keep her", "proud"], "quote": "We might be some good to her"},
+        {"kind": "background", "weight": "extended", "fact": "an old bachelor who never married", "keys": ["bachelor", "unmarried"], "quote": "but I guess she knows more than an old bachelor."},
+        {"kind": "action", "weight": "extended", "fact": "dies of a sudden heart shock after reading news of a bank failure", "keys": ["death", "heart", "collapsed"], "quote": "before they could reach him Matthew had fallen across the threshold."},
+        {"kind": "voice", "weight": "extended", "fact": "speaks haltingly and shyly, often stammering", "keys": ["hesitant", "stammer"], "quote": "I--I thought it might come in handy sometime"},
+        {"kind": "relationship", "weight": "extended", "fact": "enjoys and defends Anne's talkativeness to Marilla from their very first meeting", "keys": ["anne", "talk", "defends"], "quote": "You should have heard her talk coming from the station."},
+        {"kind": "personality", "weight": "extended", "fact": "proud of Anne's academic success, calling her 'my girl'", "keys": ["proud", "my girl"], "quote": "It was a girl--my girl--my girl"}
+      ],
+      "antiFacts": [
+        {"claim": "outgoing and talkative", "keys": ["outgoing", "talkative"], "why": "Matthew is repeatedly described as the shyest man alive who dreads talking to strangers"},
+        {"claim": "Anne's biological father", "keys": ["biological father", "anne's father"], "why": "he is her adoptive guardian; her biological father was Walter Shirley, who died when she was an infant"},
+        {"claim": "married with a wife", "keys": ["married", "wife"], "why": "he is called an old bachelor who never married"},
+        {"claim": "a young man", "keys": ["young man"], "why": "he is an elderly man, described as looking much the same at sixty as at twenty"},
+        {"claim": "clean-shaven", "keys": ["clean-shaven", "no beard"], "why": "he has a full, soft brown beard worn since he was twenty"}
+      ]
+    }
+  ]
+}

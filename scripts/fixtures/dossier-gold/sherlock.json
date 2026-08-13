@@ -1,0 +1,61 @@
+{
+  "book": "sherlock",
+  "characters": [
+    {
+      "name": "Holmes",
+      "aliases": ["Sherlock Holmes", "Mr. Holmes", "Mr. Sherlock Holmes"],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "tall, spare/gaunt figure", "keys": ["tall", "spare figure", "gaunt"], "quote": "his tall, spare figure pass twice in a dark silhouette against the blind"},
+        {"kind": "appearance", "weight": "extended", "fact": "hawk-like nose and thin frame, often curled up in his chair while thinking", "keys": ["hawk-like nose", "thin knees"], "quote": "his thin knees drawn up to his hawk-like nose"},
+        {"kind": "background", "weight": "core", "fact": "shares lodgings with Watson at Baker Street", "keys": ["baker street", "lodgings"], "quote": "remained in our lodgings in Baker Street, buried among his old books"},
+        {"kind": "background", "weight": "extended", "fact": "unofficial consulting detective known across three continents", "keys": ["unofficial adviser", "consulting detective", "three continents"], "quote": "unofficial adviser and helper to everybody who is absolutely puzzled, throughout three continents"},
+        {"kind": "background", "weight": "extended", "fact": "narrow but intense range of knowledge: violin-player, boxer, swordsman, lawyer, self-poisoner by cocaine and tobacco", "keys": ["violin-player", "boxer", "swordsman", "cocaine"], "quote": "violin-player, boxer, swordsman, lawyer, and self-poisoner by cocaine and tobacco"},
+        {"kind": "personality", "weight": "core", "fact": "cold, precise, unemotional mind; considered the most perfect reasoning machine", "keys": ["cold precise mind", "reasoning machine"], "quote": "the most perfect reasoning and observing machine that the world has seen"},
+        {"kind": "personality", "weight": "extended", "fact": "obsessive, tireless focus once absorbed in an unsolved problem, going days without rest", "keys": ["tireless", "days without rest"], "quote": "would go for days, and even for a week, without rest"},
+        {"kind": "personality", "weight": "extended", "fact": "indifferent to reward and royal favor, values a memento of intellect/character over wealth", "keys": ["refuses reward", "indifferent to money"], "quote": "turning away without observing the hand which the King had stretched out to him"},
+        {"kind": "action", "weight": "core", "fact": "master of disguise, unrecognizable even to Watson", "keys": ["disguise", "amazing powers"], "quote": "I had to look three times before I was certain that it was indeed he"},
+        {"kind": "action", "weight": "core", "fact": "deduces a person's history from minute physical details (scuffed shoes, calluses, stains)", "keys": ["deduction", "scored cuts"], "quote": "the leather is scored by six almost parallel cuts"},
+        {"kind": "action", "weight": "extended", "fact": "examines crime scenes on hands and knees with a magnifying lens", "keys": ["magnifying lens", "examine minutely"], "quote": "fell upon his knees upon the floor and, with the lantern and a magnifying lens, began to examine minutely the cracks"},
+        {"kind": "action", "weight": "extended", "fact": "plays the violin to relax or think through a case", "keys": ["violin"], "quote": "hand me over my violin and let us try to forget for half an hour"},
+        {"kind": "action", "weight": "extended", "fact": "visibly transforms when hot on a scent: darkened face, hard-set brows, animal intensity", "keys": ["hot upon such a scent", "transformed"], "quote": "His brows were drawn into two hard black lines, while his eyes shone out from beneath them with a steely glitter."},
+        {"kind": "voice", "weight": "core", "fact": "insists on data before forming theories", "keys": ["capital mistake", "theorise"], "quote": "It is a capital mistake to theorise before one has data."},
+        {"kind": "voice", "weight": "core", "fact": "draws the line between passively seeing and actively observing", "keys": ["see but not observe"], "quote": "You see, but you do not observe. The distinction is clear."},
+        {"kind": "relationship", "weight": "core", "fact": "depends on Watson as chronicler and companion, calling him 'my Boswell'", "keys": ["my boswell"], "quote": "I am lost without my Boswell."},
+        {"kind": "relationship", "weight": "extended", "fact": "values Watson's quiet, undemanding companionship above conversation", "keys": ["gift of silence", "invaluable companion"], "quote": "You have a grand gift of silence, Watson"},
+        {"kind": "relationship", "weight": "extended", "fact": "retains a lasting, singular regard for Irene Adler, always referring to her as 'the woman'", "keys": ["irene adler", "the woman"], "quote": "it is always under the honourable title of _the_ woman"}
+      ],
+      "antiFacts": [
+        {"claim": "wears a deerstalker hat", "keys": ["deerstalker"], "why": "the deerstalker never appears in the text; it originates from Sidney Paget's illustrations, not Conan Doyle's prose"},
+        {"claim": "smokes a curved calabash pipe", "keys": ["calabash"], "why": "never mentioned; his pipes in the text are a black clay pipe and an old briar pipe, not a calabash"},
+        {"claim": "says 'Elementary, my dear Watson'", "keys": ["elementary, my dear watson"], "why": "the phrase never occurs in the text; 'elementary' appears once, describing a clue as 'rather elementary,' not addressed to Watson"},
+        {"claim": "romantically involved with Irene Adler", "keys": ["romance with irene", "loves irene"], "why": "explicitly denied: 'It was not that he felt any emotion akin to love for Irene Adler'; his regard is intellectual admiration, not romance"},
+        {"claim": "warmly deferential toward Scotland Yard detectives", "keys": ["deferential to police"], "why": "contradicted; he routinely solves cases 'abandoned as hopeless by the official police' and treats detectives like Lestrade with mild condescension"}
+      ]
+    },
+    {
+      "name": "Watson",
+      "aliases": ["Dr. Watson", "John Watson", "Doctor Watson"],
+      "facts": [
+        {"kind": "appearance", "weight": "extended", "fact": "gained noticeable weight (about seven pounds) after his marriage, per Holmes's deduction", "keys": ["put on weight", "seven pounds"], "quote": "I think, Watson, that you have put on seven and a half pounds since I saw you."},
+        {"kind": "background", "weight": "core", "fact": "former army doctor, carries a jezail bullet wound from his Afghan campaign", "keys": ["afghan campaign", "jezail bullet"], "quote": "the jezail bullet which I had brought back in one of my limbs as a relic of my Afghan campaign"},
+        {"kind": "background", "weight": "core", "fact": "returns to civil medical practice and his own house in Kensington after marrying", "keys": ["kensington", "practice"], "quote": "As I drove home to my house in Kensington"},
+        {"kind": "background", "weight": "extended", "fact": "shared rooms with Holmes at Baker Street before his own marriage", "keys": ["shared rooms", "baker street", "before marriage"], "quote": "It was a few weeks before my own marriage, during the days when I was still sharing rooms with Holmes in Baker Street"},
+        {"kind": "personality", "weight": "core", "fact": "self-deprecating about his own powers of observation next to Holmes's", "keys": ["own stupidity", "self-deprecating"], "quote": "I was always oppressed with a sense of my own stupidity in my dealings with Sherlock Holmes"},
+        {"kind": "personality", "weight": "extended", "fact": "practical and ready for sudden travel/adventure, a habit from his army days", "keys": ["prompt and ready traveller"], "quote": "My experience of camp life in Afghanistan had at least had the effect of making me a prompt and ready traveller."},
+        {"kind": "action", "weight": "core", "fact": "writes up and publishes Holmes's cases, admittedly embellishing them", "keys": ["chronicle", "embellish"], "quote": "the enthusiasm which has prompted you to chronicle"},
+        {"kind": "action", "weight": "core", "fact": "carries an army revolver into danger at Holmes's request and stands watch armed", "keys": ["army revolver", "armed"], "quote": "there may be some little danger, so kindly put your army revolver in your pocket"},
+        {"kind": "action", "weight": "extended", "fact": "accompanies Holmes on dangerous stakeouts, weapon at the ready", "keys": ["revolver cocked", "stakeout"], "quote": "I placed my revolver, cocked, upon the top of the wooden case behind which I crouched."},
+        {"kind": "voice", "weight": "extended", "fact": "reacts to Holmes's deductions with exclamations of astonishment", "keys": ["this is too much"], "quote": "My dear Holmes,” said I, “this is too much."},
+        {"kind": "relationship", "weight": "core", "fact": "introduced by Holmes as his 'intimate friend and associate' whom clients can trust completely", "keys": ["intimate friend and associate"], "quote": "This is my intimate friend and associate, Dr. Watson, before whom you can speak as freely as before myself."},
+        {"kind": "relationship", "weight": "extended", "fact": "married, but still returns to stay at Baker Street with Holmes when his wife is away", "keys": ["married", "wife away"], "quote": "My wife was on a visit to her mother’s, and for a few days I was a dweller once more in my old quarters at Baker Street."}
+      ],
+      "antiFacts": [
+        {"claim": "physically stout or heavyset in build", "keys": ["stout", "heavyset"], "why": "no build is described beyond the seven-pound weight gain since marriage; a stout/heavyset build is never stated"},
+        {"claim": "a poor or incompetent doctor", "keys": ["incompetent doctor", "poor doctor"], "why": "contradicted; Holmes deduces he is 'an active member of the medical profession' from professional signs (iodoform smell, nitrate stains) and he maintains a real Kensington practice"},
+        {"claim": "skeptical of or resistant to Holmes's methods", "keys": ["skeptical of holmes"], "why": "contradicted; he is an admiring, willing companion who calls himself dense by comparison and enthusiastically chronicles Holmes's cases"},
+        {"claim": "has children in the stories", "keys": ["children", "watson's children"], "why": "never mentioned; only his wife appears, with no reference to any children"},
+        {"claim": "wears a bowler hat and carries a cane as a signature look", "keys": ["bowler hat", "cane"], "why": "invented visual shorthand from illustrations/adaptations; no such signature appearance is described in the text"}
+      ]
+    }
+  ]
+}

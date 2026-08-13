@@ -11,3 +11,6 @@ release
 # marketing site repo, not here.
 shots/
 .probe-bucket-review/
+
+# Dossier quality bench artifacts (bench-dossier-quality.cjs)
+bench-results/

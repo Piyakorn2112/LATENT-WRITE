@@ -1,0 +1,64 @@
+{
+  "book": "carol",
+  "characters": [
+    {
+      "name": "Scrooge",
+      "aliases": ["Ebenezer Scrooge"],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "a squeezing, wrenching, grasping, covetous old sinner, hard as flint", "keys": ["miserly", "grasping", "covetous"], "quote": "a squeezing, wrenching, grasping, scraping, clutching, covetous, old sinner"},
+        {"kind": "appearance", "weight": "core", "fact": "cold features: pointed nose nipped red, thin blue lips, a stiff frosty gait", "keys": ["cold", "pointed nose", "frosty"], "quote": "The cold within him froze his old features, nipped his pointed nose, shrivelled his cheek, stiffened his gait"},
+        {"kind": "personality", "weight": "core", "fact": "hard, secret, self-contained, and solitary, striking no generous fire from anyone", "keys": ["solitary", "secret", "self-contained"], "quote": "Hard and sharp as flint, from which no steel had ever struck out generous fire; secret, and self-contained, and solitary as an oyster."},
+        {"kind": "personality", "weight": "core", "fact": "openly scorns Christmas cheer and calls the poor undeserving of merriment", "keys": ["merry", "christmas", "misanthrope"], "quote": "What right have you to be merry? What reason have you to be merry? You're poor enough."},
+        {"kind": "voice", "weight": "core", "fact": "dismisses everything with his catchphrase 'Bah! Humbug!'", "keys": ["bah", "humbug"], "quote": "Bah!\" said Scrooge, \"Humbug!"},
+        {"kind": "background", "weight": "core", "fact": "former business partner of the late Jacob Marley; the firm is still called Scrooge and Marley", "keys": ["marley", "scrooge and marley", "partner"], "quote": "Scrooge and Marley. The firm was known as Scrooge and Marley."},
+        {"kind": "action", "weight": "core", "fact": "refuses to donate to a charity collection, invoking prisons and workhouses instead", "keys": ["prisons", "workhouses", "charity", "refuse"], "quote": "Are there no prisons?\" asked Scrooge."},
+        {"kind": "relationship", "weight": "core", "fact": "coldly rebuffs his nephew Fred's cheerful Christmas dinner invitation", "keys": ["nephew", "fred", "uncle"], "quote": "Nephew!\" returned the uncle sternly, \"keep Christmas in your own way, and let me keep it in mine."},
+        {"kind": "background", "weight": "extended", "fact": "as a boy he was left alone at boarding school over Christmas until his sister Fan came to bring him home", "keys": ["fan", "sister", "boarding school"], "quote": "You are quite a woman, little Fan!\" exclaimed the boy."},
+        {"kind": "background", "weight": "extended", "fact": "was once engaged to a woman named Belle, who broke it off because his growing love of money had replaced his love for her", "keys": ["belle", "gain", "engagement"], "quote": "Another idol has displaced me"},
+        {"kind": "background", "weight": "extended", "fact": "as a young man he was apprenticed to the jovial old Fezziwig, who threw joyous Christmas parties", "keys": ["fezziwig", "apprentice"], "quote": "Was I apprenticed here!"},
+        {"kind": "action", "weight": "extended", "fact": "after his ghostly transformation, buys the prize turkey and has it sent anonymously to Bob Cratchit", "keys": ["turkey", "bob cratchit", "gift"], "quote": "I'll send it to Bob Cratchit's!"},
+        {"kind": "action", "weight": "extended", "fact": "pretends to scold Bob for arriving late the next morning, then announces he is raising his salary", "keys": ["raise", "salary", "bob"], "quote": "I am about to raise your salary!"},
+        {"kind": "relationship", "weight": "extended", "fact": "becomes a second father to Tiny Tim, who does not die after all", "keys": ["tiny tim", "second father"], "quote": "to Tiny Tim, who did NOT die, he was a second father."},
+        {"kind": "personality", "weight": "extended", "fact": "is transformed into as good a man as the old city knew, laughing heartily where he once growled", "keys": ["good man", "transformation", "reformed"], "quote": "He became as good a friend, as good a master, and as good a man, as the good old city knew"},
+        {"kind": "voice", "weight": "extended", "fact": "curtly repeats 'Good afternoon!' to dismiss unwelcome conversation before his transformation", "keys": ["good afternoon", "curt", "dismiss"], "quote": "Good afternoon!\" said Scrooge."},
+        {"kind": "appearance", "weight": "extended", "fact": "carries his own low temperature everywhere, even icing his office in hot weather", "keys": ["cold", "dog-days", "office"], "quote": "he iced his office in the dog-days; and didn't thaw it one degree at Christmas."}
+      ],
+      "antiFacts": [
+        {"claim": "generous and warm from the very beginning", "keys": ["generous", "warm"], "why": "he starts the story miserly and cold, only becoming generous after the ghostly visitations"},
+        {"claim": "a young man", "keys": ["young man"], "why": "he is repeatedly described as old (old sinner, old features)"},
+        {"claim": "happily married", "keys": ["married", "wife"], "why": "his engagement to Belle was broken off, and the text never depicts him marrying anyone"},
+        {"claim": "kind and generous to his clerk from the start", "keys": ["kind to clerk", "generous employer"], "why": "at the start he keeps the coal-box locked from Bob and grudges him a paid Christmas Day off"},
+        {"claim": "has no living relatives", "keys": ["no relatives", "alone in the world"], "why": "he has a nephew, Fred, who repeatedly invites him to dinner"}
+      ]
+    },
+    {
+      "name": "Bob Cratchit",
+      "aliases": ["Bob", "Cratchit"],
+      "facts": [
+        {"kind": "background", "weight": "core", "fact": "Scrooge's underpaid clerk, earning only fifteen shillings a week for a wife and family", "keys": ["clerk", "fifteen shillings", "salary"], "quote": "my clerk, with fifteen shillings a week, and a wife and family"},
+        {"kind": "background", "weight": "core", "fact": "father of a large family including Tiny Tim, a frail boy who needs a crutch and a leg iron", "keys": ["tiny tim", "crutch", "children"], "quote": "Tiny Tim upon his shoulder. Alas for Tiny Tim, he bore a little crutch, and had his limbs supported by an iron frame!"},
+        {"kind": "appearance", "weight": "core", "fact": "poor and threadbare, with a long comforter scarf since he has no greatcoat", "keys": ["comforter", "threadbare", "no greatcoat"], "quote": "the long ends of his white comforter dangling below his waist (for he boasted no great-coat)"},
+        {"kind": "action", "weight": "core", "fact": "slides on the ice down Cornhill with a line of boys and rushes home to play blindman's buff on Christmas Eve", "keys": ["slide", "cornhill", "blindman's buff"], "quote": "went down a slide on Cornhill, at the end of a lane of boys, twenty times"},
+        {"kind": "relationship", "weight": "core", "fact": "a devoted father who holds Tiny Tim close and dreads losing him", "keys": ["tiny tim", "father", "love"], "quote": "Bob held his withered little hand in his, as if he loved the child, and wished to keep him by his side"},
+        {"kind": "relationship", "weight": "core", "fact": "toasts Scrooge as 'the Founder of the Feast' at Christmas dinner despite his wife's anger at their employer", "keys": ["toast", "scrooge", "founder of the feast"], "quote": "I'll give you Mr. Scrooge, the Founder of the Feast!"},
+        {"kind": "personality", "weight": "core", "fact": "remains cheerful and speaks pleasantly to his family despite poverty and hardship", "keys": ["cheerful", "uncomplaining"], "quote": "Bob was very cheerful with them, and spoke pleasantly to all the family."},
+        {"kind": "voice", "weight": "core", "fact": "gently calls his wife 'my dear' and checks her sharp words for the children's sake", "keys": ["my dear", "mild", "gentle"], "quote": "My dear,\" said Bob, \"the children! Christmas Day."},
+        {"kind": "action", "weight": "extended", "fact": "arrives eighteen minutes late to work the day after Christmas and meekly apologizes to Scrooge", "keys": ["late", "apologize", "behind time"], "quote": "I am very sorry, sir,\" said Bob. \"I am behind my time."},
+        {"kind": "relationship", "weight": "extended", "fact": "receives a raise and Scrooge's promise of help for his family after Scrooge's transformation", "keys": ["raise", "salary", "scrooge helps"], "quote": "I'll raise your salary, and endeavour to assist your struggling family"},
+        {"kind": "background", "weight": "extended", "fact": "works in 'the Tank,' a small cold cell-like office next to Scrooge's, with a fire so small it looks like a single coal", "keys": ["tank", "fire", "cold office"], "quote": "the clerk's fire was so very much smaller that it looked like one coal"},
+        {"kind": "relationship", "weight": "extended", "fact": "is deeply touched when he recounts Scrooge's nephew Fred's unexpected kindness to him on the street", "keys": ["fred", "scrooge's nephew", "kindness"], "quote": "Bob told them of the extraordinary kindness of Mr. Scrooge's nephew"},
+        {"kind": "personality", "weight": "extended", "fact": "a proud family man who praises the Christmas goose and pudding as though they were unmatched delicacies", "keys": ["goose", "pudding", "proud family"], "quote": "There never was such a goose. Bob said he didn't believe there ever was such a goose cooked."},
+        {"kind": "action", "weight": "extended", "fact": "mixes a hot drink of gin and lemons in a jug for the family to share at Christmas dinner", "keys": ["hot mixture", "jug", "christmas dinner"], "quote": "compounded some hot mixture in a jug with gin and lemons, and stirred it round and round and put it on the hob to simmer"},
+        {"kind": "relationship", "weight": "extended", "fact": "in a vision of a possible future, grieves quietly and composes himself after Tiny Tim's death", "keys": ["mourns", "tiny tim died", "grief"], "quote": "Poor Bob sat down in it, and when he had thought a little and composed himself, he kissed the little face."},
+        {"kind": "background", "weight": "extended", "fact": "hopes to find his son Peter a situation that would earn five-and-sixpence a week", "keys": ["peter", "situation", "job"], "quote": "he had a situation in his eye for Master Peter, which would bring in, if obtained, full five-and-sixpence weekly"}
+      ],
+      "antiFacts": [
+        {"claim": "wealthy or well-paid", "keys": ["wealthy", "rich"], "why": "he earns only fifteen shillings a week and cannot even afford a greatcoat"},
+        {"claim": "resentful and bitter toward Scrooge", "keys": ["resentful", "bitter", "hates scrooge"], "why": "he toasts Scrooge as 'the Founder of the Feast' and defends him when his wife grows angry"},
+        {"claim": "childless", "keys": ["childless", "no children"], "why": "he has a large family including Tiny Tim, Peter, Belinda, Martha, and two younger children"},
+        {"claim": "Scrooge's business partner", "keys": ["business partner"], "why": "he is Scrooge's clerk and employee; Jacob Marley was the business partner"},
+        {"claim": "lives in a large, well-heated house", "keys": ["large house", "well-heated"], "why": "the Ghost blesses his modest four-roomed house, and his office fire at work is famously tiny"}
+      ]
+    }
+  ]
+}

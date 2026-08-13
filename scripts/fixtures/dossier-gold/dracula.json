@@ -1,0 +1,63 @@
+{
+  "book": "dracula",
+  "characters": [
+    {
+      "name": "Van Helsing",
+      "aliases": ["Abraham Van Helsing", "the Professor", "Dr. Van Helsing"],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "bushy eyebrows that converge/meet when he is intense or angry", "keys": ["bushy eyebrows", "eyebrows meeting"], "quote": "his eyebrows converged till they almost touched over his nose"},
+        {"kind": "appearance", "weight": "core", "fact": "kindly, strong-faced old man", "keys": ["strong-faced", "old man", "kindly"], "quote": "this kindly, strong-faced old man"},
+        {"kind": "appearance", "weight": "extended", "fact": "carries and wields a little golden crucifix", "keys": ["golden crucifix", "crucifix"], "quote": "held between them his little golden crucifix"},
+        {"kind": "background", "weight": "core", "fact": "holds multiple doctorates (M.D., D.Ph., D.Lit.)", "keys": ["m. d.", "doctorates", "d. ph."], "quote": "Abraham Van Helsing, M. D., D. Ph., D. Lit., etc., etc."},
+        {"kind": "background", "weight": "core", "fact": "Dr. Seward's old friend and former teacher, based in Amsterdam", "keys": ["amsterdam", "old friend and master", "seward's teacher"], "quote": "my old friend and master, Professor Van Helsing, of Amsterdam"},
+        {"kind": "background", "weight": "extended", "fact": "his own wife is alive but insane ('no wits, all gone'); church law prevents him remarrying, calls himself effectively a bigamist", "keys": ["wife insane", "bigamist", "church's law"], "quote": "my poor wife dead to me, but alive by Church’s law, though no wits, all gone"},
+        {"kind": "background", "weight": "extended", "fact": "researched Dracula's history through his friend Arminus of Buda-Pesth", "keys": ["arminus", "buda-pesth", "researches"], "quote": "the researches of my friend Arminus of Buda-Pesth"},
+        {"kind": "personality", "weight": "core", "fact": "devout; falls back on trusting God through the worst horrors", "keys": ["trust god", "faith", "good god"], "quote": "We can only trust the good God."},
+        {"kind": "personality", "weight": "extended", "fact": "capable of complete emotional breakdown/sobbing despite his stern reputation", "keys": ["break down", "sob", "despair"], "quote": "for the first time in my life, I saw Van Helsing break down"},
+        {"kind": "personality", "weight": "extended", "fact": "possesses surprising physical strength for his age when provoked", "keys": ["fury of strength", "strength"], "quote": "dragged him back with a fury of strength which I never thought he could have possessed"},
+        {"kind": "action", "weight": "core", "fact": "performs emergency blood transfusions to save Lucy", "keys": ["blood transfusion", "transfusion"], "quote": "Then with swiftness, but with absolute method, Van Helsing performed the operation."},
+        {"kind": "action", "weight": "extended", "fact": "uses garlic flowers as protective wards against vampires", "keys": ["garlic flowers", "garlic"], "quote": "his purpose of using the garlic; the whole of the window-sashes reeked with it"},
+        {"kind": "action", "weight": "extended", "fact": "seals a tomb's cracks with a crumbled sacred wafer (Communion host)", "keys": ["sacred wafer", "host", "seals tomb"], "quote": "he took from his bag a mass of what looked like thin, wafer-like biscuit"},
+        {"kind": "action", "weight": "extended", "fact": "plans to behead and stake a vampire's body to give it rest", "keys": ["stake", "behead", "decapitate"], "quote": "I shall cut off her head and fill her mouth with garlic, and I shall drive a stake through her body."},
+        {"kind": "voice", "weight": "core", "fact": "speaks broken, foreign-inflected English with unusual word order", "keys": ["broken english", "precaution take"], "quote": "I shall precaution take. I shall give hypodermic injection of morphia."},
+        {"kind": "voice", "weight": "extended", "fact": "repeated verbal tic of asking rhetorical confirmation ('is it not so?')", "keys": ["is it not so"], "quote": "We have learned to believe, all of us--is it not so?"},
+        {"kind": "relationship", "weight": "core", "fact": "holds Mina in the highest, near-reverent regard, calling her one of 'God's women'", "keys": ["god's women", "mina"], "quote": "She is one of God’s women, fashioned by His own hand to show us men and other women that there is a heaven where we can enter"},
+        {"kind": "relationship", "weight": "extended", "fact": "close mentor/leader to Dr. Seward, whom he addresses as 'friend John'", "keys": ["friend john"], "quote": "You are a man, and it is a man we want. You are better than me, better than my friend John."}
+      ],
+      "antiFacts": [
+        {"claim": "a young man", "keys": ["young man"], "why": "repeatedly described as old (\"kindly, strong-faced old man\"); Seward calls him his old teacher"},
+        {"claim": "has a long white/grey beard", "keys": ["beard", "white beard"], "why": "never described with a beard; the beard in the text belongs to Dracula in disguise, not Van Helsing"},
+        {"claim": "fights with a sword", "keys": ["sword"], "why": "his tools are a knife, a surgical saw, a revolver, garlic, a crucifix, and a sacred wafer; no sword is ever attributed to him"},
+        {"claim": "English by birth", "keys": ["english", "born in england"], "why": "he is Dutch, based in Amsterdam, and speaks broken English throughout"},
+        {"claim": "Dr. Seward's student or apprentice", "keys": ["seward's student", "apprentice"], "why": "the relationship is reversed: Van Helsing is explicitly Seward's former teacher and elder mentor"}
+      ]
+    },
+    {
+      "name": "Mina",
+      "aliases": ["Mina Murray", "Mina Harker", "Wilhelmina Murray", "Wilhelmina", "Madam Mina", "Mrs. Harker"],
+      "facts": [
+        {"kind": "background", "weight": "core", "fact": "works as an assistant schoolmistress before marriage", "keys": ["assistant schoolmistress", "schoolmistress"], "quote": "The life of an assistant schoolmistress is sometimes trying."},
+        {"kind": "background", "weight": "core", "fact": "full given name is Wilhelmina, used only by Jonathan in moments of deadly earnestness", "keys": ["wilhelmina"], "quote": "he has never called me by that name since he asked me to marry him"},
+        {"kind": "background", "weight": "extended", "fact": "bears a red scar on her forehead after contact with a sacred wafer, marking her as tainted by the vampire's blood", "keys": ["red scar", "scar on forehead"], "quote": "the red scar on her forehead, of which she was conscious"},
+        {"kind": "personality", "weight": "core", "fact": "described as combining a keen, masculine intellect with a woman's tender heart", "keys": ["man's brain", "woman's heart"], "quote": "She has man’s brain--a brain that a man should have were he much gifted--and a woman’s heart."},
+        {"kind": "personality", "weight": "core", "fact": "regarded as an almost saintly, selfless, good woman", "keys": ["god's women", "noble", "selfless"], "quote": "She is one of God’s women, fashioned by His own hand"},
+        {"kind": "personality", "weight": "extended", "fact": "listens to horrifying news bravely and with calmness", "keys": ["brave", "calmness"], "quote": "she listened bravely and with calmness"},
+        {"kind": "action", "weight": "core", "fact": "diligently practices shorthand and typewriting so she can be useful to Jonathan", "keys": ["shorthand", "typewriter"], "quote": "I have been practising shorthand very assiduously"},
+        {"kind": "action", "weight": "core", "fact": "transcribes and organizes all the group's diaries and papers into one typed narrative", "keys": ["typewriter transcribing", "transcribing"], "quote": "I shall get my typewriter this very hour and begin transcribing"},
+        {"kind": "action", "weight": "core", "fact": "extracts a solemn promise from the men to kill her if she turns into a vampire", "keys": ["promise to kill me", "kill me"], "quote": "You must promise me, one and all--even you, my beloved husband--that, should the time come, you will kill me."},
+        {"kind": "action", "weight": "extended", "fact": "carries a large-bore revolver on the final expedition against Dracula", "keys": ["revolver", "armed"], "quote": "even for me a large-bore revolver"},
+        {"kind": "voice", "weight": "extended", "fact": "diary voice is warm and affectionate toward her caretakers", "keys": ["quite love", "dear"], "quote": "How good they all are to me. I quite love that dear Dr. Van Helsing."},
+        {"kind": "relationship", "weight": "core", "fact": "engaged, then married, to Jonathan Harker; works hard to keep up with his studies", "keys": ["jonathan", "engaged", "married"], "quote": "I want to keep up with Jonathan’s studies"},
+        {"kind": "relationship", "weight": "core", "fact": "lifelong best friend and confidante of Lucy Westenra since childhood", "keys": ["lucy", "childhood friend", "secrets"], "quote": "Mina, we have told all our secrets to each other since we were _children_"},
+        {"kind": "relationship", "weight": "extended", "fact": "forms a deep bond of trust and friendship with Van Helsing, who asks to be her friend for life", "keys": ["van helsing friend", "friends for all our lives"], "quote": "let us be friends for all our lives"}
+      ],
+      "antiFacts": [
+        {"claim": "has golden/blonde hair", "keys": ["blonde hair", "golden hair"], "why": "golden hair belongs to one of the three vampire women in Jonathan's castle vision, not to Mina; her own hair/eye color is never described"},
+        {"claim": "personally fights or stakes a vampire in combat", "keys": ["fights vampire", "stakes vampire"], "why": "she is deliberately excluded from the final hunt for her safety; the killing is done by the men"},
+        {"claim": "cold or distrustful personality", "keys": ["cold", "distrustful"], "why": "contradicted; she is repeatedly described as sweet, trusting, and 'one of God's women'"},
+        {"claim": "passive or unhelpful during the vampire hunt", "keys": ["passive", "unhelpful"], "why": "contradicted; she actively transcribes evidence, submits to hypnosis to track the Count, and organizes the group's information"},
+        {"claim": "already a mother during the main events", "keys": ["mother", "pregnant"], "why": "her son Quincey is born only in the epilogue, after the story's events; Van Helsing notes she is 'not so long married'"}
+      ]
+    }
+  ]
+}

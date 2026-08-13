@@ -955,6 +955,14 @@ export const DOSSIER_SPAN_CAP = 14;
 const SPAN_CHARS = 300;
 const PER_CHANNEL_QUOTA = 3;
 
+/** Experiment surface: the bench may widen the evidence budget; the shipped
+ *  defaults are exactly the constants above, so an absent opts is the
+ *  measured behaviour byte for byte. */
+export interface PackOptions {
+  spanCap?: number;
+  perChannelQuota?: number;
+}
+
 /** What the reader must know about how a span was found, in one word. `said`
  *  marks speech about the character (can be wrong in-world); `pronoun` marks a
  *  machine-resolved referent (can be wrong mechanically). */
@@ -989,7 +997,9 @@ export interface NumberedSpan {
  *   describable spans actually reach the pack, or the gate promises what the
  *   pack does not contain.
  */
-export function selectDossierSpans(ev: CharacterDossierEvidence): DossierSpan[] {
+export function selectDossierSpans(ev: CharacterDossierEvidence, opts: PackOptions = {}): DossierSpan[] {
+  const spanCap = opts.spanCap ?? DOSSIER_SPAN_CAP;
+  const quota = opts.perChannelQuota ?? PER_CHANNEL_QUOTA;
   const seen = new Set<string>();
   const queues = new Map<DossierChannel, DossierSpan[]>();
   for (const channel of DOSSIER_CHANNELS) {
@@ -1009,17 +1019,17 @@ export function selectDossierSpans(ev: CharacterDossierEvidence): DossierSpan[] 
       if (seen.has(key)) continue;
       seen.add(key);
       kept.push(span);
-      if (kept.length >= PER_CHANNEL_QUOTA) break;
+      if (kept.length >= quota) break;
     }
     queues.set(channel, kept);
   }
 
   const order = [...DOSSIER_CHANNELS].sort((a, b) => CHANNEL_RANK[a] - CHANNEL_RANK[b]);
   const out: DossierSpan[] = [];
-  for (let round = 0; round < PER_CHANNEL_QUOTA && out.length < DOSSIER_SPAN_CAP; round++) {
+  for (let round = 0; round < quota && out.length < spanCap; round++) {
     for (const channel of order) {
       const span = queues.get(channel)?.[round];
-      if (span && out.length < DOSSIER_SPAN_CAP) out.push(span);
+      if (span && out.length < spanCap) out.push(span);
     }
   }
   return out.sort((a, b) => a.chapter - b.chapter);
@@ -1043,8 +1053,8 @@ export interface DossierPack {
   text: string;
 }
 
-export function buildDossierPack(ev: CharacterDossierEvidence): DossierPack {
-  const chosen = selectDossierSpans(ev).map((s, i) => ({
+export function buildDossierPack(ev: CharacterDossierEvidence, opts: PackOptions = {}): DossierPack {
+  const chosen = selectDossierSpans(ev, opts).map((s, i) => ({
     n: i + 1,
     channel: s.channel,
     chapter: s.chapter,
@@ -1644,13 +1654,17 @@ export function normalizeFieldAnswer(
   raw: unknown,
   pack: DossierPack,
   field: DossierFieldKey,
+  /** Experiment surface: a variant that asks for a longer field must grade
+   *  at the length it asked for, or the truncation tidy cuts a completed
+   *  answer. Absent = the shipped cap, byte for byte. */
+  opts: { maxLen?: number } = {},
 ): DossierField & { confidence: number } {
   const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const grounded = groundField(
     value[field], value.spans, pack, fieldCandidates(pack, field),
     field === "appearance" ? usefulAppearance
       : field === "personality" ? usefulTrait : usefulProse,
-    FIELD_MAX[field],
+    opts.maxLen ?? FIELD_MAX[field],
     // Personality is the only abstractive field: appearance and background
     // are factual claims and must locate word for word.
     field === "personality");
@@ -1807,6 +1821,13 @@ const STOP_MODIFIER = new Set([
   "kissed", "turned", "fixed", "directed", "seen", "left", "established",
   "brushed", "opened", "closed", "raised", "lowered", "reached", "pressed",
   "own", "other", "certain", "several", "said",
+  // ★ "some face" shipped on Scrooge's card: `some` ends in the -some
+  //   suffix that was added FOR "handsome", and `such`/`next`/`last`/`first`
+  //   are determiners wearing adjective shapes. None of them describes.
+  // ★ "best expression" shipped on a draft's card: a superlative before an
+  //   appearance noun is almost always a scene beat ("settled on his best
+  //   expression"), not a feature.
+  "some", "such", "next", "last", "first", "best", "worst",
 ]);
 
 /**
@@ -1974,10 +1995,17 @@ function lowerFirst(text: string): string {
     : text.replace(/^./, (c) => c.toLowerCase());
 }
 
-export function composeExtractiveDescription(
+/**
+ * The card's sentences, UNFLOORED. Exported so a composition that appends
+ * further lines (the counted voice and company sentences under experiment)
+ * can apply the too-thin floor to the WHOLE card instead of losing a real
+ * two-word line ("Big eyes.") because it stood alone at this stage — the
+ * measured failure that motivated the split.
+ */
+export function composeExtractiveParts(
   ev: CharacterDossierEvidence,
   otherCastNames: readonly string[] = [],
-): string {
+): string[] {
   const nameAlt = ev.forms.map(esc).join("|");
   const others = otherCastNames.filter((n) => !ev.forms.includes(n));
   const otherCastRe = others.length
@@ -2001,6 +2029,22 @@ export function composeExtractiveDescription(
    *    before Gareth was…" reads as Gareth being something.
    */
   const PREP_BEFORE = /\b(?:before|after|since|than|with|for|to|from|near|beside|beyond|about|against|toward|towards|of|by|at|in|on|into|onto|unlike|like|behind|between)\s+$/i;
+  /**
+   * ★★ A DEFINITION MUST BE DURABLE, AND THE BASELINE BENCH CAUGHT THREE WAYS
+   *    IT WAS NOT. Measured on the dev books, the identity opener shipped
+   *    "The victim of an overwhelming attack of stage fright" (Anne — a
+   *    scene, its head noun names an EVENT ROLE), "Not a man to be
+   *    frightened by echoes" (Scrooge — a negation is what somebody is NOT),
+   *    and "The happy woman by whom he finally seated himself" (Elizabeth —
+   *    the relative clause is about Darcy, and the OPPOSITE-gender pronoun
+   *    is the tell). Each test is closed and positional; the spans stay in
+   *    the pack for the model tiers, which can weigh what extraction may not.
+   */
+  const IDENTITY_STOP_HEAD =
+    /^(?:not\b|no\b)|^(?:an?|the)\s+(?:[a-z-]+\s+){0,2}?(?:victim|object|subject|occasion|cause|target|week|day|month|year|hour|morning|evening|night|moment|while)\b/i;
+  const oppositePronounRe = ev.pronounClass === "masc" ? /\b(?:she|her|hers|herself)\b/i
+    : ev.pronounClass === "fem" ? /\b(?:he|his|him|himself)\b/i
+    : null;
   const clauseFrom = (spans: readonly DossierSpan[], maxLen: number): string | null => {
     const subjectRe = new RegExp(
       `${LB}(?:${nameAlt})${RB}\\s+(?:[a-z]+ly\\s+)?((?:was|is|were|are|had been|has been|became|remains?|always|never|seldom|often|usually|[a-z]{3,}(?:ed|es|s))\\b[^.;]{6,${maxLen}})`,
@@ -2024,6 +2068,11 @@ export function composeExtractiveDescription(
       //   same failure as the subject test one level out: "…which was the
       //   kind of thing people said about Tessa" arrived under Mira.
       if (otherCastRe && otherCastRe.test(clause)) continue;
+      // ★ AND SO IS A CLAUSE CARRYING THE OPPOSITE-GENDER PRONOUN. "The
+      //   happy woman by whom he finally seated himself" predicates
+      //   Elizabeth for three words and Darcy for the rest. Only a KNOWN
+      //   class rejects; unknown stays permissive.
+      if (oppositePronounRe && oppositePronounRe.test(clause)) continue;
       // A cut at maxLen lands mid-word; fall back to the last whole word.
       if (span.text.indexOf(clause) + clause.length < span.text.length
           && /\w$/.test(clause) && !/[.!?]$/.test(clause)) {
@@ -2056,6 +2105,28 @@ export function composeExtractiveDescription(
   //   feature failing rather than as the manuscript being quiet. Budgets
   //   below are raised when a neighbouring aspect is empty.
   const sentences: string[] = [];
+  /**
+   * ★ TWO CHANNELS CAN HARVEST THE SAME SENTENCE, and the card then says it
+   *   twice — Jane's "a week in town, without either seeing or hearing from
+   *   Caroline" shipped as both her identity and her history. Channel-level
+   *   dedup cannot catch it (different channels, different pools), so the
+   *   composer refuses any sentence whose content stems mostly overlap one
+   *   it already placed.
+   */
+  const placedStems: Set<string>[] = [];
+  const pushUnique = (sentence: string): void => {
+    const stems = new Set(
+      (sentence.toLowerCase().match(/[a-z][a-z'-]{3,}/g) ?? []).map(stemOf),
+    );
+    for (const prior of placedStems) {
+      if (stems.size === 0) break;
+      let shared = 0;
+      for (const s of stems) if (prior.has(s)) shared++;
+      if (shared / stems.size >= 0.6) return;
+    }
+    placedStems.push(stems);
+    sentences.push(sentence);
+  };
   const pack = buildDossierPack(ev);
   const hasVisual = pack.visualCandidates.length > 0;
 
@@ -2063,13 +2134,14 @@ export function composeExtractiveDescription(
   //     station alone is the cleanest possible opener when the prose named
   //     one; the clause carries it when it did not.
   const identity = clauseFrom(ev.byChannel.identity, 130);
-  const identityBody = identity ? lowerFirst(identity.replace(/^(?:was|is|had been)\s+/, "")) : "";
+  let identityBody = identity ? lowerFirst(identity.replace(/^(?:was|is|had been)\s+/, "")) : "";
+  if (IDENTITY_STOP_HEAD.test(identityBody)) identityBody = "";
   if (ev.counts.station && identityBody) {
-    sentences.push(`The ${ev.counts.station}, ${identityBody}.`);
+    pushUnique(`The ${ev.counts.station}, ${identityBody}.`);
   } else if (ev.counts.station) {
-    sentences.push(`The ${ev.counts.station}.`);
+    pushUnique(`The ${ev.counts.station}.`);
   } else if (identityBody) {
-    sentences.push(`${identityBody.replace(/^./, (c) => c.toUpperCase())}.`);
+    pushUnique(`${identityBody.replace(/^./, (c) => c.toUpperCase())}.`);
   }
 
   // 2 — CONDUCT. Only a habit the prose STATES. A bare verb tally was tried
@@ -2079,7 +2151,7 @@ export function composeExtractiveDescription(
   //     fact in the pack, where the model can weigh them as evidence and
   //     phrase them itself; extraction may not compose.
   const habit = clauseFrom(ev.byChannel.habitual, 100);
-  if (habit) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(habit)}.`);
+  if (habit) pushUnique(`${subjectPronoun(ev)} ${lowerFirst(habit)}.`);
 
   // ★ WHEN THE BOOK NEVER DESCRIBES THEM, GIVE MORE OF WHAT IT DOES GIVE.
   //   A viewpoint character has no appearance evidence by construction, and
@@ -2088,7 +2160,7 @@ export function composeExtractiveDescription(
   //   than being held back for symmetry.
   if (!hasVisual) {
     const interior = clauseFrom(ev.byChannel.interiority, 110);
-    if (interior) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(interior)}.`);
+    if (interior) pushUnique(`${subjectPronoun(ev)} ${lowerFirst(interior)}.`);
   }
 
   // 3 — APPEARANCE, in the register a character card actually uses.
@@ -2117,19 +2189,31 @@ export function composeExtractiveDescription(
   // them. Sentence-cased and stopped, so they read as a line rather than a
   // query result, and joined with commas rather than semicolons.
   if (phrases.length > 0) {
-    sentences.push(`${phrases.join(", ").replace(/^./, (c) => c.toUpperCase())}.`);
+    pushUnique(`${phrases.join(", ").replace(/^./, (c) => c.toUpperCase())}.`);
   }
 
   // 4 — BACKGROUND. Narrated only; a spoken claim is someone's opinion and
   //     does not belong in a description written as fact.
   const lore = clauseFrom(ev.byChannel["lore-narrated"], 120);
-  if (lore) sentences.push(`${subjectPronoun(ev)} ${lowerFirst(lore)}.`);
+  // The identity head test again: "had been a week in town" is a scene
+  // wearing a biography's grammar, and its tell is the same temporal head.
+  const loreBody = lore ? lore.replace(/^(?:was|is|had been|has been)\s+/, "") : "";
+  if (lore && !IDENTITY_STOP_HEAD.test(loreBody)) {
+    pushUnique(`${subjectPronoun(ev)} ${lowerFirst(lore)}.`);
+  }
 
+  return sentences;
+}
+
+export function composeExtractiveDescription(
+  ev: CharacterDossierEvidence,
+  otherCastNames: readonly string[] = [],
+): string {
   // ★ A SINGLE APPEARANCE FRAGMENT IS NOT A DESCRIPTION. "Outer coat." was
   //   the whole of one character's card; a writer reads that as the feature
   //   failing, not as the manuscript being thin. Below the floor, say
   //   nothing and let the honest empty state do its job.
-  const out = sentences.join(" ");
+  const out = composeExtractiveParts(ev, otherCastNames).join(" ");
   // ★ FIVE, not six. The natural register is shorter than the frame it
   //   replaced: "Small mended scar, warm face." is a real card line at five
   //   words and was being discarded by a floor tuned to the wordier version.

@@ -1,0 +1,1031 @@
+{
+  "book": "pride",
+  "characters": [
+    {
+      "name": "Elizabeth",
+      "aliases": [
+        "Elizabeth Bennet",
+        "Lizzy",
+        "Eliza",
+        "Miss Elizabeth Bennet"
+      ],
+      "facts": [
+        {
+          "kind": "appearance",
+          "weight": "core",
+          "fact": "Darcy comes to find her uncommonly intelligent-looking, owing to the beautiful expression of her dark eyes",
+          "keys": [
+            "dark eyes",
+            "fine eyes",
+            "intelligent"
+          ],
+          "quote": "he began to find it was rendered uncommonly intelligent by the beautiful expression of her dark eyes"
+        },
+        {
+          "kind": "appearance",
+          "weight": "extended",
+          "fact": "her figure is judged light and pleasing despite Darcy's initial critical inspection of her form",
+          "keys": [
+            "figure",
+            "light",
+            "pleasing"
+          ],
+          "quote": "he was forced to acknowledge her figure to be light and pleasing"
+        },
+        {
+          "kind": "appearance",
+          "weight": "extended",
+          "fact": "her complexion brightens and glows after vigorous exercise, such as a long walk",
+          "keys": [
+            "glow",
+            "complexion",
+            "exercise"
+          ],
+          "quote": "a face glowing with the warmth of exercise"
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "has a lively, playful disposition that delights in anything ridiculous",
+          "keys": [
+            "lively",
+            "playful",
+            "ridicul"
+          ],
+          "quote": "she had a lively, playful disposition, which delighted in anything ridiculous"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "says of herself that she dearly loves a laugh",
+          "keys": [
+            "love a laugh",
+            "laugh"
+          ],
+          "quote": "I dearly love a laugh."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "has quicker powers of observation and a less yielding temper than her sister Jane",
+          "keys": [
+            "quickness",
+            "observation"
+          ],
+          "quote": "with more quickness of observation and less pliancy of temper than her sister"
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "on reading Darcy's letter, admits her vanity and prejudice had blinded her judgment of both Darcy and Wickham",
+          "keys": [
+            "vanity",
+            "prejudice",
+            "never knew myself"
+          ],
+          "quote": "Till this moment, I never knew myself."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "said by Lady Catherine to be an obstinate, headstrong girl",
+          "keys": [
+            "obstinate",
+            "headstrong"
+          ],
+          "quote": "Obstinate, headstrong girl! I am ashamed of you!"
+        },
+        {
+          "kind": "background",
+          "weight": "core",
+          "fact": "her family's small estate (about two thousand a year) is entailed away from the daughters onto a distant male relation",
+          "keys": [
+            "entail",
+            "two thousand a year",
+            "estate"
+          ],
+          "quote": "an estate of two thousand a year, which, unfortunately for his daughters, was entailed, in default of heirs male, on a distant relation"
+        },
+        {
+          "kind": "background",
+          "weight": "extended",
+          "fact": "is Mr. and Mrs. Bennet's second daughter, one of five sisters",
+          "keys": [
+            "second daughter"
+          ],
+          "quote": "Observing his second daughter employed in trimming a hat, he suddenly addressed her"
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "walks three miles alone across muddy fields to nurse her sick sister Jane at Netherfield",
+          "keys": [
+            "walk",
+            "three miles",
+            "field"
+          ],
+          "quote": "crossing field after field at a quick pace, jumping over stiles and springing over puddles, with impatient activity"
+        },
+        {
+          "kind": "action",
+          "weight": "extended",
+          "fact": "plays and sings pleasingly at social gatherings, without pretension, though her performance is not considered brilliant",
+          "keys": [
+            "performance",
+            "pleasing",
+            "piano"
+          ],
+          "quote": "Her performance was pleasing, though by no means capital."
+        },
+        {
+          "kind": "voice",
+          "weight": "core",
+          "fact": "openly declares teasing and quarrelling to be her habitual way with those she loves",
+          "keys": [
+            "teasing",
+            "quarrelling"
+          ],
+          "quote": "it belongs to me to find occasions for teasing and quarrelling with you as often as may be"
+        },
+        {
+          "kind": "voice",
+          "weight": "extended",
+          "fact": "narrator notes she is the first person who ever dared to trifle with Lady Catherine's dignified impertinence, showing her boldness of speech even to social superiors",
+          "keys": [
+            "dared",
+            "trifle",
+            "impertinence"
+          ],
+          "quote": "Elizabeth suspected herself to be the first creature who had ever dared to trifle with so much dignified impertinence"
+        },
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "is explicitly named as her father's favourite child",
+          "keys": [
+            "favourite child"
+          ],
+          "quote": "that _she_, his favourite child, should be distressing him by her choice, should be filling him with fears and regrets"
+        },
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "rejects Mr. Darcy's first marriage proposal, telling him he is the last man in the world she could be prevailed on to marry",
+          "keys": [
+            "last man",
+            "refuse",
+            "proposal"
+          ],
+          "quote": "you were the last man in the world whom I could ever be prevailed on to marry."
+        },
+        {
+          "kind": "relationship",
+          "weight": "extended",
+          "fact": "later accepts Darcy's second marriage proposal, telling him her feelings have undergone a complete change",
+          "keys": [
+            "accept",
+            "sentiments",
+            "change"
+          ],
+          "quote": "her sentiments had undergone so material a change since the period to which he alluded, as to make her receive with gratitude and pleasure his present assurances"
+        },
+        {
+          "kind": "relationship",
+          "weight": "extended",
+          "fact": "is Charlotte Lucas's closest friend, whose friendship Charlotte values above anyone else's",
+          "keys": [
+            "friendship",
+            "charlotte"
+          ],
+          "quote": "Elizabeth Bennet, whose friendship she valued beyond that of any other person"
+        }
+      ],
+      "antiFacts": [
+        {
+          "claim": "has blonde or golden hair",
+          "keys": [
+            "blonde",
+            "golden hair"
+          ],
+          "why": "her hair colour is never stated in the text; only her dark, fine eyes are singled out for description"
+        },
+        {
+          "claim": "is the eldest of the Bennet sisters",
+          "keys": [
+            "eldest",
+            "first daughter"
+          ],
+          "why": "the text repeatedly calls her the second daughter; Jane is consistently identified as the eldest"
+        },
+        {
+          "claim": "was educated by a governess",
+          "keys": [
+            "governess",
+            "tutor"
+          ],
+          "why": "Elizabeth tells Lady Catherine the Bennet sisters never had a governess"
+        },
+        {
+          "claim": "travels to the Continent or Europe during the novel",
+          "keys": [
+            "europe",
+            "continent",
+            "abroad"
+          ],
+          "why": "her travels in the text are confined to Kent, London, and Derbyshire/the Lakes; no foreign trip occurs"
+        },
+        {
+          "claim": "is renowned as the most accomplished pianist in the neighbourhood",
+          "keys": [
+            "accomplished",
+            "pianist",
+            "virtuoso"
+          ],
+          "why": "her own playing is described as pleasing but by no means capital; that praise is given to other characters, not her"
+        }
+      ]
+    },
+    {
+      "name": "Darcy",
+      "aliases": [
+        "Fitzwilliam Darcy",
+        "Mr. Darcy",
+        "Darcy"
+      ],
+      "facts": [
+        {
+          "kind": "appearance",
+          "weight": "core",
+          "fact": "strikes the Meryton assembly room as strikingly good-looking: a fine, tall person, handsome features, and a noble bearing",
+          "keys": [
+            "tall",
+            "handsome",
+            "fine person",
+            "noble mien"
+          ],
+          "quote": "his friend Mr. Darcy soon drew the attention of the room by his fine, tall person, handsome features, noble mien"
+        },
+        {
+          "kind": "appearance",
+          "weight": "extended",
+          "fact": "once his manners are seen, he is judged to have a forbidding, disagreeable countenance despite his large estate",
+          "keys": [
+            "forbidding",
+            "disagreeable",
+            "countenance"
+          ],
+          "quote": "not all his large estate in Derbyshire could save him from having a most forbidding, disagreeable countenance"
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "narrator directly describes him as haughty, reserved, and fastidious, with well-bred but uninviting manners",
+          "keys": [
+            "haughty",
+            "reserved",
+            "fastidious"
+          ],
+          "quote": "He was at the same time haughty, reserved, and fastidious; and his manners, though well bred, were not inviting."
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "describes his own temper as resentful and unyielding; once his good opinion is lost, it is lost forever",
+          "keys": [
+            "resentful",
+            "unyielding",
+            "good opinion"
+          ],
+          "quote": "My temper would perhaps be called resentful. My good opinion once lost is lost for ever."
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "confesses to having been a selfish being all his life in practice, spoiled into pride and conceit, though reformed by Elizabeth's rebuke",
+          "keys": [
+            "selfish",
+            "pride",
+            "conceit"
+          ],
+          "quote": "I have been a selfish being all my life, in practice, though not in principle."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "said by Wickham that almost all of his actions may be traced to pride",
+          "keys": [
+            "pride",
+            "actions traced"
+          ],
+          "quote": "almost all his actions may be traced to pride"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "said by his own housekeeper, who has known him since he was four, to be the best landlord and master who ever lived, and the sweetest-tempered, most generous-hearted boy in the world",
+          "keys": [
+            "best landlord",
+            "best master",
+            "generous",
+            "sweet temper"
+          ],
+          "quote": "He is the best landlord, and the best master,” said she, “that ever lived."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "at the Meryton assembly he is quickly judged to be proud and above his company",
+          "keys": [
+            "proud",
+            "above his company"
+          ],
+          "quote": "he was discovered to be proud, to be above his company, and above being pleased"
+        },
+        {
+          "kind": "background",
+          "weight": "core",
+          "fact": "owns Pemberley, a large estate in Derbyshire, and is reputed to have ten thousand a year",
+          "keys": [
+            "ten thousand a year",
+            "pemberley",
+            "derbyshire"
+          ],
+          "quote": "the report, which was in general circulation within five minutes after his entrance, of his having ten thousand a year"
+        },
+        {
+          "kind": "background",
+          "weight": "extended",
+          "fact": "was raised as an only son (for many years an only child) and was spoiled by his parents into being selfish and overbearing",
+          "keys": [
+            "only son",
+            "spoiled"
+          ],
+          "quote": "Unfortunately an only son (for many years an only _child_), I was spoiled by my parents"
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "proposes marriage to Elizabeth at the Hunsford parsonage and is refused",
+          "keys": [
+            "proposal",
+            "hunsford",
+            "struggled"
+          ],
+          "quote": "In vain have I struggled. It will not do. My feelings will not be repressed."
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "secretly tracks down Wickham and Lydia in London and pays off Wickham's debts and commission to bring about their marriage, saving the Bennet family's reputation",
+          "keys": [
+            "wickham",
+            "lydia",
+            "debts",
+            "marriage"
+          ],
+          "quote": "Darcy did everything; made up the match, gave the money, paid the fellow’s debts, and got him his commission!"
+        },
+        {
+          "kind": "action",
+          "weight": "extended",
+          "fact": "persuades Bingley to separate from Jane, believing her indifferent to him, then later encourages Bingley to return and renew his courtship",
+          "keys": [
+            "detached",
+            "bingley",
+            "separation"
+          ],
+          "quote": "I had detached Mr. Bingley from your sister"
+        },
+        {
+          "kind": "voice",
+          "weight": "core",
+          "fact": "admits he lacks the talent of conversing easily with strangers or catching the tone of their conversation",
+          "keys": [
+            "conversing",
+            "strangers",
+            "talent"
+          ],
+          "quote": "I certainly have not the talent which some people possess,” said Darcy, “of conversing easily with those I have never seen before."
+        },
+        {
+          "kind": "voice",
+          "weight": "extended",
+          "fact": "describes himself as ill-qualified to recommend himself to strangers",
+          "keys": [
+            "ill-qualified",
+            "recommend myself",
+            "strangers"
+          ],
+          "quote": "I am ill-qualified to recommend myself to strangers."
+        },
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "eventually marries Elizabeth Bennet, crediting her with teaching him a humbling lesson that reformed his pride",
+          "keys": [
+            "marries",
+            "elizabeth",
+            "taught me a lesson"
+          ],
+          "quote": "You taught me a lesson, hard indeed at first, but most advantageous."
+        },
+        {
+          "kind": "relationship",
+          "weight": "extended",
+          "fact": "shares a steady friendship with Bingley in spite of a great opposition of character",
+          "keys": [
+            "friendship",
+            "bingley"
+          ],
+          "quote": "Between him and Darcy there was a very steady friendship, in spite of a great opposition of character."
+        },
+        {
+          "kind": "relationship",
+          "weight": "extended",
+          "fact": "is joint guardian, with his cousin Colonel Fitzwilliam, of his younger sister Georgiana, more than ten years his junior",
+          "keys": [
+            "guardian",
+            "georgiana",
+            "sister"
+          ],
+          "quote": "My sister, who is more than ten years my junior, was left to the guardianship of my mother’s nephew, Colonel Fitzwilliam, and myself."
+        }
+      ],
+      "antiFacts": [
+        {
+          "claim": "holds a hereditary title such as Lord or Sir",
+          "keys": [
+            "lord",
+            "sir darcy",
+            "title"
+          ],
+          "why": "he is called plain Mr. Darcy throughout; he is wealthy landed gentry but untitled"
+        },
+        {
+          "claim": "serves as an army or militia officer",
+          "keys": [
+            "officer",
+            "regiment",
+            "commission"
+          ],
+          "why": "military service belongs to Wickham and Colonel Fitzwilliam in the text; Darcy holds no commission"
+        },
+        {
+          "claim": "is short or slight in build",
+          "keys": [
+            "short",
+            "slight",
+            "small stature"
+          ],
+          "why": "he is explicitly described as having a fine, tall person"
+        },
+        {
+          "claim": "is warm, chatty, and instantly sociable when he first appears at the Meryton assembly",
+          "keys": [
+            "chatty",
+            "sociable",
+            "warm"
+          ],
+          "why": "the text shows the opposite: his cold reserve gives offence and turns the room against him within half an evening"
+        },
+        {
+          "claim": "built his fortune himself through trade or business",
+          "keys": [
+            "self-made",
+            "trade",
+            "business"
+          ],
+          "why": "Pemberley and his fortune are inherited from his father; his family's wealth is old and landed, not earned by him"
+        }
+      ]
+    },
+    {
+      "name": "Jane",
+      "aliases": [
+        "Jane Bennet",
+        "Miss Bennet"
+      ],
+      "facts": [
+        {
+          "kind": "appearance",
+          "weight": "core",
+          "fact": "said to be the most beautiful of the sisters",
+          "keys": [
+            "beauti"
+          ],
+          "quote": "Oh, she is the most beautiful creature I ever beheld!"
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "combines strong feeling with composure and uniform cheerfulness, so her true feelings are hard to detect",
+          "keys": [
+            "composure",
+            "cheerfulness",
+            "strength of feeling"
+          ],
+          "quote": "Jane united with great strength of feeling, a composure of temper and an uniform cheerfulness of manner, which would guard her from the suspicions of the impertinent."
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "said to never see a fault in anybody and never speak ill of anyone",
+          "keys": [
+            "fault",
+            "speak ill",
+            "good and agreeable"
+          ],
+          "quote": "You never see a fault in anybody. All the world are good and agreeable in your eyes. I never heard you speak ill of a human being in my life."
+        },
+        {
+          "kind": "background",
+          "weight": "core",
+          "fact": "eldest of the Bennet daughters",
+          "keys": [
+            "eldest"
+          ],
+          "quote": "said Mr. Darcy, looking at the eldest Miss Bennet."
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "rides to Netherfield on horseback in threatening weather (at her mother's contrivance), is caught in heavy rain and falls ill there",
+          "keys": [
+            "horseback",
+            "rain",
+            "netherfield"
+          ],
+          "quote": "Jane was therefore obliged to go on horseback, and her mother attended her to the door with many cheerful prognostics of a bad day. Her hopes were answered; Jane had not been gone long before it rained hard."
+        },
+        {
+          "kind": "voice",
+          "weight": "core",
+          "fact": "insists she is not hasty to condemn anyone but always says what she truly thinks",
+          "keys": [
+            "hasty",
+            "censur",
+            "speak what i think"
+          ],
+          "quote": "I would wish not to be hasty in censuring anyone; but I always speak what I think."
+        },
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "shares an especially close, sympathetic bond with her sister Elizabeth",
+          "keys": [
+            "elizabeth",
+            "sister",
+            "pleasure"
+          ],
+          "quote": "Elizabeth felt Jane’s pleasure."
+        },
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "marries Mr. Bingley, becoming Mrs. Bingley",
+          "keys": [
+            "bingley",
+            "marri",
+            "mrs. bingley"
+          ],
+          "quote": "With what delighted pride she afterwards visited Mrs. Bingley, and talked of Mrs. Darcy, may be guessed."
+        },
+        {
+          "kind": "appearance",
+          "weight": "extended",
+          "fact": "said by Bingley to be so lovely he could not conceive of a more beautiful angel",
+          "keys": [
+            "angel",
+            "beauti"
+          ],
+          "quote": "he could not conceive an angel more beautiful."
+        },
+        {
+          "kind": "appearance",
+          "weight": "extended",
+          "fact": "her happiness at her engagement gives her face a glow that makes her look handsomer than ever",
+          "keys": [
+            "glow",
+            "animation",
+            "handsomer"
+          ],
+          "quote": "the satisfaction of Miss Bennet’s mind gave such a glow of sweet animation to her face, as made her look handsomer than ever"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "reluctant to doubt anyone's honesty, so tries to think well of both Darcy and Wickham despite their conflicting accounts",
+          "keys": [
+            "veracity",
+            "nature",
+            "question"
+          ],
+          "quote": "it was not in her nature to question the veracity of a young man of such amiable appearance as Wickham"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "said to be candid without ostentation, taking the good of everybody's character and saying nothing of the bad",
+          "keys": [
+            "candour",
+            "candid",
+            "good of everybody"
+          ],
+          "quote": "to take the good of everybody’s character and make it still better, and say nothing of the bad,--belongs to you alone"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "gentle but firm once she has formed an opinion, and will not be laughed out of it",
+          "keys": [
+            "opinion",
+            "laugh"
+          ],
+          "quote": "Laugh as much as you choose, but you will not laugh me out of my opinion."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "struggles to keep up her spirits after Bingley's departure, with periods of private dejection despite her outward composure",
+          "keys": [
+            "struggled",
+            "spirits",
+            "dejection"
+          ],
+          "quote": "though Jane always struggled to support her spirits, there were periods of dejection"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "said to have an excellent understanding and a superlatively good disposition",
+          "keys": [
+            "understanding",
+            "disposition"
+          ],
+          "quote": "the excellent understanding and super-excellent disposition of Jane, and a general similarity of feeling and taste between her and himself"
+        },
+        {
+          "kind": "background",
+          "weight": "extended",
+          "fact": "stays for an extended visit with the Gardiners in Gracechurch Street, London",
+          "keys": [
+            "gracechurch",
+            "gardiner",
+            "london"
+          ],
+          "quote": "As they drove to Mr. Gardiner’s door, Jane was at a drawing-room window watching their arrival"
+        },
+        {
+          "kind": "action",
+          "weight": "extended",
+          "fact": "writes to Elizabeth downplaying the seriousness of her own illness",
+          "keys": [
+            "unwell",
+            "wet through",
+            "letter"
+          ],
+          "quote": "I find myself very unwell this morning, which, I suppose, is to be imputed to my getting wet through yesterday."
+        },
+        {
+          "kind": "voice",
+          "weight": "extended",
+          "fact": "confides everything to Elizabeth without reserve when truly happy, as at news of her engagement",
+          "keys": [
+            "reserves",
+            "confidence",
+            "happiest creature"
+          ],
+          "quote": "Jane could have no reserves from Elizabeth, where confidence would give pleasure; and, instantly embracing her, acknowledged, with the liveliest emotion, that she was the happiest creature in the world."
+        }
+      ],
+      "antiFacts": [
+        {
+          "claim": "is the youngest of the Bennet sisters",
+          "keys": [
+            "youngest"
+          ],
+          "why": "text establishes her as the eldest, not youngest; Lydia is the youngest"
+        },
+        {
+          "claim": "has dark hair or dark eyes",
+          "keys": [
+            "dark hair",
+            "dark eyes"
+          ],
+          "why": "no hair or eye colour is ever stated for Jane in the text"
+        },
+        {
+          "claim": "elopes with a suitor",
+          "keys": [
+            "elope",
+            "runs away"
+          ],
+          "why": "the elopement in the book belongs to Lydia and Wickham, not Jane"
+        },
+        {
+          "claim": "is an accomplished pianist who performs for guests",
+          "keys": [
+            "piano",
+            "sings",
+            "music"
+          ],
+          "why": "no passage ties Jane to playing piano or singing; that association belongs to Mary and, secondarily, Elizabeth"
+        },
+        {
+          "claim": "initially refuses Bingley's proposal",
+          "keys": [
+            "refuse",
+            "reject",
+            "proposal"
+          ],
+          "why": "the text shows her accepting with immediate, unreserved joy, no refusal depicted"
+        }
+      ]
+    },
+    {
+      "name": "Mr. Bennet",
+      "aliases": [
+        "Mr. Bennet",
+        "Mr Bennet"
+      ],
+      "facts": [
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "Narrator states his marriage to Mrs. Bennet lost real affection and respect very early on, owing to her weak understanding and narrow mind.",
+          "keys": [
+            "marriage",
+            "affection",
+            "respect",
+            "wife",
+            "understanding"
+          ],
+          "quote": "had married a woman whose weak understanding and illiberal mind had very early in their marriage put an end to all real affection for her"
+        },
+        {
+          "kind": "relationship",
+          "weight": "core",
+          "fact": "Narrator states he missed Elizabeth so much after her marriage that his affection for her drew him from home more than anything else could.",
+          "keys": [
+            "elizabeth",
+            "affection",
+            "miss",
+            "favourite",
+            "pemberley"
+          ],
+          "quote": "Mr. Bennet missed his second daughter exceedingly; his affection for her drew him oftener from home than anything else could do."
+        },
+        {
+          "kind": "background",
+          "weight": "core",
+          "fact": "His estate brings two thousand a year but, in default of a male heir, is entailed away from his five daughters onto a distant relation (Mr. Collins).",
+          "keys": [
+            "entail",
+            "estate",
+            "thousand",
+            "daughters",
+            "heirs"
+          ],
+          "quote": "Mr. Bennet’s property consisted almost entirely in an estate of two thousand a year, which, unfortunately for his daughters, was entailed, in default of heirs male, on a distant relation"
+        },
+        {
+          "kind": "personality",
+          "weight": "core",
+          "fact": "Narrator states he was fond of the country and of books, and drew his principal enjoyments from those tastes rather than from his marriage.",
+          "keys": [
+            "fond",
+            "country",
+            "books",
+            "enjoyments",
+            "tastes"
+          ],
+          "quote": "He was fond of the country and of books; and from these tastes had arisen his principal enjoyments."
+        },
+        {
+          "kind": "voice",
+          "weight": "core",
+          "fact": "His dry, ironic wit shows in teasing his wife, feigning regret that he called on Bingley, as if he'd have skipped it had she only complained sooner.",
+          "keys": [
+            "sorry",
+            "ironic",
+            "teasing",
+            "unlucky",
+            "called"
+          ],
+          "quote": "I am sorry to hear _that_; but why did you not tell me so before? If I had known as much this morning, I certainly would not have called on him."
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "He paid a surprise early visit to Mr. Bingley, all the while assuring his wife until the last moment that he would not go.",
+          "keys": [
+            "visit",
+            "bingley",
+            "earliest",
+            "assuring",
+            "wife"
+          ],
+          "quote": "Mr. Bennet was among the earliest of those who waited on Mr. Bingley. He had always intended to visit him, though to the last always assuring his wife that he should not go"
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "He habitually retired to his library after tea, as was his custom, to get away from the rest of the family.",
+          "keys": [
+            "library",
+            "retired",
+            "custom",
+            "escape"
+          ],
+          "quote": "After tea, Mr. Bennet retired to the library, as was his custom"
+        },
+        {
+          "kind": "action",
+          "weight": "core",
+          "fact": "He travelled to London himself, with Colonel Forster, to search for Lydia after her elopement with Wickham.",
+          "keys": [
+            "london",
+            "search",
+            "lydia",
+            "forster",
+            "discover"
+          ],
+          "quote": "My father is going to London with Colonel Forster instantly, to try to discover her."
+        },
+        {
+          "kind": "action",
+          "weight": "extended",
+          "fact": "Though he seemed unlikely to yield, he ultimately let Lydia go to Brighton, reasoning it would keep peace at Longbourn.",
+          "keys": [
+            "brighton",
+            "lydia",
+            "peace",
+            "yield"
+          ],
+          "quote": "We shall have no peace at Longbourn if Lydia does not go to Brighton. Let her go, then."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "After Lydia's elopement he blamed himself directly, saying it was his own doing and he ought to feel it, a rare moment of genuine self-reproach.",
+          "keys": [
+            "blame",
+            "suffer",
+            "doing",
+            "reproach"
+          ],
+          "quote": "Say nothing of that. Who should suffer but myself? It has been my own doing, and I ought to feel it."
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "Narrator states he returned from the search for Lydia with his usual philosophic composure, saying as little as he had ever been in the habit of saying.",
+          "keys": [
+            "philosophic",
+            "composure",
+            "little",
+            "habit"
+          ],
+          "quote": "When Mr. Bennet arrived, he had all the appearance of his usual philosophic composure. He said as little as he had ever been in the habit of saying"
+        },
+        {
+          "kind": "relationship",
+          "weight": "extended",
+          "fact": "Beneath his usual irony he showed real fatherly concern for Elizabeth's happiness, warning she could not be happy or respectable unless she truly esteemed her husband.",
+          "keys": [
+            "esteemed",
+            "happy",
+            "respectable",
+            "husband",
+            "warn"
+          ],
+          "quote": "I know that you could be neither happy nor respectable, unless you truly esteemed your husband, unless you looked up to him as a superior."
+        },
+        {
+          "kind": "voice",
+          "weight": "extended",
+          "fact": "In a wry letter to Mr. Collins announcing Elizabeth's engagement, he advises standing by Darcy over Lady Catherine because Darcy 'has more to give.'",
+          "keys": [
+            "collins",
+            "catherine",
+            "nephew",
+            "give"
+          ],
+          "quote": "Console Lady Catherine as well as you can. But, if I were you, I would stand by the nephew. He has more to give."
+        },
+        {
+          "kind": "voice",
+          "weight": "extended",
+          "fact": "He joked that the disgraced Wickham was perhaps his favourite son-in-law, typical of his dry irony.",
+          "keys": [
+            "wickham",
+            "favourite",
+            "admire",
+            "sons"
+          ],
+          "quote": "I admire all my three sons-in-law highly,” said he. “Wickham, perhaps, is my favourite; but I think I shall like _your_ husband quite as well as Jane’s."
+        },
+        {
+          "kind": "background",
+          "weight": "extended",
+          "fact": "Narrator states that despite the entail, he never saved money and had often wished he had laid by an annual sum for his family's provision instead of spending his whole income.",
+          "keys": [
+            "saved",
+            "income",
+            "annual",
+            "provision",
+            "wished"
+          ],
+          "quote": "Mr. Bennet had very often wished, before this period of his life, that, instead of spending his whole income, he had laid by an annual sum, for the better provision of his children"
+        },
+        {
+          "kind": "personality",
+          "weight": "extended",
+          "fact": "Narrator states his family knew him to be, on all common occasions, a most negligent and dilatory correspondent.",
+          "keys": [
+            "negligent",
+            "dilatory",
+            "correspondent"
+          ],
+          "quote": "His family knew him to be, on all common occasions, a most negligent and dilatory correspondent"
+        },
+        {
+          "kind": "action",
+          "weight": "extended",
+          "fact": "When Wickham and Lydia visited after their marriage, his reception of them was cold: his countenance gained in austerity and he scarcely opened his lips.",
+          "keys": [
+            "reception",
+            "austerity",
+            "cordial",
+            "wickham"
+          ],
+          "quote": "Their reception from Mr. Bennet, to whom they then turned, was not quite so cordial. His countenance rather gained in austerity; and he scarcely opened his lips."
+        },
+        {
+          "kind": "action",
+          "weight": "extended",
+          "fact": "When Mrs. Bennet demanded he force Elizabeth to marry Mr. Collins, he merely raised his eyes from his book with calm unconcern, unmoved by her agitation.",
+          "keys": [
+            "calm",
+            "unconcern",
+            "book",
+            "collins"
+          ],
+          "quote": "Mr. Bennet raised his eyes from his book as she entered, and fixed them on her face with a calm unconcern, which was not in the least altered by her communication."
+        }
+      ],
+      "antiFacts": [
+        {
+          "claim": "Physically described as tall, grey-haired, or otherwise given a specific face or build",
+          "keys": [
+            "appearance",
+            "tall",
+            "hair",
+            "face"
+          ],
+          "why": "The text never gives Mr. Bennet a physical description; unlike Mr. Collins ('a tall, heavy-looking young man') or Wickham's noted handsomeness, no height, hair colour, or facial feature is ever attributed to him."
+        },
+        {
+          "claim": "Has a military or naval background or career",
+          "keys": [
+            "military",
+            "army",
+            "navy",
+            "officer"
+          ],
+          "why": "Nothing in the text gives Mr. Bennet a military past. The military figures are Colonel Forster, Wickham, and the officers of the militia; Mr. Bennet is characterized instead as a bookish country gentleman."
+        },
+        {
+          "claim": "Is a wealthy, rich landowner",
+          "keys": [
+            "wealthy",
+            "rich",
+            "fortune",
+            "income"
+          ],
+          "why": "The text explicitly says 'Mr. Bennet was not imagined to be very rich'; his income is a modest two thousand a year, and he never managed to save any of it, unlike genuinely rich characters such as Darcy or Bingley."
+        },
+        {
+          "claim": "Warm and affectionate toward his wife, Mrs. Bennet",
+          "keys": [
+            "affection",
+            "warm",
+            "fond",
+            "wife"
+          ],
+          "why": "The narrator states directly that respect, esteem, and confidence 'had vanished for ever' between them and that real affection ended very early in the marriage; he treats her with irony and teasing rather than warmth."
+        },
+        {
+          "claim": "A sociable, active figure who enjoys attending balls and parties with his family",
+          "keys": [
+            "sociable",
+            "balls",
+            "parties",
+            "attend"
+          ],
+          "why": "He skips the Netherfield ball entirely (Mrs. Bennet tells him 'I wish you had been there'), and he consistently retreats to his library rather than join family social outings."
+        }
+      ]
+    }
+  ]
+}

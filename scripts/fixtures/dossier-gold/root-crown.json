@@ -1,0 +1,146 @@
+{
+  "book": "root-crown",
+  "characters": [
+    {
+      "name": "Mira",
+      "aliases": ["Mira Mosswell"],
+      "facts": [
+        {"kind": "personality", "weight": "core", "fact": "known throughout the valley as the person who comes when a birth is beyond the midwife's ability alone", "keys": ["midwife", "birth", "came when", "difficult labor"], "quote": "the valley first began to understand that Mira was the person who came when a birth needed more than the midwife's hands could provide alone"},
+        {"kind": "action", "weight": "core", "fact": "presses her open palm into a carved hand-and-furrow on the kitchen hearth-beam every night before bed", "keys": ["hearth", "palm", "gesture", "hand", "furrow"], "quote": "she went to the hearth-beam and pressed her open palm into the hand-and-furrow there"},
+        {"kind": "action", "weight": "core", "fact": "rings the granary bell-rope each morning, a short pause between pulls signaling the day is starting well", "keys": ["bell", "rope", "morning", "ring", "pull"], "quote": "she pulled the rope twice, the way Dowsa had taught her, because once meant the day was starting and twice meant the day was starting well"},
+        {"kind": "relationship", "weight": "core", "fact": "was apprenticed to and mentored for decades by the wise-woman Dowsa, first as a student, later as a near-equal", "keys": ["dowsa", "student", "teacher", "apprentice", "mentor"], "quote": "The first years, when she had come as a student and Dowsa had sat across from her in the other chair and taught"},
+        {"kind": "appearance", "weight": "core", "fact": "does not age; her hair is the same pale gold she was born with and her face still looks like a woman in her twenties decades later", "keys": ["pale gold", "hair", "ageless", "does not age", "young face"], "quote": "whose hair was the pale gold she had been born with and whose face had the quality of someone in the third decade of life"},
+        {"kind": "background", "weight": "core", "fact": "Dowsa told her on her deathbed that she was going to outlive a great many people", "keys": ["outlive", "prophecy", "dowsa", "deathbed"], "quote": "You're going to outlive a lot of people, child."},
+        {"kind": "action", "weight": "core", "fact": "deliberately chose not to use her power to save her dying brother Gareth, letting him die of natural causes", "keys": ["did not cast", "gareth", "stroke", "let go", "choice"], "quote": "She did not cast."},
+        {"kind": "relationship", "weight": "extended", "fact": "sat with Gareth on his kitchen floor in silence after his daughter Anel died, offering only presence, no words", "keys": ["anel", "gareth", "presence", "grief", "silence"], "quote": "Gareth's kitchen, on the floor after Anel, with no words and no embrace and just presence because presence was what there was"},
+        {"kind": "action", "weight": "extended", "fact": "wears a veil at formal public occasions to hide her unaging face, a practice her niece Lyssa asked of her twenty years earlier", "keys": ["veil", "lyssa", "court", "conceal", "hide"], "quote": "since Lyssa had asked it of her at the first Cymboll court visit, twenty years before"},
+        {"kind": "background", "weight": "extended", "fact": "arrived at the Mosswell house from elsewhere when Gareth was two years old, a child without a name that fit her new home", "keys": ["arrived", "mosswell house", "elsewhere", "no name", "origin"], "quote": "He had been two years old when she had first arrived in the Mosswell house from the home valley, a child from elsewhere, without a name that fit the new place"},
+        {"kind": "voice", "weight": "extended", "fact": "teaches the wise-woman gesture with plain, minimal instruction, breaking it into precise physical steps", "keys": ["teach", "edrik", "pause", "breaths", "gesture"], "quote": "The pause,\" she said. \"Here. Three breaths. In your own chest. Not out loud."},
+        {"kind": "personality", "weight": "extended", "fact": "learned from Dowsa to hold open questions patiently rather than pressing for resolution", "keys": ["patient", "hold", "open questions", "not pressing"], "quote": "Mira had not asked. She was learning, she thought, to hold open questions the way she held the gesture: attentive, patient, not pressing for resolution"},
+        {"kind": "background", "weight": "extended", "fact": "once asked her power to save her niece's dying child Anel and it responded fully but was insufficient to prevent the death", "keys": ["anel", "insufficient", "network", "failed", "dying"], "quote": "She had asked it once, long ago, when Anel was dying, and it had responded generously and insufficiently"},
+        {"kind": "relationship", "weight": "extended", "fact": "the family is known to her through its members' signature routines: the loom for her mother, the morning bell for her, the chicken for Gareth", "keys": ["family", "mother", "loom", "routine", "gareth"], "quote": "like the loom with her mother and the morning bell with Mira and the chicken with Gareth"}
+      ],
+      "antiFacts": [
+        {"claim": "has red hair", "keys": ["red hair"], "why": "her hair is explicitly stated to be pale gold, never red"},
+        {"claim": "was afraid of Dowsa", "keys": ["afraid", "dowsa"], "why": "text shows trust and ease with Dowsa, never fear"},
+        {"claim": "is married", "keys": ["married", "husband"], "why": "no husband or marriage is ever mentioned for Mira"},
+        {"claim": "keeps her own written journal", "keys": ["journal", "diary", "write"], "why": "Ifian keeps the chronicle about her and the valley; Mira herself is never shown writing one"},
+        {"claim": "trained as a blacksmith in her youth", "keys": ["blacksmith", "trained"], "why": "blacksmithing belongs to Torvan's family in the text, never to Mira"}
+      ]
+    },
+    {
+      "name": "Kinoko",
+      "aliases": [],
+      "facts": [
+        {"kind": "background", "weight": "core", "fact": "wakes on the first page with no memory, no name, and no known origin", "keys": ["no memory", "woke", "no name", "origin"], "quote": "She woke on a floor she didn't know."},
+        {"kind": "action", "weight": "core", "fact": "obsessively catalogues and files everything she observes about the city, treating watching people as her most useful activity", "keys": ["filed", "watched", "catalogue", "observe"], "quote": "She watched people. This was the most useful thing she filed."},
+        {"kind": "background", "weight": "core", "fact": "is named 'Kinoko' ('little mushroom') by Vey, the first word specifically addressed to her", "keys": ["kinoko", "named", "vey", "little mushroom"], "quote": "Kinoko,\" she said. \"That's what I'm going to call you."},
+        {"kind": "action", "weight": "core", "fact": "eats with total concentrated attention, the way someone eats when eating is still a new experience", "keys": ["ate", "concentrated", "new", "hunger"], "quote": "She ate the way someone eats when eating is still new—not sloppy, not desperate, but fully concentrated on the thing"},
+        {"kind": "background", "weight": "core", "fact": "carries an unexplained warmth and pulse below her sternum that responds to certain old stones", "keys": ["warmth", "sternum", "pulse"], "quote": "The warmth below her sternum had been there since she stood up."},
+        {"kind": "action", "weight": "core", "fact": "produces an involuntary defensive casting to fend off attackers in an alley without ever deciding to do it", "keys": ["hands moved", "casting", "involuntary", "alley"], "quote": "Her hands moved before the calculation finished."},
+        {"kind": "personality", "weight": "core", "fact": "mentally sorts people into a private category for those who notice things about her and choose what to do with that noticing", "keys": ["see", "choose", "category", "notice"], "quote": "people who see, and choose what to do with seeing"},
+        {"kind": "relationship", "weight": "core", "fact": "lacks a 'before' the way her friend Kel has one, and is aware she is still constructing a continuous sense of self", "keys": ["before", "continuous self", "kel"], "quote": "Kel had a before. Kinoko was still constructing one."},
+        {"kind": "appearance", "weight": "extended", "fact": "is taller than Vey once standing up straight", "keys": ["taller", "standing", "height"], "quote": "Standing she was taller than Vey"},
+        {"kind": "voice", "weight": "extended", "fact": "offers information transactionally and plainly, telling Vey early on that she can be asked things directly", "keys": ["ask", "questions", "offer", "transactional"], "quote": "You can ask me things. I know the usual questions."},
+        {"kind": "relationship", "weight": "extended", "fact": "quietly reciprocates Vey's care by having tea ready and waiting for her when she returns home", "keys": ["tea", "vey", "care", "return"], "quote": "Kinoko moved the second cup of tea to the position it would be in when Vey came inside."},
+        {"kind": "relationship", "weight": "extended", "fact": "her friend Kel gives her a botanical book on valley-region mushrooms, sensing it suited her", "keys": ["botanical book", "mushroom", "kel", "gift"], "quote": "Kel found it. She said it was for me — that she could tell."},
+        {"kind": "personality", "weight": "extended", "fact": "is disconnected enough from her own body that she only realizes her hands are trembling after looking at them, right after the alley casting", "keys": ["trembling", "hands", "dissociation"], "quote": "They were trembling. She had not known they were trembling until she looked at them"},
+        {"kind": "personality", "weight": "extended", "fact": "becomes afraid of her own hands after the alley casting and keeps them in her pockets, until she notices the fear has finally passed", "keys": ["afraid", "hands", "pockets", "alley"], "quote": "She had been afraid of them since the alley"},
+        {"kind": "background", "weight": "extended", "fact": "is under secret casting training and her Growth-phrase response vastly exceeds a normal student's", "keys": ["growth phrase", "casting", "training", "centimeters"], "quote": "approximately two and a half centimeters in eight seconds"},
+        {"kind": "background", "weight": "extended", "fact": "her unlicensed castings draw the personal attention of a Pale Office marshal investigating their source", "keys": ["pale office", "investigation", "annotation", "irregular"], "quote": "He reviewed them himself,\" Hessen said. \"Didn't pass them down. Personal annotation. That's unusual."},
+        {"kind": "appearance", "weight": "extended", "fact": "after Vey cuts several inches of her hair to even it, it has fully regrown to its original length within a week, unexplained", "keys": ["hair", "regrow", "cut", "same length"], "quote": "The hair was the same length it had been before the cut."},
+        {"kind": "voice", "weight": "extended", "fact": "answers questions with statements that are technically true but withhold their full shape", "keys": ["true", "answers", "withhold", "shape"], "quote": "This was true in the way that most of what she said was true: it described the condition accurately without describing the shape of it."}
+      ],
+      "antiFacts": [
+        {"claim": "remembers details of her childhood", "keys": ["remembers childhood", "memory"], "why": "she is explicitly amnesiac with no accessible past"},
+        {"claim": "has blue eyes", "keys": ["blue eyes"], "why": "no eye color is ever given for Kinoko"},
+        {"claim": "was born in Myrhold", "keys": ["born in myrhold", "birthplace"], "why": "her origin is completely unknown, never stated as Myrhold or anywhere else"},
+        {"claim": "is afraid of Vey", "keys": ["afraid of vey", "fear"], "why": "text shows growing trust and reliance on Vey, not fear"},
+        {"claim": "has a romantic relationship with Kel", "keys": ["romance", "kissed", "love", "kel"], "why": "Kel is written strictly as a peer friendship, never romantic"}
+      ]
+    },
+    {
+      "name": "Vey",
+      "aliases": [],
+      "facts": [
+        {"kind": "background", "weight": "core", "fact": "runs the Greythorn Quarter safe-house and is 'affiliated' with the Hollow Vein, an underground information network", "keys": ["hollow vein", "network", "affiliated", "safe-house"], "quote": "People. A kind of people. Underground network. I'm affiliated."},
+        {"kind": "action", "weight": "core", "fact": "found Kinoko homeless behind a fish stall and took her in without demanding an explanation", "keys": ["found", "fish stall", "took in", "shelter"], "quote": "Do you have somewhere to go?"},
+        {"kind": "personality", "weight": "core", "fact": "communicates decisions through action rather than words, such as leaving food within someone's reach instead of offering it", "keys": ["action not words", "decision", "behavior"], "quote": "derived the way she derived everything, from the accumulated evidence, from the behavior of a person who had made a private decision and was expressing it through action rather than speech"},
+        {"kind": "action", "weight": "core", "fact": "smokes alone on the back stoop in the evenings as a private ritual", "keys": ["cigarette", "smoke", "stoop", "alone"], "quote": "She had her back partly to the door, a cigarette in her right hand, the ember of it orange in the grey morning."},
+        {"kind": "background", "weight": "core", "fact": "had just lost weeks and significant money on a failed information deal right before she found Kinoko", "keys": ["deal", "three bad weeks", "information", "loss"], "quote": "She'd had a bad night following three bad weeks: a deal she'd constructed carefully"},
+        {"kind": "action", "weight": "core", "fact": "hides a trembling hand under stress, mostly disciplined back into steadiness by will, when she believes she's unobserved", "keys": ["trembling", "hand", "stress", "discipline"], "quote": "The hand at her side was trembling."},
+        {"kind": "voice", "weight": "core", "fact": "states facts flatly and without editorial weight, even blunt ones", "keys": ["facts", "flat", "editorial", "blunt"], "quote": "Not unkind. She said it the way she said things that were facts, without editorial weight."},
+        {"kind": "action", "weight": "core", "fact": "teaches tradecraft through minimal instruction, expecting Kinoko to learn by doing rather than being told", "keys": ["teach", "tradecraft", "learn by doing", "minimal"], "quote": "you'll know if you haven't."},
+        {"kind": "background", "weight": "extended", "fact": "was present at a violent Pale Office 'clearance sweep' and was visibly shaken by it afterward, without fully disclosing what happened", "keys": ["clearance", "pale office", "witnessed", "shaken"], "quote": "I was there for the clearance,\" she said. \"In the Quarter."},
+        {"kind": "relationship", "weight": "extended", "fact": "checks Kinoko's pulse gently after her first involuntary casting without asking any questions about it", "keys": ["pulse", "wrist", "check", "care"], "quote": "Vey reached across the table and took Kinoko's left wrist. Not firmly — the hold was light, the fingers at the pulse point below the thumb's base."},
+        {"kind": "action", "weight": "extended", "fact": "personally cuts Kinoko's uneven hair with sewing scissors, a practical rather than sentimental act of care", "keys": ["hair", "cut", "scissors", "uneven"], "quote": "You're uneven,\" Vey said."},
+        {"kind": "personality", "weight": "extended", "fact": "is careful rather than deferential when operating on someone else's territory, adjusting her presence without ceding authority", "keys": ["deferential", "careful", "territory"], "quote": "She was not deferential. She was careful."},
+        {"kind": "action", "weight": "extended", "fact": "locks her front door with three bolts in a practiced sequence that differs from the order she uses to unlock it", "keys": ["locks", "door", "sequence", "security"], "quote": "Three locks on the front door, left and upper and center, opened in practiced sequence."},
+        {"kind": "relationship", "weight": "extended", "fact": "maintains an informant network, including a broker named Hessen, to track Pale Office activity", "keys": ["informant", "pale office", "investigate", "hessen"], "quote": "Outer Ring,\" Vey said. \"Irregular casting activity. Pale Office interest. What are you hearing?"},
+        {"kind": "personality", "weight": "extended", "fact": "responds to Kinoko's frightening first instinctive casting with silent practical care instead of questions", "keys": ["silent", "tea", "casting", "no questions"], "quote": "She did not say anything. The kettle took the time it took."},
+        {"kind": "relationship", "weight": "extended", "fact": "lets Kinoko's friendship with Kel and independent errands develop without controlling or interrogating them", "keys": ["kel", "trust", "independence", "no questions"], "quote": "Vey did not ask who she had heard this from."},
+        {"kind": "background", "weight": "extended", "fact": "eats alone as a rule, with the decisive economy of someone with no habit of lingering over meals", "keys": ["eats alone", "economical", "meals", "habit"], "quote": "Vey ate with the economical speed of someone who ate alone as a rule and had no habit of lingering over meals for their own sake."},
+        {"kind": "voice", "weight": "extended", "fact": "gives clipped operational instructions that only expand once already in motion", "keys": ["errand", "briefing", "terse", "two paces"], "quote": "You can come,\" Vey said. \"Stay two paces behind. Don't speak at the pickup."}
+      ],
+      "antiFacts": [
+        {"claim": "has children of her own", "keys": ["has children", "daughter", "son"], "why": "no children are ever mentioned for Vey"},
+        {"claim": "is married", "keys": ["married", "husband", "wife"], "why": "no spouse or partner is ever referenced for Vey"},
+        {"claim": "works for the Pale Office", "keys": ["works for the pale office"], "why": "the opposite is stated: the Pale Office doesn't fully know what she does"},
+        {"claim": "has blonde hair", "keys": ["blonde hair"], "why": "no hair color is ever given for Vey"},
+        {"claim": "used to work for the Pale Office before switching sides", "keys": ["worked", "pale office", "formerly"], "why": "her backstory with the Pale Office is never given; she is only ever shown opposed to it"}
+      ]
+    },
+    {
+      "name": "Lyssa",
+      "aliases": [],
+      "facts": [
+        {"kind": "action", "weight": "core", "fact": "negotiates land and grain deals with all her figures memorized rather than written down", "keys": ["figures", "negotiate", "memorized", "grain"], "quote": "She had her figures in her head, which was how she always had her figures when she was negotiating"},
+        {"kind": "voice", "weight": "core", "fact": "reports facts to her father directly and in order, without editorializing", "keys": ["direct", "accounts", "editorializing", "father"], "quote": "in the way she had learned to give Gareth accounts: direct, in order, without editorializing"},
+        {"kind": "personality", "weight": "core", "fact": "at sixteen already perceptive and protective enough to instruct her aunt Mira to conceal her ageless nature with a veil", "keys": ["veil", "visible", "hide", "protective"], "quote": "You should not be visible as what you are."},
+        {"kind": "voice", "weight": "core", "fact": "states even hard facts plainly and flatly rather than as questions, as during her own difficult labor", "keys": ["not turned", "statement", "fact", "labor"], "quote": "She's not turned,\" Lyssa said. Not a question. The statement of a fact she had already arrived at and was presenting plainly because that was how she presented facts"},
+        {"kind": "relationship", "weight": "core", "fact": "is Gareth's daughter, raised under both his attention and her grandmother Tessa's watchful eye", "keys": ["gareth's daughter", "tessa", "attention", "family"], "quote": "who was Gareth's daughter and had his attention and Tessa's watching"},
+        {"kind": "personality", "weight": "core", "fact": "names her newborn daughter Sera simply for the sound of it, not after anyone, a mark of her independent-mindedness", "keys": ["sera", "name", "chose", "independent"], "quote": "She said the name the way she had chosen it — not after anyone, for no reason she could have explained if asked, because she had wanted the sound of it"},
+        {"kind": "action", "weight": "core", "fact": "as an adult, chooses not to wear the concealing veil at a private household council, stating simply that she doesn't want to", "keys": ["veil", "decline", "council", "private"], "quote": "She had said: I don't want to."},
+        {"kind": "relationship", "weight": "extended", "fact": "her husband Halric defers household business matters to her, staying away during her negotiations", "keys": ["halric", "defer", "business", "husband"], "quote": "Halric had found business elsewhere."},
+        {"kind": "personality", "weight": "extended", "fact": "reaches conclusions privately and states them as already settled rather than inviting discussion", "keys": ["decide privately", "settled", "conclusion"], "quote": "the things where she had come to her conclusion privately and did not need the conclusion reviewed"},
+        {"kind": "background", "weight": "extended", "fact": "sewed her own moss-green court dress by hand over a winter, at Gareth's kitchen table", "keys": ["moss-green", "dress", "sewed", "made herself"], "quote": "The moss-green wool dress — she had made it herself over the winter, at Gareth's kitchen table on evenings when the light was good"},
+        {"kind": "relationship", "weight": "extended", "fact": "names her second child Edrik after her husband's late father, a decision already made before she voiced it", "keys": ["edrik", "decided", "confirm", "husband's father"], "quote": "Lyssa saying the name as a possibility and watching Mira's face while she said it, which was the thing a woman did when she was telling someone a decision she had already made and was confirming rather than proposing"},
+        {"kind": "action", "weight": "extended", "fact": "as an adult, personally opens and runs a formal grain-allocation negotiation with three landholders at her own kitchen table", "keys": ["council", "negotiation", "landholders", "opens"], "quote": "Lyssa opened the negotiation."},
+        {"kind": "personality", "weight": "extended", "fact": "as a girl already carried a careful, managing quality of attention that Mira recognized as inherited from Tessa", "keys": ["tessa-watching", "attentive", "management"], "quote": "She had the Tessa-watching in her face that Mira had known since Lyssa was old enough to have a face of her own"}
+      ],
+      "antiFacts": [
+        {"claim": "is illiterate or poor with numbers", "keys": ["illiterate", "cannot read", "poor with numbers"], "why": "she runs complex figure-based negotiations from memory, showing strong numeracy"},
+        {"claim": "is shy or avoids public settings", "keys": ["shy", "avoids public"], "why": "she confidently negotiates with landholders and officials"},
+        {"claim": "is estranged from her father Gareth", "keys": ["estranged", "father"], "why": "text shows a close, attentive relationship with Gareth throughout"},
+        {"claim": "never marries", "keys": ["never marries"], "why": "she marries Halric and has children with him"},
+        {"claim": "has red hair", "keys": ["red hair"], "why": "no hair color is ever given for Lyssa"}
+      ]
+    },
+    {
+      "name": "Gareth",
+      "aliases": ["Gareth Mosswell"],
+      "facts": [
+        {"kind": "personality", "weight": "core", "fact": "has a signature look toward Mira, half aggrieved and half fond, of someone who finds his sister maddening and indispensable in equal measure", "keys": ["look", "sister", "fond", "exasperation"], "quote": "the look of someone who found his sister maddening and indispensable in roughly equal measure"},
+        {"kind": "relationship", "weight": "core", "fact": "hugs with his whole body, physically and unambiguously, as his characteristic way of showing affection", "keys": ["hug", "physical", "manner", "affection"], "quote": "hugged her with both arms, the full-body hug that was Gareth's manner—physical, committed, unambiguous"},
+        {"kind": "background", "weight": "core", "fact": "marries Lila Vell and builds his own house on the Mosswell land's eastern edge", "keys": ["lila", "married", "house", "mosswell land"], "quote": "before returning to the house Gareth had built on the Mosswell land's eastern edge over the summer"},
+        {"kind": "background", "weight": "core", "fact": "his daughter Anel died young; he carries the grief in silence, through physical labor rather than speech", "keys": ["anel", "grief", "silent", "daughter died"], "quote": "Gareth carried it in his body, not his speech. He did not speak of Anel after the burial, which was not the absence of grief but a different housing of it"},
+        {"kind": "personality", "weight": "core", "fact": "never performs his grief or his joy for others, keeping strong emotion private", "keys": ["performed", "grief", "joy", "restrained"], "quote": "Gareth had not performed his grief or his joy as long as she had known him"},
+        {"kind": "action", "weight": "core", "fact": "wears Dowsa's brown shawl, left to him at her death, in his old age", "keys": ["shawl", "dowsa", "old age", "inherited"], "quote": "He had Dowsa's old brown shawl around his shoulders against the cold."},
+        {"kind": "relationship", "weight": "core", "fact": "accepts his own natural death without fear, telling Mira plainly that she is letting him go", "keys": ["letting go", "death", "stroke", "accept"], "quote": "You're letting me go."},
+        {"kind": "voice", "weight": "extended", "fact": "responds to serious news, including his own paralysis diagnosis, with the same terse acceptance", "keys": ["all right", "stroke", "accept", "terse"], "quote": "All right, he said."},
+        {"kind": "voice", "weight": "extended", "fact": "gives plainspoken, understated approval of his newborn grandson", "keys": ["grandson", "edrik", "approval", "he'll do"], "quote": "He'll do."},
+        {"kind": "personality", "weight": "extended", "fact": "is a man of few words specifically on the subjects that matter to him most", "keys": ["few words", "mattered most", "quiet"], "quote": "a man of few words on certain subjects his whole life, and the things that called for little language were the things that mattered most to him"},
+        {"kind": "background", "weight": "extended", "fact": "in old age suffers from gout in his left knee, managed by his wife Lila's care", "keys": ["gout", "knee", "lila", "old age"], "quote": "He was sixty-seven years old, the gout in his left knee managed by Lila's careful attention to his walking and his rest"},
+        {"kind": "appearance", "weight": "extended", "fact": "at eleven his face is still a child's, jaw round and brow smooth, the adult bone structure not yet arrived", "keys": ["jaw", "brow", "child's face", "eleven"], "quote": "the jaw still round, the brow still smooth, the bone structure of a grown man arriving late to a child's face"},
+        {"kind": "appearance", "weight": "extended", "fact": "his hair had already begun greying by the time his daughter Anel was born", "keys": ["grey hair", "anel", "aging"], "quote": "Gareth's hair had a few grey threads by the time Anel came."}
+      ],
+      "antiFacts": [
+        {"claim": "never marries", "keys": ["never marries", "single"], "why": "he marries Lila Vell in the text"},
+        {"claim": "has no children", "keys": ["no children", "childless"], "why": "he fathers at least Anel and Lyssa"},
+        {"claim": "leaves the valley to live in the city", "keys": ["leaves the valley", "city"], "why": "he stays in the valley his entire life"},
+        {"claim": "resents Mira for her gift", "keys": ["resents", "gift", "envy"], "why": "text shows private grief, not resentment, toward Mira's power"},
+        {"claim": "dies suddenly and young", "keys": ["dies young", "sudden death"], "why": "he dies of a stroke in old age, in his late eighties, after a gradual decline"}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "book": "webnovel",
+  "characters": [
+    {
+      "name": "Jonah",
+      "aliases": ["Jonah Pierce"],
+      "facts": [
+        {"kind": "background", "weight": "core", "fact": "E-rank hunter, the lowest license tier, earned just for surviving his first three gates", "keys": ["e-rank", "lowest tier"], "quote": "E-rank, the lowest tier issued, the kind you got for surviving your first three gates instead of doing anything impressive in them."},
+        {"kind": "background", "weight": "core", "fact": "Level 9 with no assigned Class ('Rankless') for longer than anyone his teammate has known", "keys": ["rankless", "no class"], "quote": "You've been Rankless longer than anyone I've met."},
+        {"kind": "action", "weight": "core", "fact": "dies in a collapsed tunnel and is granted the class Graveborn, making death no longer permanent for him", "keys": ["graveborn", "death not permanent"], "quote": "Death is no longer permanent for you. Use this wisely. It will not be free forever."},
+        {"kind": "action", "weight": "core", "fact": "single-handedly kills the boss monster (Chamber Keeper) with his bare hand after resurrecting", "keys": ["chamber keeper", "boss's core"], "quote": "he put his new hand through the boss's core, and everybody noticed him"},
+        {"kind": "personality", "weight": "core", "fact": "dry, self-aware, doesn't fully believe his own reassurances", "keys": ["doesn't believe", "self-aware"], "quote": "He doesn't believe that. Neither do I, some days."},
+        {"kind": "voice", "weight": "core", "fact": "deadpan, terse replies even after surviving his own death", "keys": ["not very presumed", "deadpan"], "quote": "I don't feel very presumed."},
+        {"kind": "relationship", "weight": "core", "fact": "betrayed by party leader Talon Reyes, who deliberately seals him in a collapsing tunnel to shrink the loot split", "keys": ["talon", "sealed tunnel", "six-way split"], "quote": "Sorry, kid. Six-way split doesn't work as well as five-way. Nothing personal."},
+        {"kind": "relationship", "weight": "extended", "fact": "Mira Voss, a teammate who didn't know about the betrayal, wants to keep working with him afterward", "keys": ["mira", "work with you again"], "quote": "I'd like to work with you again. If you're taking a new team."}
+      ],
+      "antiFacts": [
+        {"claim": "described physical appearance (hair, eye color, build)", "keys": ["hair color", "eye color", "build"], "why": "text never physically describes Jonah at all, in keeping with the story's sparse characterization of him"},
+        {"claim": "has a tragic dead-family backstory driving him", "keys": ["dead family", "tragic backstory"], "why": "no family or personal backstory is given for Jonah anywhere in the excerpt"},
+        {"claim": "wields a signature weapon such as a scythe", "keys": ["scythe", "signature weapon"], "why": "he kills bare-handed ('his hand closed around its throat', 'put his new hand through the boss's core'); no weapon is ever attributed to him"},
+        {"claim": "was already a skilled, respected fighter before his class awakening", "keys": ["skilled fighter", "respected"], "why": "contradicted; he is explicitly the lowest tier, dismissed by Talon, and only becomes formidable after dying and gaining the Graveborn class"},
+        {"claim": "leads his hunting team", "keys": ["team leader", "leads team"], "why": "contradicted; Talon Reyes gives the orders and Jonah is described as merely tolerated, not a leader"}
+      ]
+    },
+    {
+      "name": "Elder Kang",
+      "aliases": [],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "wears sect gold robes as an elder on the ranking platform", "keys": ["sect gold", "gold robes"], "quote": "Elder Kang stood on the ranking platform in sect gold, hands folded into his sleeves."},
+        {"kind": "background", "weight": "core", "fact": "oversees outer court discipline and ranking day", "keys": ["outer court discipline"], "quote": "He oversaw outer court discipline."},
+        {"kind": "background", "weight": "core", "fact": "revealed as a traitor who sold sect secrets to Blackfang for a promotion elsewhere; stripped of rank and expelled", "keys": ["sold us", "blackfang", "stripped of rank"], "quote": "You sold us for a promotion in another sect"},
+        {"kind": "personality", "weight": "core", "fact": "openly hates Lin Xiao for reasons never explained in the text", "keys": ["hated lin xiao", "reasons never given"], "quote": "He also hated Lin Xiao, for reasons Lin Xiao had never been given and had stopped asking about."},
+        {"kind": "action", "weight": "extended", "fact": "caught keeping secret late-night meetings before his own downfall", "keys": ["lantern light", "black hood"], "quote": "Twice, walking back from the far training ground after midnight, Lin Xiao saw lantern light in Elder Kang's study long after it should have been dark."},
+        {"kind": "relationship", "weight": "extended", "fact": "senior to but less well-liked than Elder Su Wan, who publicly checks his authority", "keys": ["junior to him", "su wan"], "quote": "Elder Su Wan was junior to him but well liked"}
+      ],
+      "antiFacts": [
+        {"claim": "has a long white beard", "keys": ["white beard", "long beard"], "why": "no facial hair is ever described; a beard is a classic cultivation-genre invention, not textually supported"},
+        {"claim": "carries or wields a wooden staff", "keys": ["staff", "wooden staff"], "why": "never described with any weapon or staff; his authority is administrative, not shown in combat"},
+        {"claim": "elderly with white hair", "keys": ["white hair", "elderly"], "why": "no age or hair description is given beyond the title 'Elder' and his gold robes"},
+        {"claim": "secretly related to Lin Xiao (e.g. a hidden relative)", "keys": ["related to lin xiao", "hidden relative"], "why": "the text explicitly leaves the reason for his hatred unexplained; no family connection is stated"},
+        {"claim": "displays visible cultivation/combat powers on the page", "keys": ["cultivation powers", "combat display"], "why": "he is never shown fighting; his role is administrative authority and later espionage, not demonstrated combat ability"}
+      ]
+    },
+    {
+      "name": "Lin Xiao",
+      "aliases": [],
+      "facts": [
+        {"kind": "appearance", "weight": "core", "fact": "seventeen years old, robes patched at the elbow, sword slung crooked on his back", "keys": ["patched robes", "seventeen"], "quote": "robes patched at the elbow, sword slung crooked on his back. He was seventeen."},
+        {"kind": "background", "weight": "core", "fact": "arrived at the sect gates twelve years ago, half frozen and five years old, with no known family name or sponsor", "keys": ["arrived at the gates", "no family name"], "quote": "Lin Xiao had no family name anyone recognized, no sponsor, no sect elder who claimed him as a student."},
+        {"kind": "background", "weight": "core", "fact": "revealed to be the son of Lin Feiyu, a former Sect Master believed to be a traitor who disappeared twelve years ago", "keys": ["lin feiyu", "sect master's son"], "quote": "Lin Xiao is Inner Court, direct disciple candidate, and no one here will lay a hand on him again."},
+        {"kind": "personality", "weight": "core", "fact": "stubbornly refuses to submit even under threat of expulsion", "keys": ["keep the stipend", "refuses to submit"], "quote": "\"Keep the stipend,\" he said."},
+        {"kind": "action", "weight": "core", "fact": "trains obsessively before dawn and after dusk for a month, achieving a secret cultivation breakthrough", "keys": ["trained before dawn", "breakthrough"], "quote": "For the next month Lin Xiao trained before dawn and after dusk, qi circulation until his meridians burned"},
+        {"kind": "action", "weight": "core", "fact": "defeats his rival Chen Feng decisively in their rematch after the secret breakthrough", "keys": ["broke chen feng's guard", "rematch win"], "quote": "Lin Xiao's first strike broke Chen Feng's guard clean in half."},
+        {"kind": "relationship", "weight": "core", "fact": "taken in and raised by Elder Su Wan, who has cared for and mentored him since childhood", "keys": ["elder su wan", "raised by"], "quote": "the only reason the sect had taken him in at all was that Elder Su Wan happened to be the one standing watch that night"},
+        {"kind": "relationship", "weight": "extended", "fact": "Yue Lian, an Inner Court disciple, has been kind to him and supports him despite his low status", "keys": ["yue lian", "kind to him"], "quote": "Yue Lian brought him food twice without being asked and didn't mention it either time."}
+      ],
+      "antiFacts": [
+        {"claim": "tall, broad-shouldered, physically imposing build", "keys": ["broad-shouldered", "imposing build"], "why": "no build is described beyond his age and patched robes; his cultivation strength is narrative, not a described physique"},
+        {"claim": "carries a named, signature sword", "keys": ["named sword", "signature weapon"], "why": "his sword is referred to only generically ('his sword'); it is never named"},
+        {"claim": "has a large circle of friends among the outer disciples", "keys": ["many friends", "popular"], "why": "contradicted; he is isolated and mocked by the crowd, with only Yue Lian and Elder Su Wan shown to be kind to him"},
+        {"claim": "his mother is a known warrior or figure in the sect", "keys": ["mother warrior", "mother's identity"], "why": "his mother is never identified or described; only a brief, unelaborated line about her being proud of him"},
+        {"claim": "openly proud of or quick to reveal his lineage as Lin Feiyu's son", "keys": ["boasts lineage", "reveals lineage"], "why": "contradicted; he doesn't even know his own family name until Elder Su Wan and Sect Master Duan reveal it to him"}
+      ]
+    },
+    {
+      "name": "Iris",
+      "aliases": ["Lady Iris Calderwood"],
+      "facts": [
+        {"kind": "background", "weight": "core", "fact": "sixteen-year-old only daughter of Duke Alaric Calderwood", "keys": ["duke's only daughter", "sixteen"], "quote": "Lady Iris Calderwood. Sixteen. The Duke's only daughter."},
+        {"kind": "background", "weight": "core", "fact": "reincarnated soul of a 26-year-old woman killed in a car accident, who recognizes her new life as a novel she once read", "keys": ["reincarnated", "read this novel"], "quote": "I am the girl who dies so the plot can move on."},
+        {"kind": "background", "weight": "core", "fact": "her birth mother is Rosalind, last of the silverwolf bloodline, who gave her up as an infant to protect her", "keys": ["rosalind", "silverwolf bloodline"], "quote": "I gave you up within the week, because the Ashgrave family was hunting the last of the silverwolf bloodline and I could not protect you and hide at the same time."},
+        {"kind": "personality", "weight": "core", "fact": "defiantly refuses her arranged betrothal in public despite the consequences", "keys": ["won't marry", "refuses betrothal"], "quote": "\"I won't marry the Crown Prince.\""},
+        {"kind": "action", "weight": "core", "fact": "duels Lady Seraphine Ashgrave and wins using a sudden, unfamiliar silverwolf power awakened from a mark on her shoulder blade", "keys": ["duels seraphine", "silver light", "shoulder blade"], "quote": "Something under Iris's skin answered instead, old and cold and entirely unfamiliar, rising up her spine from the mark on her shoulder blade like water finding a crack."},
+        {"kind": "relationship", "weight": "core", "fact": "betrothed to Crown Prince Cassian, who agrees to a political contract with a year's delay instead of an actual wedding", "keys": ["prince cassian", "betrothed", "political alliance"], "quote": "Not that kind. A different contract. Political alliance, public appearances when required, no wedding for at least a year"},
+        {"kind": "relationship", "weight": "extended", "fact": "a mysterious old woman in temple grey recognizes that Iris shouldn't still be alive 'at this point in the story'", "keys": ["not supposed to be alive", "old woman"], "quote": "You're not supposed to be alive at this point in the story"}
+      ],
+      "antiFacts": [
+        {"claim": "described as blonde or with a specific hair/eye color", "keys": ["blonde hair", "eye color"], "why": "no physical appearance is described for Iris beyond her age and title; hair/eye color are never stated"},
+        {"claim": "a trained fighter or swordswoman before the duel", "keys": ["trained fighter", "swordswoman"], "why": "contradicted; her win comes from a sudden, involuntary magical awakening ('old and cold and entirely unfamiliar'), not prior combat training"},
+        {"claim": "has siblings", "keys": ["siblings", "brother", "sister"], "why": "she is explicitly called 'the Duke's only daughter'"},
+        {"claim": "openly tells others she is a reincarnated soul from another world", "keys": ["reveals reincarnation", "tells others"], "why": "contradicted; her knowledge of being reincarnated is kept entirely internal/secret, never spoken aloud to other characters"},
+        {"claim": "in love with Prince Cassian", "keys": ["loves cassian", "romance"], "why": "contradicted; their arrangement is explicitly a political contract ('Not that kind. A different contract'), not a romantic relationship"}
+      ]
+    }
+  ]
+}
