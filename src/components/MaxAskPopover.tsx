@@ -4,6 +4,7 @@ import { ThinkingLabel } from "./ThinkingLabel";
 import { assistantRunJSON, cancelWhere, type AssistantJSONRequest } from "../lib/assistant-client";
 import {
   MAX_ASK_TASK,
+  MAX_ASK_SYSTEM,
   runMaxAsk,
   type AskKind,
   type MaxAskInput,
@@ -119,6 +120,21 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
 
   useEffect(() => {
     aliveRef.current = true;
+    // ★★ PREWARM ON INTENT. Measured (probe-ttft): a cold ask pays ~1-2.3s
+    //    of engine boot plus ~3.3s prefilling the fixed system prompt at
+    //    ~145 tok/s — but the batch engine reuses a cached PREFIX, so the
+    //    same call lands in ~160ms once the system prompt is warm. The
+    //    right-click menu is the intent signal: one 1-token request here
+    //    boots the engine and warms the exact prefix while the writer reads
+    //    the menu. Fire-and-forget; a real ask runs beside it on another
+    //    slot, and closing the popover cancels it with everything else.
+    void assistantRunJSON({
+      task: MAX_ASK_TASK, tier: "max", noThink: false, lane: "batch",
+      jsonStyle: "compact", contextSize: 8192,
+      systemPrompt: MAX_ASK_SYSTEM, userText: ".",
+      schema: { type: "object", properties: { w: { type: "string", maxLength: 4 } } },
+      maxTokens: 1, timeoutMs: 30_000,
+    }).catch(() => { /* a failed prewarm costs nothing */ });
     return () => {
       aliveRef.current = false;
       cancelWhere((job) => job.task === MAX_ASK_TASK);

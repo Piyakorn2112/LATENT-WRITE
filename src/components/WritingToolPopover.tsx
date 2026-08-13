@@ -11,6 +11,8 @@ import { useEffect, useRef, useState } from "react";
 import { OrbEngine } from "./orb/OrbEngine";
 import { ThinkingLabel } from "./ThinkingLabel";
 import type { WritingOp, WritingToolOutcome } from "../lib/writing-tool";
+import { CUSTOM_SYSTEM, WRITING_TASK } from "../lib/writing-tool";
+import { assistantRunJSON } from "../lib/assistant-client";
 
 export interface WritingToolPopoverProps {
   x: number;
@@ -57,6 +59,21 @@ const OP_LABEL: Record<WritingOp, string> = {
 };
 
 export function WritingToolPopover(props: WritingToolPopoverProps) {
+  // ★★ PREWARM ON INTENT (probe-ttft): a cold writing call pays engine boot
+  //    plus ~3.3s prefilling its fixed system prompt; the batch engine
+  //    reuses a cached prefix at ~160ms. The three op prompts share their
+  //    SHARED_RULES head, so one 1-token request on the longest of them
+  //    warms the family while the writer chooses an op. Fire-and-forget;
+  //    App cancels by task when the popover closes.
+  useEffect(() => {
+    void assistantRunJSON({
+      task: WRITING_TASK, tier: "max", lane: "batch", jsonStyle: "compact",
+      systemPrompt: CUSTOM_SYSTEM, userText: ".",
+      schema: { type: "object", properties: { w: { type: "string", maxLength: 4 } } },
+      maxTokens: 1, timeoutMs: 30_000,
+    }).catch(() => { /* a failed prewarm costs nothing */ });
+  }, []);
+
   const [phase, setPhase] = useState<Phase>("choose");
   const [instruction, setInstruction] = useState("");
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);

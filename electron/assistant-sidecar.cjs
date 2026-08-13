@@ -34,7 +34,7 @@ const http = require('http');
 const crypto = require('crypto');
 
 const BOOT_TIMEOUT_MS = 60_000;
-const HEALTH_POLL_MS = 250;
+const HEALTH_POLL_MS = 100; // 250 → 100: worth ~150ms of cold TTFT, free
 const RUN_TEXT_THROTTLE_MS = 120;
 
 // ── state ───────────────────────────────────────────────────────────────────

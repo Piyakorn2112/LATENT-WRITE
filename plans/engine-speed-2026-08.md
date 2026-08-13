@@ -145,3 +145,32 @@ bytes fails its sha256 before it is ever loaded. If a true custom fork is ever
 needed, it enters as a NEW ENGINE object (own tag/sha256/url pointing at
 our fork's release), and the same gate arbitrates — the convention does not
 care whose release it is.
+
+## Addendum: time-to-first-token (2026-08-13)
+
+TTFT decomposed per engine (probe-ttft.cjs): boot+load 1.0-2.5s (page
+cache warm), generation start fine — the whale is PREFIX PREFILL, ~3.3s
+for a ~500-token system prompt (~145 tok/s) on both engines, identical
+with and without a grammar (grammar exonerated by the no-grammar
+discriminator). Two engine facts decide the design:
+
+- llama-server reuses a cached PREFIX partially: a new user text on a
+  cached system prompt prefills in ~160ms. The in-process host does not
+  (full re-prefill per new user text, 3.7s) — one more reason the
+  interactive surfaces live on the batch engine.
+- warm-same TTFT is 40-104ms: the caches work; the cost is only ever the
+  FIRST touch of a prefix.
+
+**Shipped: prewarm on intent.** Opening the ask popover or the writing
+popover fires one 1-token request carrying the surface's fixed system
+prompt (the writing ops share their SHARED_RULES head, so one warms the
+family). The engine boots and the prefix warms while the writer reads the
+menu. Measured end to end with real ask bytes: prewarm 2.8s off the user
+path, then the real ask at TTFT 329ms — against 5.8s cold. Health poll
+250ms → 100ms shaves boot detection. Nothing loads before intent, so the
+memory round's budget holds; a canceled popover cancels its prewarm with
+everything else.
+
+Batch-geometry prefill tuning (-ub above 128) was left alone: the 128
+setting owns a measured UI-smoothness number, and the prewarm removes the
+same seconds without touching that trade.
