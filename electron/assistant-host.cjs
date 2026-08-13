@@ -119,6 +119,11 @@ async function ensureBinding() {
 async function handleLoad(msg) {
   const modelPath = String(msg.modelPath || '');
   const contextSize = Number(msg.contextSize) || 4096;
+  // ★ MEMORY KNOB (probe + registry): the logical batch size scales the
+  //   compute/logits buffers (vocab 151k x batch positions). Raising it was
+  //   measured and rejected above; LOWERING it is the memory experiment,
+  //   gated on byte-identical outputs. Default stays the binding default.
+  const batchSize = Number(process.env.ASSISTANT_BATCH_SIZE) || Number(msg.batchSize) || 0;
   const gpuLayers = msg.gpuLayers === undefined ? 'max' : msg.gpuLayers;
   const kvCacheTypeRequested = msg.kvCacheType || null;
   const flashAttentionRequested = msg.flashAttention === undefined ? null : msg.flashAttention;
@@ -181,14 +186,14 @@ async function handleLoad(msg) {
     if (kvKey) extra.experimentalKvCacheKeyType = kvKey;
     if (kvValue) extra.experimentalKvCacheValueType = kvValue;
     try {
-      context = await model.createContext({ contextSize, sequences: 1, ...extra });
+      context = await model.createContext({ contextSize, sequences: 1, ...(batchSize ? { batchSize } : {}), ...extra });
       kvApplied = kvCacheTypeRequested || null;
     } catch (err) {
       if (!kvCacheTypeRequested) throw err;
       // The experimental option refused — plain context, honestly reported.
       delete extra.experimentalKvCacheKeyType;
       delete extra.experimentalKvCacheValueType;
-      context = await model.createContext({ contextSize, sequences: 1, ...extra });
+      context = await model.createContext({ contextSize, sequences: 1, ...(batchSize ? { batchSize } : {}), ...extra });
     }
     sequence = context.getSequence();
     marks.contextMs = Date.now() - m2;

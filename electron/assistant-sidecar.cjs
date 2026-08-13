@@ -286,6 +286,7 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     //   Process-priority knobs were measured and REJECTED: --prio -1 moved
     //   nothing and taskpolicy -b starved GPU feeding (177ms stalls).
     '-ub', '128',
+    ...(Number(process.env.ASSISTANT_SIDECAR_BATCH) ? ['-b', String(Number(process.env.ASSISTANT_SIDECAR_BATCH))] : []),
     // ★★ THE HOST-RAM PROMPT CACHE DEFAULTS TO 8192 MiB, ON. b10298 keeps
     //   evicted slot KV states in host memory (PR #16391) and re-matches
     //   them by prefix — a real win for our byte-identical per-task system
@@ -293,7 +294,13 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     //   an 8GB tenant the memory guard knows nothing about. Cap it: 1GB
     //   holds ~7 slot states at this config, enough to keep every task
     //   type's prefix warm. --cache-idle-slots (default on) rides this.
-    '--cache-ram', '1024',
+    // ★ 512, HALVED FROM 1024 (memory round, 2026-08-13): the cap is a
+    //   session-growth ceiling, not a boot cost — it fills as slot prefixes
+    //   are evicted and re-cached. ~512MB still holds 3-4 full 2048-token
+    //   Q8 slot states, which covers the task types that actually
+    //   interleave; the trade is a re-prefill on a cold task switch, never
+    //   an output change. Env override kept for probes.
+    '--cache-ram', String(Number(process.env.ASSISTANT_SIDECAR_CACHE_RAM) || 512),
     '--host', '127.0.0.1',
     '--port', String(_port),
     '--no-webui',

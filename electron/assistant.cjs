@@ -67,6 +67,12 @@ const MODEL_REGISTRY = {
     //    range, MORE than the entire 1.06 GB weights file. Without it in the
     //    budget below, the guard thinks a long context is free.
     kvBytesPerToken: 103 * 1024,
+    /** ★ 120s, ADDED in the memory round: the small tier inherited the
+     *  5-minute default and held its 1.78GB (measured warm RSS) for three
+     *  minutes longer than the 4B holds its own. Background small-tier
+     *  work arrives in bursts; 120s covers a burst, then the memory goes
+     *  back. A warm reload is ~1.3s if work resumes. */
+    idleTtlMs: 120_000,
     /**
      * ★★ FLASH ATTENTION YES, KV QUANTIZATION NO, AND THE SPLIT IS MEASURED.
      *
