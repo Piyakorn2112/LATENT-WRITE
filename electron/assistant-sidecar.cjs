@@ -181,6 +181,21 @@ const TEMPLATES = {
     `<|im_start|>assistant\n<think>\n\n</think>\n\n`,
 };
 
+/**
+ * ★ THE OPEN-THINK TEMPLATES: the assistant turn opens <think> and leaves it
+ *   open, so the model reasons and the caller stops at </think> — the
+ *   sidecar's serving of runThinkPass. This is the whole-flow rule from the
+ *   ask/rewrite round: lane-batching a flow's constrained calls while its
+ *   think pass stays on the in-process host forces a host reload per
+ *   attempt and makes the flow SLOWER; a flow migrates whole or not at all.
+ */
+const THINK_TEMPLATES = {
+  qwen3: (systemPrompt, userText) =>
+    `<|im_start|>system\n${systemPrompt}<|im_end|>\n` +
+    `<|im_start|>user\n${userText}<|im_end|>\n` +
+    `<|im_start|>assistant\n<think>\n`,
+};
+
 function hasTemplate(name) {
   return typeof TEMPLATES[name] === 'function';
 }
@@ -331,9 +346,15 @@ async function run(opts, entry) {
   if (_inflight.size >= (_config ? _config.slots : 1)) {
     return { ok: false, error: 'busy', requestId, timings: emptyTimings() };
   }
-  const template = TEMPLATES[entry && entry.template];
+  // ★ A freeText run is a THINK pass: open-think template, no grammar, the
+  //   caller's stop texts (runThinkPass sends ['</think>']). Everything
+  //   else keeps the closed-think template and requires a schema.
+  const freeText = opts.freeText === true;
+  const template = freeText
+    ? THINK_TEMPLATES[entry && entry.template]
+    : TEMPLATES[entry && entry.template];
   if (!template) return { ok: false, error: 'no-template', requestId, timings: emptyTimings() };
-  if (!opts.schema || typeof opts.schema !== 'object') {
+  if (!freeText && (!opts.schema || typeof opts.schema !== 'object')) {
     return { ok: false, error: 'schema-required', requestId, timings: emptyTimings() };
   }
 
@@ -372,9 +393,15 @@ async function run(opts, entry) {
         //    this with stopGenerationTriggers ['\n\n\n\n']; the sidecar now
         //    mirrors it. A compact no-newline JSON body can never contain
         //    the sequence, so the stop is unreachable inside a real answer.
-        ...(typeof opts.gbnf === 'string' && opts.gbnf !== ''
-          ? { grammar: opts.gbnf, stop: ['\n\n\n\n'] }
-          : { json_schema: opts.schema }),
+        ...(freeText
+          ? {
+              stop: Array.isArray(opts.stopTexts) && opts.stopTexts.length
+                ? opts.stopTexts.filter((s) => typeof s === 'string' && s !== '').slice(0, 4)
+                : ['</think>'],
+            }
+          : typeof opts.gbnf === 'string' && opts.gbnf !== ''
+            ? { grammar: opts.gbnf, stop: ['\n\n\n\n'] }
+            : { json_schema: opts.schema }),
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
         ...(Number.isFinite(opts.minP) && opts.minP > 0 ? { min_p: opts.minP } : {}),
         n_predict: Number.isFinite(opts.maxTokens) ? opts.maxTokens : 128,
@@ -426,6 +453,12 @@ async function run(opts, entry) {
     }
     }
 
+    if (freeText) {
+      // The host's freeText contract: the raw text rides json.text, and the
+      // caller (runThinkPass) strips the think markers itself. The template
+      // already OPENED <think>, so the text is the reasoning body.
+      return finish({ ok: true, json: { text }, raw: text, stopReason, requestId, task, timings: timings() });
+    }
     let json;
     try {
       json = JSON.parse(text);

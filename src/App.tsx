@@ -123,6 +123,7 @@ import {
   assistantModelId,
   assistantRunJSON,
   cancelWhere as cancelAssistantWhere,
+  type AssistantJSONRequest,
 } from "./lib/assistant-client";
 import { toParagraphs, type ChapterAnalysisResult } from "./lib/chapter-analysis-runner";
 import { runChapterAnalysisInWorker } from "./lib/analysis-worker-client";
@@ -556,7 +557,17 @@ export default function App() {
       writingJobRef.current = job;
     }
     setWritingRun({ chapterId: job.chapterId, start: job.start, end: job.start + job.spanLen });
-    const run: typeof assistantRunJSON = (req) => assistantRunJSON({ ...req, tier: "max" });
+    // ★ THE WHOLE FLOW RIDES THE BATCH ENGINE — think passes included (the
+    //   open-think template serves freeText there now). Migrating only the
+    //   constrained calls was measured SLOWER (engine ping-pong: a host
+    //   reload per custom attempt); whole-flow lane runs at parity with
+    //   honest think-token accounting and stops blocking the single-flight
+    //   host. A busy engine queues nowhere, so 'busy' retries on the host.
+    const run: typeof assistantRunJSON = async <T,>(req: AssistantJSONRequest) => {
+      const first = await assistantRunJSON<T>({ ...req, tier: "max", lane: "batch" });
+      if (!first.ok && first.reason === "busy") return assistantRunJSON<T>({ ...req, tier: "max" });
+      return first;
+    };
     const before = chapter.content.slice(Math.max(0, job.start - 4000), job.start);
     // Cast present in the selection OR named by the instruction ("add more
     // detail about Mira" must carry Mira's sheet even when the selected

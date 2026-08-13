@@ -69,6 +69,20 @@ export interface IntentReading {
   target?: TargetSpec;
   /** Set only when intent === "scrub". */
   scrub?: { kind: ScrubKind };
+  /**
+   * ★ INSTRUCTION CONTRACTS — the parts of a multi-part instruction a
+   *   script CAN check, parsed here so the gate can enforce them and the
+   *   think-retry receives a concrete diagnosis instead of a shrug.
+   *   Measured need: "make the narration tense, leave the dialogue exactly,
+   *   end on the unlit lamp" shipped with the lamp mid-paragraph through
+   *   every think mode, because no gate could see the demand.
+   */
+  /** "keep/leave the dialogue exactly/as it is/unchanged" — every quoted
+   *  span of the original must survive verbatim. */
+  protectDialogue?: boolean;
+  /** "end (the paragraph) on <phrase>" — the final sentence must carry the
+   *  phrase's content words. */
+  endOn?: string;
 }
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -169,7 +183,7 @@ const LONGER = /\b(longer|expand|extend|lengthen|flesh out|elaborate|deepen|deve
  * length ask survives as `wantsShorter`), and INSERT is checked before
  * EXPAND because "add a scene" contains "add".
  */
-export function classifyInstruction(instruction: string): IntentReading {
+function classifyCore(instruction: string): IntentReading {
   const s = instruction.trim();
   if (!s) return { intent: "unknown" };
 
@@ -225,4 +239,28 @@ export function namesInInstruction(instruction: string, names: readonly string[]
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     return new RegExp(`(^|[^\\p{L}])${esc}([^\\p{L}]|$)`, "u").test(instruction);
   });
+}
+
+/** The checkable contracts, parsed independently of intent: any custom
+ *  instruction may carry them alongside its main demand. */
+function readContracts(s: string): Pick<IntentReading, "protectDialogue" | "endOn"> {
+  const out: Pick<IntentReading, "protectDialogue" | "endOn"> = {};
+  if (
+    /\b(?:keep|leave|preserve|do not (?:touch|change|alter)|don't (?:touch|change|alter))\b[^.]{0,50}\b(?:dialogue|quotes?|spoken lines?|lines? of dialogue)\b/i.test(s)
+    || /\b(?:dialogue|quotes?)\b[^.]{0,40}\b(?:exactly as (?:it is|they are|written)|as (?:it is|they are)|unchanged|verbatim|untouched|exactly)\b/i.test(s)
+  ) {
+    out.protectDialogue = true;
+  }
+  const end = /\bend(?:ing|s)?\b[^.]{0,30}?\bon\s+(?:the\s+)?(?:image\s+of\s+)?(?:the\s+)?([a-z][a-z' -]{2,40}?)(?=[.,;!?]|$)/i.exec(s);
+  if (end) {
+    const phrase = end[1].trim();
+    if (phrase.length >= 3) out.endOn = phrase;
+  }
+  return out;
+}
+
+export function classifyInstruction(instruction: string): IntentReading {
+  const s = instruction.trim();
+  if (!s) return { intent: "unknown" };
+  return { ...classifyCore(s), ...readContracts(s) };
 }

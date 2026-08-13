@@ -42,6 +42,11 @@ const OUT = process.env.OUT || path.join(ROOT, 'bench-results', `askrw-${LABEL}.
 const ASK_CTX = 8192;   // MaxAskPopover's window
 const RW_CTX = 8192;    // the writing runner leaves the tier default
 const REASON = VARIANT === 'reason' || VARIANT === 'sidecar';
+/** Custom-rewrite think A/B: policy | off | free | guided | reason. */
+const RW_THINK = process.env.RW_THINK || 'policy';
+const RW_BUDGET = Number(process.env.RW_BUDGET) || 0;
+const RW_LANE = process.env.RW_LANE === 'batch' ? { lane: 'batch' } : {};
+let THINK_GUIDES = null;
 const ASK_EXTRA = VARIANT === 'sidecar' ? { lane: 'batch', jsonStyle: 'compact' } : {};
 
 let win = null;
@@ -51,6 +56,8 @@ const callBridge = (method, arg) => {
     `window.electronAPI.${method}(${payload === 'null' ? '' : payload})`, true,
   );
 };
+const tsxEval = (code, arg) => JSON.parse(execFileSync(NODE, [TSX, '-e', code, JSON.stringify(arg)],
+  { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim().split('\n').pop());
 const helper = (step, arg) => JSON.parse(execFileSync(NODE, [
   TSX, path.join('scripts', 'bench-askrw-helper.ts'), step, JSON.stringify(arg),
 ], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim().split('\n').pop());
@@ -76,9 +83,9 @@ async function call(requestId, req, extra) {
 }
 
 /** runThinkPass, mirrored: freeText to </think>, notes cleaned + tail-capped. */
-async function thinkPass(requestId, req, budget, task, ctx) {
+async function thinkPass(requestId, req, budget, task, ctx, extra = {}) {
   const r = await call(requestId, { ...req, maxTokens: budget }, {
-    task, noThink: false, freeText: true, stopTexts: ['</think>'], contextSize: ctx,
+    task, noThink: false, freeText: true, stopTexts: ['</think>'], contextSize: ctx, ...extra,
   });
   if (!r.res || !r.res.ok) return { notes: null, ...r };
   const raw = typeof (r.res.json && r.res.json.text) === 'string' ? r.res.json.text : '';
@@ -223,13 +230,25 @@ async function runRewriteCase(c) {
   for (;;) {
     prep = helper('rw-prep', {
       op: c.op, instruction: c.instruction, text: c.text, before: c.before,
-      retryNote, attempt,
+      retryNote, attempt, thinkMode: RW_THINK,
+      ...(RW_BUDGET ? { thinkBudget: RW_BUDGET } : {}),
+      ...(c.characters ? { characters: c.characters } : {}),
     });
     const sampled = c.op === 'custom' && attempt === prep.maxAttempts - 1;
     let notes = null;
     if (prep.decision.think) {
+      if (!THINK_GUIDES && (RW_THINK === 'guided' || RW_THINK === 'free')) {
+        THINK_GUIDES = tsxEval(
+          'import {GUIDED_WRITING_THINK, FREE_WRITING_THINK} from "./scripts/fixtures/think-guides";' +
+          'console.log(JSON.stringify({g: GUIDED_WRITING_THINK, f: FREE_WRITING_THINK}))', {});
+      }
+      const thinkReq = RW_THINK === 'guided'
+        ? { ...prep.request, systemPrompt: THINK_GUIDES.g }
+        : RW_THINK === 'free'
+          ? { ...prep.request, systemPrompt: THINK_GUIDES.f }
+          : prep.request;
       const t = track(`think-a${attempt}`, await thinkPass(
-        rid(`think-a${attempt}`), prep.request, prep.decision.budget, 'writing-tool', RW_CTX));
+        rid(`think-a${attempt}`), thinkReq, prep.decision.budget, 'writing-tool', RW_CTX, RW_LANE));
       notes = t.notes;
     }
     const req = notes
@@ -238,6 +257,7 @@ async function runRewriteCase(c) {
     const main = track(`main-a${attempt}`, await call(rid(`main-a${attempt}`), req, {
       task: 'writing-tool', contextSize: RW_CTX, jsonStyle: 'compact',
       ...(VARIANT === 'sidecar' ? { lane: 'batch' } : {}),
+      ...RW_LANE,
       ...(sampled ? { temperature: 0.7, minP: 0.05 } : {}),
     }));
     if (!main.res || !main.res.ok) { outcome = 'failed'; break; }
@@ -301,7 +321,9 @@ async function main() {
     }
   }
   if (MODE === 'both' || MODE === 'rewrite') {
+    const rwWanted = process.env.RW_CASES ? process.env.RW_CASES.split(',') : null;
     for (const c of fixtures.rw) {
+      if (rwWanted && !rwWanted.includes(c.id)) continue;
       const row = await runRewriteCase(c);
       rows.push(row);
       console.log(`── rw ${c.id}  ${row.wallMs}ms  ${row.decodeTokens}tok  ${row.outcome}  keys ${row.keysHit.length}/${row.keysTotal}${row.mustKeepMissing.length ? '  LOST:' + row.mustKeepMissing.join('|') : ''}${row.antiHit.length ? '  ANTI:' + row.antiHit.join(',') : ''}`);

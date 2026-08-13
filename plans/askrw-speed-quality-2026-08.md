@@ -130,3 +130,47 @@ wholly-unlocated gate catches the fully-invented shape, not the
 half-anchored one. Closing it likely needs per-claim subject checking —
 the next measured experiment. The golden's two unnecessary-caution cases
 (supported-but-paraphrased claims) also stand as recorded.
+
+## The custom-instruction round (2026-08-13, continued)
+
+The owner named long multi-part custom instructions as the frequent
+real-world shape and asked for thinking ON with the speed to afford it.
+Three hard cases joined the reference set (multi-part with protected
+dialogue and a required closing image; a long ordered walk with a protected
+last sentence; a compression with a five-item keep-list).
+
+**Thinking earns its keep on hard customs, measured:** think-off failed two
+of six outright (unrevisable at the gate) and went 1 → 7 anti-hits;
+in-schema reason nearly as bad (6 anti, one lost protected word). The
+shipped policy held best.
+
+**Both researched think guides were REFUTED here:** guided-checklist and
+free-with-guards each forced thinking onto simple customs (tripling their
+latency for zero gain), each introduced a protected-word loss the policy
+did not have, and neither fixed the multi-part miss. Guided at a 512
+budget improved the multi-part substance but at 19s and still with the
+residue. The guides stay in fixtures as bench history.
+
+**What actually fixed the multi-part case: harness sight, not model
+thought.** The instruction's checkable promises are now parsed as
+INSTRUCTION CONTRACTS (writing-intent.readContracts): "keep/leave the
+dialogue exactly" makes every quoted span of the original a verbatim
+requirement; "end on <phrase>" makes the final sentence carry the phrase.
+The gate enforces them (never relaxed — they are the writer's own words),
+so the EXISTING think-retry finally receives a concrete diagnosis. Result:
+the multi-part case's retry produced the best output of any arm — clipped
+narration, dialogue byte-identical, the lamp last. One semantic residue
+("comfortable and unbothered") remains gate-invisible by nature.
+
+**Engine:** the open-think template joined the sidecar (freeText served
+with the assistant turn's think block left open, stop at </think>), so
+think passes ride the batch engine — whole-flow migration per the
+ping-pong rule, at measured parity per call, with think tokens finally
+REPORTED (the host never counted them). The writing runner ships
+lane 'batch' with a busy fallback to the host.
+
+**Timing anomaly, recorded:** the long-passage case reproduced 6-11x
+decode slowdowns (127-245s at the same 656 tokens that earlier ran 22.3s)
+late in a benching session with no orphaned processes — the sustained-load
+degradation class again. Quality outputs identical; timing claims for long
+decodes should be taken from fresh sessions only.

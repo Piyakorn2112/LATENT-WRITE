@@ -104,19 +104,46 @@ switch (step) {
       before: (arg.before ?? "").slice(-CONTEXT_BEFORE_CHARS),
       revisedTail: "",
       instruction: arg.instruction,
-      characters: [],
+      characters: Array.isArray(arg.characters) ? arg.characters : [],
       reading,
       retryNote: arg.retryNote,
     });
+    // ── think-mode A/B (bench-only) ──
+    // policy: the shipped decideWritingThinking. off/free/guided force the
+    // pass for CUSTOM ops; reason patches the schema instead of a pass.
+    const mode = arg.thinkMode ?? "policy";
+    const policy = decideWritingThinking(reading.intent, arg.attempt ?? 0, op);
+    const budget = Number.isFinite(arg.thinkBudget) ? arg.thinkBudget : (policy.budget || 320);
+    const decision =
+      mode === "off" ? { think: false, budget: 0, reason: "forced-off" }
+      : mode === "free" || mode === "guided"
+        ? (op === "custom"
+          ? { think: true, budget, reason: `forced-${mode}` }
+          : policy)
+      : mode === "reason" ? { think: false, budget: 0, reason: "reason-in-schema" }
+      : policy;
+    let patched = request;
+    if (mode === "reason" && op === "custom") {
+      const schema = JSON.parse(JSON.stringify(request.schema)) as {
+        properties: Record<string, unknown>;
+      };
+      schema.properties = { reason: { type: "string", maxLength: 420 }, ...schema.properties };
+      patched = {
+        ...request,
+        systemPrompt: `${request.systemPrompt}\n\nBefore the text, fill "reason" FIRST: two or three sentences listing what\nthe instruction demands, what in the passage each demand touches, and what\nmust not change. Then write the text.`,
+        schema: schema as never,
+        maxTokens: request.maxTokens + 160,
+      };
+    }
     out({
       reading,
       profile,
       batchText: batches[0].text,
       request: {
-        systemPrompt: request.systemPrompt, userText: request.userText,
-        schema: request.schema, maxTokens: request.maxTokens,
+        systemPrompt: patched.systemPrompt, userText: patched.userText,
+        schema: patched.schema, maxTokens: patched.maxTokens,
       },
-      decision: decideWritingThinking(reading.intent, arg.attempt ?? 0, op),
+      decision,
       maxAttempts: op === "custom" ? 3 : 2,
     });
     break;

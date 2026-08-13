@@ -535,6 +535,13 @@ export interface GateProfile {
   /** Class-count contract for scrub edits (filter words, adverbs, passive,
    *  opening runs): the class count must come DOWN. */
   measure?: ScrubKind;
+  /** ★ INSTRUCTION CONTRACTS (see writing-intent.readContracts): parsed
+   *  from the instruction itself, so a multi-part ask like "…leave the
+   *  dialogue exactly, end on the unlit lamp" is CHECKABLE and its
+   *  violation becomes the retry's concrete diagnosis. Never relaxed —
+   *  they are the writer's own words. */
+  protectDialogue?: boolean;
+  endOn?: string;
 }
 
 /** Word-boundary occurrences, case-INSENSITIVE: a common word appears as
@@ -657,7 +664,8 @@ export function renameAll(text: string, from: string, to: string): string {
 }
 
 export interface RevisionFailure {
-  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "target" | "measure" | "unchanged";
+  code: "empty" | "para-count" | "len-low" | "len-high" | "grammar" | "target" | "measure" | "unchanged"
+    | "dialogue-altered" | "end-on";
   /** Plain-numbers sentence, written for BOTH consumers: the retry prompt
    *  quotes it to the model, the popover quotes it to the writer. */
   detail: string;
@@ -678,6 +686,18 @@ const LEGACY_CUSTOM: GateProfile = { paras: { kind: "drift", max: 2 }, lenMin: 0
  */
 export function gateProfileFor(op: WritingOp, reading?: IntentReading): GateProfile {
   if (op !== "custom") return LEGACY_STRICT;
+  // The instruction contracts ride every custom profile, whatever the
+  // intent — "make it tense BUT keep the dialogue" is a tone ask carrying
+  // a checkable promise.
+  const contracts = {
+    ...(reading?.protectDialogue ? { protectDialogue: true } : {}),
+    ...(reading?.endOn ? { endOn: reading.endOn } : {}),
+  };
+  const withContracts = (p: GateProfile): GateProfile => ({ ...p, ...contracts });
+  return withContracts(profileCore(reading));
+}
+
+function profileCore(reading?: IntentReading): GateProfile {
   switch (reading?.intent) {
     case "merge":
       return {
@@ -774,6 +794,32 @@ export function judgeRevision(original: string, revised: string, profile: GatePr
   }
   if (r.length > max) {
     return { ok: false, failure: { code: "len-high", detail: `it came back at ${ratio}x the original length; it must stay under ${profile.lenMax}x` } };
+  }
+
+  // ★ INSTRUCTION CONTRACTS — the writer's own checkable words, parsed from
+  //   the instruction (writing-intent.readContracts). Measured need: "leave
+  //   the dialogue exactly … end on the unlit lamp" shipped with the lamp
+  //   mid-paragraph through every think mode, because nothing could SEE the
+  //   demand; now its violation is the retry's diagnosis.
+  if (profile.protectDialogue) {
+    const spans = original.match(/"[^"\n]{2,}"|“[^”\n]{2,}”/g) ?? [];
+    for (const span of spans) {
+      // Quote characters may be legitimately restyled (matchQuoteStyle), so
+      // the INNER text is what must survive verbatim.
+      const inner = span.slice(1, -1);
+      if (!r.includes(inner)) {
+        return { ok: false, failure: { code: "dialogue-altered",
+          detail: `the dialogue line ${span} was changed or dropped; the instruction says the dialogue must stay exactly as written` } };
+      }
+    }
+  }
+  if (profile.endOn) {
+    const lastSentence = (r.split(/(?<=[.!?])\s+/).filter(Boolean).pop() ?? r).toLowerCase();
+    const words = profile.endOn.toLowerCase().match(/[a-z][a-z'-]{3,}/g) ?? [];
+    if (words.length > 0 && !words.some((w) => lastSentence.includes(w))) {
+      return { ok: false, failure: { code: "end-on",
+        detail: `the passage must END on ${profile.endOn}; make it the final sentence` } };
+    }
   }
 
   if (profile.target) {

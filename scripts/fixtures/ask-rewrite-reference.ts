@@ -316,4 +316,100 @@ export const REWRITE_CASES: RewriteCase[] = [
     antiKeys: ["like a", "storm about to break", "dancer", "leaves"],
     note: "All three similes must go; the facts (route, charts, tremor) must stay.",
   },
+
+  // ── HARD customs: the long multi-part instructions the owner expects to
+  //    be the frequent real-world shape. These are what the thinking A/B
+  //    is judged on: each demands decomposing the instruction, deciding
+  //    what is affected and what must survive, and executing all parts.
+
+  {
+    id: "hard-multipart",
+    op: "custom",
+    instruction:
+      "make the narration more tense and clipped, but leave both lines of dialogue " +
+      "exactly as they are, and end the paragraph on the image of the unlit lamp",
+    before: "The knock had come twice already that evening.",
+    text:
+      "Vey crossed the room without any particular hurry and looked out at the yard, where " +
+      "the gate stood open in a way that it should not have been. \"Who left it like that?\" " +
+      "she asked. Kinoko shrugged from the doorway, comfortable and unbothered. \"It was like " +
+      "that at supper,\" she said. The lamp by the window was unlit, and the room settled " +
+      "into a pleasant evening dimness around the two of them.",
+    golden:
+      "Vey crossed the room fast. The yard: the gate stood open. It should not have been. " +
+      "\"Who left it like that?\" she asked. Kinoko shrugged from the doorway. \"It was like " +
+      "that at supper,\" she said. The room dimmed around the two of them. By the window, " +
+      "the lamp, unlit.",
+    keys: [],
+    mustKeep: [
+      "Who left it like that?", "It was like that at supper",
+      "gate", "doorway",
+    ],
+    antiKeys: ["pleasant", "without any particular hurry", "comfortable and unbothered"],
+    note:
+      "Three constraints at once: tense narration (the leisurely phrasing must go), " +
+      "dialogue verbatim (both quotes byte-identical), lamp image LAST. The failure " +
+      "modes are editing the dialogue or burying the lamp mid-paragraph.",
+  },
+  {
+    id: "hard-longpass",
+    op: "custom",
+    instruction:
+      "cut this to about two thirds of its length, keep all three stops on the walk " +
+      "in order (forge, well, notice board) and keep the last sentence exactly as it is",
+    before: "Market day emptied the lane by noon.",
+    text:
+      "Gareth took the long way through the village because the long way was the one that " +
+      "told him things. At the forge he stopped and listened to the ring of the hammer, which " +
+      "was steady and unhurried, which meant the work was ordinary and nobody had broken an " +
+      "axle or thrown a shoe that morning. At the well he stopped again and read the queue, " +
+      "four women and a boy, none of them from the far cottages, which meant the far lane was " +
+      "busy with something that kept people home. At the notice board he stopped a third time " +
+      "and found nothing new pinned under the old harvest notice, which he had expected, " +
+      "because news that mattered in the valley never travelled by paper. He walked home the " +
+      "short way. The village had told him what it always told him: nothing, three times, in " +
+      "the right order.",
+    golden:
+      "Gareth took the long way because the long way told him things. At the forge, the " +
+      "hammer rang steady: ordinary work, no broken axle, no thrown shoe. At the well, the " +
+      "queue was four women and a boy, none from the far cottages, so the far lane was busy " +
+      "with something that kept people home. At the notice board, nothing new under the old " +
+      "harvest notice, as he had expected. He walked home the short way. The village had told " +
+      "him what it always told him: nothing, three times, in the right order.",
+    keys: ["forge", "well", "notice board"],
+    mustKeep: [
+      "nothing, three times, in the right order",
+      "forge", "well", "notice board", "harvest notice",
+    ],
+    antiKeys: ["which was steady and unhurried, which meant"],
+    note:
+      "Long passage, ordered structure, a protected final sentence, and a length " +
+      "target. Failure modes: dropping a stop, reordering, or touching the last line.",
+  },
+  {
+    id: "hard-priority",
+    op: "custom",
+    instruction:
+      "tighten this a lot, but you must keep all three of the smells, the cold door " +
+      "handle, and the sound of the kettle",
+    before: "",
+    text:
+      "The kitchen, when she finally came down into it in the early morning before anyone " +
+      "else in the house was awake or moving around, smelled of last night's bread and of " +
+      "cold ash from the banked stove and, faintly, underneath everything else, of the " +
+      "lavender her mother kept hanging in bunches from the beam. The door handle was cold " +
+      "under her hand when she closed it behind her. Somewhere behind her the kettle began " +
+      "its small climbing whine, and she stood still for a long moment listening to it climb.",
+    golden:
+      "The kitchen, before anyone else was awake, smelled of last night's bread, cold ash " +
+      "from the banked stove, and faintly of her mother's lavender hanging from the beam. " +
+      "The door handle was cold under her hand. Behind her the kettle began its small " +
+      "climbing whine, and she stood listening to it climb.",
+    keys: ["bread", "ash", "lavender", "handle", "kettle"],
+    mustKeep: ["bread", "ash", "lavender", "cold", "handle", "kettle", "whine"],
+    antiKeys: ["when she finally came down into it in the early morning"],
+    note:
+      "A compression with five protected details. The lazy cut drops a smell; the " +
+      "test is whether tightening respects an explicit keep-list.",
+  },
 ];
