@@ -225,6 +225,9 @@ function loreWeakDisqualified(sentence: string): boolean {
   if (/\b(?:returned|arrived|came|come) from (?:his|her|their|my|your|our)\b/i.test(sentence)) return true;
   if (/\b(?:telegram|letter|message|word|news|reply|answer|note|card)\b[^.!?]{0,40}\b(?:came|come|arrived) from/i.test(sentence)) return true;
   if (/\bstudied (?:his|her|their|the lessons?)\b/i.test(sentence)) return true;
+  // "the direction Kinoko would come from" — a bearing in a scene, not an
+  // origin; the head noun in front of the motion gives it away.
+  if (/\b(?:direction|way|path|road|side)\b[^.!?]{0,30}\b(?:come|came|comes) from/i.test(sentence)) return true;
   return false;
 }
 
@@ -1226,9 +1229,11 @@ personality: at most 25 words. Name the TRAITS the passages show. You may use
   background: {
     definition: `spans: FIRST. The numbers of the passages that state what is KNOWN about
   this person — origins, family, history. [] if none do.
-background: at most 25 words, from ONLY those passages. A passage tagged
-  (said) is one character talking about another and may be unfair or wrong;
-  report it as "said to …", never as fact. "" if spans is [].`,
+background: at most 25 words, from ONLY those passages. Report only what
+  happened to THIS PERSON: a passage often mentions other people, and what
+  happened to those others is not an answer about this person. A passage
+  tagged (said) is one character talking about another and may be unfair or
+  wrong; report it as "said to …", never as fact. "" if spans is [].`,
     question: "What is known about {name}?",
   },
 };

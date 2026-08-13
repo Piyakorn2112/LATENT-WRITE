@@ -106,25 +106,23 @@ export function companySentence(ev: CharacterDossierEvidence): string | null {
   return `Most often on the page with ${names.join(" and ")}.`;
 }
 
-/** The action line the harvest already derives ("Across the book X is the
- *  one who mended, baked, wove") — grammatical past forms after `who`, so
- *  it is NOT the reverted "most often seen to filed" template. Two verbs
- *  minimum: one verb is a moment, not a pattern. */
-export function actionSentence(ev: CharacterDossierEvidence): string | null {
-  if (ev.counts.distinctiveVerbs.length < 2) return null;
-  return ev.byChannel.action[0]?.text ?? null;
-}
-
 /** The richer deterministic card: shipped composition plus counted lines,
  *  floored as a WHOLE — "Big eyes." plus a voice line is a real card even
- *  though neither part clears the floor alone. */
+ *  though neither part clears the floor alone.
+ *
+ *  ★ THE ACTION LINE WAS TRIED HERE AND REVERTED, a second time. "Across
+ *    the book Kinoko is the one who filed, agreed, closed" is grammatical
+ *    and says nothing — distinctive verbs are distinctive relative to the
+ *    CAST, not meaningful in themselves, which is the same lesson as the
+ *    owner's original verb-tally revert. The verbs stay counted facts in
+ *    the pack, where the model phrases conduct from them ("focused and
+ *    precise in action"); a template may not. */
 export function composeSkeleton(
   ev: CharacterDossierEvidence,
   otherCastNames: readonly string[] = [],
 ): string {
   const parts = [
     ...composeExtractiveParts(ev, otherCastNames),
-    actionSentence(ev),
     voiceSentence(ev),
     companySentence(ev),
   ].filter(Boolean);
@@ -167,6 +165,8 @@ export function buildFusionRequest(input: FusionInput): FusionRequest {
       `- Keep the manuscript's own wording for descriptive details. You may\n` +
       `  reorder and conjugate the facts' own words; do not add imagery,\n` +
       `  comparisons or atmosphere of your own.\n` +
+      `- Never join two facts into cause, purpose or sequence the lines do not\n` +
+      `  state. A fact that will not connect naturally stays its own sentence.\n` +
       `- Refer to ${input.name} as ${pronoun} after the first mention.\n` +
       `- No headings, no lists, no quotation marks.\n` +
       `Answer as JSON: {"text"}.`,
@@ -225,6 +225,24 @@ for (const family of VERB_FAMILIES) {
   for (const form of family) FAMILY_OF.set(form, family);
 }
 
+/**
+ * ★ LIGHT VERBS ARE GLUE, NOT CLAIMS. The deep run's residual rejects were
+ *   dominated by them — found ×4, appeared ×3, wore, made, remained,
+ *   showed — verbs that PREDICATE facts already in the lines ("wore a deep
+ *   blue cloak" where the cloak is the fact) without adding one. The
+ *   fabrication surface of a description is its nouns, adjectives and
+ *   particulars; a closed light-verb set is licensed as connective tissue.
+ *   Contentful verbs (weaving, slashed) stay checked.
+ */
+const GLUE_WORDS = new Set([
+  "found", "appear", "appears", "appeared", "appearing", "made", "makes",
+  "remained", "remains", "remain", "showed", "shows", "shown", "show",
+  "wore", "worn", "wears", "moved", "moves", "preferred", "prefers",
+  "kept", "keeps", "seemed", "seems", "turned", "turns", "grew", "grown",
+  "became", "becomes", "carried", "carries", "held", "holds", "tended",
+  "tends", "described",
+]);
+
 /** Every hay word's irregular family plus its regular inflections, appended
  *  once, so conjugating a fact's own verb is never scored as invention.
  *  ("snap" must license "snapped": the doubled consonant defeats a suffix
@@ -274,7 +292,8 @@ export function groundFusion(raw: unknown, input: FusionInput): FusionVerdict {
   const hay = [
     expandHay(foldPossessives([input.factLines.join(" "), input.forms.join(" ")].join(" "))),
   ];
-  const newWords = missingWords(foldPossessives(text), hay);
+  const newWords = missingWords(foldPossessives(text), hay)
+    .filter((w) => !GLUE_WORDS.has(w));
   if (newWords.length > 0) {
     return { ok: false, text, newWords, droppedLines: [], reason: "new-content-words" };
   }
