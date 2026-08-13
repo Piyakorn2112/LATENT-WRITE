@@ -94,7 +94,7 @@
  */
 import { fnv1a } from "./evidence-pack";
 import { tidyTruncatedText } from "./assistant-client";
-import { decideAskThinking, runThinkPass, notesBlock } from "./think";
+import { decideAskThinking } from "./think";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { WorldData } from "../types";
 
@@ -424,10 +424,17 @@ export function buildMaxAskPack(input: MaxAskInput, budgetOverride?: number): Ma
  *   answer citing a rung that was never included is detectable, and an answer
  *   that came from the model's own training has nowhere honest to point.
  */
-export function maxAskSchema(rungs: readonly string[], kind?: AskKind) {
+export function maxAskSchema(rungs: readonly string[], kind?: AskKind, reasonFirst = false) {
   return {
     type: "object",
     properties: {
+      // ★ REASON IN-SCHEMA, FIRST — the dossier-measured pattern under test
+      //   here: the grammar emits in declaration order, so the model weighs
+      //   the sections before it commits to an answer and a basis, where the
+      //   30s unconstrained think pass used to buy that (and the menu kinds
+      //   never thought at all — the round's missed contradiction happened
+      //   with no reasoning stage of any kind).
+      ...(reasonFirst ? { reason: { type: "string", maxLength: 420 } } : {}),
       answer: { type: "string", maxLength: ANSWER_MAX },
       basis: { enum: kind === "check" ? [...rungs, FITS, NOT_IN_CONTEXT] : [...rungs, NOT_IN_CONTEXT] },
       confidence: { type: "number" },
@@ -463,14 +470,56 @@ export interface MaxAskRequest {
   rungs: readonly string[];
 }
 
-export function buildMaxAskRequest(pack: MaxAskPack, maxTokens = DEFAULT_MAX_TOKENS, kind?: AskKind): MaxAskRequest {
+export function buildMaxAskRequest(
+  pack: MaxAskPack,
+  maxTokens = DEFAULT_MAX_TOKENS,
+  kind?: AskKind,
+  /** Experiment surface: reason-first in-schema (see maxAskSchema). Absent
+   *  = the shipped request, byte for byte. */
+  opts: { reasonFirst?: boolean } = {},
+): MaxAskRequest {
+  const reasonFirst = opts.reasonFirst === true;
+  const base = reasonFirst
+    ? MAX_ASK_SYSTEM
+        .replace(
+          `Answer as JSON: {"answer","basis","confidence"} in that order.`,
+          `Answer as JSON: {"reason","answer","basis","confidence"} in that order.`,
+        )
+        .replace(
+          `answer: FIRST. Two or three sentences. Say the useful thing straight away.`,
+          // ★ THE ABSTENTION RULE RIDES THE REASON FIELD. The first A/B's
+          //   reason pass twisted "widowed twice" into a claim about HOW a
+          //   husband died: weighing sections invites deriving, and deriving
+          //   past what is stated is the one move this surface must never
+          //   make. Named here, where the reasoning is asked for.
+          `reason: FIRST. Two or three sentences weighing the sections: what each
+  relevant one establishes, and how they bear on the question. Compare them;
+  do not answer yet. Reasoning is not a licence to derive what no section
+  states — if the sections do not contain the answer, say so here and
+  abstain in the answer.
+answer: two or three sentences. Say the useful thing straight away.`,
+        )
+    : MAX_ASK_SYSTEM;
+  // ★ A CONFLICT CLAIM MUST QUOTE ITS TWO SIDES. The same A/B fixed the
+  //   missed contradiction and immediately minted an invented one on the
+  //   clean control ("payment could wait" read as opposing "refuses
+  //   promises"). Requiring the reason to QUOTE the two opposing statements
+  //   is kind-generic discipline: real opposites quote cleanly, and a
+  //   stretched pairing collapses when written side by side.
+  // ★ TWO-SIDED REASON FOR A CHECK, fits argued FIRST. The one-sided reason
+  //   field reliably found the planted contradiction and just as reliably
+  //   invented one on the clean control — a model told to weigh evidence
+  //   goes looking for a verdict to weigh it toward. Arguing fits first
+  //   gives the clean paragraph its advocate before the hunt starts; the
+  //   quote requirement stays, scoped to the conflict side.
+  const checkTail = reasonFirst
+    ? `\n\nThis is a fits-or-conflicts question. If nothing in the passage conflicts\nwith what the other sections establish, say the paragraph fits and use basis\n"${FITS}". A conflict requires two sections to state OPPOSITE things — a\ndetail merely absent elsewhere is not a conflict, and neither is waiting,\ndelay, or something merely unusual. In your reason, argue FITS first: say\nwhy the paragraph is consistent with the sections. Then, only if two\nstatements truly oppose each other, quote them both and change your verdict\nto conflict. A conflict you cannot quote from both sides is not one.`
+    : `\n\nThis is a fits-or-conflicts question. If nothing in the passage conflicts\nwith what the other sections establish, say the paragraph fits and use basis\n"${FITS}". A conflict requires two sections to state OPPOSITE things — a\ndetail merely absent elsewhere is not a conflict.`;
   return {
-    systemPrompt: kind === "check"
-      ? `${MAX_ASK_SYSTEM}\n\nThis is a fits-or-conflicts question. If nothing in the passage conflicts\nwith what the other sections establish, say the paragraph fits and use basis\n"${FITS}". A conflict requires two sections to state OPPOSITE things — a\ndetail merely absent elsewhere is not a conflict.`
-      : MAX_ASK_SYSTEM,
+    systemPrompt: kind === "check" ? `${base}${checkTail}` : base,
     userText: pack.text,
-    schema: maxAskSchema(pack.rungsIncluded, kind),
-    maxTokens,
+    schema: maxAskSchema(pack.rungsIncluded, kind, reasonFirst),
+    maxTokens: reasonFirst ? maxTokens + 160 : maxTokens,
     rungs: pack.rungsIncluded,
   };
 }
@@ -521,7 +570,9 @@ export function isUsefulAnswer(a: MaxAskAnswer | null | undefined): boolean {
  *   conflicts" is a VERDICT, not an abstention), and shared by the loop and
  *   every probe so the control flow cannot drift.
  */
-const PROSE_ABSTAIN_RE = /\b(?:does not|do not|doesn't|don't|no section|none of the sections|never|not)\s+(?:mention|mentions|say|says|said|state|states|stated|specify|specifies|provide|provides|contain|contains|reveal|reveals|indicate|indicates)|no information\b/i;
+// One optional adverb between the negation and the verb: "is not explicitly
+// stated" shipped as a passage-based answer because the gap allowed none.
+const PROSE_ABSTAIN_RE = /\b(?:does not|do not|doesn't|don't|no section|none of the sections|never|not)\s+(?:[a-z]+ly\s+)?(?:mention|mentions|mentioned|say|says|said|state|states|stated|specify|specifies|specified|provide|provides|provided|contain|contains|contained|reveal|reveals|revealed|indicate|indicates|indicated)|no information\b/i;
 export function coerceProseAbstention(a: MaxAskAnswer, kind: AskKind): MaxAskAnswer {
   if (kind !== "question" || a.basis === NOT_IN_CONTEXT) return a;
   return PROSE_ABSTAIN_RE.test(a.answer) ? { ...a, basis: NOT_IN_CONTEXT } : a;
@@ -574,6 +625,10 @@ export interface ReviewAnswer {
   note?: string;
   facts: number;
   readings: number;
+  /** Fact claims whose quotes located nowhere. facts === failedFacts means
+   *  the answer's every factual claim is unlocated — the wholly-invented
+   *  shape, which a question answer must not survive as. */
+  failedFacts: number;
 }
 
 /**
@@ -676,7 +731,7 @@ const claimNames = (claim: string): string[] =>
  */
 export function computeReviewVerdict(claims: readonly ReviewClaim[], packText: string): ReviewAnswer {
   const haystack = normText(packText);
-  let facts = 0, readings = 0;
+  let facts = 0, readings = 0, failedFacts = 0;
   let note: string | undefined;
   for (const c of claims) {
     if (c.kind !== "fact") { readings += 1; continue; }
@@ -698,9 +753,12 @@ export function computeReviewVerdict(claims: readonly ReviewClaim[], packText: s
       const sentence = haystack.slice(s0, s1);
       ok = claimNames(c.claim).every((n) => sentence.includes(n.toLowerCase()));
     }
-    if (!ok && !note) note = c.claim;
+    if (!ok) {
+      failedFacts += 1;
+      if (!note) note = c.claim;
+    }
   }
-  return { verdict: note ? "overreaches" : "supported", note, facts, readings };
+  return { verdict: note ? "overreaches" : "supported", note, facts, readings, failedFacts };
 }
 
 // ── refine: revise on the verifier's feedback, once ────────────────────────
@@ -816,15 +874,24 @@ export async function runMaxAsk(
   let lastAnswerText = "";
   let steps = 0;
 
-  // ── adaptive reasoning ────────────────────────────────────────────────
-  // Decided ONCE from the question's shape; the notes are produced against
-  // the first pack and reused on widening (the reasoning is about the
-  // question, not the pack size). A failed think pass costs its budget and
-  // nothing else — the ask proceeds without notes.
-  const decision = opts.think === false
-    ? { think: false as const, budget: 0, reason: "disabled" }
-    : decideAskThinking(input.kind, input.question, questionEntities(input).length);
-  let notes: string | null = null;
+  // ── adaptive reasoning, IN-SCHEMA ─────────────────────────────────────
+  // ★★ THE 30-SECOND THINK PASS IS RETIRED (2026-08-13). Measured on the
+  //    reference bench (fixtures/ask-rewrite-reference.ts): a free-prose
+  //    reason field DECLARED FIRST in the answer schema bought the causal
+  //    question a better answer at 11-24s where the unconstrained pass
+  //    spent 44s, and gave the check kind the reasoning stage it never had
+  //    — the two-sided reason (argue fits first, then quote both sides of
+  //    any conflict) found the planted contradiction the shipped prompt
+  //    missed WITHOUT inventing one on the clean control (one-sided reason
+  //    did; three A/B rounds decided the wording). The field is scoped to
+  //    where weighing helps: check always; a question with the difficulty
+  //    features the old policy thought over (causal/multi-entity/long).
+  //    Explain, suggest and bare lookups gained nothing from it and keep
+  //    the plain schema. opts.think stays accepted for API compatibility;
+  //    there is no out-of-band pass left for it to disable.
+  const reasonFirst = input.kind === "check"
+    || (input.kind === "question"
+      && decideAskThinking(input.kind, input.question, questionEntities(input).length).think);
 
   for (let step = 1; step <= maxSteps; step += 1) {
     if (now() >= deadline) {
@@ -832,29 +899,16 @@ export async function runMaxAsk(
         tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
     }
 
-    const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS, input.kind);
+    const request = buildMaxAskRequest(pack, opts.maxTokens ?? DEFAULT_MAX_TOKENS, input.kind, { reasonFirst });
     steps = step;
     opts.onStep?.(step, step === 1 ? "first ask" : "context widened");
-
-    if (step === 1 && decision.think && now() < deadline) {
-      opts.onPhase?.("thinking");
-      notes = await runThinkPass(opts.run, {
-        task: MAX_ASK_TASK,
-        tag: `${input.chapterNumber}:${input.paragraphIndex}`,
-        systemPrompt: request.systemPrompt,
-        userText: request.userText,
-        schema: request.schema,
-        budget: decision.budget,
-        timeoutMs: Math.max(1000, Math.min(opts.timeoutMs ?? DEFAULT_TIMEOUT_MS, deadline - now())),
-      });
-    }
     opts.onPhase?.(step === 1 ? "asking" : "widening");
 
     const result = await opts.run<unknown>({
       task: MAX_ASK_TASK,
       tag: `${input.chapterNumber}:${input.paragraphIndex}`,
       systemPrompt: request.systemPrompt,
-      userText: notes ? `${request.userText}\n\n${notesBlock(notes)}` : request.userText,
+      userText: request.userText,
       schema: request.schema,
       maxTokens: request.maxTokens,
       // Never let one call outlive the whole budget.
@@ -868,6 +922,9 @@ export async function runMaxAsk(
 
     let answer = normalizeMaxAsk(result.json, pack.rungsIncluded);
     if (answer) answer = coerceProseAbstention(answer, input.kind);
+    // The step-1 abstention, held BEFORE this step's answer displaces it —
+    // the upgrade gate below must be able to return it.
+    const priorAbstention = step > 1 && best && best.basis === NOT_IN_CONTEXT ? best : null;
     if (answer) best = answer;
 
     if (answer && isUsefulAnswer(answer)) {
@@ -890,6 +947,28 @@ export async function runMaxAsk(
         const claims = normalizeClaimCheck(reviewed.json);
         return claims ? computeReviewVerdict(claims, pack.text) : null;
       };
+
+      // ★★ AN ANSWER THAT REPLACES AN ABSTENTION MUST SURVIVE THE CLAIM
+      //    CHECK. Measured on the reference bench: step 1 honestly abstained
+      //    ("not explicitly stated", coerced), the loop widened, and step 2
+      //    answered "Ede's second husband died in the flood" — an invention
+      //    stitched from real sections. The widen exists to FIND evidence;
+      //    a post-widen answer whose claims do not locate is the fabrication
+      //    class itself, and the honest abstention it displaced is the
+      //    better result. Runs regardless of selfReview: this is a gate,
+      //    not decoration.
+      if (priorAbstention && now() < deadline) {
+        const upgraded = await runClaimCheck(answer);
+        // Fail-open on a null verdict: a review that could not run is an
+        // infrastructure failure, not evidence against the answer — the
+        // gate reverts only on an EXPLICIT non-supported verdict.
+        if (upgraded && upgraded.verdict !== "supported") {
+          best = priorAbstention;
+          return { answer: priorAbstention, review: upgraded, steps, stopped: "answered",
+            packHash: pack.packHash,
+            tokensEstimate: pack.tokensEstimate, rungsIncluded: pack.rungsIncluded };
+        }
+      }
 
       let review: ReviewAnswer | null = null;
       let refined = false;
@@ -929,6 +1008,21 @@ export async function runMaxAsk(
               refined = true;
             }
           }
+        }
+        // ★★ A QUESTION ANSWER WHOSE EVERY FACT LOCATES NOWHERE ABSTAINS.
+        //    Measured: "Ede's second husband died in the flood" — one fact
+        //    claim, unlocated, refine could not repair it — shipped with a
+        //    caution, when the honest result is "not in what I was given".
+        //    Scoped hard: question-kind only (a check verdict is a reading),
+        //    only when EVERY fact claim failed (the lookup's one-of-three
+        //    false flag keeps its answer and its caution), and only after
+        //    the refine had its chance. Same coercion shape as
+        //    coerceProseAbstention: the text stays, the basis tells the
+        //    truth, and the popover renders the abstention state.
+        if (!refined && input.kind === "question"
+            && review && review.verdict === "overreaches"
+            && review.facts > 0 && review.failedFacts === review.facts) {
+          answer = { ...answer, basis: NOT_IN_CONTEXT };
         }
       }
       return { answer, review, refined, steps, stopped: "answered", packHash: pack.packHash,

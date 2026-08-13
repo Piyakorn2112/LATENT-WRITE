@@ -184,7 +184,10 @@ const scripted = (seq: Array<Record<string, unknown> | null>): { run: AssistantJ
     { answer: "Elena refused the short way in ch 8 and does it again here.", basis: "story-so-far", confidence: 0.85 },
   ]);
   const r = await runMaxAsk({ ...INPUT, budgetTokens: 60 }, { run: s.run, think: false });
-  gate(s.calls() === 2 && r.stopped === "answered",
+  // 3 calls since the upgrade gate: ask, widened ask, and the gate's claim
+  // check on the answer that displaces the abstention (fail-open here — the
+  // repeated fake is not claim-shaped, and a null verdict never vetoes).
+  gate(s.calls() === 3 && r.stopped === "answered",
     `★ widening is used exactly when it can help: ${s.calls()} calls, stopped=${r.stopped}`);
   gate(r.rungsIncluded.length > buildMaxAskPack(INPUT, 60).rungsIncluded.length,
     "…and the second pack really was bigger");
@@ -326,8 +329,37 @@ console.log("\nthe fits outlet, the prose abstention, and the refine loop");
     ]);
     const r = await runMaxAsk({ ...INPUT, kind: "question", question: "how much?", budgetTokens: 60 },
       { run: s.run, think: false });
-    gate(s.calls() === 2 && r.stopped === "answered",
+    gate(s.calls() === 3 && r.stopped === "answered",
       `★ a prose abstention now WIDENS instead of shipping (${s.calls()} calls, ${r.stopped})`);
+  }
+  {
+    // ★ THE UPGRADE GATE, positive arm: a post-widen answer whose every
+    //   fact claim locates NOWHERE does not displace the honest abstention
+    //   (measured on the reference bench: "died in the flood").
+    const s = scripted([
+      { answer: "not enough", basis: NOT_IN_CONTEXT, confidence: 0.3 },
+      { answer: "He died in the flood.", basis: "story-so-far", confidence: 0.9 },
+      { claims: [{ claim: "he died in the flood", kind: "fact", quote: "died in the flood" }] },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "how much?", budgetTokens: 60 },
+      { run: s.run, think: false });
+    gate(r.answer?.basis === NOT_IN_CONTEXT && s.calls() === 3,
+      `★ the upgrade gate: an unlocatable post-widen answer ships as the abstention (${s.calls()} calls, basis ${r.answer?.basis})`);
+  }
+  {
+    // ★ WHOLLY-UNLOCATED COERCION: a question answer whose every fact claim
+    //   failed the check, and whose refine could not repair it, abstains
+    //   instead of shipping a cautioned fabrication.
+    const s = scripted([
+      { answer: "He died at sea.", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "he died at sea", kind: "fact", quote: "died at sea" }] },
+      { answer: "He was lost at sea.", basis: "passage", confidence: 0.9 },
+      { claims: [{ claim: "lost at sea", kind: "fact", quote: "lost at sea" }] },
+    ]);
+    const r = await runMaxAsk({ ...INPUT, kind: "question", question: "what happened to him?" },
+      { run: s.run, think: false, selfReview: true });
+    gate(r.answer?.basis === NOT_IN_CONTEXT,
+      `★ a question answer whose every fact locates nowhere abstains once the refine has had its chance (basis ${r.answer?.basis})`);
   }
 
   // ── refine: revise on the tool flag, re-verify, ship only if clean ──
@@ -423,8 +455,9 @@ console.log("\nthe harness narrates its phases");
     ]);
     const { opts, seen } = phases({ run: s.run, think: false });
     await runMaxAsk({ ...INPUT, budgetTokens: 60 }, opts);
-    gate(seen.join(",") === "asking,widening",
-      `a widened ask narrates asking -> widening (got ${seen.join(",")})`);
+    // The upgrade gate narrates its claim check: reviewing joins the chain.
+    gate(seen.join(",") === "asking,widening,reviewing",
+      `a widened ask narrates asking -> widening -> reviewing (got ${seen.join(",")})`);
   }
   {
     const s = scripted([
@@ -490,15 +523,15 @@ await (async () => {
   const hard = decideAskThinking("question", "what did Tim do to Annaha in this chapter", 2);
   gate(hard.think && hard.budget >= 400, "a causal multi-entity question thinks with the big budget", `${hard.budget}`);
 
-  // The loop: a thinking question fires ONE freeText pass whose notes ride
-  // the main constrained call.
-  const seen: Array<{ freeText?: boolean; userText: string; stopTexts?: string[] }> = [];
-  const run: AssistantJSONRunner = async <T,>(req: { freeText?: boolean; userText: string; stopTexts?: string[] }) => {
-    seen.push({ freeText: req.freeText, userText: req.userText, stopTexts: req.stopTexts });
-    if (req.freeText) {
-      return { ok: true as const, json: { text: "<think>Tim shouted at Annaha at the winch, then left without a word; the question asks what he DID, so both actions count.</think>" } as T, modelId: "m", timings: null };
-    }
-    return { ok: true as const, json: { answer: "Tim shouted at Annaha over the winch and later left the dock without a word to her.", basis: "mentions", confidence: 0.9 } as T, modelId: "m", timings: null };
+  // ★ THE THINK PASS IS RETIRED: a hard question reasons IN-SCHEMA. One
+  // constrained call, no freeText pass, and the request carries the reason
+  // field declared FIRST (grammar emits in declaration order, so the model
+  // weighs before it answers — the reference bench measured 44s → 11-24s
+  // with a better answer on exactly this question shape).
+  const seen: Array<{ freeText?: boolean; userText: string; schema?: Record<string, unknown> }> = [];
+  const run: AssistantJSONRunner = async <T,>(req: { freeText?: boolean; userText: string; schema?: Record<string, unknown> }) => {
+    seen.push({ freeText: req.freeText, userText: req.userText, schema: req.schema });
+    return { ok: true as const, json: { reason: "The winch scene and the dock exit both involve Tim acting on Annaha.", answer: "Tim shouted at Annaha over the winch and later left the dock without a word to her.", basis: "mentions", confidence: 0.9 } as T, modelId: "m", timings: null };
   };
   const input: MaxAskInput = {
     ...INPUT, kind: "question",
@@ -511,11 +544,12 @@ await (async () => {
   };
   const phases: string[] = [];
   const r = await runMaxAsk(input, { run, onPhase: (p) => phases.push(p) });
-  gate(seen[0].freeText === true && (seen[0].stopTexts ?? []).includes("</think>"),
-    "★ the think pass is unconstrained and stops at </think>", JSON.stringify(seen[0].stopTexts));
-  gate(seen[1].freeText !== true && seen[1].userText.includes("YOUR NOTES"),
-    "★ the notes ride the constrained ask");
-  gate(phases[0] === "thinking" && phases[1] === "asking", "the popover narrates thinking first", phases.join(","));
+  gate(seen.length === 1 && seen[0].freeText !== true,
+    "★ one constrained call, no out-of-band pass", String(seen.length));
+  const props = Object.keys((seen[0].schema as { properties: Record<string, unknown> }).properties);
+  gate(props[0] === "reason" && props.includes("answer"),
+    `★ the hard question's schema declares reason FIRST (${props.join(",")})`);
+  gate(phases[0] === "asking", "the popover goes straight to asking", phases.join(","));
   gate(r.stopped === "answered" && r.answer?.basis === "mentions", "the answer cites the mentions rung");
 })();
 

@@ -34,10 +34,15 @@ const TSX = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const assistant = require(path.join(ROOT, 'electron', 'assistant.cjs'));
 
 const MODE = process.env.MODE || 'both';
-const LABEL = process.env.LABEL || 'baseline';
+/** baseline — the shipped flow. reason — reason-first in-schema replaces
+ *  the think pass. sidecar — reason + lane batch + compact grammar. */
+const VARIANT = process.env.VARIANT || 'baseline';
+const LABEL = process.env.LABEL || VARIANT;
 const OUT = process.env.OUT || path.join(ROOT, 'bench-results', `askrw-${LABEL}.json`);
 const ASK_CTX = 8192;   // MaxAskPopover's window
 const RW_CTX = 8192;    // the writing runner leaves the tier default
+const REASON = VARIANT === 'reason' || VARIANT === 'sidecar';
+const ASK_EXTRA = VARIANT === 'sidecar' ? { lane: 'batch', jsonStyle: 'compact' } : {};
 
 let win = null;
 const callBridge = (method, arg) => {
@@ -95,7 +100,7 @@ async function runAskCase(c) {
   const t0 = Date.now();
 
   let budget = c.budget;
-  let prep = helper('ask-prep', { input: c.input, budget });
+  let prep = helper('ask-prep', { input: c.input, budget, reasonFirst: REASON });
   let notes = null;
   let final = null;
   let review = null;
@@ -111,18 +116,36 @@ async function runAskCase(c) {
       ? { ...prep.req, userText: `${prep.req.userText}\n\n${NOTES_BLOCK(notes)}` }
       : prep.req;
     const first = track(`ask${step}`, await call(rid(`ask${step}`), askReq, {
-      task: 'max-ask', noThink: false, contextSize: ASK_CTX,
+      task: 'max-ask', noThink: false, contextSize: ASK_CTX, ...ASK_EXTRA,
     }));
     if (!first.res || !first.res.ok) { stopped = 'failed'; break; }
 
     const norm = helper('ask-norm', { json: first.res.json, rungs: prep.rungs, kind: c.input.kind });
+    const priorAbstention = step > 1 && final && final.basis === 'not-in-what-i-was-given' ? final : null;
     if (norm.answer) final = norm.answer;
 
     if (norm.useful) {
+      // ★ The shipped upgrade gate, mirrored: an answer displacing a step-1
+      //   abstention must survive the claim check or the abstention ships.
+      if (priorAbstention) {
+        const gb = helper('ask-review-build', { input: c.input, budget, answer: norm.answer });
+        const gr = track('upgrade-check', await call(rid('upgrade-check'), gb.req, {
+          task: 'max-ask', noThink: false, contextSize: ASK_CTX, ...ASK_EXTRA,
+        }));
+        const gv = gr.res && gr.res.ok
+          ? helper('ask-review-verdict', { json: gr.res.json, packText: gb.packText }).review
+          : null;
+        if (gv && gv.verdict !== 'supported') {
+          final = priorAbstention;
+          review = gv;
+          stopped = 'answered';
+          break;
+        }
+      }
       // review → flag → refine → re-check, the popover's selfReview path.
       const rb = helper('ask-review-build', { input: c.input, budget, answer: norm.answer });
       const rev = track('review', await call(rid('review'), rb.req, {
-        task: 'max-ask', noThink: false, contextSize: ASK_CTX,
+        task: 'max-ask', noThink: false, contextSize: ASK_CTX, ...ASK_EXTRA,
       }));
       if (rev.res && rev.res.ok) {
         review = helper('ask-review-verdict', { json: rev.res.json, packText: rb.packText }).review;
@@ -133,14 +156,14 @@ async function runAskCase(c) {
       if (flag) {
         const fb = helper('ask-refine-build', { input: c.input, budget, answer: norm.answer, flag, kind: c.input.kind });
         const ref = track('refine', await call(rid('refine'), fb.req, {
-          task: 'max-ask', noThink: false, contextSize: ASK_CTX,
+          task: 'max-ask', noThink: false, contextSize: ASK_CTX, ...ASK_EXTRA,
         }));
         if (ref.res && ref.res.ok) {
           const rn = helper('ask-norm', { json: ref.res.json, rungs: prep.rungs, kind: c.input.kind });
           if (rn.answer && rn.useful) {
             const rb2 = helper('ask-review-build', { input: c.input, budget, answer: rn.answer });
             const rev2 = track('recheck', await call(rid('recheck'), rb2.req, {
-              task: 'max-ask', noThink: false, contextSize: ASK_CTX,
+              task: 'max-ask', noThink: false, contextSize: ASK_CTX, ...ASK_EXTRA,
             }));
             if (rev2.res && rev2.res.ok) {
               const v2 = helper('ask-review-verdict', { json: rev2.res.json, packText: rb2.packText }).review;
@@ -149,12 +172,19 @@ async function runAskCase(c) {
           }
         }
       }
+      // Wholly-unlocated question answers abstain after a failed refine —
+      // the shipped coercion, mirrored.
+      if (!refined && c.input.kind === 'question' && review
+          && review.verdict === 'overreaches' && review.facts > 0
+          && review.failedFacts === review.facts) {
+        final = { ...final, basis: 'not-in-what-i-was-given' };
+      }
       stopped = 'answered';
       break;
     }
     if (step === 2 || prep.dropped.length === 0) { stopped = 'rungs-exhausted'; break; }
     budget = prep.widened;
-    const wider = helper('ask-prep', { input: c.input, budget });
+    const wider = helper('ask-prep', { input: c.input, budget, reasonFirst: REASON });
     if (wider.rungs.length === prep.rungs.length) { stopped = 'rungs-exhausted'; break; }
     prep = wider;
   }
@@ -207,6 +237,7 @@ async function runRewriteCase(c) {
       : prep.request;
     const main = track(`main-a${attempt}`, await call(rid(`main-a${attempt}`), req, {
       task: 'writing-tool', contextSize: RW_CTX, jsonStyle: 'compact',
+      ...(VARIANT === 'sidecar' ? { lane: 'batch' } : {}),
       ...(sampled ? { temperature: 0.7, minP: 0.05 } : {}),
     }));
     if (!main.res || !main.res.ok) { outcome = 'failed'; break; }
