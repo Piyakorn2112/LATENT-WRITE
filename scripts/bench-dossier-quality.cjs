@@ -39,6 +39,9 @@ if (MODE !== 'on' && MODE !== 'max') {
  *  deep     — max only: wider evidence, deeper caps, reason-first
  *             personality instead of the think pass, then fusion. */
 const VARIANT = process.env.VARIANT || 'baseline';
+/** rich → personality runs a 1024-token open-think pass IN THE WAVE when
+ *  the trait pool is rich (candidates >= 8); notes ride the ask. */
+const DOSSIER_THINK = process.env.DOSSIER_THINK || 'off';
 const LABEL = process.env.LABEL || VARIANT;
 
 const FAST_SET = [
@@ -157,7 +160,7 @@ async function runModel(req, requestId, tier, extra = {}) {
 }
 
 /** The think pass, exactly as think.ts runs it (freeText, </think> stop). */
-async function runThink(req, budget, requestId) {
+async function runThink(req, budget, requestId, extra = {}) {
   const t0 = Date.now();
   const res = await callBridge('assistantRun', {
     requestId,
@@ -166,6 +169,7 @@ async function runThink(req, budget, requestId) {
     schema: req.schema,
     freeText: true, stopTexts: ['</think>'], noThink: false,
     maxTokens: budget, timeoutMs: 180000, contextSize: 4096,
+    ...extra,
   });
   const ms = Date.now() - t0;
   if (!res || !res.ok) return { notes: null, ms };
@@ -259,12 +263,38 @@ async function main() {
       const proposal = {};
       const open = ['appearance', 'personality', 'background']
         .filter((field) => fieldSpecs[field] && fieldSpecs[field].ask);
+      const richThink = deep && DOSSIER_THINK === 'rich'
+        && fieldSpecs.personality && fieldSpecs.personality.think
+        && (c.deepPack.traitCandidates || []).length >= 8;
       const waveT0 = Date.now();
+      let personalityNotes = null;
       const firsts = deep
-        ? await Promise.all(open.map((field) => runModel(
-            fieldSpecs[field].ask, rid(c.spec, field, 'a'), 'max', { noThink: false, ...laneExtra })))
+        ? await Promise.all(open.map((field) => {
+            if (field === 'personality' && richThink) {
+              // Think replaces the wave slot; the ask follows with notes.
+              return (async () => {
+                const t = await runThink(fieldSpecs.personality.think, 1024,
+                  rid(c.spec, 'personality', 'think'), { lane: 'batch' });
+                timings['personality-think'] = t.ms;
+                personalityNotes = t.notes;
+                return { res: null, ms: t.ms, deferred: true };
+              })();
+            }
+            return runModel(fieldSpecs[field].ask, rid(c.spec, field, 'a'), 'max', { noThink: false, ...laneExtra });
+          }))
         : [];
       if (deep) timings.fieldWave = Date.now() - waveT0;
+      // The deferred personality ask, notes riding the user turn.
+      if (richThink) {
+        const idx = open.indexOf('personality');
+        const [withNotes] = tsxEval(
+          'import {buildFieldRequest} from "./src/lib/character-dossier";' +
+          'const a = JSON.parse(process.argv[process.argv.length-1]);' +
+          'console.log(JSON.stringify([{ask: buildFieldRequest(a.pack, "personality", "character", a.notes)}]))',
+          { pack: c.deepPack, notes: personalityNotes },
+        );
+        firsts[idx] = await runModel(withNotes.ask, rid(c.spec, 'personality', 'a'), 'max', { noThink: false, ...laneExtra });
+      }
 
       for (let i = 0; i < open.length; i++) {
         const field = open[i];

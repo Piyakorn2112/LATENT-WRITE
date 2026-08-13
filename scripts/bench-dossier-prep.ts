@@ -96,6 +96,11 @@ async function main() {
       const deepFields = Object.fromEntries(DOSSIER_FIELDS.map((field) => [field, {
         ask: buildFieldRequest(deepPack, field, "character"),
         retry: buildFieldRetryRequest(deepPack, field, "character"),
+        // The think-on-rich experiment: the runner fires this for
+        // personality when the trait pool is rich and DOSSIER_THINK=rich.
+        ...(field === "personality"
+          ? { think: buildFieldThinkRequest(deepPack, field, "character") }
+          : {}),
       }]));
 
       out.push({

@@ -307,3 +307,26 @@ composer's appearance channel already applies, at the answer side).
 MODE=on  VARIANT=fusion ./node_modules/.bin/electron scripts/bench-dossier-quality.cjs
 MODE=max VARIANT=deep   ./node_modules/.bin/electron scripts/bench-dossier-quality.cjs
 ```
+
+## Addendum: think-on-rich, re-measured on the open-think engine (2026-08-13)
+
+The owner asked whether detail-rich characters should get the think pass
+back now that the batch engine serves it. Measured on the six richest
+gold characters, 1024-token pass in the concurrent wave, notes riding the
+reason-first personality ask:
+
+```
+              s/card   personality verdicts vs reason-only
+reason-only   21-31s   —
++think 1024    56.4s   better on 2 (Darcy, Scrooge), WORSE on 2
+                       (Marilla mis-read "very generous" from one soft
+                       moment; Mira collapsed into the verb-list junk),
+                       tie on 2
+```
+
+A coin flip at 2.3x the card time — the same "two richer, two equal, one
+thinner" shape the pass measured when it was first retired, now
+reconfirmed on richer evidence with the faster engine. The reason field
+plus the widened pack already captured the gains thinking used to buy.
+Reason-only stays shipped; the bench keeps DOSSIER_THINK=rich as the
+experiment switch for any future model where the trade may differ.
