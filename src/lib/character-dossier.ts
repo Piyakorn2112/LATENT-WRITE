@@ -178,21 +178,55 @@ const RELATION_NOUN =
  *   — scene detail wearing a history's grammar. Every predicate here now
  *   names a life event or an origin; the tense alone earns nothing.
  */
-const LORE_PREDICATE =
-  "(?:was born|were born|grew up|was raised|had been born|used to|once was|was once|had once|" +
-  "came from|come from|hails? from|inherited|married|had married|served (?:in|as|under)|" +
-  "worked (?:as|for|at)|studied|trained|apprenticed|fought (?:in|at)|left (?:home|the village|the city)|" +
-  "arrived from|returned from|lost (?:his|her|their) (?:father|mother|wife|husband|son|daughter|family|home)|" +
+/** Predicates that name a life event outright. A sentence carrying one of
+ *  these is biography wherever the rest of it wanders. */
+const LORE_PREDICATE_STRONG =
+  // `had once been`, not bare `had once`: "the possibility … had once
+  //   occurred to Elizabeth" is a thought happening in a scene, and bare
+  //   `had once` admits every one of them.
+  "(?:was born|were born|grew up|was raised|had been born|used to|once was|was once|had once been|" +
+  "hails? from|inherited|married|had married|served (?:in|as|under)|" +
+  "worked (?:as|for|at)|trained|apprenticed|fought (?:in|at)|left (?:home|the village|the city)|" +
+  "lost (?:his|her|their) (?:father|mother|wife|husband|son|daughter|family|home)|" +
   "died|was killed|escaped|was sent|was taken|was known (?:as|for)|is known (?:as|for)|" +
   "they say|it is said|rumou?red|legend|had lived|has lived|spent (?:his|her|their) (?:life|childhood|youth)|" +
-  // ★ `had been` IS BIOGRAPHY WHEN IT TAKES A PLACE OR A ROLE, and scene
-  //   detail otherwise. Dropping it wholesale cost a genuinely good line —
-  //   "Tessa had been in the valley for sixty-three years and had woven
-  //   blankets and raised two children" — while keeping it wholesale let
-  //   "had been sitting on the bench for eleven minutes" through. The
-  //   complement decides: a locative or a role is a life, a progressive is
-  //   a moment.
-  "had been (?:in|at|on|with|among|of) (?!this|that|these|those)|had been (?:an?|the)\\b)";
+  "had been (?:an?|the)\\b)";
+/**
+ * ★ `had been` IS BIOGRAPHY WHEN IT TAKES A PLACE OR A ROLE, and scene
+ *   detail otherwise. Dropping it wholesale cost a genuinely good line —
+ *   "Tessa had been in the valley for sixty-three years and had woven
+ *   blankets and raised two children" — while keeping it wholesale let
+ *   "had been sitting on the bench for eleven minutes" through. The
+ *   complement decides: a locative or a role is a life, a progressive is
+ *   a moment.
+ *
+ * ★★ AND THE WEAK PREDICATES NEED THEIR COMPLEMENTS CHECKED, which the
+ *    quality bench measured four ways in one run. "Elizabeth had been at
+ *    Netherfield long enough" (a visit), "Holmes returned from his
+ *    excursion" and "Marilla returned from her cellar pilgrimage" (an
+ *    errand owns a possessive), "a telegram came from Van Helsing" (the
+ *    TELEGRAM is the subject), "Anne studied her lessons" (homework, not
+ *    formation) — every one grounded, every one a scene. The vetoes below
+ *    fire only when NO strong predicate shares the sentence, so Tessa's
+ *    "had been in the valley for sixty-three years and had woven…" keeps
+ *    riding its own duration and its strong companions.
+ */
+const LORE_PREDICATE_WEAK =
+  "(?:came from|come from|arrived from|returned from|studied|" +
+  "had been (?:in|at|on|with|among|of) (?!this|that|these|those))";
+const LORE_PREDICATE = `(?:${LORE_PREDICATE_STRONG}|${LORE_PREDICATE_WEAK})`;
+
+const LORE_STRONG_RE = new RegExp(LORE_PREDICATE_STRONG, "i");
+const LORE_DURATION_RE =
+  /\bfor\s+(?:[a-z-]+\s+)?(?:years?|winters?|summers?|decades?|months?|generations?)\b|\ball (?:his|her|their) life\b|\bsince (?:childhood|birth|[A-Z])/;
+/** Weak-predicate sentences a veto disqualifies; see the comment above. */
+function loreWeakDisqualified(sentence: string): boolean {
+  if (/had been (?:in|at|on|with|among|of)\s/i.test(sentence) && !LORE_DURATION_RE.test(sentence)) return true;
+  if (/\b(?:returned|arrived|came|come) from (?:his|her|their|my|your|our)\b/i.test(sentence)) return true;
+  if (/\b(?:telegram|letter|message|word|news|reply|answer|note|card)\b[^.!?]{0,40}\b(?:came|come|arrived) from/i.test(sentence)) return true;
+  if (/\bstudied (?:his|her|their|the lessons?)\b/i.test(sentence)) return true;
+  return false;
+}
 
 /**
  * ★★ THE VIEWPOINT CHARACTER IS DESCRIBED LEAST AND THOUGHT MOST.
@@ -612,8 +646,12 @@ function harvestSentence(
   //    the sentence owns. A biography needs the person as its subject.
   const loreActive = new RegExp(`${NAME}\\s+(?:[a-z]+\\s+){0,3}${LORE_PREDICATE}`, "i");
   const lorePassive = new RegExp(`${LORE_PREDICATE}\\s+(?:[a-z]+\\s+){0,3}${NAME}`, "i");
-  const activeHit = loreActive.test(sentence);
-  const passiveHit = !activeHit && lorePassive.test(sentence);
+  let activeHit = loreActive.test(sentence);
+  let passiveHit = !activeHit && lorePassive.test(sentence);
+  if ((activeHit || passiveHit) && !LORE_STRONG_RE.test(sentence) && loreWeakDisqualified(sentence)) {
+    activeHit = false;
+    passiveHit = false;
+  }
   if (activeHit || passiveHit) {
     // Provenance from where the PREDICATE sits, not from which regex shape
     // matched — the probe's version sent every passive hit to "spoken", which
@@ -2040,8 +2078,11 @@ export function composeExtractiveParts(
    *    is the tell). Each test is closed and positional; the spans stay in
    *    the pack for the model tiers, which can weigh what extraction may not.
    */
+  // The trailing test: "the least dear TO HER of all her children" defines
+  // Elizabeth only relative to her mother's affections — a definition that
+  // needs another person's viewpoint to parse is not the card's first line.
   const IDENTITY_STOP_HEAD =
-    /^(?:not\b|no\b)|^(?:an?|the)\s+(?:[a-z-]+\s+){0,2}?(?:victim|object|subject|occasion|cause|target|week|day|month|year|hour|morning|evening|night|moment|while)\b/i;
+    /^(?:not\b|no\b)|^(?:an?|the)\s+(?:[a-z-]+\s+){0,2}?(?:victim|object|subject|occasion|cause|target|week|day|month|year|hour|morning|evening|night|moment|while)\b|\bto (?:her|him|them)\b/i;
   const oppositePronounRe = ev.pronounClass === "masc" ? /\b(?:she|her|hers|herself)\b/i
     : ev.pronounClass === "fem" ? /\b(?:he|his|him|himself)\b/i
     : null;

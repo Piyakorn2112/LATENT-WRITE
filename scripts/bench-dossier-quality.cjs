@@ -48,7 +48,7 @@ const FAST_SET = [
   'dracula:Van Helsing',
   'sherlock:Holmes',
   'webnovel:Jonah', 'webnovel:Elder Kang',
-  'root-crown:Mira', 'root-crown:Tessa', 'root-crown:Gareth',
+  'root-crown:Mira', 'root-crown:Kinoko', 'root-crown:Vey', 'root-crown:Gareth',
 ];
 const CHARS = (process.env.CHARS ? process.env.CHARS.split(',') : FAST_SET).map((s) => s.trim());
 const OUT = process.env.OUT
