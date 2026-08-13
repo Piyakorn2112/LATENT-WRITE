@@ -1,3 +1,4 @@
+import { isSampleModeActive } from "./sample-mode";
 import type { ReviewFlag, ReviewResult } from "../types";
 import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
@@ -17,6 +18,7 @@ export async function loadReviewResultsFromProject(): Promise<Record<string, Rev
 }
 
 export function saveReviewResults(results: Record<string, ReviewResult>): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
     // a live session; route the data to local storage rather than losing it.

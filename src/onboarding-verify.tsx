@@ -1,17 +1,17 @@
 /**
- * Dev-only harness: the REAL <Onboarding/>, so the welcome tour can be read
+ * Dev-only harness: the REAL <Onboarding/>, so the welcome screen can be read
  * and photographed rather than reasoned about.
  *
  * ★ WHY NOT BOOT THE WHOLE APP. index.html under a bare Electron window never
  *   renders: the preload exposes the IPC surface but electron/main.cjs is not
  *   the process running, so nothing answers the project load and App sits at
  *   an empty root forever. Driving the packaged app instead would mean not
- *   owning the window. The tour is a self-contained overlay with two props and
- *   the same global styles.css, so mounting it directly tests the same pixels.
+ *   owning the window. The welcome is a self-contained overlay with stubbable
+ *   props and the same global styles.css, so mounting it directly tests the
+ *   same pixels.
  *
- * ?browser=1 forces the browser-build copy (no keyboard hints, export page
- * instead of the renderer), which is otherwise unreachable under Electron and
- * is half of what this component renders.
+ * ?browser=1 forces the browser-build copy (no keyboard hints in the door
+ * captions), which is otherwise unreachable under Electron.
  *
  * Driven by scripts/verify-onboarding.cjs. Not imported by the app.
  */
@@ -38,5 +38,11 @@ if (forceBrowser) {
 
 document.body.style.margin = "0";
 createRoot(document.getElementById("stage")!).render(
-  <Onboarding onClose={() => {}} />,
+  <Onboarding
+    onClose={() => {}}
+    onOpenSample={() => {}}
+    onStartOwn={() => {}}
+    hasOwnWords={false}
+    inSample={false}
+  />,
 );

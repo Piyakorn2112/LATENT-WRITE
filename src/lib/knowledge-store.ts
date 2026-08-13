@@ -1,3 +1,4 @@
+import { isSampleModeActive } from "./sample-mode";
 /**
  * knowledge-store.ts — persistence for the knowledge ledger ("who knows what,
  * and since when"), plus the writer's durable rulings on its findings.
@@ -134,6 +135,7 @@ export async function loadKnowledgeLedgerFromProject(): Promise<KnowledgeLedgerS
 }
 
 export function saveKnowledgeLedger(store: KnowledgeLedgerStore): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
     // a live session; route the data to local storage rather than losing it.

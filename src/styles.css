@@ -426,7 +426,6 @@ body {
     -webkit-backdrop-filter 0.22s ease;
 }
 
-
 /* Specular ring (::before) — masked 1px ring filled with the shared
    --border-glass-grad (white top/bottom, transparent sides, per scheme). */
 /* ★ A CUSTOM PROPERTY INHERITS, AND THESE ARE ALL DESCENDANTS OF GLASS.
@@ -504,7 +503,6 @@ body {
   inset: -1px
 }
 
-
 @media (prefers-color-scheme: dark) {
   .widget-card::after {
      opacity:1;
@@ -512,7 +510,6 @@ body {
      inset:0
   }
 }
-
 
 .liquid-glass:hover {
   box-shadow: var(--shadow-glass-hover);
@@ -760,7 +757,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   padding: 0 16px;
   pointer-events: none;
 }
-
 
 /* Keep all interactive controls inside the toolbar clickable even where
    they overlap the drag strip. */
@@ -1152,7 +1148,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   transition: none;
 }
 
-
 .split-pane:not(.split-pane--active) .document {
   opacity: 0.85;
   transition: opacity 0.2s ease;
@@ -1191,7 +1186,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 .split-divider--dragging {
   background: rgba(100, 140, 255, 0.4);
 }
-
 
 /* ─── Empty State ─── */
 .empty-state {
@@ -1574,7 +1568,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
 .analysis-panel--open {
   transform: translateX(-380px);
 }
-
 
 /* Inner container — zoom: 0.77 splits the difference between widget visual
    width (480 × 0.77 ≈ 370 px) and the settings panel inner (370 px), so
@@ -4380,7 +4373,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   color: var(--text-body);
 }
 
-
 /* ─── Entity / character-name tag ───
    Must not affect line-box height, width, or text-wrap in any way — even
    a sub-pixel difference causes the mirror-div lines to sit at different
@@ -4500,7 +4492,6 @@ body.scroll-edge-idle .app .liquid-glass-control-knob {
   height: 0.5em;
   display: block;
 }
-
 
 /* ─── Action sentence highlighter ─────────────────────────────────────────
    Subtle outline + faint fill for sentences with action verbs. Uses actor's
@@ -6589,7 +6580,6 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   transform: translate(-50%, -50%) scale(1);
 }
 
-
 /* Text-mask fade — covers the editor text outside the lens circle with the
    page colour, so the whole area reads as enclosed inside the bubble. The
    lens radius is 300px (100px base × scale 6 / 2); the clear core is pulled
@@ -7983,56 +7973,102 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   -webkit-app-region: no-drag;
 }
 
-/* ─── Sliding stage ─────────────────────────────────────────────────────── */
-.onb-stage {
-  flex: 1;
-  overflow: hidden;
-  position: relative;
-  /* Paint isolation around the slide region — the stage's pixels stay
-     inside its box, so the engine can cache the rasterised pages as
-     compositor layers without invalidating the card's backdrop-filter
-     during the track's transform. */
-  contain: layout paint;
+/* ─── The welcome screen ────────────────────────────────────────────────────
+   One screen, two doors. The card sizes to its content instead of reserving
+   a slide track worst case, so the whole composition sits as a single
+   settled object: orb, one model-setting paragraph, the two doors, and the
+   Pro row folded into a quiet footer. */
+.onb-card--welcome {
+  width: min(640px, 96vw);
+  height: auto;
+  max-height: min(700px, 92vh);
 }
-.onb-track {
-  display: flex;
-  height: 100%;
-  transition: transform 0.5s cubic-bezier(0.32, 0.72, 0.18, 1);
-  /* Explicit GPU hint — the track is the only thing that animates
-     during page navigation. Combined with translate3d in the inline
-     style, this guarantees the slide is a compositor-only transform
-     (no layout, no paint) on every frame. */
-  will-change: transform;
-}
-.onb-page {
-  flex: 0 0 auto;
-  height: 100%;
+.onb-welcome {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-start;
-  padding: 34px 56px 28px;
   text-align: center;
-  /* All pages stay opaque — the track's translate (clipped by the stage's
-     overflow:hidden) is what shows/hides them. A separate opacity gate
-     would simply hide off-screen pages twice and, more importantly,
-     would also fade out the page being slid in until React commits
-     `--active`, producing an empty mid-animation frame. */
+  padding: 34px 44px 20px;
   overflow-y: auto;
-  /* Per-page paint containment — each page's repaints (e.g. the
-     CyclingOrb's colour transitions on page 0) stay scoped to that
-     page and don't bubble up to invalidate the whole track's raster. */
-  contain: layout paint style;
+  min-height: 0;
 }
+.onb-welcome-hero {
+  flex: 0 0 auto;
+  /* The orb glow already carries visual margin; a tight box keeps the
+     title inside the same optical group instead of a floor below it. */
+  margin: 0 0 6px;
+}
+.onb-subtitle--welcome {
+  max-width: 46ch;
+  margin-bottom: 26px;
+}
+.onb-doors {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  width: 100%;
+}
+.onb-door {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 15px 17px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--divider-line);
+  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-ui);
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.onb-door:hover {
+  background: color-mix(in srgb, var(--panel-text) 6%, transparent);
+  border-color: color-mix(in srgb, var(--panel-text) 22%, transparent);
+}
+.onb-door:active {
+  transform: translateY(1px);
+}
+/* ★ ONE DOOR CARRIES WEIGHT, and it is the sample — the path with the
+   teaching material in it. Same accent grammar as the recommended mode row
+   the settings use, so "we suggest this one" reads identically everywhere. */
+.onb-door--primary {
+  border-color: color-mix(in srgb, var(--control-value-fill) 55%, var(--divider-line));
+  background: color-mix(in srgb, var(--control-value-fill) 8%, transparent);
+}
+.onb-door--primary:hover {
+  background: color-mix(in srgb, var(--control-value-fill) 12%, transparent);
+  border-color: color-mix(in srgb, var(--control-value-fill) 75%, var(--divider-line));
+}
+.onb-door-label {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.01em;
+}
+.onb-door-sub {
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+  letter-spacing: 0.01em;
+}
+.onb-pro-row--welcome {
+  width: 100%;
+  margin-top: 18px;
+  text-align: left;
+}
+/* Narrow-window safety — the doors stack, everything else already flows. */
+@media (max-width: 560px) {
+  .onb-doors { grid-template-columns: 1fr; }
+  .onb-welcome { padding: 28px 24px 16px; }
+}
+
+/* ─── Sliding stage ─────────────────────────────────────────────────────── */
 
 /* Inactive pages don't need to participate in hit-testing — declaring
    them pointer-events:none cuts the cost of mouse-move bookkeeping
    during the slide and prevents accidental hover triggers on
    off-screen content the user can't see. Active page is set by the
    .onb-page--active class added in the React render. */
-.onb-page:not(.onb-page--active) {
-  pointer-events: none;
-}
 
 /* ─── Hero areas ────────────────────────────────────────────────────────── */
 /* ★★ ONE RESERVED BAND FOR EVERY HERO, BOTTOM-ALIGNED. Hero heights ran 164 to
@@ -8043,168 +8079,40 @@ body.electron-window-unfocused .toolbar-ambient-orb {
    hero (244) and bottom-aligning inside it pins the title for six of seven.
    Page 3 is the deliberate exception, because it carries a real production
    widget and shrinking that would misrepresent the panel. */
-.onb-hero {
-  flex: 0 0 auto;
-  display: flex;
-  min-height: 244px;
-  align-items: flex-end;
-  justify-content: center;
-  width: 100%;
-  margin-bottom: 22px;
-}
-.onb-hero--orb {
-  height: 240px;
-  position: relative;
-}
+
 /* The three local-model choices. Sized so the row reads as ONE decision
    rather than three features, which is what it is. */
-.onb-hero--modes {
-  width: min(100%, 560px);
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-modes {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  width: 100%;
-}
+
 /* ★★ ROWS, NOT THREE COLUMNS. Side-by-side cards forced each mode's answer
    into three words, which is how "On" and "Max" ended up separated by nothing
    but a file size. A stacked row gives each one a full line to say what it
    actually adds, and the eye compares them down a single left edge. */
-.onb-modes {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-}
-.onb-mode-row {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 9px 12px 10px;
-  border-radius: 12px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-  text-align: left;
-}
+
 /* ★ ONE ROW CARRIES WEIGHT, and it is "On", the mode every prompt in the app
    was measured against. Three equal rows ask the writer to research a
    decision; a recommendation answers it and still shows the alternatives. */
-.onb-mode-row--pick {
-  border-color: color-mix(in srgb, var(--control-value-fill) 55%, var(--divider-line));
-  background: color-mix(in srgb, var(--control-value-fill) 8%, transparent);
-}
-.onb-mode-row-head {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.onb-mode-row-name {
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text);
-}
-.onb-mode-row-size {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-tertiary);
-}
+
 /* ★ THE ACCENT OWNS ONE JOB PER SURFACE. Blue was marking the recommended row
    AND both download sizes, so the same colour meant "this one is picked" on one
    row and "this is a real size" on two others. The recommendation keeps it. */
-.onb-mode-row-size--real {
-  color: var(--text-secondary);
-}
+
 /* ★★ EVERY ROW CARRIES A PRICE, IN ONE COLUMN, AT A SIZE THAT CAN BE READ.
    The first version put a 7px PRO on Max alone, which said "this one is
    restricted" and never "the other two are free" — and at 7px against 52%
    alpha it barely said anything. Three marks down one right-hand edge give the
    whole gating story in a single downward scan, and Max stops being the
    exception and becomes the third price. */
-.onb-mode-row-price {
-  margin-left: auto;
-  font-family: var(--font-ui);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  line-height: 1;
-  padding: 3px 7px;
-  border-radius: 999px;
-  color: var(--text-tertiary);
-  background: color-mix(in srgb, var(--panel-text) 7%, transparent);
-  white-space: nowrap;
-}
-.onb-mode-row-price--pro {
-  color: color-mix(in srgb, var(--control-value-fill) 88%, var(--text));
-  background: color-mix(in srgb, var(--control-value-fill) 14%, transparent);
-}
+
 /* Which build and which mode a demonstrated gesture needs. */
-.onb-askcard-tag {
-  margin-left: 6px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 2px 6px;
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--control-value-fill) 88%, var(--text));
-  background: color-mix(in srgb, var(--control-value-fill) 14%, transparent);
-  white-space: nowrap;
-}
+
 /* ★ THIS SENTENCE IS THE ENTIRE ANSWER to "what separates On from Max", and
    it was the quietest ink on the page. 13px in secondary, not 11.5 in
    tertiary. */
-.onb-mode-row-does {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--text-secondary);
-}
-.onb-modes-wrap {
-  width: 100%;
-}
+
 /* Whose choice this is, on the build that cannot make it. */
-.onb-modes-cap {
-  font-family: var(--font-ui);
-  font-size: 10.5px;
-  font-weight: 600;
-  color: var(--text-tertiary);
-  margin: 0 0 6px;
-  text-align: left;
-}
 
 /* ─── Right-click hero ──────────────────────────────────────────────────── */
-.onb-hero--ask {
-  width: min(100%, 620px);
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-askpair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  width: 100%;
-  align-items: start;
-}
-.onb-askcard {
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.onb-askcard-cap {
-  display: flex;
-  align-items: center;
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--text-secondary);
-  text-align: left;
-}
+
 /* ★★ THE MOCK REUSES `.max-ask`, WHICH IS `position: fixed`. Left alone it
    tears out of the page and pins itself to the viewport corner. Everything
    else about the class is exactly what should be inherited — the glass, the
@@ -8214,247 +8122,15 @@ body.electron-window-unfocused .toolbar-ambient-orb {
    and therefore wins: the first attempt measured the hero at 12px because the
    mock was still fixed-positioned. Same cascade trap as the grouped
    `transition` shorthand in the glass controls. */
-.max-ask.onb-askmock {
-  position: static;
-  z-index: auto;
-  width: 100%;
-  height: auto;
-  animation: none;
-  text-align: left;
-  /* ★ A STAND-IN SURFACE, NOT `.liquid-glass`. The real popover is glass, but
-     the tour card is glass too, and nesting the engine inside itself means a
-     second backdrop-filter pass reading a backdrop that is already refracted.
-     A quiet border and tint give the popover its edge for a tenth of the cost
-     and none of the stacking risk. */
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-}
+
 /* The two inputs are real controls in the app; here they are labels, so they
    take the field's shape without pretending to accept a caret. */
-.onb-askmock-input {
-  color: var(--text-tertiary);
-  cursor: default;
-}
-.onb-hero--widgets {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  align-items: stretch;
-  width: min(100%, 660px);
-  max-width: 660px;
-  margin-left: auto;
-  margin-right: auto;
-}
+
 /* The welcome page now renders real production widgets (TensionWidget,
    ProseProfileWidget, StyleWatchWidget, ContinuityWidget). Their
    .widget-card chassis already adapts to the container width, so the
    onboarding page can show a true 2×2 preview without another visual
    scale layer fighting the card's own layout. */
-.onb-hero--widgets .widget-card {
-  margin: 0;                          /* override the .widget-list margin */
-  width: 100%;
-}
-.onb-hero--renderer {
-  align-items: flex-end;
-  width: 100%;
-  max-width: 700px;
-  height: 228px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-hero--shortcuts {
-  align-items: stretch;
-  width: 100%;
-  max-width: 680px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.onb-renderer-preview {
-  width: 100%;
-  height: 228px;
-  border-radius: 22px;
-  border: 1px solid var(--divider-line);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 34%),
-    color-mix(in srgb, var(--panel-text) 5%, transparent);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  text-align: left;
-}
-
-.onb-renderer-preview-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--divider-line);
-}
-
-.onb-renderer-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.onb-renderer-brand-logo {
-  display: block;
-  width: auto;
-  height: 12px;
-  filter: opacity(0.78);
-}
-
-@media (prefers-color-scheme: dark) {
-  .onb-renderer-brand-logo {
-    filter: invert(1) opacity(0.72);
-  }
-}
-
-.onb-renderer-brand-title {
-  font-family: var(--font-body);
-  font-size: 16px;
-  font-style: italic;
-  color: var(--text);
-}
-
-.onb-renderer-runtime {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.onb-renderer-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 4%, transparent);
-  font-family: var(--font-ui);
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.05em;
-}
-
-.onb-renderer-status {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
-}
-
-.onb-renderer-preview-body {
-  display: grid;
-  grid-template-columns: 0.9fr 1.3fr 1.05fr;
-  flex: 1;
-  min-height: 0;
-}
-
-.onb-renderer-tree,
-.onb-renderer-viewer,
-.onb-renderer-chat {
-  min-width: 0;
-  padding: 14px 14px 12px;
-}
-
-.onb-renderer-tree {
-  border-right: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 2%, transparent);
-}
-
-.onb-renderer-tree-row {
-  padding: 7px 9px;
-  border-radius: 10px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  color: var(--text-tertiary);
-  letter-spacing: 0.01em;
-}
-
-.onb-renderer-tree-row + .onb-renderer-tree-row {
-  margin-top: 4px;
-}
-
-.onb-renderer-tree-row--active {
-  background: color-mix(in srgb, var(--panel-text) 8%, transparent);
-  color: var(--text);
-}
-
-.onb-renderer-viewer {
-  border-right: 1px solid var(--divider-line);
-}
-
-.onb-renderer-viewer-file {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  margin-bottom: 10px;
-}
-
-.onb-renderer-copy {
-  margin: 0;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text-secondary);
-}
-
-.onb-renderer-command-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-
-.onb-renderer-command {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-  border: 1px solid var(--divider-line);
-  font-family: var(--font-ui);
-  font-size: 9px;
-  color: var(--text-secondary);
-}
-
-.onb-renderer-chat {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.onb-renderer-bubble {
-  max-width: 100%;
-  border-radius: 16px;
-  padding: 10px 11px;
-  font-family: var(--font-ui);
-  font-size: 10px;
-  line-height: 1.55;
-}
-
-.onb-renderer-bubble--user {
-  align-self: flex-end;
-  background: color-mix(in srgb, var(--accent, #ff9c00) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent, #ff9c00) 22%, transparent);
-  color: var(--text);
-}
-
-.onb-renderer-bubble--assistant {
-  align-self: stretch;
-  background: color-mix(in srgb, var(--panel-text) 4%, transparent);
-  border: 1px solid var(--divider-line);
-  color: var(--text-secondary);
-}
 
 /* ─── Hero orb (large-scale wrapper) ────────────────────────────────────── */
 .onb-orb {
@@ -8528,36 +8204,6 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 .onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(6) { animation-duration: 8.7s; }
 
 /* ─── Modes row (page 2) ────────────────────────────────────────────────── */
-.onb-mode {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  flex: 1;
-  min-width: 0;
-}
-.onb-mode .onb-orb {
-  flex: 0 0 auto;
-  filter: drop-shadow(0 4px 14px rgba(168, 145, 255, 0.18));
-}
-.onb-mode-title {
-  font-family: var(--font-ui);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text);
-  margin-top: 6px;
-}
-.onb-mode-sub {
-  font-family: var(--font-ui);
-  font-size: 10.5px;
-  letter-spacing: 0.02em;
-  color: var(--text-tertiary);
-  text-align: center;
-  max-width: 14ch;
-  line-height: 1.45;
-}
 
 /* ─── Mock widget cards (page 3) ──────────────────────────────────────────
    Mirror the real .widget-card chassis exactly so the welcome preview
@@ -8567,185 +8213,9 @@ body.electron-window-unfocused .toolbar-ambient-orb {
      • +liquid-glass class           (translucent glass + 1px specular ring)
    The local rules below carry only layout — the surface treatment lives
    on .liquid-glass. */
-.onb-mock-card {
-  position: relative;
-  border-radius: 32px;
-  padding: 20px;
-  text-align: left;
-  color: var(--text);
-  overflow: hidden;
-}
-.onb-mock-corners {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  position: relative;
-  z-index: 1;
-}
-.onb-mock-corner {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-}
-.onb-mock-corner-right { color: var(--text-secondary); }
-.onb-mock-row {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--text-secondary);
-  letter-spacing: 0.02em;
-  margin-top: 6px;
-  position: relative;
-  z-index: 1;
-}
-.onb-mock-key { color: var(--text-tertiary); }
-.onb-mock-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 4px 0 8px;
-  position: relative;
-  z-index: 1;
-}
-.onb-mock-bar-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-}
-.onb-mock-bar-label {
-  flex: 0 0 88px;
-  color: var(--text-secondary);
-  letter-spacing: 0.01em;
-}
-.onb-mock-bar-track {
-  flex: 1;
-  height: 5px;
-  border-radius: 3px;
-  background: var(--divider-line);
-  overflow: hidden;
-  position: relative;
-}
-.onb-mock-bar-fill {
-  position: absolute;
-  inset: 0 auto 0 0;
-  border-radius: 3px;
-  /* Bars animate in from 0 on first reveal — playful, not loud. */
-  animation: onbBarFill 0.9s 0.15s cubic-bezier(0.18, 1.02, 0.42, 1) backwards;
-}
-@keyframes onbBarFill {
-  from { width: 0 !important; opacity: 0.4; }
-}
-.onb-mock-bar-val {
-  flex: 0 0 92px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.01em;
-}
-.onb-mock-foot {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--text-tertiary);
-  border-top: 1px solid var(--divider-line);
-  padding-top: 8px;
-  line-height: 1.5;
-  margin-top: 8px;
-  position: relative;
-  z-index: 1;
-}
 
 /* ─── Tips grid (page 4) ────────────────────────────────────────────────── */
-.onb-tip-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.onb-shortcut-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-.onb-shortcut-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 16px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-  text-align: left;
-}
-.onb-shortcut-group-title {
-  font-family: var(--font-ui);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text);
-}
-.onb-shortcut-group-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.onb-shortcut-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-.onb-tip {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-@media (prefers-color-scheme: light) {
-  .onb-tip {
-    background: rgba(0, 0, 0, 0.025);
-    border-color: rgba(0, 0, 0, 0.06);
-  }
-}
-.onb-tip-keys {
-  display: inline-flex;
-  gap: 3px;
-  flex: 0 0 auto;
-}
-.onb-key {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-@media (prefers-color-scheme: light) {
-  .onb-key {
-    background: rgba(0, 0, 0, 0.05);
-    border-color: rgba(0, 0, 0, 0.1);
-  }
-}
-.onb-tip-label {
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  color: var(--text-secondary);
-  letter-spacing: 0.01em;
-}
+
 .onb-inline-kbd {
   display: inline-flex;
   align-items: center;
@@ -8777,10 +8247,7 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   margin: 0 0 12px;
   max-width: 22ch;
 }
-.onb-title--small {
-  font-size: 24px;
-  margin-bottom: 10px;
-}
+
 /* ★ 15px, NOT 13.5. This is the primary reading content of a full-screen
    first-run modal and it was set at caption size, two steps below the app's
    own body register. The 56ch measure holds the line length where it was. */
@@ -8799,553 +8266,78 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 }
 
 /* ─── Footer ────────────────────────────────────────────────────────────── */
-.onb-footer {
-  flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  padding: 14px 22px 18px;
-  gap: 16px;
-  border-top: 1px solid var(--divider-line);
-}
-.onb-skip {
-  justify-self: start;
-  padding: 8px 14px;
-  border: 0;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  border-radius: 8px;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-.onb-skip:hover {
-  color: var(--text);
-  background: rgba(255, 255, 255, 0.06);
-}
-@media (prefers-color-scheme: light) {
-  .onb-skip:hover { background: rgba(0, 0, 0, 0.05); }
-}
-.onb-dots {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-}
-.onb-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 0;
-  background: rgba(255, 255, 255, 0.18);
-  cursor: pointer;
-  padding: 0;
-  transition: background 0.2s ease, transform 0.3s cubic-bezier(0.34, 1.42, 0.64, 1), width 0.3s ease;
-}
-@media (prefers-color-scheme: light) {
-  .onb-dot { background: rgba(0, 0, 0, 0.18); }
-}
+
 /* ★★ THE HOVER HAD NO LIGHT OVERRIDE while the base state did, so pointing at
    an inactive dot painted 40% white on a near-white card and the dot VANISHED
    under the cursor at about 1.02:1. Every other hover in this tour carries its
    light pair; this one was missed. */
-.onb-dot:hover { background: rgba(255, 255, 255, 0.4); }
-@media (prefers-color-scheme: light) {
-  .onb-dot:hover { background: rgba(0, 0, 0, 0.38); }
-}
-.onb-dot--active {
-  background: var(--text);
-  width: 22px;
-  border-radius: 999px;
-}
-.onb-nav {
-  justify-self: end;
-  display: inline-flex;
-  gap: 6px;
-}
-.onb-nav-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--divider-line);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: 12.5px;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-.onb-nav-btn:hover {
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.04);
-}
-@media (prefers-color-scheme: light) {
-  .onb-nav-btn:hover {
-    border-color: rgba(0, 0, 0, 0.18);
-    background: rgba(0, 0, 0, 0.04);
-  }
-}
-.onb-nav-btn:active { transform: translateY(1px); }
-.onb-nav-btn--primary {
-  background: var(--text);
-  color: var(--bg);
-  border-color: var(--text);
-  font-weight: 600;
-}
-.onb-nav-btn--primary:hover {
-  background: var(--text);
-  color: var(--bg);
-  border-color: var(--text);
-  filter: brightness(1.06);
-}
 
 /* Narrow-window safety — collapse the modes row gracefully. */
 @media (max-width: 720px) {
   .onb-card {
     height: min(640px, 92vh);
   }
-  .onb-page { padding: 40px 28px 22px; }
-  .onb-hero--modes { gap: 12px; }
-  .onb-mode-sub { display: none; }
-  .onb-hero--widgets,
-  .onb-shortcut-grid,
-  .onb-renderer-preview-body { grid-template-columns: 1fr; }
-  .onb-renderer-tree,
-  .onb-renderer-viewer {
-    border-right: none;
-    border-bottom: 1px solid var(--divider-line);
-  }
-  .onb-shortcut-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }
 
 /* ─── Onboarding: new hero types (pages 1–6 redesign) ──────────────────── */
 
 /* PAGE 1 — Editor mock */
-.onb-hero--editor {
-  height: auto;
-  align-items: flex-end;
-  width: 100%;
-  max-width: 580px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-editor-mock {
-  height: 200px;
-  width: 100%;
-  height: 100%;
-  border-radius: 18px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 4%, transparent);
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.onb-editor-mock-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--divider-line);
-  flex-shrink: 0;
-}
-.onb-editor-mock-toolbar-dots {
-  display: flex;
-  gap: 5px;
-}
-.onb-editor-mock-dot {
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--panel-text) 14%, transparent);
-}
-.onb-editor-mock-chapter-nav {
-  flex: 1;
-  text-align: center;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--text-secondary);
-  letter-spacing: 0.03em;
-}
-.onb-editor-mock-toolbar-orb {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.onb-editor-mock-body {
-  flex: 1;
-  padding: 14px 20px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: hidden;
-}
-.onb-editor-mock-title-line {
-  height: 13px;
-  width: 52%;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--panel-text) 18%, transparent);
-}
-.onb-editor-mock-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.onb-editor-mock-line {
-  height: 7px;
-  border-radius: 3px;
-  background: color-mix(in srgb, var(--panel-text) 10%, transparent);
-}
 
 /* PAGE 2 — Structure (Chapter Index + World Data) */
 /* ★ 244, NOT 210. The rows here are the REAL `.chapter-card-wrap`, which is
    taller than the invented row it replaced: at 210 the third card was sliced
    through its number and the panel read as broken glass rather than as a list
    that continues. Measured against the rendered card, not guessed. */
-.onb-hero--structure {
-  height: auto;
-  align-items: flex-end;
-  width: 100%;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-struct-panels {
-  display: flex;
-  gap: 12px;
-  width: 100%;
-  height: 244px;
-  align-items: stretch;
-}
 
 /* ─── Panel mocks that borrow the real panels' own classes ──────────────────
    The rows, tabs and titles inside come from `.world-*` and `.chapter-card-*`,
    so they inherit the shipping type and spacing. Only the CHROME is restated
    here, because the real panels are full-height overlays and these are two
    thumbnails side by side. */
-.onb-panelmock {
-  flex: 1;
-  min-width: 0;
-  border-radius: 16px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-  padding: 10px 12px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  text-align: left;
-  overflow: hidden;
-}
+
 /* The real header carries a close button and a row of actions; at thumbnail
    size that is noise, so the title keeps its type and loses its furniture. */
-.onb-panelmock-header {
-  padding: 0;
-  border: 0;
-  min-height: 0;
-  margin: 0;
-}
-.onb-panelmock .world-title {
-  font-size: 14px;
-  margin: 0;
-}
-.onb-panelmock-tabs {
-  padding: 0;
-  margin: 0 0 2px;
-  border: 0;
-  gap: 4px;
-  flex-wrap: nowrap;
-}
-.onb-panelmock .world-tab {
-  padding: 3px 7px;
-  font-size: 9.5px;
-  cursor: default;
-  white-space: nowrap;
-}
-.onb-panelmock-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 0;
-  overflow: hidden;
-}
+
 /* ★★ THE BORROWED CLASS BROUGHT A SCROLL AFFORDANCE WITH IT. `.chapter-list`
    carries a bottom fade mask that says "more below", and measured on the mock
    it dimmed the third row's word count from rgb(145,145,147) to rgb(164,165,166)
    so the row read as disabled. Nothing scrolls here and nothing is hidden, so
    the fade was telling the reader something untrue about real content. This is
    the cost of reusing a shipping class, and it is worth paying with eyes open. */
-.onb-panelmock .chapter-list {
-  -webkit-mask-image: none;
-  mask-image: none;
-  overflow: visible;
-}
-.onb-panelmock-row {
-  cursor: default;
-  padding: 4px 6px;
-}
-.onb-panelmock .chapter-card-num { font-size: 9.5px; }
-.onb-panelmock .chapter-card-title { font-size: 11.5px; }
-.onb-panelmock .chapter-card-meta { font-size: 9.5px; }
-.onb-panelmock .world-row-name { font-size: 11.5px; }
-.onb-panelmock .world-row-role { font-size: 9.5px; }
-.onb-struct-panel {
-  flex: 1;
-  border-radius: 16px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-  padding: 11px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  overflow: hidden;
-}
-.onb-struct-panel-header {
-  font-family: var(--font-ui);
-  font-size: 9.5px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  margin-bottom: 6px;
-}
-.onb-struct-section-label {
-  font-family: var(--font-ui);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-tertiary);
-  margin-top: 7px;
-  margin-bottom: 2px;
-}
-.onb-struct-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 4px 6px;
-  border-radius: 7px;
-}
-.onb-struct-row--active {
-  background: color-mix(in srgb, var(--panel-text) 7%, transparent);
-}
-.onb-struct-num {
-  flex-shrink: 0;
-  font-family: var(--font-ui);
-  font-size: 9.5px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary);
-  width: 14px;
-  text-align: right;
-}
-.onb-struct-icon {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--text-tertiary);
-  line-height: 1;
-}
-.onb-struct-label {
-  font-family: var(--font-ui);
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 
 /* PAGE 3 — Intelligence (orb + entity highlight) */
-.onb-hero--intel {
-  flex-direction: column;
-  gap: 14px;
-  height: auto;
-  width: min(100%, 660px);
-  margin-left: auto;
-  margin-right: auto;
-}
+
 /* The marked-up page above, the two widgets that read it below. One page
    answers "what does it show me" once, instead of splitting the answer
    across two swipes that both said "intelligence". */
-.onb-intel-widgets {
-  width: min(100%, 430px);
-  margin-left: auto;
-  margin-right: auto;
-}
+
 /* The hero on this page carries a real production widget, which brings its own
    height. Trimming the surroundings is cheaper than shrinking the widget, which
    would misrepresent what the panel actually looks like. Measured on the
    smallest card the tour renders at (560px tall): the page needed 500px of a
    493px stage, so the last line of copy sat under the footer. */
-.onb-hero--intel {
-  gap: 10px;
-  margin-bottom: 12px;
-}
+
 /* Superseded by the shared band: every page now starts at the same padding. */
-.onb-page--dense { padding-top: 34px; }
-.onb-intel-widgets .widget-card {
-  margin: 0;
-  width: 100%;
-}
-.onb-intel-highlight {
-  max-width: 430px;
-  width: 100%;
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-  text-align: left;
-}
-.onb-intel-highlight-text {
-  font-family: var(--font-body);
-  font-size: 13px;
-  line-height: 1.75;
-  color: var(--text);
-  margin: 0;
-}
+
 /* Entity span colors — mirror the production intel highlight palette */
-.onb-ent-speech {
-  background: rgba(16, 102, 255, 0.13);
-  border-radius: 3px;
-  padding: 1px 2px;
-  color: color-mix(in srgb, #1066FF 65%, var(--text));
-}
-.onb-ent-char {
-  background: rgba(0, 190, 175, 0.15);
-  border-radius: 3px;
-  padding: 1px 3px;
-  color: color-mix(in srgb, #00bead 60%, var(--text));
-  font-weight: 500;
-}
-.onb-ent-place {
-  background: rgba(235, 155, 30, 0.14);
-  border-radius: 3px;
-  padding: 1px 3px;
-  color: color-mix(in srgb, #e5980a 60%, var(--text));
-}
-.onb-ent-action {
-  background: rgba(210, 90, 30, 0.11);
-  border-radius: 3px;
-  padding: 1px 2px;
-  color: color-mix(in srgb, #d05a1e 55%, var(--text));
-}
 
 /* PAGE 5 browser — Export formats */
 /* ★ AUTO, NOT 190px. A fixed band with `height: 100%` cards stretched three
    flex children to fill it, leaving ~115px of empty box under the last line of
    each. Three tall hollow boxes read as content that failed to load, which is
    the worst impression available on the page that sells exports. */
-.onb-hero--export {
-  height: auto;
-  align-items: flex-end;
-  width: 100%;
-  max-width: 620px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-export-cards {
-  display: flex;
-  gap: 10px;
-  width: 100%;
-  /* Default `align-items: stretch` still squares the three to the tallest. */
-  height: auto;
-}
-.onb-export-card {
-  flex: 1;
-  border-radius: 14px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-  padding: 16px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-.onb-export-card-fmt {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: 0.02em;
-}
-.onb-export-card-desc {
-  color: var(--text-secondary);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  line-height: 1.55;
-  color: var(--text-tertiary);
-  letter-spacing: 0.01em;
-}
 
 /* PAGE 6 — Getting-started checklist */
-.onb-hero--checklist {
-  align-items: flex-end;
-  width: 100%;
-  max-width: 520px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.onb-checklist {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-  padding: 18px 20px;
-  border-radius: 18px;
-  border: 1px solid var(--divider-line);
-  background: color-mix(in srgb, var(--panel-text) 3%, transparent);
-}
-.onb-checklist-item {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  opacity: 0;
-}
-.onb-checklist-item--visible {
-  animation: onbCheckIn 0.45s ease forwards;
-}
+
 @keyframes onbCheckIn {
   from { opacity: 0; transform: translateX(-8px); }
   to   { opacity: 1; transform: translateX(0); }
 }
-.onb-checklist-circle {
-  flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 1.5px solid var(--divider-line);
-  background: transparent;
-}
-.onb-checklist-text {
-  font-family: var(--font-ui);
-  font-size: 13px;
-  color: var(--text);
-  line-height: 1.4;
-  text-align: left;
-}
+
 /* Where the control actually is. A step a writer cannot locate is not a
    step, and the previous list named a panel that does not exist. */
-.onb-checklist-where {
-  display: block;
-  font-size: 11.5px;
-  color: var(--text-secondary);
-  margin-top: 1px;
-}
 
 /* Responsive: collapse structure + export cards to single column */
-@media (max-width: 720px) {
-  .onb-struct-panels,
-  .onb-export-cards { flex-direction: column; gap: 8px; }
-  .onb-hero--structure { height: auto; }
-  .onb-hero--export { height: auto; }
-  .onb-modes { grid-template-columns: 1fr; }
-  .onb-intel-widgets { grid-template-columns: 1fr; }
-}
 
 /* ═══════════════════════════════════════════
    PDF EXPORT OVERLAY — page format + paper size picker
@@ -10570,7 +9562,6 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   background: var(--control-value-fill);
   border-color: rgba(59, 130, 246, 0.42);
 }
-
 
 /* Knob — same affordance language as .glass-range-knob (slider): a solid
    fill at rest that scales up + goes semi-transparent on press, so the
@@ -11956,7 +10947,6 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   margin: 0;
 }
 
-
 /* ═══════════════════════════════════════════
    RENDERER CANVAS VEIL — theme-adaptive gradient
    ═══════════════════════════════════════════ */
@@ -12989,7 +11979,6 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 
 /* Scrollbar hide for the full-detail timeline scroll area */
 .sg-overlay-panel ::-webkit-scrollbar { display: none; }
-
 
 /* ═══════════════════════════════════════════
    STORY GRAPH — FULL-SCREEN HORIZONTAL OVERLAY
@@ -15028,7 +14017,6 @@ body.electron-window-unfocused .wc-panel::after {
   border-color: var(--text-secondary);
 }
 
-
 /* ── Tool import overlay ──────────────────────────────────────────────── */
 
 .ti-conflict-badge {
@@ -16636,4 +15624,220 @@ body.electron-window-unfocused .wc-panel::after {
   gap: 8px;
   margin-top: 8px;
   flex-wrap: wrap;
+}
+
+/* ── Getting-started dock ────────────────────────────────────────────────────
+   The corner the first session lives in: the sample badge (unconditional
+   while the sandbox is open) stacked over the checklist card. Bottom-right,
+   because bottom-left belongs to the word count and top-center to the
+   status pill. Never blocks the canvas; z stays under every overlay. */
+.gs-dock {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  font-family: var(--font-ui);
+}
+.gs-sample {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px 7px 13px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  letter-spacing: 0.01em;
+}
+.gs-sample-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.gs-sample-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.gs-sample-fact {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.gs-sample-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+.gs-sample-btn {
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.gs-sample-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-text) 6%, transparent);
+}
+.gs-sample-btn--primary {
+  border-color: color-mix(in srgb, var(--control-value-fill) 55%, var(--divider-line));
+  background: color-mix(in srgb, var(--control-value-fill) 8%, transparent);
+  color: var(--text);
+}
+.gs-sample-btn--primary:hover {
+  background: color-mix(in srgb, var(--control-value-fill) 14%, transparent);
+}
+
+.gs-card {
+  width: 252px;
+  border-radius: 16px;
+  padding: 12px 14px 13px;
+  text-align: left;
+}
+.gs-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.gs-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.02em;
+  flex: 1;
+}
+.gs-count {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.gs-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.gs-icon-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-text) 8%, transparent);
+}
+.gs-collapse-chevron {
+  transform: rotate(90deg);
+}
+.gs-items {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.gs-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+.gs-tick {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 1.5px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--panel-text) 28%, transparent);
+  color: transparent;
+  flex: 0 0 auto;
+  transition: border-color 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+.gs-item--done .gs-tick {
+  border-color: color-mix(in srgb, var(--control-value-fill) 70%, transparent);
+  background: color-mix(in srgb, var(--control-value-fill) 14%, transparent);
+  color: var(--text);
+}
+.gs-item-text {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.gs-item--done .gs-item-text {
+  color: var(--text-tertiary);
+}
+.gs-item-hint {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.01em;
+}
+.gs-max-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid color-mix(in srgb, var(--panel-text) 10%, transparent);
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.gs-max-hint svg {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--control-value-fill) 80%, var(--panel-text));
+}
+.gs-recap {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.gs-done-btn {
+  border: 1px solid var(--divider-line);
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.gs-done-btn:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--panel-text) 6%, transparent);
+}
+.gs-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+}
+.gs-pill:hover {
+  color: var(--text);
+}
+.gs-pill-count {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
 }

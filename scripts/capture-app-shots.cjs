@@ -5,9 +5,9 @@
  * Seeds a scratch userData + a real on-disk project (sample novel in the
  * shipping serialization at <project>/novel.txt), then requires
  * electron/main.cjs so every IPC surface is the production one. Captures:
- * the true first-run (onboarding over the app), each tour page, the
- * populated editor after the tour, and the panels/popovers the tour
- * depicts. Shots land in bench-results/shots-app/.
+ * the true first-run (the welcome screen over the app), the sample-story
+ * sandbox after door 1, and the World/Index panels. Shots land in
+ * bench-results/shots-app/.
  *
  *   ./node_modules/.bin/electron scripts/capture-app-shots.cjs
  */
@@ -63,44 +63,25 @@ app.whenReady().then(async () => {
   const w = await win();
   w.setSize(1440, 900);
   await sleep(4000); // fonts, glass, first analysis pass
-  await shot(w, '01-first-run');
+  await shot(w, '01-first-run'); // the welcome screen over the app
 
-  // Walk the tour: click the primary button up to 8 times, shooting each page.
-  for (let i = 2; i <= 9; i++) {
-    const advanced = await js(w, `(() => {
-      const byText = (sel, texts) => [...document.querySelectorAll(sel)]
-        .find((b) => texts.some((t) => b.textContent.trim().startsWith(t)));
-      const next = byText('button', ['Next', 'Continue', 'Get started', 'Start', 'Begin', 'Done', 'Finish'])
-        || document.querySelector('.onb-next, .onb-cta');
-      if (!next) return false;
-      next.click();
-      return true;
-    })()`);
-    await sleep(700);
-    if (!advanced) { console.log(`tour walk stopped before shot ${i}`); break; }
-    await shot(w, `0${i}-tour`);
-    const stillOpen = await js(w, `!!document.querySelector('.onb-card, .onb-root, [class*="onb-"]')`);
-    if (!stillOpen) { console.log('tour closed'); break; }
-  }
-
-  // Ensure the tour is closed, then the populated editor.
-  await js(w, `(() => {
-    const skip = [...document.querySelectorAll('button')]
-      .find((b) => /skip|close|done|finish|start writing/i.test(b.textContent));
-    if (skip) skip.click();
+  // ── The redesigned first run: one welcome screen, two doors. ──
+  // Door 1 enters the sample-story sandbox; there is no tour to walk and no
+  // cast dialog to swat (the sample ships castReviewed, and the prompt for
+  // real books now fires at World-panel open, its payoff moment).
+  const openedSample = await js(w, `(() => {
+    const door = [...document.querySelectorAll('button.onb-door')]
+      .find((b) => /open the sample story/i.test(b.textContent));
+    if (!door) return false;
+    door.click();
+    return true;
   })()`);
-  await sleep(1200);
-  // The cast-confirm dialog fires right after the tour (the pile-up the
-  // audit found); answer it so the surfaces underneath can be shot.
-  await js(w, `(() => {
-    const yes = [...document.querySelectorAll('button')]
-      .find((b) => /yes, that’s my cast|yes, that's my cast/i.test(b.textContent));
-    if (yes) yes.click();
-  })()`);
-  await sleep(3000);
-  await shot(w, '10-editor');
+  if (!openedSample) console.log('sample door not found — welcome may have changed');
+  await sleep(3500); // sample parse + first analysis pass over it
+  await shot(w, '10-editor'); // sample open: marks, dock, badge
 
-  // The World panel, via its toolbar button.
+  // The World panel, via its toolbar button. For the sample it opens
+  // directly and populated — the shipped WORLD-DATA block is the cast.
   const openedWorld = await js(w, `(() => {
     const btn = [...document.querySelectorAll('button, [role="button"]')]
       .find((b) => /world/i.test(b.getAttribute('title') || b.getAttribute('aria-label') || b.textContent || ''));

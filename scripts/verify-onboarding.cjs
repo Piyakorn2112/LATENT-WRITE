@@ -1,20 +1,23 @@
 /**
- * verify-onboarding.cjs — does the welcome tour describe THIS app?
+ * verify-onboarding.cjs — does the welcome screen (and the first session it
+ * starts) describe THIS app?
  *
  * ★★ THE ONBOARDING IS DOCUMENTATION THAT SHIPS INSIDE THE PRODUCT, and it
- *    rots exactly like a README. Auditing the old one found it promising
- *    `⌘⇧A` for the analysis panel, a shortcut that exists NOWHERE in the app,
- *    and naming an "Intelligence panel" that no surface is called. A writer
- *    who presses a key that does nothing on page four does not conclude the
- *    tour is out of date; they conclude the app is broken.
+ *    rots exactly like a README. The audit of the old 7-card tour found it
+ *    promising `⌘⇧A` (a shortcut that existed nowhere), naming an
+ *    "Intelligence panel" no surface is called, and illustrating an editor
+ *    with macOS traffic dots the app does not have. The redesign retired the
+ *    carousel for one welcome screen plus learning inside the real app — so
+ *    the gates now hold THAT contract:
  *
- * ★ SO THE GATES ARE FACTS ABOUT THE SOURCE, NOT ABOUT THE WORDING. Every
- *   keystroke the tour prints must be a real accelerator in electron/menu.cjs,
- *   and every download size must match the settings row the writer will
- *   actually see. Wording is taste and is left alone; a claim is checkable.
+ *    the screen's claims are source facts; the sample story really carries
+ *    its planted teaching moments; the sandbox really cannot write; the cast
+ *    dialog really cannot stack on the welcome; and the taught gestures
+ *    really exist where they are taught.
  *
- * It also captures every page so the layout can be looked at rather than
- * assumed.
+ * ★ EVERY NEGATIVE GATE IS PAIRED WITH A POSITIVE. "No carousel" alone would
+ *   pass on an empty file; "two doors present" is what proves the screen is
+ *   the redesign and not an accident.
  *
  *   npm run dev
  *   VITE_URL=http://localhost:5178 ./node_modules/.bin/electron scripts/verify-onboarding.cjs
@@ -37,18 +40,22 @@ const gate = (ok, label, detail = "") => {
 };
 
 /**
- * ★★ STRIP THE COMMENTS BEFORE SCANNING THE SOURCE. The first run of this
- *    file failed its own "the phantom ⌘⇧A is gone" gate — because the comment
- *    explaining that ⌘⇧A was removed contains the string ⌘⇧A. A gate that
- *    reads the note about the bug instead of the code is the wrong-element
- *    failure, and it fails in the safe direction only by luck.
+ * ★★ STRIP THE COMMENTS BEFORE SCANNING THE SOURCE. The first version of
+ *    this file failed its own "the phantom ⌘⇧A is gone" gate — because the
+ *    comment explaining the removal contains the string. A gate that reads
+ *    the note about the bug instead of the code is the wrong-element failure.
  */
 const stripComments = (src) => src
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^\s*\/\/.*$/gm, "");
 
-const ONB = stripComments(fs.readFileSync(path.join(ROOT, "src/components/Onboarding.tsx"), "utf8"));
-const PANEL = fs.readFileSync(path.join(ROOT, "src/components/AnalysisPanel.tsx"), "utf8");
+const read = (rel) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+const ONB = stripComments(read("src/components/Onboarding.tsx"));
+const APP = stripComments(read("src/App.tsx"));
+const PANEL = read("src/components/AnalysisPanel.tsx");
+const SAMPLE = read("src/assets/sample-story.txt");
+const LOG = stripComments(read("src/lib/onboarding-log.ts"));
+const CHECK = stripComments(read("src/components/OnboardingChecklist.tsx"));
 const MENU = (() => {
   for (const f of ["electron/menu.cjs", "electron/main.cjs"]) {
     const p = path.join(ROOT, f);
@@ -62,35 +69,97 @@ app.whenReady().then(async () => {
 
   // ── 1. Every keystroke printed must exist as an accelerator ─────────────
   const kbds = [...ONB.matchAll(/<Kbd[^>]*>([^<]+)<\/Kbd>/g)].map((m) => m[1].trim());
-  gate(kbds.length > 0, `the tour prints ${kbds.length} keyboard hints`);
+  gate(kbds.length > 0, `the welcome prints ${kbds.length} keyboard hint(s)`);
   const accelFor = (k) => k
     .replace(/⌘/g, "CmdOrCtrl+").replace(/⇧/g, "Shift+").replace(/⌥/g, "Alt+");
   for (const k of new Set(kbds)) {
     const letter = k.replace(/[⌘⇧⌥]/g, "");
     const inMenu = MENU.includes(accelFor(k)) || new RegExp(`accelerator:\\s*["'\`][^"'\`]*${letter}["'\`]`, "i").test(MENU);
-    gate(inMenu, `${k} is a real accelerator`, `not found in the native menu — the old tour promised ⌘⇧A, which never existed`);
+    gate(inMenu, `${k} is a real accelerator`, `not found in the native menu`);
   }
-  // The shortcut that started this audit must never come back.
   gate(!/⌘⇧A|⌘⇧a/.test(ONB), `the phantom ⌘⇧A shortcut is gone`);
   gate(!/Intelligence panel/i.test(ONB), `no "Intelligence panel" — no surface has that name`);
 
-  // ── 2. Download sizes must match the settings row ───────────────────────
+  // ── 2. Any download size quoted must match the settings row ─────────────
   const onbSizes = [...ONB.matchAll(/(\d+\.\d+) GB/g)].map((m) => m[1]);
   const panelSizes = [...PANEL.matchAll(/(\d+\.\d+) GB/g)].map((m) => m[1]);
   for (const s of new Set(onbSizes)) {
-    gate(
-      panelSizes.includes(s),
-      `"${s} GB" matches the settings row the writer will see`,
-      `AnalysisPanel.tsx quotes: ${[...new Set(panelSizes)].join(", ")}`,
-    );
+    gate(panelSizes.includes(s), `"${s} GB" matches the settings row`,
+      `AnalysisPanel.tsx quotes: ${[...new Set(panelSizes)].join(", ")}`);
   }
 
-  // ── 3. Look at it ───────────────────────────────────────────────────────
+  // ── 3. The carousel is retired AND the doors are real ───────────────────
+  gate(!/onb-dot|onb-track|onb-page/.test(ONB), `no carousel remnants in the welcome`);
+  gate(/Open the sample story/.test(ONB), `door 1: "Open the sample story"`);
+  gate(/Start your own book/.test(ONB), `door 2: "Start your own book"`);
+  gate(/Back to your book/.test(ONB), `door 2 flips for a writer with words`);
+
+  // ── 4. The sample story carries its teaching plants ─────────────────────
+  const chapterCount = (SAMPLE.match(/^===CHAPTER \d+:/gm) || []).length;
+  gate(chapterCount === 4, `sample has 4 chapters (${chapterCount})`);
+  gate(/pale green/.test(SAMPLE) && /dark brown, the colour of kelp/.test(SAMPLE),
+    `the eye-colour contradiction is planted (green Ch2 vs brown Ch3)`);
+  gate(/Lantern Bridge/.test(SAMPLE) && /Lamplight Bridge/.test(SAMPLE),
+    `the renamed bridge is planted (Lantern vs Lamplight)`);
+  gate(/percision that would of/.test(SAMPLE),
+    `the proofread sentence is planted (percision / would of)`);
+  gate(/three days on his feet/.test(SAMPLE) && /two nights ago/.test(SAMPLE),
+    `the timeline slip is planted`);
+  gate(/"castReviewed": true/.test(SAMPLE),
+    `sample ships castReviewed — the scan dialog never interrogates a book the writer didn't write`);
+  gate(/safe to break/i.test(SAMPLE) && /reset/i.test(SAMPLE),
+    `the sandbox safety is ADVERTISED in the sample's own description`);
+  const castNames = (SAMPLE.match(/"name": "/g) || []).length;
+  gate(castNames >= 10, `a rich cast+places ships confirmed (${castNames} named entries)`);
+
+  // ── 5. Modal sequencing is owned ────────────────────────────────────────
+  gate(!/\[onboardingOpen\]\);/.test(APP),
+    `no effect keyed on [onboardingOpen] — the welcome-close modal pile-up cannot come back`);
+  gate(/openWorldPanel/.test(APP) && /castPromptNeeded\(novel\)/.test(APP),
+    `the cast question fires at World-panel open (its payoff moment)`);
+  gate(/worldAfterCastRef/.test(APP),
+    `answering the cast question opens the panel it feeds`);
+
+  // ── 6. The sandbox really cannot write ──────────────────────────────────
+  const latched = [
+    "src/lib/storage.ts",
+    "src/lib/story-graph.ts",
+    "src/lib/annotation-store.ts",
+    "src/lib/adaptive-store.ts",
+    "src/lib/knowledge-store.ts",
+    "src/lib/review-store.ts",
+    "src/lib/renderer-review.ts",
+  ];
+  for (const f of latched) {
+    gate(/isSampleModeActive/.test(read(f)), `${path.basename(f)} carries the sample-mode latch`);
+  }
+  gate(/reset: \(\) => void|reset\(\)/.test(read("src/lib/use-undo-redo.ts")),
+    `undo history resets at the sandbox boundary`);
+  gate(/isSampleModeActive\(\)/.test(APP),
+    `App consults the latch (daily words, first-edit attribution)`);
+
+  // ── 7. Gestures are taught only where they exist ────────────────────────
+  gate(/maxReady=\{maxAskAvailable\}/.test(APP),
+    `the gesture hint is gated on maxAskAvailable, not isElectron`);
+  gate(/onAskAtCaret=\{maxAskAvailable/.test(APP),
+    `the rail's visible ask twin carries the same gate`);
+  gate(/onAskAtCaret/.test(PANEL),
+    `the rail renders the visible affordance (contextual menus are never the only path)`);
+  gate(/max-hint|ask-used/.test(CHECK),
+    `the hint tracks whether the gesture was actually tried`);
+
+  // ── 8. The checklist is four items, one pre-credited ────────────────────
+  const items = (LOG.match(/label: "/g) || []).length;
+  gate(items === 4, `checklist has exactly 4 items (${items}) — five is the completion cliff`);
+  gate(/door-sample", "door-own", "door-import/.test(LOG),
+    `item 1 is credited by choosing any door (endowed progress on real work)`);
+  gate(/never transmitted|local only/i.test(read("src/lib/onboarding-log.ts")),
+    `the funnel record declares itself local-only`);
+
+  // ── 9. Look at it ───────────────────────────────────────────────────────
   const win = new BrowserWindow({ width: 1180, height: 900, show: false });
   const errors = [];
   win.webContents.on("console-message", (_e, level, message) => {
-    // level 3 = error. Level 2 is Electron's own CSP warning about the dev
-    // server, which is not the page's doing and not a defect in the tour.
     if (level >= 3) errors.push(message);
   });
   const BUILD = process.env.BROWSER === "1" ? "?browser=1" : "";
@@ -99,68 +168,39 @@ app.whenReady().then(async () => {
   const js = (src) => win.webContents.executeJavaScript(src, true);
 
   const present = await js(`!!document.querySelector(".onb-card")`);
-  gate(present, `the tour mounts${BUILD ? " (browser build)" : " (desktop build)"}`);
+  gate(present, `the welcome mounts${BUILD ? " (browser build)" : " (desktop build)"}`);
   if (!present) { console.log(`\n${pass} passed, ${fail} failed\n`); win.destroy(); app.exit(1); return; }
 
-  const dots = await js(`document.querySelectorAll(".onb-dot").length`);
-  gate(dots === 7, `seven pages (${dots})`);
+  const shape = await js(`(() => {
+    const doors = [...document.querySelectorAll(".onb-door")];
+    const welcome = document.querySelector(".onb-welcome");
+    return {
+      doors: doors.length,
+      primaryFirst: doors[0]?.classList.contains("onb-door--primary") ?? false,
+      doorLabels: doors.map((d) => (d.querySelector(".onb-door-label")?.textContent ?? "").trim()),
+      title: (document.querySelector(".onb-title")?.textContent ?? "").trim(),
+      words: (document.querySelector(".onb-subtitle")?.textContent ?? "").trim().split(/\\s+/).length,
+      dots: document.querySelectorAll(".onb-dot").length,
+      overflowing: welcome ? welcome.scrollHeight > welcome.clientHeight + 2 : true,
+      orb: !!document.querySelector(".onb-orb canvas, .onb-orb"),
+    };
+  })()`);
 
-  fs.mkdirSync(OUT, { recursive: true });
-  const seen = [];
-  for (let i = 0; i < dots; i++) {
-    await js(`document.querySelectorAll(".onb-dot")[${i}].click()`);
-    await wait(700);
-    const page = await js(`(() => {
-      const p = document.querySelector(".onb-page--active");
-      if (!p) return null;
-      return {
-        title: (p.querySelector(".onb-title")?.textContent ?? "").trim(),
-        words: (p.querySelector(".onb-subtitle")?.textContent ?? "").trim().split(/\\s+/).length,
-        heroPixels: (p.querySelector(".onb-hero")?.getBoundingClientRect().height ?? 0),
-        titleTop: Math.round((p.querySelector(".onb-title")?.getBoundingClientRect().top ?? 0)
-          - (document.querySelector(".onb-card")?.getBoundingClientRect().top ?? 0)),
-        overflowing: p.scrollHeight > p.clientHeight + 2,
-      };
-    })()`);
-    seen.push(page);
-    const img = await win.webContents.capturePage();
-    fs.writeFileSync(path.join(OUT, `onboarding${BUILD ? "-browser" : ""}-${i + 1}.png`), img.toPNG());
-  }
-
-  console.log("");
-  for (const [i, p] of seen.entries()) {
-    console.log(`  ${i + 1}. ${String(p.words).padStart(3)} words · hero ${String(Math.round(p.heroPixels)).padStart(3)}px · ${p.title}`);
-  }
-  console.log("");
-
-  gate(seen.every((p) => p && p.title), `every page has a title`);
-  gate(seen.every((p) => p && p.heroPixels > 40), `every page has a visible hero`);
-  // ★ "More informative but not too much text" is the brief, so the length is
-  //   a gate. Long enough to say something, short enough to be read.
-  const longest = Math.max(...seen.map((p) => p.words));
-  gate(longest <= 62, `no page runs long (worst is ${longest} words, cap 62)`);
-  const shortest = Math.min(...seen.map((p) => p.words));
-  gate(shortest >= 18, `no page is a stub (thinnest is ${shortest} words, floor 18)`);
-  // ★★ THE TITLE IS THE ONE FIXED THING ON A HORIZONTAL SLIDE TRACK, and it
-  //    used to move 102px across the seven pages (adjacent jumps of 42, 45,
-  //    57, 75 and 64), so every press of Next read as a different screen
-  //    rather than the next page of one thing. A shared hero band pins it.
-  //    Page 3 is the deliberate exception: it carries a real production
-  //    widget, and shrinking that to match would misrepresent the panel.
-  const tops = seen.map((p) => p.titleTop);
-  const pinned = tops.filter((_, i) => i !== 2);
-  const spread = Math.max(...pinned) - Math.min(...pinned);
-  gate(
-    spread <= 8,
-    `the title holds its place across the set (${spread}px spread, cap 8)`,
-    `title tops: ${tops.join(", ")} — index 2 is the allowed outlier`,
-  );
-
-  const overflow = seen.map((p, i) => (p.overflowing ? i + 1 : 0)).filter(Boolean);
-  gate(overflow.length === 0, `no page scrolls its own content`, `overflowing: page ${overflow.join(", ")} — the body copy is below the fold there`);
+  gate(shape.dots === 0, `one screen, no page dots (${shape.dots})`);
+  gate(shape.doors === 2, `exactly two doors (${shape.doors})`);
+  gate(shape.primaryFirst, `the sample door carries the recommendation accent, first`);
+  gate(shape.doorLabels.every((l) => l.length > 0), `both doors are labelled (${shape.doorLabels.join(" · ")})`);
+  gate(shape.title === "Write. It reads along.", `the title is the mental model (${JSON.stringify(shape.title)})`);
+  gate(shape.words >= 18 && shape.words <= 62,
+    `the philosophy paragraph is readable, not a wall (${shape.words} words, 18..62)`);
+  gate(!shape.overflowing, `the screen fits without scrolling`);
+  gate(shape.orb, `the orb hero is present`);
   gate(errors.length === 0, `no console errors`, errors.slice(0, 2).join(" | "));
 
-  console.log(`\n  shots: ${OUT}/onboarding${BUILD ? "-browser" : ""}-1..${dots}.png`);
+  fs.mkdirSync(OUT, { recursive: true });
+  const img = await win.webContents.capturePage();
+  fs.writeFileSync(path.join(OUT, `welcome${BUILD ? "-browser" : ""}.png`), img.toPNG());
+  console.log(`\n  shot: ${OUT}/welcome${BUILD ? "-browser" : ""}.png`);
   console.log(`\n${pass} passed, ${fail} failed\n`);
   win.destroy();
   app.exit(fail === 0 ? 0 : 1);

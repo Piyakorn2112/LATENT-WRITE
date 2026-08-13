@@ -1,3 +1,4 @@
+import { isSampleModeActive } from "./sample-mode";
 /**
  * review-store.ts — persistence for the wave-2 review answers (attribution
  * tie-breaks, scene near-misses, Chekhov promises), plus the selectors every
@@ -128,6 +129,7 @@ export async function loadReviewStoreFromProject(): Promise<AssistReviewStore | 
 }
 
 export function saveReviewStore(store: AssistReviewStore): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
     // a live session; route the data to local storage rather than losing it.

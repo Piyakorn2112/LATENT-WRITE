@@ -1,0 +1,103 @@
+===TITLE===
+The Ferrier Light
+
+===AUTHOR===
+A Latent Write sample
+
+===DESCRIPTION===
+A keeper, a stranger the tide brought in, and a harbour ledger that does not agree with itself. This short story is here for you to explore the app. Edit anything. It is safe to break, and you can always reset it.
+
+===WORLD-DATA===
+{
+  "characters": [
+    { "name": "Iris Vane", "aliases": ["Iris"], "role": "Keeper of the Ferrier Light" },
+    { "name": "Callum Rees", "aliases": ["Rees", "Callum"], "role": "The stranger the tide brought in" },
+    { "name": "Odessa Krum", "aliases": ["Odessa"], "role": "Harbourmaster" },
+    { "name": "Anselm Vane", "aliases": ["Anselm"], "role": "Iris's brother, at sea" },
+    { "name": "Peel", "role": "The Marsh boy" },
+    { "name": "Doctor Leas", "role": "The town doctor" },
+    { "name": "Widow Tam", "aliases": ["the widow Tam"], "role": "Keeps the spare room" }
+  ],
+  "places": [
+    { "name": "Saltcombe", "type": "town" },
+    { "name": "Ferrier Light", "aliases": ["the Light"], "type": "lighthouse" },
+    { "name": "Lantern Bridge", "type": "bridge" },
+    { "name": "Tidegate", "type": "harbour gate" },
+    { "name": "Exley", "type": "town" }
+  ],
+  "factions": [],
+  "entities": [],
+  "castReviewed": true
+}
+
+===CHAPTER 1: The Keeper===
+
+The light turned whether anyone watched it or not. That was the first thing Iris Vane told visitors, back when Saltcombe still had visitors, and it was the thing she repeated to herself now on the nights when the fog came up the estuary and swallowed the town whole. The Ferrier Light did not need her faith. It needed oil, a clean lens, and somebody to climb the hundred and nine steps when the wind tried to argue.
+
+She was thirty-one years old, made mostly of wool and stubbornness, and she had her family's eyes, a pale grey that people in town called sea-glass when they were being kind. Her brother Anselm had the same eyes. He was somewhere south of the equator now, third mate on a grain ship, and his letters arrived in bundles of three or not at all.
+
+"You could sell the Light," Odessa Krum told her every quarter, when Iris came down to the harbour office to collect her stipend. Odessa was the harbourmaster, a broad, deliberate woman who wore her spectacles on a chain of knotted twine. "The Trust would buy it. They would put a machine in it."
+
+"A machine can't smell weather," Iris said.
+
+"A machine doesn't need to."
+
+It was an old argument and they both enjoyed it the way other people enjoyed cards. Afterwards Iris walked home the long way, over the Lantern Bridge, where the boys of the town fished for crabs with bacon on string, and up the cliff path with the day's bread under her arm. From the gallery of the Light she could see the whole crooked town below, the Tidegate standing open for the evening boats, the chimneys leaning together like gossips.
+
+It was a small life. She had chosen it twice, once when she took the post and once, harder, when she turned down a man in Exley who had wanted her to leave it. On clear nights she wound the mechanism, trimmed the wick, and read her brother's old letters while the beam swept the sea like a slow hand smoothing a sheet.
+
+She was reading one of them, the letter about the albatross, on the night the sea decided to give something back.
+
+===CHAPTER 2: What the Tide Brought===
+
+The Marsh boy found him. Peel, twelve years old, out on the flats before dawn with a lantern and a clam rake, saw what he took for a seal lying in the weed below the Tidegate, and then the seal put out a human hand.
+
+By the time Iris got down the cliff path, half the town stood in a ring on the shingle. The man lay on Odessa's spread oilskin, breathing in long rags. He was perhaps forty. Salt had bleached white lines into his coat, and his boots were good leather, town-made, not sea boots at all.
+
+"Nobody swims into Saltcombe," said Odessa, to no one in particular. "The current runs out."
+
+The man opened his eyes, pale green, salt-stung, found Iris in the ring of faces, and held on to her the way a man holds a rail in weather.
+
+"The light," he said. "I steered on the light."
+
+"Then you steered well," Iris said. "What's your name?"
+
+"Callum Rees." He said it carefully, the way people say a thing they have just decided. Doctor Leas arrived with his bag and his bad hip, ordered the crowd back, and pronounced the stranger half-drowned, half-frozen, and wholly lucky.
+
+They carried him up to the widow Tam's spare room, because the widow Tam had the only spare room in Saltcombe that did not smell of nets. All that day the town talked. No wreck had been reported. No boat was missing from any harbour within a day's sail. The coat was good wool. The boots were good leather. And a man with no boat had come out of a sea that runs out, on the first night of the neap tide, steering on her light.
+
+At dusk Iris climbed her hundred and nine steps and stood a long time at the gallery rail without lighting the lamp. Below in the town a window glowed yellow at the widow Tam's, and she caught herself watching it, and lit the lamp, and was angry with herself without being able to say why.
+
+===CHAPTER 3: The Ledger===
+
+Odessa Krum kept the harbour ledger with a percision that would of shamed the church clock, and she kept it in a hand so small and upright that reading it felt like being lectured. Every vessel in and out of the Tidegate for thirty-one years was in that book. So when Callum Rees, three days on his feet now and walking the town like a man measuring it, asked to see the ledger, Odessa did not say no. She said, "Why," which in Saltcombe is a longer conversation.
+
+"I'm looking for a ship," he said. "The Corveste. She'd have called here the autumn the bridge went down."
+
+Iris, who had come for her stipend and stayed for the argument, looked up. "The bridge has never gone down."
+
+"The stone one," Rees said. "By the mill."
+
+"The Lamplight Bridge," Iris said slowly, "has stood since my grandmother's time."
+
+"Then I'm misremembering," he said, and smiled a smile that arrived a half-second late, and Iris caught herself noticing his eyes, dark brown, the colour of kelp in deep water, and noticing too that he had turned the pages of the ledger backwards, from the newest, like a man who knew the year he wanted and did not wish to be seen finding it.
+
+That night she wrote to Anselm. He came out of the sea two nights ago, she wrote, then crossed it out, because the letter would take three months to reach him and by then whatever the truth was would have finished happening. She wrote instead about the weather, the lamp oil, Peel's crabs. She did not write that the ledger for the autumn of the Corveste was missing four pages, cut so close to the spine that only Odessa's ruler had found the stubs. She did not write that Odessa had gone quiet as a held breath, or that Rees had thanked them both and gone out into the rain without his coat, or that from the gallery that night she had watched his window at the widow Tam's until it went dark.
+
+Some things you do not put in letters. Some things you keep, the way the sea keeps things, until you understand what they are.
+
+===CHAPTER 4: The Crossing===
+
+The storm came up the estuary on a Sunday, the worst since the year Iris took the post. By four the Tidegate was shut. By six the fishing fleet was double-lashed inside the harbour wall and the town had gone indoors to listen to its roofs.
+
+Iris was halfway up the tower stairs with the storm lantern when she saw, through the slit window on the sixty-fourth step, a figure on the harbour wall. Out past the Tidegate, where the wall runs bare into open water, a man stood leaning into the wind. He was working at something with both hands. The signal mast. The storm mast, that carries the red lamp that tells ships the harbour is shut.
+
+He was taking the lamp down.
+
+She did not remember the rest of the stairs. She lit the great lamp early, out of hours, against every regulation in the keeper's book, and swung the beam down and held it on the harbour wall like a long white finger. The figure froze. In the beam, in the rain, Callum Rees looked up at the Light, and across half a mile of storm she saw him understand that he was seen.
+
+By the time Odessa's men reached the wall he was gone, and the red lamp was back on its hook, hung wrong, hung upside down. On the flood the next morning a ship stood off the bar, a lean grey ship with no name painted, waited an hour, and turned away south. Rees was not at the widow Tam's. His good boots stood by the bed. The window was open to the sea.
+
+They never found him, which in Saltcombe is not the same as saying he was never found. Peel swears to this day there were two sets of prints on the flats, walking out. Odessa ruled the ledger shut with a line of red ink and spoke of it no more. And Iris Vane climbed her hundred and nine steps that night and every night after, and wound the mechanism, and trimmed the wick, and watched the beam go out and out and out over the water, asking the sea, the way keepers always have, to give back what it knows.
+
+The light turned whether anyone watched it or not. But somebody watched it. That was the point, she would have told you. That was always the point.

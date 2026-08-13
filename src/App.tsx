@@ -8,7 +8,7 @@ import { EntityPopover } from "./components/EntityPopover";
 import { MaxAskPopover } from "./components/MaxAskPopover";
 import { WritingToolPopover } from "./components/WritingToolPopover";
 import { runWritingTool, planWritingBatches, applyRevision, WRITING_TASK, type WritingOp } from "./lib/writing-tool";
-import { buildAskInput, splitEngineParagraphs } from "./lib/max-ask-context";
+import { buildAskInput, splitEngineParagraphs, paragraphIndexAt } from "./lib/max-ask-context";
 import { AnnotationPopover } from "./components/AnnotationPopover";
 import { DebugPanel } from "./components/DebugPanel";
 
@@ -20,6 +20,7 @@ import { FindReplace } from "./components/FindReplace";
 import { WordCount } from "./components/WordCount";
 import { ProjectSearch } from "./components/ProjectSearch";
 import { Onboarding } from "./components/Onboarding";
+import { OnboardingChecklist, SampleBadge } from "./components/OnboardingChecklist";
 import { PdfExportOverlay } from "./components/PdfExportOverlay";
 import { novelToMarkdown, novelToDocx, downloadBlob } from "./lib/text-export";
 import { newChapter, parseNovel, serializeNovel, uid, emptyNovel } from "./lib/parser";
@@ -41,6 +42,9 @@ import {
   saveCurrentChapterId,
   clearProjectLocalStorage,
 } from "./lib/storage";
+import { buildSampleNovel } from "./lib/sample-story";
+import { setSampleModeActive, isSampleModeActive } from "./lib/sample-mode";
+import { recordOnb } from "./lib/onboarding-log";
 import {
   emptyStoryGraph,
   loadStoryGraph, loadStoryGraphFromProject,
@@ -363,6 +367,17 @@ export default function App() {
     if (!pAssistReviews || nextAssistReviews !== pAssistReviews) saveReviewStore(nextAssistReviews);
   }, [commitKnowledgeStore]);
 
+  // ── The sample-story sandbox ────────────────────────────────────────────
+  // While true, the open novel is the shipped sample: in memory only, every
+  // persistence path suppressed (this state mirrors the module latch in
+  // sample-mode.ts — the latch is what the guards read, this is what the UI
+  // reads). Entering and leaving go through enterSample/exitSample below.
+  const [sampleMode, setSampleMode] = useState(false);
+  // Whether the writer had words of their own when the sample opened — it
+  // decides the welcome screen's second door ("Start your own book" vs
+  // "Back to your book") while the real book is parked in its store.
+  const preSampleHadWordsRef = useRef(false);
+
   // ── Desktop project hydration ──────────────────────────────────────────
   // On mount in Electron: reopen the last project and load all state from
   // the project filesystem. Desktop mode never reads/writes localStorage
@@ -418,8 +433,10 @@ export default function App() {
   }, [hydrateProjectState]);
 
   const needsProjectSaveWarning = useMemo(
-    () => !!window.electronAPI && !desktopProjectOpen && hasDesktopDraftContent(novel),
-    [desktopProjectOpen, novel],
+    // The sample is deliberately unsaved — nagging the writer to choose a
+    // folder for a story they didn't write would be the draft guard lying.
+    () => !!window.electronAPI && !desktopProjectOpen && !sampleMode && hasDesktopDraftContent(novel),
+    [desktopProjectOpen, novel, sampleMode],
   );
 
   useEffect(() => {
@@ -491,7 +508,10 @@ export default function App() {
   const maxAskAvailable = assistantMode(prefs) === "max"
     && typeof window !== "undefined" && !!window.electronAPI;
   const handleAskParagraph = maxAskAvailable
-    ? (info: { chapterId: string; paragraphIndex: number; x: number; y: number }) => setMaxAsk(info)
+    ? (info: { chapterId: string; paragraphIndex: number; x: number; y: number }) => {
+        recordOnb("ask-used");
+        setMaxAsk(info);
+      }
     : undefined;
 
   // ── The writing tool (max mode): right-click WITH a selection ──────────
@@ -505,10 +525,48 @@ export default function App() {
   const writingJobRef = useRef<{ chapterId: string; start: number; spanLen: number; original: string } | null>(null);
   const handleWriteSelection = maxAskAvailable
     ? (info: { chapterId: string; start: number; end: number; x: number; y: number }) => {
+        recordOnb("rewrite-used");
         writingJobRef.current = null;
         setWritingSel(info);
       }
     : undefined;
+
+  /** The first-words moments of the local first-session record. Wired into
+   *  every editor onContentChange — recordOnb is idempotent per kind, so
+   *  after the first keystroke these are cache-hit no-ops. */
+  const recordOnbEdit = () => {
+    recordOnb("first-edit");
+    if (!isSampleModeActive()) recordOnb("first-own-edit");
+  };
+
+  /** The rail's visible twin of the two right-click gestures. Reads the
+   *  caret (or selection) straight off the active textarea — selection state
+   *  survives the focus moving to the rail button — and routes exactly like
+   *  the context menu: selection → rewrite, bare caret → ask. The popover
+   *  clamps itself into the viewport from the rail anchor. */
+  const handleAskAtCaret = (anchor: DOMRect) => {
+    const target = activeChapter;
+    if (!target) return;
+    const ta = document.querySelector<HTMLTextAreaElement>(
+      prefs.splitView
+        ? `.split-pane--${activeSide} .document-editor`
+        : ".document-editor",
+    );
+    const selStart = ta?.selectionStart ?? 0;
+    const selEnd = ta?.selectionEnd ?? 0;
+    const x = anchor.left;
+    const y = anchor.top;
+    if (ta && selEnd > selStart && handleWriteSelection) {
+      handleWriteSelection({ chapterId: target.id, start: selStart, end: selEnd, x, y });
+      return;
+    }
+    handleAskParagraph?.({
+      chapterId: target.id,
+      paragraphIndex: paragraphIndexAt(target.content, selStart),
+      x,
+      y,
+    });
+  };
 
   /** Called with every editor content change so an edit ABOVE the in-flight
    *  span shifts its offsets; an edit that touches the span (the lock should
@@ -807,6 +865,10 @@ export default function App() {
   // Recompute todayWords whenever novel changes. Use deltas vs the session
   // baseline; saturate at 0 so deletions don't drive a negative count.
   useEffect(() => {
+    // Sample words are not the writer's words: the counter freezes and the
+    // store stays untouched while the sandbox is open. (Module flag, not the
+    // state mirror — it is synchronously correct on the entry commit.)
+    if (isSampleModeActive()) return;
     const today = todayKey();
     if (today !== dateRef.current) {
       // Crossed midnight — start a fresh day's count.
@@ -1872,25 +1934,40 @@ export default function App() {
     return totalWordsInNovel(n) >= 2000;
   }, []);
 
-  // Offer once per session at mount (deferred while onboarding is up so the
-  // first-launch flow stays: welcome → editor → cast question).
-  useEffect(() => {
-    if (onboardingOpen || castPromptOfferedRef.current) return;
-    if (castPromptNeeded(novel)) {
+  // ★★ THE CAST QUESTION FIRES AT ITS OWN MOMENT, NOT AT WELCOME-CLOSE.
+  //    The old sequencing (an effect keyed on [onboardingOpen]) stacked the
+  //    dialog over the editor the instant the tour closed — two modal layers
+  //    before a single word could be written, the worst finding of the
+  //    onboarding audit. The question now has exactly two natural moments:
+  //    a fresh import (below, unchanged — the writer just handed us a whole
+  //    book), and the first opening of the World panel, where the answer has
+  //    a visible payoff: the panel the writer asked for opens populated with
+  //    what they just confirmed. If they never open World, the auto-extract
+  //    fallback carries on and no modal ever interrupts them.
+  const worldAfterCastRef = useRef(false);
+  const openWorldPanel = useCallback(() => {
+    recordOnb("world-opened");
+    if (!castPromptOfferedRef.current && castPromptNeeded(novel)) {
       castPromptOfferedRef.current = true;
+      worldAfterCastRef.current = true;
       setCastConfirmOpen(true);
+      return;
     }
-    // Intentionally NOT keyed on `novel` — reruns only when onboarding
-    // closes, so the prompt can never pop mid-typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onboardingOpen]);
+    setWorldOpen(true);
+  }, [castPromptNeeded, novel]);
 
   const handleCastConfirm = useCallback((wd: WorldData) => {
+    recordOnb("cast-confirmed");
     setNovel((n) => ({ ...n, worldData: wd }));
     setCastConfirmOpen(false);
+    if (worldAfterCastRef.current) {
+      worldAfterCastRef.current = false;
+      setWorldOpen(true);
+    }
   }, []);
 
   const handleCastSkip = useCallback(() => {
+    recordOnb("cast-skipped");
     // Record the answer so the question is never re-asked for this book;
     // empty buckets keep every other code path on its auto-extract fallback.
     setNovel((n) => ({
@@ -1898,6 +1975,10 @@ export default function App() {
       worldData: { ...(n.worldData ?? emptyWorldData()), castReviewed: true },
     }));
     setCastConfirmOpen(false);
+    if (worldAfterCastRef.current) {
+      worldAfterCastRef.current = false;
+      setWorldOpen(true);
+    }
   }, []);
 
   const handleEntityPredictionFeedback = useCallback((
@@ -1926,6 +2007,7 @@ export default function App() {
   // Stable callback identity — feeds into HighlightLayer's useMemo dep list,
   // so a fresh lambda per render would invalidate the memo every keystroke.
   const handleEntityClick = useCallback((name: string, anchor: DOMRect) => {
+    recordOnb("entity-clicked");
     setEntityPopover({ name, anchor });
   }, []);
 
@@ -2209,10 +2291,106 @@ export default function App() {
     }, 280);
   }, [activeChapter, sceneBreaking, analysisResult, updateChapterById]);
 
+  // ── The sample-story sandbox: enter, exit, and the welcome doors ────────
+
+  const enterSample = useCallback(() => {
+    if (!isSampleModeActive()) {
+      // Park the real book first: flush the debounced autosave so the last
+      // keystrokes are on disk before the latch closes every write path,
+      // and remember whether there were words to come back to.
+      cancelPendingProjectSave();
+      flushSave();
+      preSampleHadWordsRef.current = totalWordsInNovel(novel) > 0;
+    }
+    setSampleModeActive(true);
+    setSampleMode(true);
+    const sample = buildSampleNovel();
+    // History must not cross the boundary in either direction — an undo
+    // stack that does could resurrect sample prose into the real book.
+    undoRedo.reset();
+    setNovel(sample);
+    setCurrentId(sample.chapters[0]?.id ?? null);
+    baselineRef.current = totalWordsInNovel(sample);
+    setStoryGraph(emptyStoryGraph());
+    setReviewResults({});
+    setAnnotationStore(clearAnnotations());
+    setAdaptiveStore(emptyAdaptiveStore());
+    commitKnowledgeStore(emptyKnowledgeLedger());
+    const clearedReviews = emptyReviewStore();
+    assistReviewsRef.current = clearedReviews;
+    setAssistReviews(clearedReviews);
+    setAnnotationTarget(null);
+    setEntityPopover(null);
+    setToolHighlights([]);
+  }, [novel, flushSave, cancelPendingProjectSave, undoRedo, commitKnowledgeStore]);
+
+  const exitSample = useCallback(async () => {
+    if (!isSampleModeActive()) return;
+    recordOnb("sample-exit");
+    // Latch opens first; the sandbox stores were never written, so the
+    // restore below reads exactly what the writer left.
+    setSampleModeActive(false);
+    setSampleMode(false);
+    undoRedo.reset();
+    setAnnotationTarget(null);
+    setEntityPopover(null);
+    setToolHighlights([]);
+    if (desktopProjectOpen) {
+      await hydrateProjectState();
+      return;
+    }
+    const restored = loadNovel();
+    const savedId = loadCurrentChapterId();
+    setNovel(restored);
+    setCurrentId(
+      savedId && restored.chapters.some((c) => c.id === savedId)
+        ? savedId
+        : restored.chapters[0]?.id ?? null,
+    );
+    baselineRef.current = totalWordsInNovel(restored);
+    setStoryGraph(loadStoryGraph());
+    setReviewResults(loadReviewResults());
+    setAnnotationStore(loadAnnotationStore());
+    setAdaptiveStore(loadAdaptiveStore());
+    commitKnowledgeStore(loadKnowledgeLedger());
+    const reviews = loadReviewStore();
+    assistReviewsRef.current = reviews;
+    setAssistReviews(reviews);
+  }, [desktopProjectOpen, hydrateProjectState, undoRedo, commitKnowledgeStore]);
+
+  const handleOpenSample = useCallback(() => {
+    if (isSampleModeActive()) recordOnb("sample-reset");
+    recordOnb("door-sample");
+    enterSample();
+    setOnboardingOpen(false);
+    setPrefs((p) => ({ ...p, hasSeenOnboarding: true }));
+  }, [enterSample]);
+
+  const handleStartOwn = useCallback(() => {
+    setOnboardingOpen(false);
+    setPrefs((p) => ({ ...p, hasSeenOnboarding: true }));
+    if (isSampleModeActive()) {
+      void exitSample().then(() => {
+        if (!preSampleHadWordsRef.current) {
+          recordOnb("door-own");
+          handleAddChapter();
+        }
+      });
+      return;
+    }
+    if (totalWordsInNovel(novel) === 0) {
+      recordOnb("door-own");
+      if (novel.chapters.length === 0) handleAddChapter();
+    }
+    // With words already there, this door is simply the way back to them.
+  }, [exitSample, handleAddChapter, novel]);
+
   // Onboarding dismissal — flip the persistent flag once so we never
   // auto-show it again. Re-opening via the Help menu doesn't update the
-  // flag (it's already true after first close).
+  // flag (it's already true after first close). Closing without choosing
+  // a door on the true first run is the one skip the local record keeps.
   const handleOnboardingClose = useCallback(() => {
+    if (!loadPrefs().hasSeenOnboarding) recordOnb("welcome-skipped");
     setOnboardingOpen(false);
     setPrefs((p) => ({ ...p, hasSeenOnboarding: true }));
   }, []);
@@ -2225,6 +2403,15 @@ export default function App() {
     if (!file) return;
     const text = await file.text();
     const parsed = parseNovel(text);
+    if (isSampleModeActive()) {
+      // Bringing a real draft in ends the sandbox. The latch must open
+      // BEFORE the explicit saves below, or the import itself would be
+      // silently suppressed by the sample-mode guards.
+      setSampleModeActive(false);
+      setSampleMode(false);
+      undoRedo.reset();
+    }
+    recordOnb("door-import");
     const nextChapterId = parsed.chapters[0]?.id ?? null;
     const clearedAnnotations = clearAnnotations();
     const clearedAdaptiveStore = emptyAdaptiveStore();
@@ -2247,7 +2434,7 @@ export default function App() {
       castPromptOfferedRef.current = true;
       setCastConfirmOpen(true);
     }
-  }, [castPromptNeeded, commitKnowledgeStore]);
+  }, [castPromptNeeded, commitKnowledgeStore, undoRedo]);
 
   // Jump from the panel's chapter observation to the paragraph it names.
   // Resolves the paragraph's offset in the live chapter text and reuses the
@@ -2369,7 +2556,7 @@ export default function App() {
         case "open-project":    handleOpenProject(); break;
         case "new-chapter":     handleAddChapter(); break;
         case "open-index":      setIndexOpen(true); break;
-        case "open-world":      setWorldOpen(true); break;
+        case "open-world":      openWorldPanel(); break;
         case "import-txt":      handleImport(); break;
         case "export-txt":      handleExport(); break;
         case "export-pdf":      handleExportPdf(); break;
@@ -2383,13 +2570,14 @@ export default function App() {
         case "prev-chapter":    handlePrev(); break;
         case "next-chapter":    handleNext(); break;
         case "show-welcome":    setOnboardingOpen(true); break;
+        case "show-checklist":  setPrefs((p) => ({ ...p, onbChecklistHidden: false })); break;
         case "undo":            handleUndo(); break;
         case "redo":            handleRedo(); break;
         case "split-view":      setPrefs((p) => ({ ...p, splitView: !p.splitView })); break;
       }
     });
     return off;
-  }, [handleAddChapter, handleImport, handleExport, handleExportPdf, handleExportMarkdown, handleExportDocx, flushSave, cycleIntel, handlePrev, handleNext, handleOpenProject, handleUndo, handleRedo]);
+  }, [handleAddChapter, handleImport, handleExport, handleExportPdf, handleExportMarkdown, handleExportDocx, flushSave, cycleIntel, handlePrev, handleNext, handleOpenProject, handleUndo, handleRedo, openWorldPanel]);
 
   useEffect(() => {
     if (!window.electronAPI?.isElectron) return;
@@ -2588,7 +2776,7 @@ export default function App() {
         onPrev={handlePrev}
         onNext={handleNext}
         onOpenIndex={() => setIndexOpen(true)}
-        onOpenWorld={() => setWorldOpen(true)}
+        onOpenWorld={openWorldPanel}
         onAddChapter={handleAddChapter}
         onImport={handleImport}
         onExport={handleExport}
@@ -2641,6 +2829,7 @@ export default function App() {
               key={current.id}
               chapter={current}
               onContentChange={(content) => {
+                recordOnbEdit();
                 noteWritingShift(current.id, current.content, content);
                 updateChapterById(current.id, (c) => ({ ...c, content }));
               }}
@@ -2676,6 +2865,7 @@ export default function App() {
               key={secondaryChapter.id}
               chapter={secondaryChapter}
               onContentChange={(content) => {
+                recordOnbEdit();
                 noteWritingShift(secondaryChapter.id, secondaryChapter.content, content);
                 updateChapterById(secondaryChapter.id, (c) => ({ ...c, content }));
               }}
@@ -2707,6 +2897,7 @@ export default function App() {
           key={current.id}
           chapter={current}
           onContentChange={(content) => {
+            recordOnbEdit();
             noteWritingShift(current.id, current.content, content);
             updateCurrent((c) => ({ ...c, content }));
           }}
@@ -2960,6 +3151,7 @@ export default function App() {
         onReviewComplete={handleReviewComplete}
         onProjectLoaded={handleProjectLoaded}
         onNovelRefresh={handleNovelRefresh}
+        onAskAtCaret={maxAskAvailable && activeChapter ? handleAskAtCaret : undefined}
         onAutoParagraph={activeChapter ? handleAutoParagraph : undefined}
         autoParagraphing={autoParagraphing}
         onAutoSceneBreak={
@@ -2970,7 +3162,10 @@ export default function App() {
         sceneBreaking={sceneBreaking}
         onImportTools={handleImportTools}
         onToolHighlights={handleToolHighlights}
-        onOpenChange={setAnalysisPanelOpen}
+        onOpenChange={(open) => {
+          if (open) recordOnb("analysis-opened");
+          setAnalysisPanelOpen(open);
+        }}
       />
 
       {current && prefs.debugPanel && analysisResult && (
@@ -3031,8 +3226,29 @@ export default function App() {
         </button>
       )}
 
+      {!onboardingOpen && !focusMode && (sampleMode || !prefs.onbChecklistHidden) && (
+        <div className="gs-dock">
+          {sampleMode && (
+            <SampleBadge onResetSample={handleOpenSample} onStartOwn={handleStartOwn} />
+          )}
+          {!prefs.onbChecklistHidden && (
+            <OnboardingChecklist
+              maxReady={maxAskAvailable}
+              onHide={() => setPrefs((p) => ({ ...p, onbChecklistHidden: true }))}
+            />
+          )}
+        </div>
+      )}
+
       {onboardingOpen && (
-        <Onboarding onClose={handleOnboardingClose} onTierChange={handleTierChange} />
+        <Onboarding
+          onClose={handleOnboardingClose}
+          onOpenSample={handleOpenSample}
+          onStartOwn={handleStartOwn}
+          hasOwnWords={sampleMode ? preSampleHadWordsRef.current : totalWordsInNovel(novel) > 0}
+          inSample={sampleMode}
+          onTierChange={handleTierChange}
+        />
       )}
 
       {toolImportState && (

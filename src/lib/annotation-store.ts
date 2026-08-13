@@ -1,3 +1,4 @@
+import { isSampleModeActive } from "./sample-mode";
 import type { AnnotationCorrection, AnnotationStore } from "../types";
 import { saveProjectState, loadProjectState, stateTarget } from "./project-manager";
 
@@ -25,6 +26,7 @@ export async function loadAnnotationStoreFromProject(): Promise<AnnotationStore 
 }
 
 export function saveAnnotationStore(store: AnnotationStore): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     // ★ A REFUSED WRITE MUST NOT DROP THE PAYLOAD. The project can close under
     // a live session; route the data to local storage rather than losing it.

@@ -18,6 +18,9 @@ export interface Preferences {
   /** Set to true once the user dismisses the welcome flow. Missing on first
    *  launch — we use that to decide whether to auto-show onboarding. */
   hasSeenOnboarding?: boolean;
+  /** The getting-started dock's dismissal. True = the writer closed it (or
+   *  finished the recap); the Help menu's "Getting Started" flips it back. */
+  onbChecklistHidden?: boolean;
   funMode?: boolean;
   debugPanel?: boolean;
   sidePanelCompensation?: boolean;
@@ -121,6 +124,7 @@ export function loadPrefs(): Preferences {
       typography: { ...DEFAULTS.typography, ...(p.typography ?? {}) },
       goals: { ...DEFAULTS.goals, ...(p.goals ?? {}) },
       hasSeenOnboarding: p.hasSeenOnboarding,
+      onbChecklistHidden: p.onbChecklistHidden === true ? true : undefined,
       funMode: p.funMode ?? DEFAULTS.funMode,
       debugPanel: p.debugPanel ?? DEFAULTS.debugPanel,
       sidePanelCompensation: p.sidePanelCompensation ?? DEFAULTS.sidePanelCompensation,

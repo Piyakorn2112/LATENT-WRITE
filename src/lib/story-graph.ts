@@ -1,3 +1,4 @@
+import { isSampleModeActive } from "./sample-mode";
 import type { Chapter, MajorEvent, WorldData } from "../types";
 import type { ChapterGraphEntry, StoryGraph } from "../types";
 import type { ChapterAnalysisResult } from "./use-analysis";
@@ -43,6 +44,7 @@ export async function loadStoryGraphFromProject(): Promise<StoryGraph | null> {
 }
 
 export function saveStoryGraph(g: StoryGraph): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     // A refused write means the project closed under us; keep the draft
     // rather than dropping it on the floor.

@@ -15,6 +15,10 @@ export interface UndoRedoHandle {
   undo: () => Novel | null;
   redo: () => Novel | null;
   flush: () => void;
+  /** Drop all history. Called at the sample-mode boundary in both
+   *  directions — an undo stack that crosses it could resurrect sample
+   *  prose into the real book (and the autosave would then persist it). */
+  reset: () => void;
 }
 
 export function useUndoRedo(): UndoRedoHandle {
@@ -94,5 +98,17 @@ export function useUndoRedo(): UndoRedoHandle {
     return JSON.parse(next) as Novel;
   }, [flush, syncFlags]);
 
-  return { canUndo, canRedo, push, undo, redo, flush };
+  const reset = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    pendingRef.current = null;
+    undoRef.current = [];
+    redoRef.current = [];
+    currentRef.current = null;
+    syncFlags();
+  }, [syncFlags]);
+
+  return { canUndo, canRedo, push, undo, redo, flush, reset };
 }

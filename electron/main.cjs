@@ -249,6 +249,10 @@ function buildMenu() {
           label: 'Welcome to Latent Write',
           click: () => sendMenuCommand('show-welcome'),
         },
+        {
+          label: 'Getting Started',
+          click: () => sendMenuCommand('show-checklist'),
+        },
       ],
     },
   ];

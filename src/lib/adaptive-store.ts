@@ -1,3 +1,4 @@
+import { isSampleModeActive } from "./sample-mode";
 import type {
   AdaptiveLearningStore,
   AdaptivePredictionRecord,
@@ -76,6 +77,7 @@ export async function loadAdaptiveStoreFromProject(): Promise<AdaptiveLearningSt
 }
 
 export function saveAdaptiveStore(store: AdaptiveLearningStore): void {
+  if (isSampleModeActive()) return;
   const persisted = {
     ...store,
     predictions: store.predictions

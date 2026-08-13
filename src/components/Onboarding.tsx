@@ -1,77 +1,71 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ChevronLeft, ChevronRight, CloseIcon } from "./Icon";
-import { TensionWidget } from "./widgets/TensionWidget";
-import { ProseProfileWidget } from "./widgets/ProseProfileWidget";
-import rendererLogoUrl from "../assets/renderer-logo.svg";
-import type { ChapterAnalysis } from "../lib/use-analysis";
+import { useEffect, useState, type CSSProperties } from "react";
+import { ChevronRight, CloseIcon } from "./Icon";
 import { activateCode } from "../lib/license";
-import { OrbEngine } from "./orb/OrbEngine";
+import { recordOnb } from "../lib/onboarding-log";
 
-// Mirrors the flag in Toolbar.tsx — flip to false to restore the legacy
-// CSS mesh-dot hero orb below, which is left fully intact.
-const USE_ORB_ENGINE: boolean = true;
+/**
+ * The welcome screen. ONE screen, two doors, then the app teaches inside
+ * itself.
+ *
+ * ★★ THE SEVEN-CARD TOUR IS RETIRED, NOT REDESIGNED. The research pass
+ *    (plans/onboarding-reimagine-2026-08.md §4) was unanimous: no serious
+ *    creative tool ships a card slideshow any more, auto-fired linear tours
+ *    lose 2-3x to contextual help, and working memory holds an unused
+ *    instruction about twenty seconds, so a gesture taught on card 4 is gone
+ *    before the editor opens. What survives here is the one thing a full
+ *    screen earns: the mental model (a reader built in, everything local)
+ *    and a choice of where to learn it. The teaching itself now lives where
+ *    the research says it works, in the real app at the moment of relevance:
+ *    the sample story carries the material, the checklist carries the path,
+ *    and the gesture hint fires when the gesture actually exists.
+ *
+ * ★ BOTH DOORS ARE REAL WORK. "Open the sample story" starts the sandbox
+ *   (in-memory, never persisted, resets on reopen, and the copy SAYS so,
+ *   because a safety that isn't advertised doesn't license exploration).
+ *   "Start your own book" opens a first chapter ready to type into. There is
+ *   no forced order, no Next, and closing is a guilt-free skip.
+ */
 
 // Each "mode" reuses the production orb's pre-saturated palette. Keeps the
 // welcome experience visually identical to the toolbar orb users see later.
-type IntelMode = "fast" | "default" | "high" | "auto";
+type IntelMode = "fast" | "default" | "high";
 
 type OrbPalette = { a: string; b: string; c: string };
 
-const ORB_COLORS: Record<Exclude<IntelMode, "auto">, OrbPalette> = {
+const ORB_COLORS: Record<IntelMode, OrbPalette> = {
   fast:    { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
   default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
   high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
 };
 
-const ORB_ACCENT_COLORS: Record<Exclude<IntelMode, "auto">, OrbPalette> = {
+const ORB_ACCENT_COLORS: Record<IntelMode, OrbPalette> = {
   fast:    { a: "#34A8FF", b: "#7DE8FF", c: "#C7FFD0" },
   default: { a: "#7080FF", b: "#9FEEFF", c: "#FFAB92" },
   high:    { a: "#5B79FF", b: "#8CE5FF", c: "#FFC38E" },
 };
 
-const MODE_ORDER: Exclude<IntelMode, "auto">[] = ["default", "high", "fast"];
+const MODE_ORDER: IntelMode[] = ["default", "high", "fast"];
 
-const paletteStyleVars = (palette?: OrbPalette): CSSProperties | undefined => palette
-  ? ({ "--orb-a": palette.a, "--orb-b": palette.b, "--orb-c": palette.c } as CSSProperties)
-  : undefined;
+const paletteStyleVars = (palette: OrbPalette): CSSProperties =>
+  ({ "--orb-a": palette.a, "--orb-b": palette.b, "--orb-c": palette.c } as CSSProperties);
 
 // ─── HeroOrb ──────────────────────────────────────────────────────────────
-function HeroOrb({
-  mode,
-  size = 220,
-  topPalette,
-  underPalette,
-  accentPalette,
-}: {
-  mode: IntelMode;
-  size?: number;
-  topPalette?: OrbPalette;
-  underPalette?: OrbPalette;
-  accentPalette?: OrbPalette;
-}) {
-  const isAuto = mode === "auto";
-  const resolvedPalette = !isAuto ? ORB_COLORS[mode] : undefined;
-  const resolvedAccentPalette = !isAuto ? ORB_ACCENT_COLORS[mode] : undefined;
-  const topStyleVars = paletteStyleVars(topPalette ?? resolvedPalette);
-  const underStyleVars = paletteStyleVars(underPalette ?? resolvedPalette);
-  const accentStyleVars = paletteStyleVars(accentPalette ?? resolvedAccentPalette);
+// ★★ THE SCALED PRODUCTION DOT, NOT THE CANVAS ENGINE. OrbEngine at hero
+//    size decomposes into six flat ellipses — the engine's geometry is tuned
+//    for a 20px toolbar dot, and magnifying the canvas magnifies its parts
+//    instead of its glow. This markup scales the REAL .intel-mesh-dot (with
+//    its ghost and accent layers and the slowed hero animation timings the
+//    stylesheet keeps for exactly this block), so the hero is the toolbar
+//    orb as users will actually recognise it, just closer.
+function HeroOrb({ mode, size = 170 }: { mode: IntelMode; size?: number }) {
   const scale = size / 20;
-  if (USE_ORB_ENGINE) {
-    return (
-      <div className="onb-orb" style={{ width: size, height: size }}>
-        {/* flowScale < 1 — at hero scale the toolbar flow speed reads
-            frantic, same reason the legacy orbits were slowed ~2.6×. */}
-        <OrbEngine mode={mode} size={size} flowScale={0.45} />
-      </div>
-    );
-  }
   return (
     <div className="onb-orb" style={{ width: size, height: size }}>
       <div
         className="onb-orb-stage"
         style={{ transform: `scale(${scale})`, transformOrigin: "center" }}
       >
-        <span className="intel-mesh-dot" data-mode={mode} style={topStyleVars}>
+        <span className="intel-mesh-dot" data-mode={mode} style={paletteStyleVars(ORB_COLORS[mode])}>
           {[0, 1, 2, 3, 4, 5].map((i) => (
             <span key={i} className="intel-mesh-dot-orb" />
           ))}
@@ -79,7 +73,7 @@ function HeroOrb({
         <span
           className="intel-mesh-dot intel-mesh-dot--ghost"
           data-mode={mode}
-          style={underStyleVars}
+          style={paletteStyleVars(ORB_COLORS[mode])}
           aria-hidden="true"
         >
           {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -89,7 +83,7 @@ function HeroOrb({
         <span
           className="intel-mesh-dot intel-mesh-dot--accent"
           data-mode={mode}
-          style={accentStyleVars}
+          style={paletteStyleVars(ORB_ACCENT_COLORS[mode])}
           aria-hidden="true"
         >
           {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -101,440 +95,41 @@ function HeroOrb({
   );
 }
 
-function CyclingOrb({ active, size = 220 }: { active: boolean; size?: number }) {
+function CyclingOrb({ size = 170 }: { size?: number }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
-    if (!active) return;
     const id = window.setInterval(() => setIdx((i) => (i + 1) % MODE_ORDER.length), 4000);
     return () => window.clearInterval(id);
-  }, [active]);
+  }, []);
   return <HeroOrb mode={MODE_ORDER[idx]} size={size} />;
 }
 
-// ─── Mock data ────────────────────────────────────────────────────────────
-// Static, hand-tuned snapshot — renders the actual production widgets so
-// what users see here is exactly what they'll see in the analysis panel.
-const MOCK_TENSION_ANALYSIS = {
-  tensionCurve: [
-    0.22, 0.55, 0.30, 0.48, 0.18, 0.62, 0.35, 0.78, 0.55, 0.88,
-    0.40, 0.30, 0.72, 0.96, 0.58, 0.82, 0.42, 0.55,
-  ],
-  peakTension: "high",
-  arcShape: "double-peak",
-  peakLabel: "confrontation",
-  guidance: { peakPosition: 78 },
-  highModeAnalysis: undefined,
-} as unknown as ChapterAnalysis;
-
-const MOCK_PROSE_TEXT = `The rain caught him at the bridge. He pulled his coat tight and pressed forward into the wind. Sarah's voice still echoed in his head, soft and unsure, the way she had said his name. A car hissed past, headlights bleached against wet stone. He thought of turning back. He did not turn back. The river beneath ran black and silver, swollen with the storm. Somewhere downstream a bell tolled three quick beats, then silence. He counted his steps to the far end and walked them without looking up.`;
-
-function MockTensionWidget() {
-  return <TensionWidget analysis={MOCK_TENSION_ANALYSIS} />;
-}
-
-/** Kept beside the tension mock because the two are a pair in the panel, even
- *  though the tour now shows one at a time. */
-export function MockProseProfileWidget() {
-  return <ProseProfileWidget content={MOCK_PROSE_TEXT} />;
-}
-
-// ─── Page 1 hero: Editor mock ─────────────────────────────────────────────
-// A CSS-art illustration of the writing editor — toolbar strip + prose lines.
-// The tiny cycling orb in the toolbar matches what the user will see after
-// they start writing.
-function EditorMockHero({ active }: { active: boolean }) {
-  return (
-    <div className="onb-editor-mock">
-      <div className="onb-editor-mock-toolbar">
-        <div className="onb-editor-mock-toolbar-dots">
-          <span className="onb-editor-mock-dot" />
-          <span className="onb-editor-mock-dot" />
-          <span className="onb-editor-mock-dot" />
-        </div>
-        <span className="onb-editor-mock-chapter-nav">Chapter 1 · The Bridge</span>
-        <div className="onb-editor-mock-toolbar-orb">
-          <CyclingOrb active={active} size={20} />
-        </div>
-      </div>
-      <div className="onb-editor-mock-body">
-        <div className="onb-editor-mock-title-line" />
-        <div className="onb-editor-mock-lines">
-          {[88, 72, 94, 48, 83, 66, 91, 57].map((w, i) => (
-            <div
-              key={i}
-              className="onb-editor-mock-line"
-              style={{ width: `${w}%` } as CSSProperties}
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Page 2 hero: the Index and World panels ──────────────────────────────
-//
-// ★★ REBUILT FROM THE REAL MARKUP. The old mock invented two side-by-side
-//    cards headed "Chapter Index" and "World Data", and neither panel is
-//    called that or looks like that: both are full overlays titled "Index" and
-//    "World", both carry TABS with counts, and the chapter rows are
-//    zero-padded numbers with a word count under the title. A writer who
-//    learned this picture then opened the real panel would be looking for
-//    furniture that was never there.
-//
-//    So these use the shipping classes — `.world-header`, `.world-title`,
-//    `.world-tabs`, `.world-tab`, `.world-tab-count`, `.chapter-card-*`,
-//    `.world-row-*` — and inherit the real type, spacing and states.
-/** ★ THREE ROWS, BECAUSE THREE IS WHAT FITS. Four clipped the last card
- *   mid-height and the panel read as broken rather than as scrolled. The tab
- *   count still says 4, which is what a real panel with more rows than window
- *   does. */
-const STRUCT_CHAPTERS: Array<{ n: number; title: string; words: string }> = [
-  { n: 1, title: "The Bridge", words: "2,140 words" },
-  { n: 2, title: "City Plaza", words: "1,880 words" },
-  { n: 3, title: "Glass Tower", words: "2,305 words" },
-];
-const STRUCT_CAST: Array<{ name: string; role: string }> = [
-  { name: "Nora", role: "Protagonist" },
-  { name: "Mira", role: "Sister" },
-  { name: "Kestrel", role: "" },
-];
-
-function StructureHero() {
-  return (
-    <div className="onb-struct-panels">
-      <div className="onb-panelmock">
-        <div className="world-header onb-panelmock-header">
-          <h2 className="world-title">Index</h2>
-        </div>
-        <div className="world-tabs onb-panelmock-tabs">
-          <span className="world-tab world-tab--active">
-            <span>Chapters</span><span className="world-tab-count">3</span>
-          </span>
-          <span className="world-tab"><span>Book Info</span></span>
-        </div>
-        <div className="chapter-list onb-panelmock-body">
-          {STRUCT_CHAPTERS.map((c) => (
-            <div key={c.n} className="chapter-card-wrap onb-panelmock-row">
-              <span className="chapter-card-num">{String(c.n).padStart(2, "0")}</span>
-              <span className="chapter-card-body">
-                <span className="chapter-card-title">{c.title}</span>
-                <span className="chapter-card-meta">{c.words}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="onb-panelmock">
-        <div className="world-header onb-panelmock-header">
-          <h2 className="world-title">World</h2>
-        </div>
-        <div className="world-tabs onb-panelmock-tabs">
-          <span className="world-tab world-tab--active">
-            <span>Characters</span><span className="world-tab-count">3</span>
-          </span>
-          <span className="world-tab">
-            <span>Places</span><span className="world-tab-count">2</span>
-          </span>
-          <span className="world-tab"><span>Factions</span></span>
-          <span className="world-tab"><span>Entities</span></span>
-        </div>
-        <div className="onb-panelmock-body">
-          {STRUCT_CAST.map((c) => (
-            <div key={c.name} className="world-row onb-panelmock-row">
-              <span className="world-row-name">{c.name}</span>
-              {c.role && <span className="world-row-role">{c.role}</span>}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Page 3 hero: Entity highlight mock ───────────────────────────────────
-// A prose snippet with color-coded entity/speech spans — mirrors what the
-// intelligence layer renders over the actual text in the editor.
-function EntityHighlightMock() {
-  return (
-    <div className="onb-intel-highlight">
-      <p className="onb-intel-highlight-text">
-        <span className="onb-ent-speech">"It's not safe,"</span>
-        {" said "}
-        <span className="onb-ent-char">Nora</span>
-        {", stepping back from "}
-        <span className="onb-ent-place">Myrhold Bridge</span>
-        {". "}
-        <span className="onb-ent-char">Mira</span>
-        {" said nothing. "}
-        <span className="onb-ent-action">She turned and walked into the dark.</span>
-      </p>
-    </div>
-  );
-}
-
-// ─── Page 5 hero: Export formats (browser only) ───────────────────────────
-const EXPORT_FORMATS = [
-  { fmt: "PDF",      desc: "6 format presets, professional typesetting, custom covers" },
-  { fmt: "Markdown", desc: "Portable .md that opens in Bear, Obsidian, iA Writer, anywhere" },
-  { fmt: "DOCX",     desc: "Double-spaced manuscript for editors, agents and reviewers" },
-];
-
-function ExportHero() {
-  return (
-    <div className="onb-export-cards">
-      {EXPORT_FORMATS.map(({ fmt, desc }) => (
-        <div key={fmt} className="onb-export-card">
-          <div className="onb-export-card-fmt">{fmt}</div>
-          <div className="onb-export-card-desc">{desc}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Right-click hero: the two menus the writer actually gets ─────────────
-//
-// ★★ THE REAL CLASSES, NOT A LOOKALIKE. These reuse `.max-ask`, `.max-ask-item`
-//    and `.max-ask-item-hint` from the shipping popovers, so the mock inherits
-//    the same glass, radii, type and spacing, and it cannot drift from them
-//    without the drift being visible here too. The labels and hints below are
-//    copied verbatim from MENU in MaxAskPopover.tsx and the choose phase in
-//    WritingToolPopover.tsx — a tour that invents its own wording teaches a
-//    menu the writer will not find.
-const ASK_MENU = [
-  { label: "Check against the story", hint: "does anything here conflict?" },
-  { label: "What is this doing?", hint: "the work this paragraph performs" },
-  { label: "What could follow?", hint: "grounded in what is established" },
-] as const;
-
-const WRITE_MENU = [
-  { label: "Proofread", hint: "fix typos and grammar, keep every word choice" },
-  { label: "Rewrite", hint: "smooth clarity and flow, keep the meaning" },
-] as const;
-
-/**
- * ★★ BOTH MENUS ARE MAX-ONLY, AND THE TOUR HAS TO SAY SO. App.tsx gates them
- *    at one place — `maxAskAvailable = assistantMode(prefs) === "max" &&
- *    !!window.electronAPI` — so on Off, on On, and in the browser, right-click
- *    does nothing at all. Teaching the gesture without the condition is the
- *    same defect as the phantom ⌘⇧A: a control the reader presses and no
- *    response comes back. It matters more now that Max is Pro, because an
- *    undisclosed gate one page before the price page is the bait sequence.
- */
-function RightClickHero({ desktop }: { desktop: boolean }) {
-  return (
-    <div className="onb-askpair">
-      <figure className="onb-askcard">
-        <figcaption className="onb-askcard-cap">
-          Right-click a paragraph
-          <span className="onb-askcard-tag">{desktop ? "Max" : "Desktop, Max"}</span>
-        </figcaption>
-        <div className="max-ask onb-askmock" aria-hidden="true">
-          <div className="max-ask-inner">
-            <div className="max-ask-context">She turned and walked into the dark.</div>
-            {ASK_MENU.map((m) => (
-              <div key={m.label} className="max-ask-item">
-                <span className="max-ask-item-label">{m.label}</span>
-                <span className="max-ask-item-hint">{m.hint}</span>
-              </div>
-            ))}
-            <div className="max-ask-question-input onb-askmock-input">
-              Ask about this paragraph…
-            </div>
-          </div>
-        </div>
-      </figure>
-
-      <figure className="onb-askcard">
-        <figcaption className="onb-askcard-cap">
-          Select first, then right-click
-          <span className="onb-askcard-tag">{desktop ? "Max" : "Desktop, Max"}</span>
-        </figcaption>
-        <div className="max-ask onb-askmock" aria-hidden="true">
-          <div className="max-ask-inner">
-            <div className="max-ask-context">
-              the rain caught him at the bridge
-              <span className="max-ask-item-hint"> · 34 chars</span>
-            </div>
-            {WRITE_MENU.map((m) => (
-              <div key={m.label} className="max-ask-item">
-                <span className="max-ask-item-label">{m.label}</span>
-                <span className="max-ask-item-hint">{m.hint}</span>
-              </div>
-            ))}
-            <div className="max-ask-question-input onb-askmock-input">
-              Or describe a change…
-            </div>
-          </div>
-        </div>
-      </figure>
-    </div>
-  );
-}
-
-// ─── Local model hero: the three modes, with their real sizes ─────────────
-//
-// ★ THE NUMBERS ARE THE ONES IN THE SETTINGS ROW, because a writer who reads
-//   "1.1 GB" here and sees a different figure at the moment of downloading has
-//   been told a story rather than a fact. Kept in step with MODE_OPTIONS and
-//   MODE_SIZE in AnalysisPanel.tsx.
-/**
- * ★★ THE THREE MODES SEPARATED BY WHAT THEY DO, not by adjectives. "On" and
- *    "Max" were a size and a slogan, which leaves the writer choosing between
- *    "1.1 GB" and "2.5 GB" with no idea what the extra gigabyte buys. Each row
- *    now names the jobs that mode actually performs, taken from the engines
- *    that call it: entity review and continuity on the 1.7B; the abstractive
- *    dossier, alias referents and paragraph asks on the 4B.
- *
- * ★ MAX IS THE ONLY GATED ONE, which is a product decision worth stating in
- *   the tour rather than discovering at the track. Off and On are the free
- *   build and every measured number in the README comes from them.
- */
-const LOCAL_MODES = [
-  {
-    name: "Off", size: "no download", isSize: false, price: "Free",
-    does: "Every engine still runs. Marks, tension, pacing, the scan.",
-  },
-  {
-    name: "On", size: "1.1 GB", isSize: true, price: "Free",
-    does: "Adds a reader. Sorts scanned names, checks continuity, writes chapter summaries.",
-  },
-  {
-    name: "Max", size: "2.5 GB", isSize: true, price: "Pro",
-    does: "Adds judgement. Answers questions about a paragraph, writes from cited passages.",
-  },
-] as const;
-
-/**
- * ★★ THE BROWSER BUILD MUST NOT PRE-SELECT A MODE IT CANNOT HONOUR. The
- *    recommended-row highlight is an offer, and there is no runtime behind it
- *    in a browser: the page would be showing a chosen 1.1 GB download above
- *    copy explaining that the desktop app is what provides it. The rows stay,
- *    because they are a true description of what the desktop app adds, but
- *    nothing is marked as picked and the caption says whose choice it is.
- */
-function LocalModelHero({ desktop }: { desktop: boolean }) {
-  return (
-    <div className="onb-modes-wrap">
-      {!desktop && (
-        <p className="onb-modes-cap">In the desktop app</p>
-      )}
-      <div className="onb-modes" aria-label="Local model options">
-        {LOCAL_MODES.map((m) => (
-          <div
-            key={m.name}
-            className={`onb-mode-row${desktop && m.name === "On" ? " onb-mode-row--pick" : ""}`}
-          >
-            <div className="onb-mode-row-head">
-              <span className="onb-mode-row-name">{m.name}</span>
-              {/* ★ ONLY A REAL SIZE GETS THE ACCENT. "no download" in the same
-                  blue read as a figure of the same kind, which is the one
-                  thing the Off row is saying it is not. */}
-              <span className={`onb-mode-row-size${m.isSize ? " onb-mode-row-size--real" : ""}`}>
-                {m.size}
-              </span>
-              {/* ★★ ALL THREE ROWS CARRY A PRICE, not just the gated one. One
-                  badge on one row reads as "this one is restricted" and never
-                  as "the other two are free", which is the fact the writer
-                  most needs. Three marks in one right-hand column give the
-                  whole gating story in a single downward scan. */}
-              <span className={`onb-mode-row-price${m.price === "Pro" ? " onb-mode-row-price--pro" : ""}`}>
-                {m.price}
-              </span>
-            </div>
-            <div className="onb-mode-row-does">{m.does}</div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Page 6 hero: Getting-started checklist ───────────────────────────────
-//
-// ★ EACH ONE NAMES THE CONTROL IT MEANS. The previous list said "open the
-//   Intelligence panel", and no panel has that name — a first step a writer
-//   cannot find is worse than no list at all.
-interface ChecklistItem { do: string; where: string }
-
-function ChecklistHero({ active, items }: { active: boolean; items: readonly ChecklistItem[] }) {
-  return (
-    <div className="onb-checklist" aria-label="Getting started checklist">
-      {items.map((item, i) => (
-        <div
-          key={i}
-          className={`onb-checklist-item${active ? " onb-checklist-item--visible" : ""}`}
-          style={{ animationDelay: `${i * 0.14}s` } as CSSProperties}
-        >
-          <div className="onb-checklist-circle" aria-hidden="true" />
-          <span className="onb-checklist-text">
-            {item.do}
-            <span className="onb-checklist-where">{item.where}</span>
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─── Renderer preview data (page 5, desktop) ─────────────────────────────
-const RENDERER_FILES = [
-  "novel.txt",
-  "drafts/ch012.md",
-  "review-logs/review_ch012.md",
-  "anchors/ch012_anchor.md",
-];
-const RENDERER_COMMANDS = ["/draft 12", "/review 12", "/assemble 12"];
-
-/**
- * A keyboard hint that only appears where the keystroke actually works.
- *
- * ★★ EVERY ACCELERATOR IN THIS APP IS OWNED BY THE NATIVE MENU. App.tsx's
- *    browser key handler returns immediately under Electron and covers only a
- *    few keys otherwise, so ⌘I, ⌘J and ⌘O are DESKTOP-ONLY. Printing them in
- *    the browser build would teach a shortcut that does nothing, which is how
- *    a writer decides the app is broken. Same audit found the previous copy
- *    promising ⌘⇧A for the analysis panel, a shortcut that exists nowhere.
- */
+/** A keyboard hint that only appears where the keystroke actually works —
+ *  every accelerator in this app is owned by the native menu, so shortcuts
+ *  are desktop-only facts. */
 function Kbd({ children, desktop }: { children: React.ReactNode; desktop: boolean }) {
   if (!desktop) return null;
   return <kbd className="onb-inline-kbd">{children}</kbd>;
 }
 
-// ─── Page component ───────────────────────────────────────────────────────
-interface OnbPageProps {
-  active: boolean;
-  widthPercent: number;
-  /** `dense` buys back top padding on a page whose hero is a real widget. */
-  variant?: "dense";
-  children: React.ReactNode;
-}
-function OnbPage({ active, widthPercent, variant, children }: OnbPageProps) {
-  return (
-    <div
-      className={`onb-page ${active ? "onb-page--active" : ""}${variant ? ` onb-page--${variant}` : ""}`}
-      aria-hidden={!active}
-      style={{ flexBasis: `${widthPercent}%` }}
-    >
-      {children}
-    </div>
-  );
-}
-
 // ─── Onboarding ───────────────────────────────────────────────────────────
 interface Props {
+  /** Close without choosing a door — Esc, the X. A guilt-free skip. */
   onClose: () => void;
+  /** Door 1 — enter the sandbox. */
+  onOpenSample: () => void;
+  /** Door 2 — start (or return to) the writer's own book. */
+  onStartOwn: () => void;
+  /** The writer already has words of their own; door 2 becomes a way back. */
+  hasOwnWords: boolean;
+  /** The sample is open right now; door 1's copy owns the reset semantics. */
+  inSample: boolean;
   onTierChange?: (tier: import("../lib/license").Tier) => void;
 }
 
 const ONBOARDING_OVERLAY_BODY_CLASS = "onboarding-overlay-freeze";
 
-export function Onboarding({ onClose, onTierChange }: Props) {
-  const [page, setPage] = useState(0);
-  const total = 7;
-  const pageWidth = 100 / total;
+export function Onboarding({ onClose, onOpenSample, onStartOwn, hasOwnWords, inSample, onTierChange }: Props) {
   const isElectron = !!window.electronAPI;
 
   const [proOpen, setProOpen] = useState(false);
@@ -557,6 +152,10 @@ export function Onboarding({ onClose, onTierChange }: Props) {
       setProCodeError(result.error ?? "Invalid code.");
     }
   };
+
+  useEffect(() => {
+    recordOnb("welcome-seen");
+  }, []);
 
   useEffect(() => {
     const body = document.body;
@@ -592,29 +191,10 @@ export function Onboarding({ onClose, onTierChange }: Props) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key === "ArrowRight") setPage((p) => Math.min(total - 1, p + 1));
-      if (e.key === "ArrowLeft")  setPage((p) => Math.max(0, p - 1));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-
-  const slideStyle = useMemo<CSSProperties>(() => ({
-    width: `${total * 100}%`,
-    transform: `translate3d(${-page * pageWidth}%, 0, 0)`,
-  }), [page, pageWidth]);
-
-  const isLast = page === total - 1;
-
-  /** Named controls, not verbs in the abstract, and the last one differs by
-   *  build because the browser has no local model to switch on. */
-  const checklist: ChecklistItem[] = [
-    { do: "Write or paste one scene", where: "the marks appear as you go" },
-    { do: "Open World and press Auto-Scan", where: isElectron ? "⌘J, then tick your cast" : "tick the names it finds" },
-    isElectron
-      ? { do: "Turn on Local enhancements", where: "Analysis settings" }
-      : { do: "Open the Analysis panel", where: "read the Tension curve" },
-  ];
 
   return (
     <div
@@ -623,7 +203,7 @@ export function Onboarding({ onClose, onTierChange }: Props) {
       aria-modal="true"
       aria-label="Welcome to Latent Write"
     >
-      <div className="onb-card liquid-glass">
+      <div className="onb-card onb-card--welcome liquid-glass">
 
         <button
           className="onb-close icon-btn"
@@ -634,297 +214,83 @@ export function Onboarding({ onClose, onTierChange }: Props) {
           <CloseIcon size={15} />
         </button>
 
-        <div className="onb-stage">
-          <div className="onb-track" style={slideStyle}>
+        <div className="onb-welcome">
+          <div className="onb-welcome-hero">
+            <CyclingOrb size={170} />
+          </div>
 
-            {/* PAGE 1 — Write, and it reads along */}
-            <OnbPage active={page === 0} widthPercent={pageWidth}>
-              <div className="onb-hero onb-hero--editor">
-                <EditorMockHero active={page === 0} />
-              </div>
-              <h1 className="onb-title">Write. It reads along.</h1>
-              <p className="onb-subtitle">
-                {/* ★ NO ABSOLUTE PRIVACY CLAIM HERE. This said "it never leaves
-                    this machine", which page 6 then contradicts by describing
-                    the one screen that does send something. Page 5 owns the
-                    promise and page 6 owns its exception; page 1 owns the file. */}
-                A novel editor with a reader built in. Start typing, or bring an existing draft
-                in from the <strong>toolbar</strong> <Kbd desktop={isElectron}>⌘O</Kbd>. Your book
-                is saved as plain text, in a folder you choose, and it exports to PDF, Word or
-                Markdown when you are done.
-              </p>
-            </OnbPage>
+          <h1 className="onb-title">Write. It reads along.</h1>
+          <p className="onb-subtitle onb-subtitle--welcome">
+            {/* ★ THE ONE MENTAL MODEL, then doing. Names, speech, tension and
+                the rest are shown by the app itself the moment a story is
+                open, so the copy spends its sentences on the two facts the
+                first screen must establish and nothing else can: there is a
+                reader in the editor, and it lives on this machine. */}
+            A novel editor with a reader built in. It marks names, speech and
+            tension as you write, and answers from what you have written.
+            Everything runs on this machine, and nothing you write is uploaded.
+          </p>
 
-            {/* PAGE 2 — Chapters and cast */}
-            <OnbPage active={page === 1} widthPercent={pageWidth}>
-              <div className="onb-hero onb-hero--structure">
-                <StructureHero />
-              </div>
-              <h1 className="onb-title onb-title--small">Your chapters, and your cast</h1>
-              <p className="onb-subtitle">
-                The <strong>Index</strong> <Kbd desktop={isElectron}>⌘I</Kbd> holds the book. The{" "}
-                <strong>World</strong> panel <Kbd desktop={isElectron}>⌘J</Kbd> holds who and what
-                is in it. Press <strong>Auto-Scan</strong> there and the app reads your draft,
-                finds the names, and sorts them into those tabs for you to tick.
-              </p>
-            </OnbPage>
+          <div className="onb-doors">
+            <button type="button" className="onb-door onb-door--primary" onClick={onOpenSample}>
+              <span className="onb-door-label">Open the sample story</span>
+              <span className="onb-door-sub">
+                {inSample
+                  ? "You are in it now. Opening it again starts a fresh copy."
+                  : "A keeper, a stranger, and a ledger that does not agree with itself. Safe to break, and it resets when you leave."}
+              </span>
+            </button>
 
-            {/* PAGE 3 — What it shows you (highlights + analysis, merged) */}
-            <OnbPage active={page === 2} widthPercent={pageWidth} variant="dense">
-              {/* ★ ONE WIDGET, NOT TWO. The production widgets render at their
-                  real size here, and two of them stacked on the marked-up
-                  paragraph pushed the body copy clean off the bottom of the
-                  card — the tour explained itself to nobody. Tension is the one
-                  the copy names, so it is the one shown. */}
-              <div className="onb-hero onb-hero--intel">
-                <EntityHighlightMock />
-                <div className="onb-intel-widgets">
-                  <MockTensionWidget />
-                </div>
-              </div>
-              <h1 className="onb-title onb-title--small">What it shows you</h1>
-              <p className="onb-subtitle">
-                Speech and names are marked as you type, and a deeper pass refines them when you
-                pause. The <strong>Analysis panel</strong> adds tension, pacing and prose shape,
-                and every widget has a <strong>?</strong> that explains what it measures.
-              </p>
-            </OnbPage>
-
-            {/* PAGE 4 — Right-click, the two AI actions in the page itself. */}
-            <OnbPage active={page === 3} widthPercent={pageWidth} variant="dense">
-              <div className="onb-hero onb-hero--ask">
-                <RightClickHero desktop={isElectron} />
-              </div>
-              <h1 className="onb-title onb-title--small">It answers, it does not overwrite</h1>
-              <p className="onb-subtitle">
-                {/* ★★ THE ACCEPT STEP DOES NOT EXIST. This said "nothing is
-                    replaced until you accept it", and App.tsx splices the
-                    revision in the moment the run finishes — the popover's own
-                    line is "The new text is in place; press ⌘Z to bring the old
-                    text back." A safety promise the code does not keep is the
-                    worst sentence a tour can carry. */}
-                {/* ★ THE HERO ALREADY PRINTS ALL FIVE MENU ITEMS in the reader's
-                    eyeline, so listing them again in prose spent the paragraph
-                    on what the picture had said. The words go to what the
-                    picture cannot show: what happens after, and the gate. */}
-                <strong>Right-click a paragraph</strong> and it answers from the story you have
-                already written. <strong>Select a passage first</strong> and the same menu
-                rewrites it instead. The new text goes straight in,
-                and <kbd className="onb-inline-kbd">⌘Z</kbd> puts the old text back. Both menus
-                need <strong>Max</strong>.
-              </p>
-            </OnbPage>
-
-            {/* PAGE 5 — The local model.
-                ★ THE PAGE THIS ONBOARDING WAS MISSING. Three modes separated by
-                  what they DO, their real download sizes, and the two promises
-                  that make the choice safe: the rules answer first, and the
-                  model reads snippets rather than the book. */}
-            <OnbPage active={page === 4} widthPercent={pageWidth} variant="dense">
-              <div className="onb-hero onb-hero--modes">
-                <LocalModelHero desktop={isElectron} />
-              </div>
-              <h1 className="onb-title onb-title--small">Your book stays here</h1>
-              <p className="onb-subtitle">
-                {isElectron ? (
-                  <>
-                    <strong>Off and On are free, forever. Max is Pro.</strong> Whichever you pick,
-                    the model runs on this machine and sees short passages, never your whole book.
-                    Nothing you write is uploaded, and there is no account and no key. Change it
-                    any time under <strong>Analysis settings</strong>.
-                  </>
+            <button type="button" className="onb-door" onClick={onStartOwn}>
+              <span className="onb-door-label">{hasOwnWords ? "Back to your book" : "Start your own book"}</span>
+              <span className="onb-door-sub">
+                {hasOwnWords ? (
+                  "Your words are where you left them."
                 ) : (
                   <>
-                    Everything here is plain rules running in your own browser, with no account
-                    and no key. The desktop app adds these optional local models for deeper
-                    reading, and they run on your machine too.
+                    A blank first chapter. Or bring a draft in
+                    {isElectron ? <> with <Kbd desktop={isElectron}>⌘O</Kbd></> : " from the toolbar"}.
                   </>
                 )}
-              </p>
-            </OnbPage>
+              </span>
+            </button>
+          </div>
 
-            {/* PAGE 6 — Renderer (desktop) / Export (browser) */}
-            <OnbPage active={page === 5} widthPercent={pageWidth}>
-              {isElectron ? (
-                <>
-                  <div className="onb-hero onb-hero--renderer">
-                    <div className="onb-renderer-preview">
-                      <div className="onb-renderer-preview-top">
-                        <div className="onb-renderer-brand">
-                          <img src={rendererLogoUrl} alt="" className="onb-renderer-brand-logo" />
-                          <span className="onb-renderer-brand-title">Workspace</span>
-                        </div>
-                        <div className="onb-renderer-runtime">
-                          {/* ★ THE ALIAS, NOT A PINNED VERSION. "sonnet-4" was
-                              printed here long after the aliases became the
-                              thing the writer types; a version number in a
-                              mock is a date stamp that nobody remembers to
-                              update. `sonnet` is what /model accepts. */}
-                          <span className="onb-renderer-pill">sonnet</span>
-                          <span className="onb-renderer-pill">high</span>
-                          <span className="onb-renderer-status" aria-hidden="true" />
-                        </div>
-                      </div>
-                      <div className="onb-renderer-preview-body">
-                        <div className="onb-renderer-tree">
-                          {RENDERER_FILES.map((file, index) => (
-                            <div
-                              key={file}
-                              className={`onb-renderer-tree-row${index === 1 ? " onb-renderer-tree-row--active" : ""}`}
-                            >
-                              {file}
-                            </div>
-                          ))}
-                        </div>
-                        <div className="onb-renderer-viewer">
-                          <div className="onb-renderer-viewer-file">drafts/ch012.md</div>
-                          {/* ★ SHOW THE SESSION, DO NOT DESCRIBE IT. This panel
-                              used to hold a sentence about what a workspace is,
-                              directly above a caption saying the same thing
-                              twice. A draft file should contain draft. */}
-                          <p className="onb-renderer-copy">
-                            The bridge took the wind badly that evening. Nora went first, one hand
-                            on the rail, and did not look back to see whether Mira had followed.
-                          </p>
-                          <div className="onb-renderer-command-row">
-                            {RENDERER_COMMANDS.map((command) => (
-                              <span key={command} className="onb-renderer-command">{command}</span>
-                            ))}
-                          </div>
-                        </div>
-                        <div className="onb-renderer-chat">
-                          <div className="onb-renderer-bubble onb-renderer-bubble--user">/review 12</div>
-                          <div className="onb-renderer-bubble onb-renderer-bubble--assistant">
-                            Two continuity flags. Nora's coat is grey here and green in Chapter 9,
-                            and this bridge is stone where Chapter 4 made it iron.
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <h1 className="onb-title onb-title--small">And one door to the cloud</h1>
-                  <p className="onb-subtitle">
-                    The <strong>Renderer</strong> runs a Claude session against your project, with
-                    slash commands like <strong>/review</strong> for a prose critique
-                    and <strong>/draft</strong> from your outline. {/* ★ NOT "the only part that
-                    sends anything anywhere" — the model weights come from Hugging Face and the
-                    engine binary from GitHub, so that claim is false the first time a writer
-                    switches On. What is true, and is what they are actually asking, is that this
-                    is the only place their WRITING goes. */}
-                    It is the only part that sends your writing off this machine. It uses the
-                    Claude login you already have, and if you never open it, it never runs.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <div className="onb-hero onb-hero--export">
-                    <ExportHero />
-                  </div>
-                  <h1 className="onb-title onb-title--small">Export when you're ready</h1>
-                  <p className="onb-subtitle">
-                    Export as <strong>PDF</strong> with professional typesetting presets and custom
-                    covers, <strong>DOCX</strong> for editor and agent hand-off (double-spaced
-                    manuscript), or <strong>Markdown</strong> to take your draft anywhere.
-                  </p>
-                </>
-              )}
-            </OnbPage>
-
-            {/* PAGE 7 — Three things to do first */}
-            <OnbPage active={page === 6} widthPercent={pageWidth}>
-              <div className="onb-hero onb-hero--checklist">
-                <ChecklistHero active={page === 6} items={checklist} />
-              </div>
-              <h1 className="onb-title onb-title--small">Three things to do first</h1>
-              <p className="onb-subtitle">
-                In order, and they take about five minutes. The third one is where the app
-                stops looking like a text box.
-              </p>
-              <div className="onb-pro-row">
+          <div className="onb-pro-row onb-pro-row--welcome">
+            <button
+              type="button"
+              className="onb-pro-toggle"
+              onClick={() => setProOpen((v) => !v)}
+            >
+              <ChevronRight
+                size={13}
+                className={`onb-pro-toggle-chevron${proOpen ? " onb-pro-toggle-chevron--open" : ""}`}
+              />
+              Have a Pro code?
+            </button>
+            <div className={`onb-pro-expand${proOpen ? " onb-pro-expand--open" : ""}`}>
+              <div className="onb-pro-form">
+                <input
+                  type="text"
+                  className="settings-code-input"
+                  placeholder="LATENT-XXXXX-XXXXX-XXXXX"
+                  value={proCodeInput}
+                  spellCheck={false}
+                  onChange={(e) => { setProCodeInput(e.target.value); setProCodeError(null); setProCodeSuccess(false); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { void handleProActivate(); } }}
+                />
                 <button
                   type="button"
-                  className="onb-pro-toggle"
-                  onClick={() => setProOpen((v) => !v)}
+                  className={`settings-code-submit${proCodeInput.trim() ? " settings-code-submit--active" : ""}`}
+                  disabled={proActivating}
+                  onClick={() => { void handleProActivate(); }}
                 >
-                  <ChevronRight
-                    size={13}
-                    className={`onb-pro-toggle-chevron${proOpen ? " onb-pro-toggle-chevron--open" : ""}`}
-                  />
-                  Have a Pro code?
+                  {proActivating ? "…" : "Activate"}
                 </button>
-                <div className={`onb-pro-expand${proOpen ? " onb-pro-expand--open" : ""}`}>
-                  <div className="onb-pro-form">
-                    <input
-                      type="text"
-                      className="settings-code-input"
-                      placeholder="LATENT-XXXXX-XXXXX-XXXXX"
-                      value={proCodeInput}
-                      spellCheck={false}
-                      onChange={(e) => { setProCodeInput(e.target.value); setProCodeError(null); setProCodeSuccess(false); }}
-                      onKeyDown={(e) => { if (e.key === "Enter") { void handleProActivate(); } }}
-                    />
-                    <button
-                      type="button"
-                      className={`settings-code-submit${proCodeInput.trim() ? " settings-code-submit--active" : ""}`}
-                      disabled={proActivating}
-                      onClick={() => { void handleProActivate(); }}
-                    >
-                      {proActivating ? "…" : "Activate"}
-                    </button>
-                  </div>
-                  {proCodeError && <p className="onb-pro-status onb-pro-status--error">{proCodeError}</p>}
-                  {proCodeSuccess && <p className="onb-pro-status onb-pro-status--success">Pro activated! You're all set.</p>}
-                </div>
               </div>
-            </OnbPage>
-
-          </div>
-        </div>
-
-        {/* Footer: skip · dots · back/next */}
-        <div className="onb-footer">
-          <button
-            className="onb-skip"
-            onClick={onClose}
-            aria-label={isLast ? "Close welcome" : "Skip welcome"}
-          >
-            {isLast ? "Close" : "Skip"}
-          </button>
-
-          <div className="onb-dots" role="tablist" aria-label="Page indicator">
-            {Array.from({ length: total }, (_, i) => (
-              <button
-                key={i}
-                role="tab"
-                aria-selected={i === page}
-                aria-label={`Go to page ${i + 1}`}
-                className={`onb-dot ${i === page ? "onb-dot--active" : ""}`}
-                onClick={() => setPage(i)}
-              />
-            ))}
-          </div>
-
-          <div className="onb-nav">
-            {page > 0 && (
-              <button
-                className="onb-nav-btn"
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                aria-label="Previous page"
-              >
-                <ChevronLeft size={16} />
-                <span>Back</span>
-              </button>
-            )}
-            <button
-              className="onb-nav-btn onb-nav-btn--primary"
-              onClick={() => {
-                if (isLast) onClose();
-                else setPage((p) => p + 1);
-              }}
-            >
-              <span>{isLast ? "Open the editor" : "Next"}</span>
-              {!isLast && <ChevronRight size={16} />}
-            </button>
+              {proCodeError && <p className="onb-pro-status onb-pro-status--error">{proCodeError}</p>}
+              {proCodeSuccess && <p className="onb-pro-status onb-pro-status--success">Pro activated! You're all set.</p>}
+            </div>
           </div>
         </div>
       </div>

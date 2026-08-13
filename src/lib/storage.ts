@@ -1,6 +1,7 @@
 import type { Chapter, Novel } from "../types";
 import { emptyNovel, parseNovel, serializeNovel } from "./parser";
 import { isDesktopApp, saveProjectState, loadProjectState, readProjectFile, writeProjectFile, stateTarget } from "./project-manager";
+import { isSampleModeActive } from "./sample-mode";
 
 const KEY = "glass-editor:novel-v1";
 const CURRENT_CHAPTER_KEY = "glass-editor:current-chapter-v1";
@@ -149,6 +150,9 @@ export async function loadNovelFromProject(): Promise<Novel | null> {
 }
 
 export async function saveNovelToProject(novel: Novel): Promise<boolean> {
+  // The sandbox writes nowhere. Claiming success keeps callers from
+  // "rescuing" sample prose into the localStorage draft via their fallbacks.
+  if (isSampleModeActive()) return true;
   if (!isDesktopApp()) {
     saveNovel(novel);
     return true;
@@ -161,6 +165,7 @@ export async function saveNovelToProject(novel: Novel): Promise<boolean> {
 }
 
 export function saveNovel(novel: Novel): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     // A refused write means the project closed under us. Keep the draft rather
     // than dropping the writer's prose on the floor.
@@ -192,6 +197,7 @@ export async function loadCurrentChapterIdFromProject(): Promise<PersistedChapte
 }
 
 export function saveCurrentChapterId(id: string | null, chapter?: Pick<Chapter, "number" | "title"> | null): void {
+  if (isSampleModeActive()) return;
   if (stateTarget() === "project") {
     void saveProjectState(
       "current-chapter",
