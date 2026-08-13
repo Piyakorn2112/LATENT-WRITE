@@ -75,17 +75,58 @@ Loop suite: 85/85 including new positive gates for both behaviors; the
 think-pass test rewritten to assert the new contract (one constrained
 call, reason declared first, no out-of-band pass).
 
-## Final configuration
+## The frozen golden's one re-run, and what it refuted
 
-- **Ask**: reason-first in-schema per the v3 policy; the 256/1024-token
-  free-text think pass is retired wholesale; the loop, review, refine and
-  widen mechanics unchanged; the two new gates above.
-- **Rewrite**: unchanged flow (it was already right); the sidecar lane on
-  its constrained calls where the engine is present.
-- **Both**: lane 'batch' + compact grammar (the engine work of
-  plans/engine-speed-2026-08.md) with busy falling back to the host's
-  single-flight lane.
+The frozen max-ask golden (14 cases, hand-graded r2 on record) was run ONCE
+against the reason-first candidate. The check cases held (control fits,
+contradictions found). The QUESTION cases refuted the field: it accepted a
+false premise ("Teo sold his share of the Petrel to Renner … because he
+owed money" — the set's first-ever mustNotClaim violation) and derived an
+answer on the unanswerable case ("he keeps it as a loan"). A reason field
+weighs; weighing manufactures a rationale when the honest move is refusing
+the question's terms. The frozen probe has always measured think-free, so
+the diff isolated the schema change cleanly. Per the one-re-run discipline
+the set was not run again; the r2 transcript stays the record, and the
+shipped question configuration is bit-identical to what r2 graded PASS.
 
-## Results
+## Final configuration (shipped)
 
-(final table from the sidecar-variant run + the one-shot golden probe)
+- **check**: reason-first in-schema, the two-sided wording. The one kind
+  both benches agree on.
+- **explain / suggest / question**: the plain schema, no reason, no think —
+  the exact configuration the frozen set graded, now also the fastest.
+- **All ask calls**: lane 'batch' + compact grammar (every call is
+  constrained now), busy falling back to the host's single-flight lane.
+- **Rewrite**: wholly unchanged in the product. The sidecar experiment for
+  it measured engine ping-pong (custom ops think on the host; batching
+  their main calls forced a reload per attempt, 9.3s → 11.6s) and the
+  surface was already at 11/11 keys.
+- **The gates** (upgrade gate, wholly-unlocated coercion, adverb-tolerant
+  abstention regex) ship for every kind.
+
+## Results (the shipped configuration, reference set)
+
+```
+              wall mean      decode tokens        keys vs golden   anti
+ask   before    19.0s   1809 (+~1024 hidden)          8/30           1
+ask   shipped    9.9s   1413 (nothing hidden)        14/30           0
+rw    before     4.7s    245                         11/11           0
+rw    shipped    4.7s    245  (unchanged)            11/11           0
+```
+
+Ask is 48% faster wall and half the real compute, with quality up on every
+axis that moved: the planted contradiction 6/6 (quoting both sides of the
+conflict), the clean control at fits, zero anti-hits. The trivial lookup
+fell 23.9s → 14.5s from the engine lane alone. Per hard ask, ~1024 think
+tokens and ~20-30s of GPU time are simply gone, and the flow being
+sidecar-served ends the 1.7B↔4B host reload when background work
+interleaves with asks.
+
+**Residual, recorded not patched:** the starved absent-fact question can
+still fabricate by smuggling a genuinely-located quote under an invented
+claim ("died before she could learn anything … from the road he took").
+This is the claim-check's documented compound-escape class; the
+wholly-unlocated gate catches the fully-invented shape, not the
+half-anchored one. Closing it likely needs per-claim subject checking —
+the next measured experiment. The golden's two unnecessary-caution cases
+(supported-but-paraphrased claims) also stand as recorded.

@@ -547,8 +547,18 @@ await (async () => {
   gate(seen.length === 1 && seen[0].freeText !== true,
     "★ one constrained call, no out-of-band pass", String(seen.length));
   const props = Object.keys((seen[0].schema as { properties: Record<string, unknown> }).properties);
-  gate(props[0] === "reason" && props.includes("answer"),
-    `★ the hard question's schema declares reason FIRST (${props.join(",")})`);
+  // ★ REFUTED ON THE FROZEN GOLDEN: a reason field on question-kind
+  //   accepted a false premise (the set's first mustNotClaim violation).
+  //   Questions run the plain schema the golden graded PASS; only a CHECK
+  //   carries the reason field.
+  gate(props[0] === "answer" && !props.includes("reason"),
+    `★ a question's schema stays plain — no reason field (${props.join(",")})`);
+  {
+    const checkReq = buildMaxAskRequest(buildMaxAskPack(INPUT), undefined, "check", { reasonFirst: true });
+    const checkProps = Object.keys((checkReq.schema as { properties: Record<string, unknown> }).properties);
+    gate(checkProps[0] === "reason",
+      `★ a check's schema declares reason FIRST (${checkProps.join(",")})`);
+  }
   gate(phases[0] === "asking", "the popover goes straight to asking", phases.join(","));
   gate(r.stopped === "answered" && r.answer?.basis === "mentions", "the answer cites the mentions rung");
 })();

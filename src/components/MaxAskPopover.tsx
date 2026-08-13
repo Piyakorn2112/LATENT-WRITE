@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { OrbEngine } from "./orb/OrbEngine";
 import { ThinkingLabel } from "./ThinkingLabel";
-import { assistantRunJSON, cancelWhere } from "../lib/assistant-client";
+import { assistantRunJSON, cancelWhere, type AssistantJSONRequest } from "../lib/assistant-client";
 import {
   MAX_ASK_TASK,
   runMaxAsk,
@@ -35,12 +35,23 @@ interface Props {
  *   asks, and immediately closes must not leave a 4B inference blocking the
  *   entity reviewer for ten seconds. cancelWhere on unmount, by task.
  */
-const maxRunner: AssistantJSONRunner = (req) =>
+const maxRunner: AssistantJSONRunner = async <T,>(req: AssistantJSONRequest) => {
   // contextSize 8192: Q8_0 KV cache means the 8k window now costs what the
   // old 4k f16 window did (~265 MB), so the ask surface takes the room — the
   // evidence budget grew with it, and the memory guard still walks down on a
   // machine that cannot hold it.
-  assistantRunJSON({ ...req, tier: "max", noThink: false, contextSize: 8192 });
+  //
+  // ★★ THE WHOLE FLOW IS CONSTRAINED NOW (the think pass retired for the
+  //    in-schema reason field), so every call may ride the batch engine:
+  //    lane 'batch' + the compact grammar measured on the reference bench
+  //    at 19.0s → 10.8s mean per ask with better answers. A busy engine
+  //    queues nowhere, so 'busy' retries on the host's single-flight lane —
+  //    a machine without the engine binary never sees a difference.
+  const base = { ...req, tier: "max" as const, noThink: false, contextSize: 8192, jsonStyle: "compact" as const };
+  const first = await assistantRunJSON<T>({ ...base, lane: "batch" });
+  if (!first.ok && first.reason === "busy") return assistantRunJSON<T>(base);
+  return first;
+};
 
 const MENU: ReadonlyArray<{ kind: AskKind; label: string; hint: string }> = [
   { kind: "check", label: "Check against the story", hint: "does anything here conflict?" },

@@ -94,7 +94,6 @@
  */
 import { fnv1a } from "./evidence-pack";
 import { tidyTruncatedText } from "./assistant-client";
-import { decideAskThinking } from "./think";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { WorldData } from "../types";
 
@@ -874,24 +873,24 @@ export async function runMaxAsk(
   let lastAnswerText = "";
   let steps = 0;
 
-  // ── adaptive reasoning, IN-SCHEMA ─────────────────────────────────────
-  // ★★ THE 30-SECOND THINK PASS IS RETIRED (2026-08-13). Measured on the
-  //    reference bench (fixtures/ask-rewrite-reference.ts): a free-prose
-  //    reason field DECLARED FIRST in the answer schema bought the causal
-  //    question a better answer at 11-24s where the unconstrained pass
-  //    spent 44s, and gave the check kind the reasoning stage it never had
-  //    — the two-sided reason (argue fits first, then quote both sides of
-  //    any conflict) found the planted contradiction the shipped prompt
-  //    missed WITHOUT inventing one on the clean control (one-sided reason
-  //    did; three A/B rounds decided the wording). The field is scoped to
-  //    where weighing helps: check always; a question with the difficulty
-  //    features the old policy thought over (causal/multi-entity/long).
-  //    Explain, suggest and bare lookups gained nothing from it and keep
-  //    the plain schema. opts.think stays accepted for API compatibility;
-  //    there is no out-of-band pass left for it to disable.
-  const reasonFirst = input.kind === "check"
-    || (input.kind === "question"
-      && decideAskThinking(input.kind, input.question, questionEntities(input).length).think);
+  // ── adaptive reasoning, IN-SCHEMA, CHECK ONLY ─────────────────────────
+  // ★★ THE 30-SECOND THINK PASS IS RETIRED (2026-08-13), and the reason
+  //    field that replaced it is scoped to the ONE kind both benches agree
+  //    on. On the reference set, reason-first-on-check found the planted
+  //    contradiction the shipped prompt missed (6/6 keys, quoting both
+  //    sides) without inventing one on the clean control — the two-sided
+  //    wording (argue fits first, then quote both sides of any conflict)
+  //    took three A/B rounds. On QUESTIONS the same field was REFUTED by
+  //    the frozen golden's one re-run: it accepted a false premise ("Teo
+  //    sold his share … because he owed money" — the set's first-ever
+  //    mustNotClaim violation) and derived an answer on the unanswerable
+  //    case. A reason field weighs; weighing manufactures a rationale when
+  //    the honest move is refusing the question's terms. Questions
+  //    therefore run the exact plain-schema configuration the frozen set
+  //    graded PASS (it always measured think-free), which is also the
+  //    fastest they have ever been. opts.think stays accepted for API
+  //    compatibility; there is no out-of-band pass left for it to disable.
+  const reasonFirst = input.kind === "check";
 
   for (let step = 1; step <= maxSteps; step += 1) {
     if (now() >= deadline) {

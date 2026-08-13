@@ -46,15 +46,10 @@ switch (step) {
   case "ask-prep": {
     const input = arg.input as MaxAskInput;
     const pack = buildMaxAskPack(input, arg.budget);
-    // ★ REASON WHERE WEIGHING HELPS, NOWHERE ELSE — the first A/B's verdict.
-    //   check always (the missed contradiction lived there); a question when
-    //   the OLD think policy found difficulty features (causal/multi-entity/
-    //   long — the same shapes that earned the 30s pass); never on explain,
-    //   suggest or a bare lookup, where the field bought nothing and cost
-    //   tokens. The out-of-band think pass is gone in this mode wholesale.
+    // ★ REASON ON CHECK ONLY — the frozen golden REFUTED it on questions
+    //   (false-premise acceptance); see plans/askrw-speed-quality-2026-08.md.
     const wouldThink = decideAskThinking(input.kind, input.question, questionEntities(input).length);
-    const reasonFirst = arg.reasonFirst === true
-      && (input.kind === "check" || (input.kind === "question" && wouldThink.think));
+    const reasonFirst = arg.reasonFirst === true && input.kind === "check";
     const req = buildMaxAskRequest(pack, undefined, input.kind, { reasonFirst });
     const decision = arg.think === false || arg.reasonFirst === true
       ? { think: false, budget: 0, reason: reasonFirst ? "reason-in-schema" : "disabled" }
