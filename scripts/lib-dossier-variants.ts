@@ -154,7 +154,9 @@ export function buildFusionRequest(input: FusionInput): FusionRequest {
       `- Use ONLY the facts given. Never add a detail, trait, name or number that\n` +
       `  is not in a fact line. Leaving a small fact out is allowed; inventing\n` +
       `  one is not.\n` +
-      `- Keep the manuscript's own wording for descriptive details.\n` +
+      `- Keep the manuscript's own wording for descriptive details. You may\n` +
+      `  reorder and conjugate the facts' own words; do not add imagery,\n` +
+      `  comparisons or atmosphere of your own.\n` +
       `- Refer to ${input.name} as ${pronoun} after the first mention.\n` +
       `- No headings, no lists, no quotation marks.\n` +
       `Answer as JSON: {"text"}.`,
@@ -169,6 +171,68 @@ export function buildFusionRequest(input: FusionInput): FusionRequest {
 
 const FINITE_VERB_RE =
   /\b(?:is|was|were|are|am|has|had|have|does|did|do|can|could|will|would|shall|should|may|might|must|never|always|[a-z]{3,}(?:ed|es|s))\b/i;
+
+/**
+ * ★ THE GATE'S FIRST MEASURED RUN REJECTED 12 OF 12 REWRITES, and a third
+ *   of the "new words" were not new: "Vey's" beside the fact line's "Vey"
+ *   (a possessive survives the suffix stemmer as `vey'`), and "spoke"
+ *   beside "speaks" (irregular inflection, invisible to any suffix rule).
+ *   Possessives are folded off both sides; each hay word that belongs to an
+ *   irregular family donates its whole family, so the model may conjugate a
+ *   verb the facts already use without being scored as inventing one. The
+ *   remaining rejects were REAL — "moves through shadows … weaving tale" —
+ *   and stay rejected.
+ */
+const foldPossessives = (s: string): string =>
+  s.replace(/(['’])s\b/g, "").replace(/['’](?=\s|$)/g, "");
+
+const VERB_FAMILIES: string[][] = [
+  ["speak", "speaks", "spoke", "spoken", "speaking"],
+  ["write", "writes", "wrote", "written", "writing"],
+  ["find", "finds", "found", "finding"],
+  ["spend", "spends", "spent", "spending"],
+  ["tell", "tells", "told", "telling"],
+  ["know", "knows", "knew", "known", "knowing"],
+  ["come", "comes", "came", "coming"],
+  ["go", "goes", "went", "gone", "going"],
+  ["see", "sees", "saw", "seen", "seeing"],
+  ["give", "gives", "gave", "given", "giving"],
+  ["take", "takes", "took", "taken", "taking"],
+  ["keep", "keeps", "kept", "keeping"],
+  ["hold", "holds", "held", "holding"],
+  ["stand", "stands", "stood", "standing"],
+  ["sit", "sits", "sat", "sitting"],
+  ["run", "runs", "ran", "running"],
+  ["make", "makes", "made", "making"],
+  ["say", "says", "said", "saying"],
+  ["wear", "wears", "wore", "worn", "wearing"],
+  ["grow", "grows", "grew", "grown", "growing"],
+  ["leave", "leaves", "left", "leaving"],
+  ["meet", "meets", "met", "meeting"],
+];
+const FAMILY_OF = new Map<string, string[]>();
+for (const family of VERB_FAMILIES) {
+  for (const form of family) FAMILY_OF.set(form, family);
+}
+
+/** Every hay word's irregular family plus its regular inflections, appended
+ *  once, so conjugating a fact's own verb is never scored as invention.
+ *  ("snap" must license "snapped": the doubled consonant defeats a suffix
+ *  stemmer, so the licensed forms are generated on the hay side instead.) */
+function expandHay(hay: string): string {
+  const words = hay.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [];
+  const extra = new Set<string>();
+  for (const w of words) {
+    for (const member of FAMILY_OF.get(w) ?? []) extra.add(member);
+    extra.add(`${w}ed`);
+    extra.add(`${w}d`);
+    if (w.length <= 6 && /[bdgklmnprt]$/.test(w)) {
+      extra.add(`${w}${w[w.length - 1]}ed`);
+      extra.add(`${w}${w[w.length - 1]}ing`);
+    }
+  }
+  return extra.size ? `${hay} ${[...extra].join(" ")}` : hay;
+}
 
 export interface FusionVerdict {
   ok: boolean;
@@ -197,8 +261,10 @@ export function groundFusion(raw: unknown, input: FusionInput): FusionVerdict {
   if (!text) return fail("empty");
   if (/[•\-*]\s|\n/.test(text)) return fail("list-shape");
 
-  const hay = [input.factLines.join(" "), input.forms.join(" ")];
-  const newWords = missingWords(text, hay);
+  const hay = [
+    expandHay(foldPossessives([input.factLines.join(" "), input.forms.join(" ")].join(" "))),
+  ];
+  const newWords = missingWords(foldPossessives(text), hay);
   if (newWords.length > 0) {
     return { ok: false, text, newWords, droppedLines: [], reason: "new-content-words" };
   }
@@ -222,6 +288,26 @@ export function groundFusion(raw: unknown, input: FusionInput): FusionVerdict {
   if (words > factWords * 1.8 + 10) return fail("too-long");
 
   return { ok: true, text, newWords: [], droppedLines, reason: "ok" };
+}
+
+/**
+ * ★ A REPAIR NEEDS AN EXTERNAL CHECK, and the containment gate is one — the
+ *   measured small-model rule (repair loops that check something concrete
+ *   help; open self-critique hurts). ONE retry, the offending words named;
+ *   a second failure falls back to the deterministic text.
+ */
+export function buildFusionRetryRequest(
+  input: FusionInput,
+  newWords: readonly string[],
+): FusionRequest {
+  const base = buildFusionRequest(input);
+  return {
+    ...base,
+    systemPrompt: base.systemPrompt +
+      `\n\nIMPORTANT: your earlier rewrite added words that appear in none of the` +
+      `\nfact lines: ${newWords.slice(0, 12).join(", ")}. Write it again using only` +
+      `\nthe facts' own words.`,
+  };
 }
 
 // ── reason-first personality (replaces the unconstrained think pass) ──────

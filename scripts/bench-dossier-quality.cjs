@@ -103,7 +103,27 @@ async function tryFusion(c, factLines, tier, timings, fieldResults) {
     tier === 'max' ? { noThink: false } : {});
   timings.fusion = ms;
   if (!res || !res.ok) { fieldResults.fusion = { status: 'no-answer' }; return null; }
-  const verdict = fusionVerdict(res.json && res.json.text, input);
+  let verdict = fusionVerdict(res.json && res.json.text, input);
+
+  // ★ One repair retry, the offending words named — the containment gate is
+  //   the external check that makes a small-model repair loop worth having.
+  if (!verdict.ok && verdict.reason === 'new-content-words') {
+    const retryReq = tsxEval(
+      'import {buildFusionRetryRequest} from "./scripts/lib-dossier-variants";' +
+      'const a = JSON.parse(process.argv[process.argv.length-1]);' +
+      'console.log(JSON.stringify(buildFusionRetryRequest(a.input, a.newWords)))',
+      { input, newWords: verdict.newWords },
+    );
+    const second = await runModel(retryReq, rid(c.spec, 'fusion', 'b'), tier,
+      tier === 'max' ? { noThink: false } : {});
+    timings['fusion-retry'] = second.ms;
+    if (second.res && second.res.ok) {
+      const repaired = fusionVerdict(second.res.json && second.res.json.text, input);
+      if (repaired.ok) verdict = repaired;
+      else verdict = { ...verdict, reason: `${verdict.reason};retry:${repaired.reason}` };
+    }
+  }
+
   fieldResults.fusion = {
     status: verdict.ok ? 'fused' : `rejected:${verdict.reason}`,
     newWords: verdict.newWords, droppedLines: verdict.droppedLines,

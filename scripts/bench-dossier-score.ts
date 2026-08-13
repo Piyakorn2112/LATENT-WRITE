@@ -88,7 +88,21 @@ function scoreRow(row: BenchRow, gold: GoldCharacter, bookText: string): CardSco
   const coveredExt = ext.filter((f) => hit(f.keys));
   const kindsCovered = [...new Set([...coveredCore, ...coveredExt].map((f) => f.kind))];
 
-  const antiHits = gold.antiFacts.filter((a) => hit(a.keys)).map((a) => a.claim);
+  // ★ AN ANTI-FACT KEY THE CHARACTER'S OWN GOLD USES IS NOT A FABRICATION
+  //   SIGNAL ON ITS OWN. "afraid of Dowsa" carries keys [afraid, dowsa], and
+  //   the legitimate company line "most often on the page with Dowsa" tripped
+  //   it. A key that also appears in the character's true facts only counts
+  //   when EVERY key of the claim co-occurs; a key foreign to the gold
+  //   (blonde hair on a dark-eyed cast) still fires alone.
+  const legit = new Set(
+    gold.facts.flatMap((f) => [...f.keys, ...(f.quote.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [])]),
+  );
+  const antiHits = gold.antiFacts.filter((a) => {
+    const present = a.keys.filter((k) => descLower.includes(k.toLowerCase()));
+    if (present.length === 0) return false;
+    if (present.length === a.keys.length) return true;
+    return present.some((k) => ![...legit].some((l) => l.includes(k.toLowerCase())));
+  }).map((a) => a.claim);
   const bookLower = bookText.toLowerCase();
   const invented = desc ? inventedParticulars(desc, bookLower, row.forms) : [];
   const offText = desc ? missingWords(desc, [bookText, row.role]) : [];
