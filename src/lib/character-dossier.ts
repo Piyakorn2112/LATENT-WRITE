@@ -1180,11 +1180,23 @@ export function buildDossierPack(ev: CharacterDossierEvidence, opts: PackOptions
 //    never asked at all. Latency is bounded by three small calls, each faster
 //    than the one big one was.
 
+/** ★ RAISED FROM 140/160/160 ON THE QUALITY BENCH. The short caps were the
+ *   depth ceiling: at 20-25 words every personality answer was a bare trait
+ *   list. At these caps, with the reason field and the conduct-first
+ *   instruction below, the same model writes "He is intelligent and
+ *   socially superior, yet emotionally sensitive and prone to resentment" —
+ *   and grounding still holds every word to the pack. */
 const FIELD_MAX: Record<DossierFieldKey, number> = {
-  appearance: 140,
-  personality: 160,
-  background: 160,
+  appearance: 220,
+  personality: 300,
+  background: 260,
 };
+
+/** The max tier's evidence budget, measured against the default 14/3 on the
+ *  quality bench: wider candidate sets per field with the one-field-per-call
+ *  design left intact. The on tier and the extractive composition keep the
+ *  measured defaults. */
+export const MAX_PACK_OPTS: PackOptions = { spanCap: 20, perChannelQuota: 4 };
 
 /** Fixed per-field schemas: three grammar-cache entries, each reused across
  *  every character (a fixed schema is a grammar-cache hit; never input-scale
@@ -1195,6 +1207,15 @@ function fieldSchema(field: DossierFieldKey) {
   return {
     type: "object",
     properties: {
+      // ★ PERSONALITY REASONS IN-SCHEMA, FIRST. The 1024-token unconstrained
+      //   think pass cost ~30s a card for marginal gains; a free-prose reason
+      //   field DECLARED FIRST (grammar emits in declaration order, so the
+      //   model reasons before it selects and composes) bought better answers
+      //   at ~7s, measured A/B on the quality bench. Extractive fields stay
+      //   reason-free: a lookup does not earn a preamble.
+      ...(field === "personality"
+        ? { reason: { type: "string", maxLength: 420 } }
+        : {}),
       spans: { type: "array", items: { type: "integer" }, maxItems: 3 },
       [field]: { type: "string", maxLength: FIELD_MAX[field] },
       confidence: { type: "number" },
@@ -1214,22 +1235,27 @@ const CHARACTER_ASK: Record<DossierFieldKey, FieldAsk> = {
     definition: `spans: FIRST. The numbers of the passages that state what this person LOOKS
   LIKE — body, face, hair, eyes, age, clothing. A passage where they merely do
   something with a body part is not appearance. [] if none qualify.
-appearance: at most 20 words, from ONLY those passages, their own words where
+appearance: at most 30 words, from ONLY those passages, their own words where
   you can. "" if spans is [].`,
     question: "What does {name} look like?",
   },
   personality: {
+    // ★ CONDUCT FIRST, TRAIT SECOND, FUSED — the two instructions the bench
+    //   measured out of bare trait lists ("Intelligent, romantic, emotionally
+    //   deep") into evidenced statements. Same wire schema for every kind.
     definition: `spans: FIRST. The numbers of the passages that show what this person is
   LIKE — temperament, habits, manner, how they treat people. [] if none do.
-personality: at most 25 words. Name the TRAITS the passages show. You may use
-  your own words for a trait, but never invent a name, a place or a number
-  that is not in the passages. "" if spans is [].`,
+personality: at most 40 words. Lead with what the passages show this person
+  DOING, and let the trait follow from the conduct. When two or three
+  passages agree, cite them all and fuse them into one statement. You may
+  use your own words for a trait, but never invent a name, a place or a
+  number that is not in the passages. "" if spans is [].`,
     question: "What is {name} like?",
   },
   background: {
     definition: `spans: FIRST. The numbers of the passages that state what is KNOWN about
   this person — origins, family, history. [] if none do.
-background: at most 25 words, from ONLY those passages. Report only what
+background: at most 35 words, from ONLY those passages. Report only what
   happened to THIS PERSON: a passage often mentions other people, and what
   happened to those others is not an answer about this person. A passage
   tagged (said) is one character talking about another and may be unfair or
@@ -1313,12 +1339,20 @@ const SUBJECT_WORD: Record<DossierKind, string> = {
 function fieldSystem(field: DossierFieldKey, kind: DossierKind): string {
   const ask = ASK_BY_KIND[kind][field];
   const subject = SUBJECT_WORD[kind];
+  const keys = field === "personality"
+    ? `{"reason","spans","${field}","confidence"}`
+    : `{"spans","${field}","confidence"}`;
+  const reasonLine = field === "personality"
+    ? `reason: FIRST. Two or three sentences weighing the passages: which agree
+  with each other, which is the odd one out, and what they add up to.
+`
+    : "";
   return `You fill in ONE field of a ${subject === "person" ? "character" : subject} card for a novel, from evidence a
 search has already gathered. You cannot read the manuscript. The numbered
 passages ${field === "personality" ? "and counted facts " : ""}are all the evidence there is.
 
-Answer as JSON: {"spans","${field}","confidence"} in that order.
-${ask.definition}
+Answer as JSON: ${keys} in that order.
+${reasonLine}${ask.definition}
 confidence: 0 to 1, how much the passages actually settle this. Never above 1.
 
 A passage tagged (pronoun) had its subject resolved by a machine and may
@@ -1357,12 +1391,22 @@ export interface DossierFieldRequest {
  *    candidate span cannot support a comparison, so a lone span is a lookup
  *    whatever the field.
  */
+/**
+ * ★★ RETIRED BY THE REASON FIELD (2026-08-13). Everything below stands as
+ *    the record of why the unconstrained pass existed and what it cost; the
+ *    quality bench then measured the in-schema reason field (declared first,
+ *    ~420 chars) against it: equal-or-better personality answers at ~7s
+ *    where the think pass spent ~30s, on the same packs and the same model.
+ *    The card no longer thinks out-of-band; the policy is kept as a
+ *    function so a future surface can revisit it with the history intact.
+ */
 export function decideDossierThinking(
   field: DossierFieldKey,
   candidateCount: number,
 ): { think: boolean; budget: number; reason: string } {
   if (field !== "personality") return { think: false, budget: 0, reason: "extractive-field" };
   if (candidateCount < 2) return { think: false, budget: 0, reason: "single-span" };
+  return { think: false, budget: 0, reason: "reason-in-schema" };
   // ★★ THE BUDGET IS SET BY WHERE THE CONCLUSION SITS, NOT BY THE TASK.
   //
   //    At 320 every note came back exactly at the cap, opening "Okay, I need
@@ -1386,12 +1430,9 @@ export function decideDossierThinking(
   //    text. That is the cost of thinking on this task, and it is why the
   //    budget is not the only thing that had to be right.
   //
-  //    1024 is what ships. Measured on five characters of the owner's
-  //    manuscript: two answers materially richer (Mira gained "nurturing and
-  //    protective", Tessa gained "skilled in practical crafts"), two equal,
-  //    one thinner. It costs ~30s on top of a ~10s card, which is why only
-  //    this one field spends it and why the UI names the wait.
-  return { think: true, budget: 1024, reason: "multi-span-inference" };
+  //    1024 is what shipped, until the reason field replaced it. Measured on
+  //    five characters of the owner's manuscript: two answers materially
+  //    richer, two equal, one thinner, at ~30s on top of a ~10s card.
 }
 
 /** The reasoning prompt for a field. Same evidence, different instruction:
@@ -1697,10 +1738,11 @@ export function normalizeFieldAnswer(
   raw: unknown,
   pack: DossierPack,
   field: DossierFieldKey,
-  /** Experiment surface: a variant that asks for a longer field must grade
-   *  at the length it asked for, or the truncation tidy cuts a completed
-   *  answer. Absent = the shipped cap, byte for byte. */
-  opts: { maxLen?: number } = {},
+  /** maxLen: a variant that asks for a longer field must grade at the length
+   *  it asked for, or the truncation tidy cuts a completed answer.
+   *  pronounClass: the character's whole-book class, when the caller has one.
+   *  Absent opts = the shipped behaviour, byte for byte. */
+  opts: { maxLen?: number; pronounClass?: HonorificClass } = {},
 ): DossierField & { confidence: number } {
   const value = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const grounded = groundField(
@@ -1711,6 +1753,20 @@ export function normalizeFieldAnswer(
     // Personality is the only abstractive field: appearance and background
     // are factual claims and must locate word for word.
     field === "personality");
+  // ★ A FACTUAL ANSWER THAT OPENS ON THE OPPOSITE-GENDER PRONOUN IS ABOUT
+  //   SOMEBODY ELSE. Measured: Gareth's background led with "She was
+  //   twenty-two years old, in the year that Gareth had married" — Lyssa's
+  //   age, grounded in a span genuinely about his wedding. The ownership
+  //   instruction alone did not stop it; this is the composer's
+  //   opposite-pronoun test applied at the model's answer, and a refusal
+  //   here licenses the extractive retry like any other.
+  if (grounded.text && field !== "personality"
+      && (opts.pronounClass === "masc" || opts.pronounClass === "fem")) {
+    const opposite = opts.pronounClass === "masc" ? /^(?:she|her)\b/i : /^(?:he|his)\b/i;
+    if (opposite.test(grounded.text.trim())) {
+      return { text: "", spans: [], status: "refused", confidence: 0 };
+    }
+  }
   const confRaw = typeof value.confidence === "number" && Number.isFinite(value.confidence)
     ? value.confidence : 0;
   return { ...grounded, confidence: Math.min(1, Math.max(0, confRaw)) };
@@ -2358,6 +2414,217 @@ export function composeProposalDescription(p: DossierProposal): string {
       return /[.!?…]$/.test(s) ? s : `${s}.`;
     });
   return parts.join(" ");
+}
+
+// ── fusion: the card's fact lines rewritten as prose, gated in code ───────
+//
+// ★★ THE NATURALNESS PASS THAT KEEPS ZERO FABRICATION. The composed card
+//    reads as blocks; a rewrite reads as written — but a model rewriting is
+//    a model composing, which is the fabrication surface this engine exists
+//    to close. So the gate is CODE, not judgement: every content word of
+//    the rewrite must locate in the input fact lines, at most one fact line
+//    may be dropped, and the shape must be sentences. A failed gate falls
+//    back to the composed text, so fusion can only ever add.
+//
+//    Measured: the 1.7B failed the gate 11 of 12 times (it reaches for
+//    imagery — "moves through shadows … weaving tale" — exactly the
+//    fabrication class predicted), so the ON tier never attempts fusion.
+//    The 4B passes at a useful rate and its passes are the first cards this
+//    engine has produced that read written rather than assembled. The
+//    residual risk is a wrong CONNECTIVE between true facts (a causal join
+//    the lines do not state) — the prompt forbids it, and the fallback is
+//    always available to the writer as the un-fused fields.
+
+const foldPossessives = (s: string): string =>
+  s.replace(/(['’])s\b/g, "").replace(/['’](?=\s|$)/g, "");
+
+/** Irregular families: conjugating a fact's own verb is never invention. */
+const VERB_FAMILIES: string[][] = [
+  ["speak", "speaks", "spoke", "spoken", "speaking"],
+  ["write", "writes", "wrote", "written", "writing"],
+  ["find", "finds", "found", "finding"],
+  ["spend", "spends", "spent", "spending"],
+  ["tell", "tells", "told", "telling"],
+  ["know", "knows", "knew", "known", "knowing"],
+  ["come", "comes", "came", "coming"],
+  ["go", "goes", "went", "gone", "going"],
+  ["see", "sees", "saw", "seen", "seeing"],
+  ["give", "gives", "gave", "given", "giving"],
+  ["take", "takes", "took", "taken", "taking"],
+  ["keep", "keeps", "kept", "keeping"],
+  ["hold", "holds", "held", "holding"],
+  ["stand", "stands", "stood", "standing"],
+  ["sit", "sits", "sat", "sitting"],
+  ["run", "runs", "ran", "running"],
+  ["make", "makes", "made", "making"],
+  ["say", "says", "said", "saying"],
+  ["wear", "wears", "wore", "worn", "wearing"],
+  ["grow", "grows", "grew", "grown", "growing"],
+  ["leave", "leaves", "left", "leaving"],
+  ["meet", "meets", "met", "meeting"],
+];
+const FAMILY_OF = new Map<string, string[]>();
+for (const family of VERB_FAMILIES) {
+  for (const form of family) FAMILY_OF.set(form, family);
+}
+
+/**
+ * ★ LIGHT VERBS ARE GLUE, NOT CLAIMS. The bench's residual rejects were
+ *   found ×4, appeared ×3, wore, made, remained, showed — verbs that
+ *   predicate facts already in the lines ("wore a deep blue cloak" where
+ *   the cloak is the fact) without adding one. The fabrication surface of
+ *   a description is its nouns, adjectives and particulars; this closed
+ *   set is licensed as connective tissue. Contentful verbs stay checked.
+ */
+const GLUE_WORDS = new Set([
+  "found", "appear", "appears", "appeared", "appearing", "made", "makes",
+  "remained", "remains", "remain", "showed", "shows", "shown", "show",
+  "wore", "worn", "wears", "moved", "moves", "preferred", "prefers",
+  "kept", "keeps", "seemed", "seems", "turned", "turns", "grew", "grown",
+  "became", "becomes", "carried", "carries", "held", "holds", "tended",
+  "tends", "described",
+]);
+
+/** Every hay word's irregular family plus its regular inflections, appended
+ *  once. ("snap" must license "snapped": the doubled consonant defeats a
+ *  suffix stemmer, so the licensed forms are generated on the hay side.) */
+function expandHay(hay: string): string {
+  const words = hay.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [];
+  const extra = new Set<string>();
+  for (const w of words) {
+    for (const member of FAMILY_OF.get(w) ?? []) extra.add(member);
+    extra.add(`${w}ed`);
+    extra.add(`${w}d`);
+    if (w.length <= 6 && /[bdgklmnprt]$/.test(w)) {
+      extra.add(`${w}${w[w.length - 1]}ed`);
+      extra.add(`${w}${w[w.length - 1]}ing`);
+    }
+  }
+  return extra.size ? `${hay} ${[...extra].join(" ")}` : hay;
+}
+
+export interface FusionInput {
+  name: string;
+  pronounClass: HonorificClass;
+  forms: readonly string[];
+  /** Independent fact lines: the composed fields plus the extractive card's
+   *  sentences. Order is the card's order. */
+  factLines: readonly string[];
+}
+
+export interface FusionRequest {
+  systemPrompt: string;
+  userText: string;
+  schema: object;
+  maxTokens: number;
+}
+
+export function buildFusionRequest(input: FusionInput): FusionRequest {
+  const pronoun = input.pronounClass === "masc" ? "he"
+    : input.pronounClass === "fem" ? "she" : "they";
+  const factWords = input.factLines.join(" ").split(/\s+/).filter(Boolean).length;
+  const sentMax = factWords > 60 ? 5 : factWords > 30 ? 4 : 3;
+  return {
+    systemPrompt:
+      `You rewrite a character card so it reads as if a person wrote it. You are\n` +
+      `given fact lines gathered from a manuscript search. Write 2 to ${sentMax} plain\n` +
+      `sentences of connected prose.\n` +
+      `Rules:\n` +
+      `- Use ONLY the facts given. Never add a detail, trait, name or number that\n` +
+      `  is not in a fact line. Leaving a small fact out is allowed; inventing\n` +
+      `  one is not.\n` +
+      `- Keep the manuscript's own wording for descriptive details. You may\n` +
+      `  reorder and conjugate the facts' own words; do not add imagery,\n` +
+      `  comparisons or atmosphere of your own.\n` +
+      `- Never join two facts into cause, purpose or sequence the lines do not\n` +
+      `  state. A fact that will not connect naturally stays its own sentence.\n` +
+      `- Refer to ${input.name} as ${pronoun} after the first mention.\n` +
+      `- No headings, no lists, no quotation marks.\n` +
+      `Answer as JSON: {"text"}.`,
+    userText:
+      `CHARACTER: ${input.name}\n` +
+      `FACTS:\n${input.factLines.map((l) => `- ${l}`).join("\n")}\n\n` +
+      `Write the card text.`,
+    schema: { type: "object", properties: { text: { type: "string", maxLength: 700 } } },
+    maxTokens: 320,
+  };
+}
+
+export interface FusionVerdict {
+  ok: boolean;
+  text: string;
+  /** Content words of the output that locate in no fact line. Non-empty
+   *  fails the gate: that is the fabrication surface, closed in code. */
+  newWords: string[];
+  /** Fact lines none of whose content words reached the output. */
+  droppedLines: string[];
+  reason: string;
+}
+
+/** How many content words a line has, via the module's own tokenizer:
+ *  missingWords against an empty haystack returns every content word. */
+const fusionContentWords = (line: string): string[] => missingWords(line, [" "]);
+
+/**
+ * The fusion gate. Approves only a rewrite that (a) introduces no content
+ * word absent from the facts, (b) drops at most one fact line entirely,
+ * (c) is shaped like prose: 2+ sentences, each with a finite verb.
+ */
+export function groundFusion(raw: unknown, input: FusionInput): FusionVerdict {
+  const text = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+  const fail = (reason: string): FusionVerdict =>
+    ({ ok: false, text, newWords: [], droppedLines: [], reason });
+  if (!text) return fail("empty");
+  if (/[•*]\s|\n|- /.test(text)) return fail("list-shape");
+
+  const hay = [
+    expandHay(foldPossessives([input.factLines.join(" "), input.forms.join(" ")].join(" "))),
+  ];
+  const newWords = missingWords(foldPossessives(text), hay)
+    .filter((w) => !GLUE_WORDS.has(w));
+  if (newWords.length > 0) {
+    return { ok: false, text, newWords, droppedLines: [], reason: "new-content-words" };
+  }
+
+  const droppedLines = input.factLines.filter((line) => {
+    const total = fusionContentWords(line);
+    if (total.length === 0) return false;
+    return missingWords(line, [text]).length === total.length;
+  });
+  if (droppedLines.length > 1) {
+    return { ok: false, text, newWords: [], droppedLines, reason: "dropped-facts" };
+  }
+
+  const sentences = text.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length < 2) return fail("one-sentence");
+  if (sentences.some((s) => !FINITE_VERB_RE.test(s))) return fail("fragment");
+
+  const factWords = input.factLines.join(" ").split(/\s+/).filter(Boolean).length;
+  const words = text.split(/\s+/).filter(Boolean).length;
+  if (words < factWords * 0.5) return fail("too-short");
+  if (words > factWords * 1.8 + 10) return fail("too-long");
+
+  return { ok: true, text, newWords: [], droppedLines, reason: "ok" };
+}
+
+/**
+ * ★ A REPAIR NEEDS AN EXTERNAL CHECK, and the containment gate is one — the
+ *   measured small-model rule (repair loops that check something concrete
+ *   help; open self-critique hurts). ONE retry, the offending words named;
+ *   a second failure falls back to the composed text.
+ */
+export function buildFusionRetryRequest(
+  input: FusionInput,
+  newWords: readonly string[],
+): FusionRequest {
+  const base = buildFusionRequest(input);
+  return {
+    ...base,
+    systemPrompt: base.systemPrompt +
+      `\n\nIMPORTANT: your earlier rewrite added words that appear in none of the` +
+      `\nfact lines: ${newWords.slice(0, 12).join(", ")}. Write it again using only` +
+      `\nthe facts' own words.`,
+  };
 }
 
 export function buildExtractiveCard(

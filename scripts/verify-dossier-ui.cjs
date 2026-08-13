@@ -114,10 +114,21 @@ app.whenReady().then(async () => {
   await wait(900);
   p = await probe();
   console.log(`\n  Osric: ${p.rowCount} rows · note "${p.noteText.slice(0, 80)}"`);
-  gate(p.rowCount === 1 && !p.hasDescRow, "Osric gets the role row and NO description row",
-    `rows ${p.rowCount} desc ${p.hasDescRow}`);
-  gate(/does not describe Osric/.test(p.noteText),
-    "…and the honest empty state instead of an invention");
+  // ★ CONTRACT UPDATED 2026-08-13. The never-DESCRIBED character used to get
+  //   an empty description; the counted lines (voice, company) then joined
+  //   the composition, and they are measured facts, not inventions — Osric
+  //   really does speak those lines beside those people. What the gate must
+  //   still hold is the original point: nothing extracted-descriptive and
+  //   nothing model-written may appear for him. A description row for Osric
+  //   is legal ONLY when built entirely from the counted templates.
+  const osricDesc = p.hasDescRow ? (p.texts.find((t) => /speaks?|page with/.test(t)) ?? "") : "";
+  const countedOnly = !p.hasDescRow || (osricDesc !== "" && osricDesc
+    .split(/(?<=[.!?])\s+/)
+    .every((s) => /^(?:He|She|They)\s+(?:speaks?|never)\b|^Most often on the page with/.test(s.trim())));
+  gate(countedOnly, "Osric's description, if any, is counted lines only (no extraction, no model)",
+    `rows ${p.rowCount} desc ${p.hasDescRow} text "${osricDesc.slice(0, 90)}"`);
+  gate(p.hasDescRow ? true : /does not describe Osric/.test(p.noteText),
+    "…and with no counted lines either, the honest empty state");
   gate(p.texts.some((t) => /minor|recurring|major|central/.test(t)),
     "the deterministic role still shows (counted facts always exist)");
 

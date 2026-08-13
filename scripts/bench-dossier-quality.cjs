@@ -69,7 +69,8 @@ const tsxEval = (code, arg) => JSON.parse(execFileSync(NODE, [TSX, '-e', code, J
 const normalizeBatch = (items) => tsxEval(
   'import {normalizeFieldAnswer} from "./src/lib/character-dossier";' +
   'const a = JSON.parse(process.argv[process.argv.length-1]);' +
-  'console.log(JSON.stringify(a.map((x) => normalizeFieldAnswer(x.raw, x.pack, x.field, x.maxLen ? {maxLen: x.maxLen} : {}))))',
+  'console.log(JSON.stringify(a.map((x) => normalizeFieldAnswer(x.raw, x.pack, x.field, ' +
+  '{...(x.maxLen ? {maxLen: x.maxLen} : {}), ...(x.pronounClass ? {pronounClass: x.pronounClass} : {})}))))',
   items,
 );
 
@@ -222,7 +223,7 @@ async function main() {
         const { res, ms } = await runModel(ask, rid(c.spec, 'appearance', 'a'), 'small');
         timings.appearance = ms;
         if (res && res.ok) {
-          const [answer] = normalizeBatch([{ raw: res.json, pack: c.pack, field: 'appearance' }]);
+          const [answer] = normalizeBatch([{ raw: res.json, pack: c.pack, field: 'appearance', pronounClass: c.pronounClass }]);
           fieldResults.appearance = answer;
           if (answer.status === 'grounded' || answer.status === 'repaired') {
             lead = composeProposal({
@@ -272,7 +273,7 @@ async function main() {
         const first = await runModel(withNotes.ask, rid(c.spec, field, 'a'), 'max', { noThink: false });
         timings[field] = first.ms;
         if (!first.res || !first.res.ok) continue;
-        let [answer] = normalizeBatch([{ raw: first.res.json, pack, field, ...grade }]);
+        let [answer] = normalizeBatch([{ raw: first.res.json, pack, field, pronounClass: c.pronounClass, ...grade }]);
         if (deep && first.res.json && typeof first.res.json.reason === 'string') {
           answer.reason = first.res.json.reason;
         }
@@ -280,7 +281,7 @@ async function main() {
           const second = await runModel(withNotes.retry, rid(c.spec, field, 'b'), 'max', { noThink: false });
           timings[`${field}-retry`] = second.ms;
           if (second.res && second.res.ok) {
-            const [retried] = normalizeBatch([{ raw: second.res.json, pack, field, ...grade }]);
+            const [retried] = normalizeBatch([{ raw: second.res.json, pack, field, pronounClass: c.pronounClass, ...grade }]);
             if (retried.status === 'grounded' || retried.status === 'repaired') answer = retried;
           }
         }

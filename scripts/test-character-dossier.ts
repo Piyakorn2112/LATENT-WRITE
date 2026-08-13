@@ -222,9 +222,17 @@ async function main() {
 
   // The grammar cap leaves a ragged tail; observed verbatim on the real 4B.
   // The tidy pass must cut back to the completed sentence BEFORE grounding.
-  const raggedAtCap =
-    "abstracted, eating mechanically, with her big eyes fixed unswervingly and unseeingly " +
-    "on the sky outside the window. a little, flat, glossy, new sailor, the [ext";
+  // Built AT the cap programmatically so the fixture tracks FIELD_MAX: the
+  // tidy pass only fires on a string sitting at the cap, and the cap moved
+  // (160 → 300) when the depth work raised the field budgets.
+  const raggedHead =
+    "She sat abstracted through the whole of the meal, eating mechanically, with her big " +
+    "eyes fixed unswervingly and unseeingly on the sky outside the window.";
+  let raggedTail = " a little, flat, glossy, new sailor,";
+  while ((raggedHead + raggedTail + " the [ext").length < 300) {
+    raggedTail += " glossy, flat, new sailor,";
+  }
+  const raggedAtCap = (raggedHead + raggedTail + " the [ext").slice(0, 300);
   const tidyPack = {
     ...marlowPack,
     spans: [{ n: 1, channel: "copular" as const, chapter: 1, text: raggedAtCap.replace(" [ext", " extreme") }],

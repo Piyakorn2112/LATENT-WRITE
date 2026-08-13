@@ -139,14 +139,92 @@ survives contact with this pipeline:
   unconstrained think pass, then fusion. The think pass's 30s pays for all
   of it.
 
-## 6. Results
+## 5b. The second reading round (mixed-code sweep, findings only)
 
-(to be filled from the clean same-code sweep)
+The first full variant sweep ran while fixes were still landing, so its
+numbers are not comparable — but reading its cards produced five findings,
+each fixed before the clean sweep:
 
-## 7. What ships
+1. **Light verbs are glue, not claims.** The gate's residual rejects were
+   found ×4, appeared ×3, wore, made, remained, showed — verbs that
+   predicate facts already present ("wore a deep blue cloak", cloak being
+   the fact). A closed glue set is licensed; contentful words stay checked.
+2. **Lexical containment cannot see a causal join.** The 4B fused two true
+   facts into "had been at Netherfield long enough TO BE the least dear…" —
+   every word licensed, the claim invented. The prompt now forbids joining
+   facts into cause, purpose or sequence the lines do not state. (This is
+   the known limit of the gate; the residual risk is a wrong CONNECTIVE
+   between true facts, never a new particular.)
+3. **The action line failed its second audition.** "Across the book Kinoko
+   is the one who filed, agreed, closed" is grammatical and empty —
+   distinctive verbs are distinctive relative to the cast, not meaningful in
+   themselves. Reverted, same lesson as the owner's original verb-tally
+   revert. The verbs stay pack facts the model may phrase ("focused and
+   precise in action" — the 4B, from the same counts).
+4. **Background needs an ownership clause.** Lyssa's "she was twenty-two"
+   shipped on Gareth's card via a span genuinely about his wedding year. The
+   field definition now requires history of THIS PERSON only.
+5. **A bearing is not an origin** ("the direction Kinoko would come from"
+   passed the weak-lore vetoes); the head noun in front of the motion now
+   disqualifies it.
 
-(to be decided from §6 — the wiring change is in WorldDataView.generateDossier
-plus graduating the winning variant helpers into character-dossier.ts)
+Also measured in that round: deep mode HALVED the card (38.6s → ~20s) by
+replacing the 1024-token think pass with an in-schema reason field, and its
+best fused cards were the first output of this engine that reads written
+rather than assembled: "Darcy is a fine, tall person with handsome features
+and a noble mien. He is intelligent and socially superior, yet emotionally
+sensitive and prone to resentment. Darcy speaks at length and is most often
+on the page with Elizabeth and Jane."
+
+## 6. Results (clean same-code sweep, 14 cards, 2026-08-13)
+
+```
+                          core   ext  anti  invented  frag  words  s/card
+on   baseline (shipped)     4%    1%    0      0        6%    11     0.9
+on   skeleton               14%    5%    0      0       31%    26     0.9   ← ships
+on   fusion (1.7B)          14%    5%    0      0       28%    25     3.4   1/12 gate pass — rejected
+max  baseline (shipped)     10%    0%    0      0       36%    20    38.5
+max  fusion (think kept)    12%    2%    0      0       12%    32    41.4
+max  deep                   13%    5%    0      0        8%    40    ~17*   ← ships
+```
+
+\* Three root-crown cards in the deep run hit 10-35 MINUTE model calls at the
+tail of a 90-minute continuous sweep; a fresh re-run of the same three cards
+took 17/16/25s. The stall is environment degradation under sustained load
+(the calls carry a 180s timeout that the assistant layer's reload path
+evidently exceeds), recorded here as an ops observation — the variant's own
+latency is the fresh number.
+
+Fabrication stayed ZERO on every axis in every variant: no anti-fact hits,
+no invented particulars, across 70 generated cards.
+
+Reading verdicts that the aggregates cannot show:
+
+- The deep+fused cards are the first this engine has produced that read
+  written rather than assembled (Darcy, Jane, Kinoko).
+- The on-tier fusion is not shippable: the 1.7B reaches for imagery and
+  fails the containment gate 11 of 12 times even with the glue license and
+  a named-words retry. The skeleton alone carries the on-tier win.
+- The pronoun gate closed the last measured wrong-person leak (Lyssa's age
+  on Gareth's card survived the ownership prompt; the code gate refuses a
+  factual answer opening on the opposite-gender pronoun).
+
+## 7. What shipped (2026-08-13)
+
+Everything measured above graduated into `src/lib/character-dossier.ts` and
+`WorldDataView.generateDossier`:
+
+- **ON tier**: the extractive composition gained the voice and company
+  counted lines (its 4% → 14%); the 1.7B appearance call stays; no fusion.
+  Latency unchanged (~1-2s plus the model call).
+- **MAX tier**: wider evidence (MAX_PACK_OPTS 20/4), raised caps
+  (220/300/260 chars, 30/40/35 words), conduct-first fused-citation
+  personality asked reason-first IN-SCHEMA (the 1024-token think pass is
+  retired — its ~30s bought less than the ~100-token reason field),
+  opposite-pronoun code gate on factual fields, then the fusion pass with
+  the containment gate and one named-words retry. Composed fields remain
+  the fallback whenever fusion fails, so fusion can only add. Net: a
+  richer, connected card at roughly HALF the old latency (~17-20s vs 38.5s).
 
 ## Reproduce
 

@@ -23,13 +23,7 @@ import {
   harvestDossierEvidence,
   DOSSIER_FIELDS,
 } from "../src/lib/character-dossier";
-import {
-  buildDeepPack,
-  buildReasonFirstRequest,
-  composeSkeleton,
-  deepenFieldRequest,
-  DEEP_FIELDS,
-} from "./lib-dossier-variants";
+import { buildDeepPack, composeSkeleton } from "./lib-dossier-variants";
 import { resolveSpeakerCandidates, buildSpeakerAliasMap } from "../src/lib/world-data";
 import { loadBook } from "./print-chapter";
 
@@ -94,19 +88,15 @@ async function main() {
         }];
       }));
 
-      // ── variant artifacts (bench-only; see lib-dossier-variants.ts) ──
+      // ── variant artifacts. After the 2026-08-13 graduation the shipped
+      //    builders ARE the deep shape; the deep pack is the max-tier
+      //    evidence budget (MAX_PACK_OPTS).
       const skeleton = composeSkeleton(ev, sameKind);
       const deepPack = buildDeepPack(ev);
-      const deepFields = Object.fromEntries(DOSSIER_FIELDS.map((field) => {
-        const base = field === "personality"
-          ? buildReasonFirstRequest(deepPack, field)
-          : buildFieldRequest(deepPack, field, "character");
-        return [field, {
-          ask: deepenFieldRequest(base, field),
-          retry: deepenFieldRequest(buildFieldRetryRequest(deepPack, field, "character"), field),
-          gradeMaxLen: DEEP_FIELDS[field].maxLength,
-        }];
-      }));
+      const deepFields = Object.fromEntries(DOSSIER_FIELDS.map((field) => [field, {
+        ask: buildFieldRequest(deepPack, field, "character"),
+        retry: buildFieldRetryRequest(deepPack, field, "character"),
+      }]));
 
       out.push({
         spec: `${book}:${name}`,

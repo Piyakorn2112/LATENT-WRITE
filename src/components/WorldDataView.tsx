@@ -26,20 +26,20 @@ import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
 import { OrbEngine } from "./orb/OrbEngine";
-import { runThinkPass } from "../lib/think";
 import { ThinkingLabel } from "./ThinkingLabel";
 import {
   DOSSIER_TASK,
+  MAX_PACK_OPTS,
   buildDossierPack,
   buildExtractiveCard,
   buildFieldRequest,
   buildFieldRetryRequest,
-  buildFieldThinkRequest,
-  decideDossierThinking,
-  fieldCandidates,
+  buildFusionRequest,
+  buildFusionRetryRequest,
   composeExtractiveDescription,
   composeProposalDescription,
   dossierSignature,
+  groundFusion,
   harvestDossierEvidence,
   normalizeFieldAnswer,
   DOSSIER_FIELDS,
@@ -49,6 +49,8 @@ import {
   type DossierFieldKey,
   type DossierProposal,
   type ExtractiveCard,
+  type FusionInput,
+  type FusionRequest,
   type HarvestProgress,
 } from "../lib/character-dossier";
 import {
@@ -502,7 +504,9 @@ export function WorldDataView({
             contextSize: 4096,
           });
           if (!alive()) return;
-          const answer = res.ok ? normalizeFieldAnswer(res.json, pack, "appearance") : null;
+          const answer = res.ok
+            ? normalizeFieldAnswer(res.json, pack, "appearance", { pronounClass: ev.pronounClass })
+            : null;
           if (answer && (answer.status === "grounded" || answer.status === "repaired")) {
             const chapters = [...new Set(answer.spans
               .map((n) => pack.spans.find((s) => s.n === n)?.chapter)
@@ -540,39 +544,20 @@ export function WorldDataView({
         return;
       }
 
-      const proposal: DossierProposal = emptyProposal(pack, card.role);
+      // ★★ THE MAX TIER'S OWN EVIDENCE BUDGET. Wider candidate sets per
+      //    field (span cap 20, quota 4), measured on the quality bench with
+      //    the one-field-per-call design left intact. The extractive
+      //    composition and the on-tier call keep the measured 14/3 pack.
+      const maxPack = buildDossierPack(ev, MAX_PACK_OPTS);
+      const proposal: DossierProposal = emptyProposal(maxPack, card.role);
       for (const field of DOSSIER_FIELDS) {
         if (!alive()) return;
-        // ★★ REAL THINKING NEEDS ITS OWN UNCONSTRAINED CALL. A grammar masks
-        //    think tokens from token zero, so `noThink: false` on the
-        //    constrained request below has always been cosmetic. Only the
-        //    abstractive field earns the second call — see
-        //    decideDossierThinking.
-        const policy = decideDossierThinking(field, fieldCandidates(pack, field).length);
-        let notes: string | null = null;
-        if (policy.think) {
-          const thinkReq = buildFieldThinkRequest(pack, field, kind);
-          if (thinkReq) {
-            setDossier({
-              phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
-              descriptionText: "", citedChapters: [], generated: false, card, thinking: true,
-            });
-            notes = await runThinkPass(assistantRunJSON, {
-              task: DOSSIER_TASK,
-              tag: entity.name,
-              systemPrompt: thinkReq.systemPrompt,
-              userText: thinkReq.userText,
-              schema: thinkReq.schema,
-              budget: policy.budget,
-              timeoutMs: 90_000,
-              // Same window as the answer calls, or the first answer at 4096
-              // would make this one reload the model. See runThinkPass.
-              contextSize: 4096,
-            });
-            if (!alive()) return;
-          }
-        }
-        const request = buildFieldRequest(pack, field, kind, notes);
+        // ★★ THE 1024-TOKEN THINK PASS IS RETIRED. Personality now reasons
+        //    IN-SCHEMA: a free-prose reason field declared first, so the
+        //    model weighs the passages before it selects and composes.
+        //    Measured equal-or-better at ~7s where the unconstrained pass
+        //    spent ~30s. See decideDossierThinking's retained history.
+        const request = buildFieldRequest(maxPack, field, kind);
         if (!request) continue; // gate closed: never asked, never invented
         setDossier({
           phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
@@ -606,16 +591,16 @@ export function WorldDataView({
         const first = await ask(request);
         if (!alive()) return;
         if (!first.ok) continue; // that field stays empty; the card says so
-        let answer = normalizeFieldAnswer(first.json, pack, field);
+        let answer = normalizeFieldAnswer(first.json, maxPack, field, { pronounClass: ev.pronounClass });
         // ★ A refusal licenses ONE extractive retry (module rule): the line
         //   used words from outside the passages, so ask again for verbatim.
         if (answer.status === "refused") {
-          const retryReq = buildFieldRetryRequest(pack, field, kind, notes);
+          const retryReq = buildFieldRetryRequest(maxPack, field, kind);
           if (retryReq) {
             const second = await ask(retryReq);
             if (!alive()) return;
             if (second.ok) {
-              const retried = normalizeFieldAnswer(second.json, pack, field);
+              const retried = normalizeFieldAnswer(second.json, maxPack, field, { pronounClass: ev.pronounClass });
               // ★ A RETRY MAY ONLY REPLACE A REFUSAL WITH AN ACCEPTANCE.
               //   Taking any non-empty retry was measured swapping the best
               //   answers in the run for word salad, because the extractive
@@ -635,14 +620,67 @@ export function WorldDataView({
       const generatedText = composeProposalDescription(proposal);
       const citedSpans = [...proposal.appearance.spans, ...proposal.personality.spans, ...proposal.background.spans];
       const citedChapters = [...new Set(citedSpans
-        .map((n) => pack.spans.find((s) => s.n === n)?.chapter)
+        .map((n) => maxPack.spans.find((s) => s.n === n)?.chapter)
         .filter((c): c is number => c !== undefined))];
+
+      // ★★ FUSION — the whole card rewritten as connected prose, gated in
+      //    CODE (see groundFusion): no new content words, at most one fact
+      //    dropped, sentence shape enforced, one retry naming the offending
+      //    words. A failed gate ships the composed fields exactly as before,
+      //    so this pass can only ever add. Max tier only — the 1.7B failed
+      //    the same gate 11 of 12 times on the bench.
+      let fused = "";
+      if (generatedText || extractive) {
+        const fieldLines = ([proposal.appearance, proposal.personality, proposal.background])
+          .filter((f) => f.text)
+          .map((f) => {
+            const s = f.text.trim().replace(/^./, (c) => c.toUpperCase());
+            return /[.!?…]$/.test(s) ? s : `${s}.`;
+          });
+        const extractiveLines = extractive
+          ? extractive.split(/(?<=[.!?])\s+/).map((s) => s.trim()).filter(Boolean)
+          : [];
+        const fusionInput: FusionInput = {
+          name: ev.name, pronounClass: ev.pronounClass, forms: ev.forms,
+          factLines: [...fieldLines, ...extractiveLines],
+        };
+        if (fusionInput.factLines.length >= 2 && alive()) {
+          setDossier({
+            phase: "writing", forName: entity.name, progress: null, fieldInFlight: null,
+            descriptionText: "", citedChapters: [], generated: false, card,
+          });
+          const runFusion = async (req: FusionRequest) => assistantRunJSON<{ text?: unknown }>({
+            task: DOSSIER_TASK, tag: `${entity.name}-fusion`, tier: "max", noThink: false,
+            systemPrompt: req.systemPrompt, userText: req.userText,
+            schema: req.schema, maxTokens: req.maxTokens,
+            timeoutMs: 60_000, contextSize: 4096,
+            ...(reroll ? { temperature: 0.7, minP: 0.05 } : {}),
+          });
+          const firstFusion = await runFusion(buildFusionRequest(fusionInput));
+          if (!alive()) return;
+          if (firstFusion.ok) {
+            let verdict = groundFusion(firstFusion.json?.text, fusionInput);
+            if (!verdict.ok && verdict.reason === "new-content-words") {
+              const retryFusion = await runFusion(buildFusionRetryRequest(fusionInput, verdict.newWords));
+              if (!alive()) return;
+              if (retryFusion.ok) {
+                const repaired = groundFusion(retryFusion.json?.text, fusionInput);
+                if (repaired.ok) verdict = repaired;
+              }
+            }
+            if (verdict.ok) fused = verdict.text;
+          }
+        }
+      }
+
       if (alive()) {
         setDossier({
           phase: "ready", forName: entity.name, progress: null, fieldInFlight: null,
-          descriptionText: generatedText || extractive,
-          citedChapters: generatedText ? citedChapters : (extractive ? extractiveChapters : []),
-          generated: !!generatedText,
+          descriptionText: fused || generatedText || extractive,
+          citedChapters: (fused || generatedText)
+            ? [...new Set([...citedChapters, ...(fused ? extractiveChapters : [])])]
+            : (extractive ? extractiveChapters : []),
+          generated: !!(fused || generatedText),
           card,
         });
       }
