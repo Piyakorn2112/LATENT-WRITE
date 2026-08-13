@@ -106,6 +106,15 @@ export function companySentence(ev: CharacterDossierEvidence): string | null {
   return `Most often on the page with ${names.join(" and ")}.`;
 }
 
+/** The action line the harvest already derives ("Across the book X is the
+ *  one who mended, baked, wove") — grammatical past forms after `who`, so
+ *  it is NOT the reverted "most often seen to filed" template. Two verbs
+ *  minimum: one verb is a moment, not a pattern. */
+export function actionSentence(ev: CharacterDossierEvidence): string | null {
+  if (ev.counts.distinctiveVerbs.length < 2) return null;
+  return ev.byChannel.action[0]?.text ?? null;
+}
+
 /** The richer deterministic card: shipped composition plus counted lines,
  *  floored as a WHOLE — "Big eyes." plus a voice line is a real card even
  *  though neither part clears the floor alone. */
@@ -115,6 +124,7 @@ export function composeSkeleton(
 ): string {
   const parts = [
     ...composeExtractiveParts(ev, otherCastNames),
+    actionSentence(ev),
     voiceSentence(ev),
     companySentence(ev),
   ].filter(Boolean);
