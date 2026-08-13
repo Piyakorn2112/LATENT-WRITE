@@ -364,8 +364,16 @@ async function run(opts, entry) {
         // A precompiled compact grammar beats json_schema: the server's own
         // schema conversion allows pretty-printing and the model takes it
         // (measured 111 vs ~70 tokens on a chip answer).
+        // ★★ AND A GRAMMAR NEEDS THE HOST'S OWN STOP TRIGGER. The generated
+        //    no-new-lines grammars still permit trailing newlines AFTER the
+        //    closing brace, and the server happily samples them to the
+        //    n_predict cap — measured: a 36-token answer became 512 tokens,
+        //    "}\n\n\n\n…" padded 13.5s. The in-process host guards exactly
+        //    this with stopGenerationTriggers ['\n\n\n\n']; the sidecar now
+        //    mirrors it. A compact no-newline JSON body can never contain
+        //    the sequence, so the stop is unreachable inside a real answer.
         ...(typeof opts.gbnf === 'string' && opts.gbnf !== ''
-          ? { grammar: opts.gbnf }
+          ? { grammar: opts.gbnf, stop: ['\n\n\n\n'] }
           : { json_schema: opts.schema }),
         temperature: Number.isFinite(opts.temperature) ? opts.temperature : 0,
         ...(Number.isFinite(opts.minP) && opts.minP > 0 ? { min_p: opts.minP } : {}),
