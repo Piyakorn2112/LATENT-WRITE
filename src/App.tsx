@@ -8,7 +8,7 @@ import { EntityPopover } from "./components/EntityPopover";
 import { MaxAskPopover } from "./components/MaxAskPopover";
 import { WritingToolPopover } from "./components/WritingToolPopover";
 import { runWritingTool, planWritingBatches, applyRevision, WRITING_TASK, type WritingOp } from "./lib/writing-tool";
-import { buildAskInput, splitEngineParagraphs, paragraphIndexAt } from "./lib/max-ask-context";
+import { buildAskInput, splitEngineParagraphs } from "./lib/max-ask-context";
 import { AnnotationPopover } from "./components/AnnotationPopover";
 import { DebugPanel } from "./components/DebugPanel";
 
@@ -537,35 +537,6 @@ export default function App() {
   const recordOnbEdit = () => {
     recordOnb("first-edit");
     if (!isSampleModeActive()) recordOnb("first-own-edit");
-  };
-
-  /** The rail's visible twin of the two right-click gestures. Reads the
-   *  caret (or selection) straight off the active textarea — selection state
-   *  survives the focus moving to the rail button — and routes exactly like
-   *  the context menu: selection → rewrite, bare caret → ask. The popover
-   *  clamps itself into the viewport from the rail anchor. */
-  const handleAskAtCaret = (anchor: DOMRect) => {
-    const target = activeChapter;
-    if (!target) return;
-    const ta = document.querySelector<HTMLTextAreaElement>(
-      prefs.splitView
-        ? `.split-pane--${activeSide} .document-editor`
-        : ".document-editor",
-    );
-    const selStart = ta?.selectionStart ?? 0;
-    const selEnd = ta?.selectionEnd ?? 0;
-    const x = anchor.left;
-    const y = anchor.top;
-    if (ta && selEnd > selStart && handleWriteSelection) {
-      handleWriteSelection({ chapterId: target.id, start: selStart, end: selEnd, x, y });
-      return;
-    }
-    handleAskParagraph?.({
-      chapterId: target.id,
-      paragraphIndex: paragraphIndexAt(target.content, selStart),
-      x,
-      y,
-    });
   };
 
   /** Called with every editor content change so an edit ABOVE the in-flight
@@ -3151,7 +3122,6 @@ export default function App() {
         onReviewComplete={handleReviewComplete}
         onProjectLoaded={handleProjectLoaded}
         onNovelRefresh={handleNovelRefresh}
-        onAskAtCaret={maxAskAvailable && activeChapter ? handleAskAtCaret : undefined}
         onAutoParagraph={activeChapter ? handleAutoParagraph : undefined}
         autoParagraphing={autoParagraphing}
         onAutoSceneBreak={

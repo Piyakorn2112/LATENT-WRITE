@@ -20,7 +20,7 @@ import { CastWidget } from "./widgets/CastWidget";
 import { RoleWidget } from "./widgets/RoleWidget";
 import { CrossArcWidget } from "./widgets/CrossArcWidget";
 import { PlaceholderWidget } from "./widgets/PlaceholderWidget";
-import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon, LayersIcon, Wand2Icon, SparklesIcon, resolveToolIcon } from "./Icon";
+import { ChevronRight as ChevronIcon, SettingsIcon, PilcrowIcon, LayersIcon, Wand2Icon, resolveToolIcon } from "./Icon";
 import { StoryGraphPanel } from "./StoryGraphPanel";
 import type { PresenceOverrides } from "../lib/story-graph-display";
 import { RendererPanel } from "./RendererPanel";
@@ -78,11 +78,6 @@ interface Props {
   autoParagraphing?: boolean;
   onAutoSceneBreak?: () => void;
   sceneBreaking?: boolean;
-  /** The visible twin of the right-click gestures (contextual menus are
-   *  accelerators, never the only path): asks about the paragraph at the
-   *  caret, or rewrites the selection if one exists. Passed only when the
-   *  gestures themselves are live — same gate, one place, in App. */
-  onAskAtCaret?: (anchor: DOMRect) => void;
   onOpenChange?: (open: boolean) => void;
   /** Story Graph — full novel structure accumulated from NLP analysis. */
   storyGraph?: StoryGraph;
@@ -1010,7 +1005,7 @@ export function AnalysisPanel({
   prefs, onSetPrefs, chapterId, chapterTitle, chapterContent, needsProjectSaveWarning,
   allChapters, chapterIndex, worldData,
   onAutoParagraph, autoParagraphing,
-  onAutoSceneBreak, sceneBreaking, onAskAtCaret, onOpenChange,
+  onAutoSceneBreak, sceneBreaking, onOpenChange,
   storyGraph, knowledgeStore, onKnowledgeKnewAlready, onKnowledgeGoodCatch, confirmedChekhov,
   presenceOverrides, onSelectChapter,
   reviewResult, onReviewComplete, onProjectLoaded, onNovelRefresh,
@@ -1287,23 +1282,6 @@ export function AnalysisPanel({
             <span className="analysis-tab-badge">{widgetCount}</span>
           )}
         </button>
-
-        {onAskAtCaret && (
-          <div className="analysis-action-group" aria-label="Ask the reader" role="group">
-            {/* The rail twin of right-click ask/rewrite. A contextual menu is
-                an accelerator for people who already know it exists; this
-                button is how they find out. Branches exactly like the
-                gesture: a live selection rewrites, a bare caret asks. */}
-            <button
-              className="analysis-action-button"
-              onClick={(e) => onAskAtCaret(e.currentTarget.getBoundingClientRect())}
-              aria-label="Ask about the paragraph at the cursor"
-              title="Ask about this paragraph · select text first to rewrite · also on right-click"
-            >
-              <SparklesIcon size={13} />
-            </button>
-          </div>
-        )}
 
         {(onAutoParagraph || onAutoSceneBreak) && (
           <div className="analysis-action-group" aria-label="Formatting actions" role="group">

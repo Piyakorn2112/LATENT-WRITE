@@ -193,10 +193,13 @@ Everything in §5 shipped. The engineering shape, for the next reader:
   answering opens the panel it feeds (worldAfterCastRef). The sample
   never asks — its WORLD-DATA block ships castReviewed with 7
   characters and 5 places confirmed.
-- **The hero is the scaled production mesh dot**, not the canvas
-  OrbEngine — at hero size the engine decomposes into six flat
-  ellipses (tried, photographed, rejected); the legacy stage markup
-  with ghost/accent layers is the toolbar orb as users recognise it.
+- **The hero is the production OrbEngine** (the toolbar's canvas, with
+  its vibrance/aberration character) at hero size. An earlier pass
+  swapped it for the legacy gradient mesh dot on the judgment that the
+  six-petal flower "decomposed" at scale — the owner overturned that:
+  the flower IS the product's identity mark, and the welcome must show
+  exactly the orb the writer meets in the toolbar. Taste calls about
+  brand marks belong to the owner.
 - **onboarding-log.ts** stores first-occurrence timestamps per event
   kind, idempotent, bounded; the checklist derives from it via
   useSyncExternalStore, the dock reads it live (watched it tick 2/4
@@ -215,6 +218,19 @@ a fraction of the surgery); a Renderer-panel guard in sample mode (the
 panel operates on the real project; a first-run sample user has
 neither project nor login, noted as a residual); the 5-writer
 moderated protocol (a template in §3, to be run with real writers).
+
+**Owner round (2026-08-14):** four corrections, all shipped. The rail
+"ask" sparkles button is REMOVED (owner: bad design, doesn't fit the
+UI flow — the checklist's one-time hint is the gesture teaching; the
+NN/g redundancy rule waits for a better-integrated form if ever). The
+welcome hero is the OrbEngine flower (above). The subtitle→doors gap
+was a CASCADE LOSS, not a taste gap: `.onb-subtitle--welcome`'s margin
+AND max-width were silently beaten by the base `.onb-subtitle` rule
+sitting later in the sheet — fixed by doubling the class; the app-
+cascade-beats-component lesson again. The doors were redesigned as
+icon-chip rows (book / pen chips, accent grammar kept, hover-reveal
+chevron, content centered so a returning writer's one-line door reads
+composed).
 
 **Critic round (designers-package visual critic, 2026-08-13):** verdict
 ship-after-should-fixes; all fixed same day. The blocker — the sample

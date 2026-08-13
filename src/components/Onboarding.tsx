@@ -1,6 +1,7 @@
-import { useEffect, useState, type CSSProperties } from "react";
-import { ChevronRight, CloseIcon } from "./Icon";
+import { useEffect, useState } from "react";
+import { BookOpenIcon, ChevronRight, CloseIcon, PenLineIcon } from "./Icon";
 import { activateCode } from "../lib/license";
+import { OrbEngine } from "./orb/OrbEngine";
 import { recordOnb } from "../lib/onboarding-log";
 
 /**
@@ -30,72 +31,23 @@ import { recordOnb } from "../lib/onboarding-log";
 // welcome experience visually identical to the toolbar orb users see later.
 type IntelMode = "fast" | "default" | "high";
 
-type OrbPalette = { a: string; b: string; c: string };
-
-const ORB_COLORS: Record<IntelMode, OrbPalette> = {
-  fast:    { a: "#FFAE00", b: "#FF6500", c: "#FFDE5E" },
-  default: { a: "#1066FF", b: "#33E9FF", c: "#AADAFF" },
-  high:    { a: "#C50DFF", b: "#FF64FF", c: "#FFA4FF" },
-};
-
-const ORB_ACCENT_COLORS: Record<IntelMode, OrbPalette> = {
-  fast:    { a: "#34A8FF", b: "#7DE8FF", c: "#C7FFD0" },
-  default: { a: "#7080FF", b: "#9FEEFF", c: "#FFAB92" },
-  high:    { a: "#5B79FF", b: "#8CE5FF", c: "#FFC38E" },
-};
-
 const MODE_ORDER: IntelMode[] = ["default", "high", "fast"];
 
-const paletteStyleVars = (palette: OrbPalette): CSSProperties =>
-  ({ "--orb-a": palette.a, "--orb-b": palette.b, "--orb-c": palette.c } as CSSProperties);
-
 // ─── HeroOrb ──────────────────────────────────────────────────────────────
-// ★★ THE SCALED PRODUCTION DOT, NOT THE CANVAS ENGINE. OrbEngine at hero
-//    size decomposes into six flat ellipses — the engine's geometry is tuned
-//    for a 20px toolbar dot, and magnifying the canvas magnifies its parts
-//    instead of its glow. This markup scales the REAL .intel-mesh-dot (with
-//    its ghost and accent layers and the slowed hero animation timings the
-//    stylesheet keeps for exactly this block), so the hero is the toolbar
-//    orb as users will actually recognise it, just closer.
-function HeroOrb({ mode, size = 170 }: { mode: IntelMode; size?: number }) {
-  const scale = size / 20;
+// ★ THE TOOLBAR ORB, CLOSER. OrbEngine with the toolbar's own character
+//   (vibrance, aberration) at hero size — the six-petal flower IS the
+//   product's identity mark, so the welcome shows exactly what the writer
+//   will find at the top-left of the editor a moment later. flowScale < 1
+//   because at hero scale the toolbar flow speed reads frantic.
+function HeroOrb({ mode, size = 150 }: { mode: IntelMode; size?: number }) {
   return (
     <div className="onb-orb" style={{ width: size, height: size }}>
-      <div
-        className="onb-orb-stage"
-        style={{ transform: `scale(${scale})`, transformOrigin: "center" }}
-      >
-        <span className="intel-mesh-dot" data-mode={mode} style={paletteStyleVars(ORB_COLORS[mode])}>
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} className="intel-mesh-dot-orb" />
-          ))}
-        </span>
-        <span
-          className="intel-mesh-dot intel-mesh-dot--ghost"
-          data-mode={mode}
-          style={paletteStyleVars(ORB_COLORS[mode])}
-          aria-hidden="true"
-        >
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} className="intel-mesh-dot-orb" />
-          ))}
-        </span>
-        <span
-          className="intel-mesh-dot intel-mesh-dot--accent"
-          data-mode={mode}
-          style={paletteStyleVars(ORB_ACCENT_COLORS[mode])}
-          aria-hidden="true"
-        >
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <span key={i} className="intel-mesh-dot-orb" />
-          ))}
-        </span>
-      </div>
+      <OrbEngine mode={mode} size={size} flowScale={0.45} vibrance={0.9} aberration={0.45} />
     </div>
   );
 }
 
-function CyclingOrb({ size = 170 }: { size?: number }) {
+function CyclingOrb({ size = 150 }: { size?: number }) {
   const [idx, setIdx] = useState(0);
   useEffect(() => {
     const id = window.setInterval(() => setIdx((i) => (i + 1) % MODE_ORDER.length), 4000);
@@ -216,7 +168,7 @@ export function Onboarding({ onClose, onOpenSample, onStartOwn, hasOwnWords, inS
 
         <div className="onb-welcome">
           <div className="onb-welcome-hero">
-            <CyclingOrb size={170} />
+            <CyclingOrb size={150} />
           </div>
 
           <h1 className="onb-title">Write. It reads along.</h1>
@@ -233,26 +185,38 @@ export function Onboarding({ onClose, onOpenSample, onStartOwn, hasOwnWords, inS
 
           <div className="onb-doors">
             <button type="button" className="onb-door onb-door--primary" onClick={onOpenSample}>
-              <span className="onb-door-label">Open the sample story</span>
-              <span className="onb-door-sub">
-                {inSample
-                  ? "You are in it now. Opening it again starts a fresh copy."
-                  : "A keeper, a stranger, and a ledger that does not agree with itself. Safe to break, and it resets when you leave."}
+              <span className="onb-door-icon" aria-hidden="true">
+                <BookOpenIcon size={15} />
               </span>
+              <span className="onb-door-text">
+                <span className="onb-door-label">Open the sample story</span>
+                <span className="onb-door-sub">
+                  {inSample
+                    ? "You are in it now. Opening it again starts a fresh copy."
+                    : "A keeper, a stranger, and a ledger that does not agree with itself. Safe to break, and it resets when you leave."}
+                </span>
+              </span>
+              <ChevronRight size={14} className="onb-door-go" aria-hidden="true" />
             </button>
 
             <button type="button" className="onb-door" onClick={onStartOwn}>
-              <span className="onb-door-label">{hasOwnWords ? "Back to your book" : "Start your own book"}</span>
-              <span className="onb-door-sub">
-                {hasOwnWords ? (
-                  "Your words are where you left them."
-                ) : (
-                  <>
-                    A blank first chapter. Or bring a draft in
-                    {isElectron ? <> with <Kbd desktop={isElectron}>⌘O</Kbd></> : " from the toolbar"}.
-                  </>
-                )}
+              <span className="onb-door-icon" aria-hidden="true">
+                <PenLineIcon size={15} />
               </span>
+              <span className="onb-door-text">
+                <span className="onb-door-label">{hasOwnWords ? "Back to your book" : "Start your own book"}</span>
+                <span className="onb-door-sub">
+                  {hasOwnWords ? (
+                    "Your words are where you left them."
+                  ) : (
+                    <>
+                      A blank first chapter. Or bring a draft in
+                      {isElectron ? <> with <Kbd desktop={isElectron}>⌘O</Kbd></> : " from the toolbar"}.
+                    </>
+                  )}
+                </span>
+              </span>
+              <ChevronRight size={14} className="onb-door-go" aria-hidden="true" />
             </button>
           </div>
 

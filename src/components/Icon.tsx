@@ -50,6 +50,7 @@ import {
   MoreHorizontal as _Mh,
   Undo2 as _Ud,
   Redo2 as _Rd,
+  PenLine as _Pn,
 } from "lucide-react";
 
 type P = Omit<LucideProps, "size"> & { size?: number };
@@ -104,6 +105,7 @@ export const PuzzleIcon        = wrap(_Pz);
 export const MoreHorizontalIcon = wrap(_Mh);
 export const UndoIcon           = wrap(_Ud);
 export const RedoIcon           = wrap(_Rd);
+export const PenLineIcon        = wrap(_Pn);
 
 const TOOL_ICON_MAP: Record<string, React.FC<P>> = {
   Target: TargetIcon, Search: SearchIcon, BookOpen: BookOpenIcon,

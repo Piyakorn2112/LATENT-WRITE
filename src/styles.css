@@ -7998,9 +7998,12 @@ body.electron-window-unfocused .toolbar-ambient-orb {
      title inside the same optical group instead of a floor below it. */
   margin: 0 0 6px;
 }
-.onb-subtitle--welcome {
-  max-width: 46ch;
-  margin-bottom: 26px;
+/* Doubled class beats the base `.onb-subtitle { margin: 0 }` that sits
+   LATER in this sheet — a single class here silently lost the cascade and
+   the doors sat flush against the paragraph. */
+.onb-subtitle.onb-subtitle--welcome {
+  max-width: 52ch;
+  margin-bottom: 30px;
 }
 .onb-doors {
   display: grid;
@@ -8009,14 +8012,14 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   width: 100%;
 }
 .onb-door {
+  /* A row: icon chip, text column, and a chevron that only steps forward
+     on hover. align-items centers each door's content in the stretched
+     grid cell, so a one-line door (a returning writer's "Back to your
+     book") reads composed rather than top-pinned in an empty box. */
   display: flex;
-  flex-direction: column;
-  /* Centered within the stretched grid cell — door 2's copy is shorter
-     (one line for a returning writer), and top-anchored short content
-     read as a box that failed to load rather than a quiet door. */
-  justify-content: center;
-  gap: 5px;
-  padding: 15px 17px 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 14px 15px 15px;
   border-radius: 16px;
   border: 1px solid var(--divider-line);
   background: color-mix(in srgb, var(--panel-text) 3%, transparent);
@@ -8043,6 +8046,28 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   background: color-mix(in srgb, var(--control-value-fill) 12%, transparent);
   border-color: color-mix(in srgb, var(--control-value-fill) 75%, var(--divider-line));
 }
+.onb-door-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--panel-text) 6%, transparent);
+  color: var(--text-secondary);
+}
+.onb-door--primary .onb-door-icon {
+  background: color-mix(in srgb, var(--control-value-fill) 16%, transparent);
+  color: color-mix(in srgb, var(--control-value-fill) 82%, var(--panel-text));
+}
+.onb-door-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
 .onb-door-label {
   font-size: 13.5px;
   font-weight: 600;
@@ -8054,6 +8079,17 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   line-height: 1.5;
   color: var(--text-tertiary);
   letter-spacing: 0.01em;
+}
+.onb-door-go {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.onb-door:hover .onb-door-go {
+  opacity: 1;
+  transform: translateX(0);
 }
 .onb-pro-row--welcome {
   width: 100%;
@@ -8137,6 +8173,10 @@ body.electron-window-unfocused .toolbar-ambient-orb {
    scale layer fighting the card's own layout. */
 
 /* ─── Hero orb (large-scale wrapper) ────────────────────────────────────── */
+/* The hero is the production OrbEngine at hero size (the toolbar's own
+   canvas, the product's identity mark). The wrapper only centers it and
+   adds a quiet halo; the engine's canvas extends ~50% beyond the box for
+   its own glow, so overflow stays visible by default. */
 .onb-orb {
   position: relative;
   display: flex;
@@ -8145,69 +8185,6 @@ body.electron-window-unfocused .toolbar-ambient-orb {
   /* Subtle glow halo behind the orb — playful but not loud. */
   filter: drop-shadow(0 8px 40px rgba(168, 145, 255, 0.22));
 }
-/* The stage must mirror the toolbar's .intel-btn-inner exactly so the two
-   mesh-dot spans render with correct geometry:
-     • display: flex blockifies the main <span class="intel-mesh-dot"> so
-       its width: 20px / height: 20px from the base class actually apply
-       (inline-default spans ignore those properties — that's why removing
-       flex earlier rendered an empty container).
-     • Explicit 20×20 size keeps the layered mesh spans' `position:
-       absolute; inset: 0;` resolving against a 20×20 box, perfectly
-       overlapping the main cluster instead of anchoring at the wrapper's
-       top-left.
-   The transform: scale() on the stage then visually inflates the
-   correctly-laid-out 20×20 unit to the requested hero size. */
-.onb-orb-stage {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-}
-
-/* Smooth colour crossfade on mode swap. The toolbar orb deliberately snaps
-   colours when the user clicks (felt more responsive at 20 px), but at
-   the welcome's 220 px the snap is jarring — the eye is locked on the
-   orb. The @property-registered <color> variables make this transition
-   interpolatable; we just need to declare it. Targeted to .onb-orb so
-   the toolbar behaviour is preserved. */
-.onb-orb .intel-mesh-dot {
-  transition:
-    --orb-a 1.4s ease,
-    --orb-b 1.4s ease,
-    --orb-c 1.4s ease,
-    transform 0.55s cubic-bezier(0.34, 1.42, 0.64, 1),
-    filter 0.5s ease;
-}
-
-/* Slow the internal orbits ~2.6× on the hero orb. The orbits use absolute-
-   pixel transforms inside the 20 px container, which transform-scale then
-   blows up to 220 px — the same per-second pixel velocity now traverses
-   much more area, so the small-orb timings read as frantic at hero scale.
-   Stretching them brings the motion back to a calm float. */
-.onb-orb .intel-mesh-dot-orb:nth-child(1) { animation-duration: 8.5s; }
-.onb-orb .intel-mesh-dot-orb:nth-child(2) { animation-duration: 10s; }
-.onb-orb .intel-mesh-dot-orb:nth-child(3) { animation-duration: 7.5s; }
-.onb-orb .intel-mesh-dot-orb:nth-child(4) { animation-duration: 8.5s; }
-.onb-orb .intel-mesh-dot-orb:nth-child(5) { animation-duration: 10s; }
-.onb-orb .intel-mesh-dot-orb:nth-child(6) { animation-duration: 7.5s; }
-
-.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(1) { animation-duration: 9.1s; }
-.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(2) { animation-duration: 10.7s; }
-.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(3) { animation-duration: 8.1s; }
-.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(4) { animation-duration: 9.1s; }
-.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(5) { animation-duration: 10.7s; }
-.onb-orb .intel-mesh-dot--ghost .intel-mesh-dot-orb:nth-child(6) { animation-duration: 8.1s; }
-
-.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(1) { animation-duration: 9.8s; }
-.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(2) { animation-duration: 11.2s; }
-.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(3) { animation-duration: 8.7s; }
-.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(4) { animation-duration: 9.8s; }
-.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(5) { animation-duration: 11.2s; }
-.onb-orb .intel-mesh-dot--accent .intel-mesh-dot-orb:nth-child(6) { animation-duration: 8.7s; }
-
-/* ─── Modes row (page 2) ────────────────────────────────────────────────── */
 
 /* ─── Mock widget cards (page 3) ──────────────────────────────────────────
    Mirror the real .widget-card chassis exactly so the welcome preview

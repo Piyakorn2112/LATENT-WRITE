@@ -139,12 +139,12 @@ app.whenReady().then(async () => {
     `App consults the latch (daily words, first-edit attribution)`);
 
   // ── 7. Gestures are taught only where they exist ────────────────────────
+  // (The rail "ask" button was removed by the owner — the checklist's
+  //  one-time hint is the teaching surface; no gate mourns the button.)
   gate(/maxReady=\{maxAskAvailable\}/.test(APP),
     `the gesture hint is gated on maxAskAvailable, not isElectron`);
-  gate(/onAskAtCaret=\{maxAskAvailable/.test(APP),
-    `the rail's visible ask twin carries the same gate`);
-  gate(/onAskAtCaret/.test(PANEL),
-    `the rail renders the visible affordance (contextual menus are never the only path)`);
+  gate(!/onAskAtCaret/.test(PANEL) && !/onAskAtCaret/.test(APP),
+    `the retired rail ask button stays retired`);
   gate(/max-hint|ask-used/.test(CHECK),
     `the hint tracks whether the gesture was actually tried`);
 
