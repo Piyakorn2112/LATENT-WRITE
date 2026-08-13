@@ -172,3 +172,46 @@ instrumentation is a feature, not hidden telemetry.
 device, inspectable. Activation = the five proxy gates checked against
 it in moderated sessions; ship-gate = 4/5 writers clear all gates
 unassisted.
+
+## 6. Built (2026-08-13, commit "Onboarding reimagined")
+
+Everything in §5 shipped. The engineering shape, for the next reader:
+
+- **The sandbox contract is a LATCH, double-guarded.** sample-mode.ts
+  holds a module flag; every derived store's save function checks it
+  (storage, story-graph, annotations, adaptive, knowledge, review
+  store, review results) AND the App effects check it (daily words),
+  so a missed call site degrades to a no-op, never to sample prose in
+  a real book. Undo history resets at the boundary in both directions
+  (a stack that crossed it could resurrect sample prose into the real
+  book and autosave it). Import exits the sandbox BEFORE its explicit
+  saves. The draft-guard nag is forced off in sample mode. Enter
+  flushes the real book first; exit restores from stores that were
+  never written (or re-hydrates the project).
+- **The pile-up effect is deleted, not deferred.** The cast question's
+  two moments: fresh import (kept) and World-panel first-open, where
+  answering opens the panel it feeds (worldAfterCastRef). The sample
+  never asks — its WORLD-DATA block ships castReviewed with 7
+  characters and 5 places confirmed.
+- **The hero is the scaled production mesh dot**, not the canvas
+  OrbEngine — at hero size the engine decomposes into six flat
+  ellipses (tried, photographed, rejected); the legacy stage markup
+  with ghost/accent layers is the toolbar orb as users recognise it.
+- **onboarding-log.ts** stores first-occurrence timestamps per event
+  kind, idempotent, bounded; the checklist derives from it via
+  useSyncExternalStore, the dock reads it live (watched it tick 2/4
+  in the app capture when World opened).
+- **verify-onboarding.cjs**: 45 gates — source facts (the four sample
+  plants, the seven latches, the sequencing shapes, the gesture gates)
+  paired with rendered gates (two doors, accent-first, title, word
+  band 18..62, no scroll, no console errors), desktop AND browser
+  builds, plus THEME=light run. capture-app-shots.cjs walks the new
+  flow (welcome → sample door → editor → World → Index).
+- ~1,100 lines of dead carousel CSS pruned after pixels were verified.
+
+**Deliberately not done:** per-paragraph hover affordances over the
+textarea (the rail twin + one-time hint satisfy the redundancy rule at
+a fraction of the surgery); a Renderer-panel guard in sample mode (the
+panel operates on the real project; a first-run sample user has
+neither project nor login, noted as a residual); the 5-writer
+moderated protocol (a template in §3, to be run with real writers).
