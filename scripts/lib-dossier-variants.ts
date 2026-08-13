@@ -35,98 +35,20 @@ import {
 } from "../src/lib/character-dossier";
 
 // ── deterministic skeleton ────────────────────────────────────────────────
+//
+// GRADUATED 2026-08-13. The voice and company lines doubled on-tier
+// core-fact coverage (4% → 14%, zero fabrication) and moved into
+// composeExtractiveParts in the shipped module; the skeleton variant is now
+// the shipped composition. The alias below keeps the bench runner's shape.
+// (The ACTION line was tried here twice and reverted twice — "the one who
+// filed, agreed, closed" is the verb-tally lesson; the verbs stay pack
+// facts for the model tiers to phrase.)
 
-/** Present-tense base forms for the shipped MARKED_SPEECH_VERB set. Closed
- *  map, hand-written, because mechanical de-conjugation of -ed forms is
- *  exactly the "filed, considered, agreed" trap the module already recorded. */
-const SPEECH_VERB_BASE: Record<string, string> = {
-  snapped: "snap", muttered: "mutter", murmured: "murmur", whispered: "whisper",
-  shouted: "shout", yelled: "yell", barked: "bark", insisted: "insist",
-  admitted: "admit", conceded: "concede", confessed: "confess", protested: "protest",
-  objected: "object", demanded: "demand", ordered: "order", commanded: "command",
-  pleaded: "plead", begged: "beg", urged: "urge", warned: "warn",
-  teased: "tease", joked: "joke", laughed: "laugh", sighed: "sigh",
-  groaned: "groan", grumbled: "grumble", complained: "complain", observed: "observe",
-  noted: "note", remarked: "remark", offered: "offer", suggested: "suggest",
-  agreed: "agree", allowed: "allow", corrected: "correct", countered: "counter",
-  pressed: "press", prompted: "prompt", explained: "explain", announced: "announce",
-  declared: "declare", hissed: "hiss", growled: "growl", drawled: "drawl",
-  stammered: "stammer", blurted: "blurt",
-};
-
-export function subjectPronounOf(ev: CharacterDossierEvidence): string {
-  return ev.pronounClass === "masc" ? "He" : ev.pronounClass === "fem" ? "She" : "They";
-}
-
-/**
- * The voice line, from counted speech facts only. Templates are closed; the
- * only open slots are verbs from the closed base-form map above. Returns null
- * when the evidence does not clear the module's own floors.
- */
-export function voiceSentence(ev: CharacterDossierEvidence): string | null {
-  const c = ev.counts;
-  const pronoun = subjectPronounOf(ev);
-  if (c.speechLines === 0) {
-    // Only notable for a character the book actually spends time on.
-    return c.mentions >= 30 ? `${pronoun} never speaks a line of dialogue.` : null;
-  }
-  const length = c.meanLineWords > 0 && c.meanLineWords <= 8 ? "in short lines"
-    : c.meanLineWords >= 22 ? "at length" : null;
-  const marked = c.speechVerbs
-    .filter(([v]) => SPEECH_VERB_BASE[v])
-    .slice(0, 2)
-    .map(([v]) => SPEECH_VERB_BASE[v]);
-  const manner = c.speechLines >= 4 && marked.length > 0 && c.plainSaidRatio < 0.6
-    ? `often to ${marked.join(" or ")}`
-    : c.speechLines >= 4 && marked.length > 0
-      ? `mostly plainly, sometimes to ${marked[0]}`
-      : null;
-  if (!length && !manner) return null;
-  const verb = pronoun === "They" ? "speak" : "speaks";
-  const bits = [length, manner].filter(Boolean).join(", ");
-  return `${pronoun} ${verb} ${bits}.`;
-}
-
-/** The company line, from co-presence counts. */
-export function companySentence(ev: CharacterDossierEvidence): string | null {
-  const c = ev.counts;
-  const own = c.chapters.length;
-  if (own < 3 || c.coPresent.length === 0) return null;
-  // A co-present "name" sharing a word with the character's own forms is the
-  // character again under an unmerged alias ("Sherlock Holmes" beside
-  // "Holmes" in a cold-start cast); self-company is never a fact.
-  const ownTokens = new Set(
-    ev.forms.flatMap((f) => f.toLowerCase().split(/\s+/)).filter((t) => t.length >= 3),
-  );
-  const strong = c.coPresent
-    .filter(([n]) => !n.toLowerCase().split(/\s+/).some((t) => ownTokens.has(t)))
-    .filter(([, k]) => k >= Math.max(2, own * 0.5));
-  if (strong.length === 0) return null;
-  const names = strong.slice(0, 2).map(([n]) => n);
-  return `Most often on the page with ${names.join(" and ")}.`;
-}
-
-/** The richer deterministic card: shipped composition plus counted lines,
- *  floored as a WHOLE — "Big eyes." plus a voice line is a real card even
- *  though neither part clears the floor alone.
- *
- *  ★ THE ACTION LINE WAS TRIED HERE AND REVERTED, a second time. "Across
- *    the book Kinoko is the one who filed, agreed, closed" is grammatical
- *    and says nothing — distinctive verbs are distinctive relative to the
- *    CAST, not meaningful in themselves, which is the same lesson as the
- *    owner's original verb-tally revert. The verbs stay counted facts in
- *    the pack, where the model phrases conduct from them ("focused and
- *    precise in action"); a template may not. */
 export function composeSkeleton(
   ev: CharacterDossierEvidence,
   otherCastNames: readonly string[] = [],
 ): string {
-  const parts = [
-    ...composeExtractiveParts(ev, otherCastNames),
-    voiceSentence(ev),
-    companySentence(ev),
-  ].filter(Boolean);
-  const out = parts.join(" ");
+  const out = composeExtractiveParts(ev, otherCastNames).join(" ");
   return out.split(/\s+/).filter(Boolean).length >= 5 ? out : "";
 }
 

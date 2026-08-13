@@ -2016,6 +2016,79 @@ function usableClause(clause: string): boolean {
   return true;
 }
 
+// ── the counted lines: voice and company ──────────────────────────────────
+//
+// ★★ THE COUNTED FACTS WERE MEASURED AND NEVER REACHED THE CARD. Speech
+//    stats, marked attribution verbs and co-presence sat in the pack's fact
+//    line while the description said nothing about how a person talks or
+//    who they are usually with — and on the quality bench, adding these two
+//    closed-template lines DOUBLED core-fact coverage of the on-tier card
+//    (4% → 14%) at zero model risk. The templates are closed; the only open
+//    slots are counted names and verbs from the closed base-form map below.
+//    (An action line from distinctiveVerbs was tried in the same round and
+//    REVERTED: "the one who filed, agreed, closed" is the verb-tally lesson
+//    again. The verbs stay pack facts for the model tiers to phrase.)
+
+/** Present-tense base forms for MARKED_SPEECH_VERB. Hand-written, closed:
+ *  mechanical de-conjugation of -ed forms is the "filed, considered,
+ *  agreed" trap with a different hat. */
+const SPEECH_VERB_BASE: Record<string, string> = {
+  snapped: "snap", muttered: "mutter", murmured: "murmur", whispered: "whisper",
+  shouted: "shout", yelled: "yell", barked: "bark", insisted: "insist",
+  admitted: "admit", conceded: "concede", confessed: "confess", protested: "protest",
+  objected: "object", demanded: "demand", ordered: "order", commanded: "command",
+  pleaded: "plead", begged: "beg", urged: "urge", warned: "warn",
+  teased: "tease", joked: "joke", laughed: "laugh", sighed: "sigh",
+  groaned: "groan", grumbled: "grumble", complained: "complain", observed: "observe",
+  noted: "note", remarked: "remark", offered: "offer", suggested: "suggest",
+  agreed: "agree", allowed: "allow", corrected: "correct", countered: "counter",
+  pressed: "press", prompted: "prompt", explained: "explain", announced: "announce",
+  declared: "declare", hissed: "hiss", growled: "growl", drawled: "drawl",
+  stammered: "stammer", blurted: "blurt",
+};
+
+/** How this character talks, from counted speech facts only. Null when the
+ *  evidence does not clear the module's own floors. */
+export function voiceSentence(ev: CharacterDossierEvidence): string | null {
+  const c = ev.counts;
+  const pronoun = subjectPronoun(ev);
+  if (c.speechLines === 0) {
+    // Only notable for a character the book actually spends time on.
+    return c.mentions >= 30 ? `${pronoun} never speaks a line of dialogue.` : null;
+  }
+  const length = c.meanLineWords > 0 && c.meanLineWords <= 8 ? "in short lines"
+    : c.meanLineWords >= 22 ? "at length" : null;
+  const marked = c.speechVerbs
+    .filter(([v]) => SPEECH_VERB_BASE[v])
+    .slice(0, 2)
+    .map(([v]) => SPEECH_VERB_BASE[v]);
+  const manner = c.speechLines >= 4 && marked.length > 0 && c.plainSaidRatio < 0.6
+    ? `often to ${marked.join(" or ")}`
+    : c.speechLines >= 4 && marked.length > 0
+      ? `mostly plainly, sometimes to ${marked[0]}`
+      : null;
+  if (!length && !manner) return null;
+  const verb = pronoun === "They" ? "speak" : "speaks";
+  return `${pronoun} ${verb} ${[length, manner].filter(Boolean).join(", ")}.`;
+}
+
+/** Who they share the book with, from co-presence counts. A co-present
+ *  "name" sharing a word with the character's own forms is the character
+ *  again under an unmerged alias; self-company is never a fact. */
+export function companySentence(ev: CharacterDossierEvidence): string | null {
+  const c = ev.counts;
+  const own = c.chapters.length;
+  if (own < 3 || c.coPresent.length === 0) return null;
+  const ownTokens = new Set(
+    ev.forms.flatMap((f) => f.toLowerCase().split(/\s+/)).filter((t) => t.length >= 3),
+  );
+  const strong = c.coPresent
+    .filter(([n]) => !n.toLowerCase().split(/\s+/).some((t) => ownTokens.has(t)))
+    .filter(([, k]) => k >= Math.max(2, own * 0.5));
+  if (strong.length === 0) return null;
+  return `Most often on the page with ${strong.slice(0, 2).map(([n]) => n).join(" and ")}.`;
+}
+
 /**
  * ★★ IDENTITY FIRST, THEN CONDUCT, THEN APPEARANCE. v1 built the description
  *    out of appearance phrases alone and led with them, which on modern prose
@@ -2247,6 +2320,14 @@ export function composeExtractiveParts(
   if (lore && !IDENTITY_STOP_HEAD.test(loreBody)) {
     pushUnique(`${subjectPronoun(ev)} ${lowerFirst(lore)}.`);
   }
+
+  // 5 — VOICE and COMPANY, the counted lines. Last, because they are the
+  //     harness's phrasing of counted facts rather than the manuscript's own
+  //     words, and the manuscript speaks first.
+  const voice = voiceSentence(ev);
+  if (voice) pushUnique(voice);
+  const company = companySentence(ev);
+  if (company) pushUnique(company);
 
   return sentences;
 }
