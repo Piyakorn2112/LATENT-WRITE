@@ -550,26 +550,28 @@ export function WorldDataView({
       //    composition and the on-tier call keep the measured 14/3 pack.
       const maxPack = buildDossierPack(ev, MAX_PACK_OPTS);
       const proposal: DossierProposal = emptyProposal(maxPack, card.role);
-      for (const field of DOSSIER_FIELDS) {
-        if (!alive()) return;
-        // ★★ THE 1024-TOKEN THINK PASS IS RETIRED. Personality now reasons
-        //    IN-SCHEMA: a free-prose reason field declared first, so the
-        //    model weighs the passages before it selects and composes.
-        //    Measured equal-or-better at ~7s where the unconstrained pass
-        //    spent ~30s. See decideDossierThinking's retained history.
-        const request = buildFieldRequest(maxPack, field, kind);
-        if (!request) continue; // gate closed: never asked, never invented
-        setDossier({
-          phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
-          descriptionText: "", citedChapters: [], generated: false, card,
-        });
 
-        const ask = async (req: typeof request) => assistantRunJSON<Record<string, unknown>>({
+      // ★★ THE 1024-TOKEN THINK PASS IS RETIRED. Personality now reasons
+      //    IN-SCHEMA: a free-prose reason field declared first, so the
+      //    model weighs the passages before it selects and composes.
+      //    Measured equal-or-better at ~7s where the unconstrained pass
+      //    spent ~30s. See decideDossierThinking's retained history.
+      const ask = async (req: NonNullable<ReturnType<typeof buildFieldRequest>>) =>
+        assistantRunJSON<Record<string, unknown>>({
           task: DOSSIER_TASK,
           tag: entity.name,
           tier: "max",
           // ★ The thinking tier: /no_think must NOT be appended.
           noThink: false,
+          // ★★ THE BATCH ENGINE SERVES THE CARD. lane:'batch' routes to the
+          //    llama-server sidecar (transparent in-process fallback), and
+          //    jsonStyle:'compact' takes the measured whitespace-token cut
+          //    on both engines (the sidecar autogenerates the same compact
+          //    grammar the host builds). Measured on the real card bytes:
+          //    per-call at parity or better, and the independent fields
+          //    batch across slots at 1.6-2.2x wall-clock.
+          lane: "batch",
+          jsonStyle: "compact",
           systemPrompt: req.systemPrompt,
           userText: req.userText,
           schema: req.schema,
@@ -588,8 +590,33 @@ export function WorldDataView({
           ...(reroll ? { temperature: 0.7, minP: 0.05 } : {}),
         });
 
-        const first = await ask(request);
-        if (!alive()) return;
+      // ★ ONE CONCURRENT WAVE, THEN SEQUENTIAL REPAIRS. The three field
+      //   calls are independent, so they ride the batch lane together; the
+      //   personality call dominates the wall clock and the short fields
+      //   hide under it. On a machine without the sidecar the overflow
+      //   falls back to the single-flight host and answers 'busy' — those
+      //   fields are re-asked sequentially below, so the fallback machine
+      //   pays exactly what it paid before this change and nothing new.
+      const open = DOSSIER_FIELDS
+        .map((field) => ({ field, request: buildFieldRequest(maxPack, field, kind) }))
+        .filter((x): x is { field: DossierFieldKey; request: NonNullable<ReturnType<typeof buildFieldRequest>> } => !!x.request);
+      if (open.length > 0) {
+        setDossier({
+          phase: "writing", forName: entity.name, progress: null,
+          fieldInFlight: open.some((x) => x.field === "personality") ? "personality" : open[0].field,
+          descriptionText: "", citedChapters: [], generated: false, card,
+        });
+      }
+      const firsts = await Promise.all(open.map((x) => ask(x.request)));
+      if (!alive()) return;
+
+      for (let i = 0; i < open.length; i++) {
+        const { field } = open[i];
+        let first = firsts[i];
+        if (!first.ok && first.reason === "busy") {
+          first = await ask(open[i].request);
+          if (!alive()) return;
+        }
         if (!first.ok) continue; // that field stays empty; the card says so
         let answer = normalizeFieldAnswer(first.json, maxPack, field, { pronounClass: ev.pronounClass });
         // ★ A refusal licenses ONE extractive retry (module rule): the line
@@ -597,6 +624,10 @@ export function WorldDataView({
         if (answer.status === "refused") {
           const retryReq = buildFieldRetryRequest(maxPack, field, kind);
           if (retryReq) {
+            setDossier({
+              phase: "writing", forName: entity.name, progress: null, fieldInFlight: field,
+              descriptionText: "", citedChapters: [], generated: false, card,
+            });
             const second = await ask(retryReq);
             if (!alive()) return;
             if (second.ok) {
@@ -651,6 +682,7 @@ export function WorldDataView({
           });
           const runFusion = async (req: FusionRequest) => assistantRunJSON<{ text?: unknown }>({
             task: DOSSIER_TASK, tag: `${entity.name}-fusion`, tier: "max", noThink: false,
+            lane: "batch", jsonStyle: "compact",
             systemPrompt: req.systemPrompt, userText: req.userText,
             schema: req.schema, maxTokens: req.maxTokens,
             timeoutMs: 60_000, contextSize: 4096,

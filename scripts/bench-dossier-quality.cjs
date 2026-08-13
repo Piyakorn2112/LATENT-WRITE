@@ -100,8 +100,10 @@ async function tryFusion(c, factLines, tier, timings, fieldResults) {
   };
   if (input.factLines.length < 2) return null;
   const req = fusionRequest(input);
-  const { res, ms } = await runModel(req, rid(c.spec, 'fusion', 'a'), tier,
-    tier === 'max' ? { noThink: false } : {});
+  const fusionExtra = tier === 'max'
+    ? { noThink: false, ...(VARIANT === 'deep' ? { lane: 'batch', jsonStyle: 'compact' } : {}) }
+    : {};
+  const { res, ms } = await runModel(req, rid(c.spec, 'fusion', 'a'), tier, fusionExtra);
   timings.fusion = ms;
   if (!res || !res.ok) { fieldResults.fusion = { status: 'no-answer' }; return null; }
   let verdict = fusionVerdict(res.json && res.json.text, input);
@@ -115,8 +117,7 @@ async function tryFusion(c, factLines, tier, timings, fieldResults) {
       'console.log(JSON.stringify(buildFusionRetryRequest(a.input, a.newWords)))',
       { input, newWords: verdict.newWords },
     );
-    const second = await runModel(retryReq, rid(c.spec, 'fusion', 'b'), tier,
-      tier === 'max' ? { noThink: false } : {});
+    const second = await runModel(retryReq, rid(c.spec, 'fusion', 'b'), tier, fusionExtra);
     timings['fusion-retry'] = second.ms;
     if (second.res && second.res.ok) {
       const repaired = fusionVerdict(second.res.json && second.res.json.text, input);
@@ -250,10 +251,24 @@ async function main() {
       const deep = VARIANT === 'deep';
       const pack = deep ? c.deepPack : c.pack;
       const fieldSpecs = deep ? c.deepFields : c.fields;
+      // ★ The shipped wiring: batch lane + compact grammar, and the field
+      //   calls fired as ONE CONCURRENT WAVE (they batch across sidecar
+      //   slots at 1.6-2.2x; 'busy' from the fallback host is re-asked
+      //   sequentially, exactly like the component).
+      const laneExtra = deep ? { lane: 'batch', jsonStyle: 'compact' } : {};
       const proposal = {};
-      for (const field of ['appearance', 'personality', 'background']) {
+      const open = ['appearance', 'personality', 'background']
+        .filter((field) => fieldSpecs[field] && fieldSpecs[field].ask);
+      const waveT0 = Date.now();
+      const firsts = deep
+        ? await Promise.all(open.map((field) => runModel(
+            fieldSpecs[field].ask, rid(c.spec, field, 'a'), 'max', { noThink: false, ...laneExtra })))
+        : [];
+      if (deep) timings.fieldWave = Date.now() - waveT0;
+
+      for (let i = 0; i < open.length; i++) {
+        const field = open[i];
         const spec = fieldSpecs[field];
-        if (!spec || !spec.ask) continue;
         let notes = null;
         if (!deep && spec.think) {
           const t = await runThink(spec.think, spec.thinkBudget, rid(c.spec, field, 'think'));
@@ -269,19 +284,21 @@ async function main() {
           { pack, field, notes },
         ) : [spec];
 
-        const grade = deep ? { maxLen: spec.gradeMaxLen } : {};
-        const first = await runModel(withNotes.ask, rid(c.spec, field, 'a'), 'max', { noThink: false });
+        let first = deep ? firsts[i] : await runModel(withNotes.ask, rid(c.spec, field, 'a'), 'max', { noThink: false });
+        if (deep && first.res && !first.res.ok && first.res.error === 'busy') {
+          first = await runModel(withNotes.ask, rid(c.spec, field, 'a2'), 'max', { noThink: false, ...laneExtra });
+        }
         timings[field] = first.ms;
         if (!first.res || !first.res.ok) continue;
-        let [answer] = normalizeBatch([{ raw: first.res.json, pack, field, pronounClass: c.pronounClass, ...grade }]);
+        let [answer] = normalizeBatch([{ raw: first.res.json, pack, field, pronounClass: c.pronounClass }]);
         if (deep && first.res.json && typeof first.res.json.reason === 'string') {
           answer.reason = first.res.json.reason;
         }
         if (answer.status === 'refused' && withNotes.retry) {
-          const second = await runModel(withNotes.retry, rid(c.spec, field, 'b'), 'max', { noThink: false });
+          const second = await runModel(withNotes.retry, rid(c.spec, field, 'b'), 'max', { noThink: false, ...laneExtra });
           timings[`${field}-retry`] = second.ms;
           if (second.res && second.res.ok) {
-            const [retried] = normalizeBatch([{ raw: second.res.json, pack, field, pronounClass: c.pronounClass, ...grade }]);
+            const [retried] = normalizeBatch([{ raw: second.res.json, pack, field, pronounClass: c.pronounClass }]);
             if (retried.status === 'grounded' || retried.status === 'repaired') answer = retried;
           }
         }

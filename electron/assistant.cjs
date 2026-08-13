@@ -963,6 +963,37 @@ async function loadInHost(entry, modelPath, fitContext, verified) {
 
 // ── run / cancel / unload ───────────────────────────────────────────────────
 
+/** Compact-grammar autogeneration for sidecar runs, cached by schema. The
+ *  measured chain: json_schema lets the server pretty-print (~111 vs ~70
+ *  tokens on a chip answer); a compact no-newlines grammar removes the
+ *  whitespace tokens; the sidecar's stop trigger removes the trailing
+ *  padding the grammar would otherwise allow. Callers that ship their own
+ *  hand-built gbnf keep it; jsonStyle:'compact' opts in to generation —
+ *  the same builder and options the in-process host uses, so both engines
+ *  constrain the same call the same way. */
+const _gbnfCache = new Map(); // schema JSON → grammar string | null
+let _gbnfBuilder; // undefined = not tried, null = unavailable
+async function compactGbnfFor(schema) {
+  const key = JSON.stringify(schema);
+  if (_gbnfCache.has(key)) return _gbnfCache.get(key);
+  if (_gbnfBuilder === undefined) {
+    try {
+      const { pathToFileURL } = require('url');
+      const p = path.join(__dirname, '..', 'node_modules', 'node-llama-cpp',
+        'dist', 'utils', 'gbnfJson', 'getGbnfGrammarForGbnfJsonSchema.js');
+      _gbnfBuilder = (await import(pathToFileURL(p).href)).getGbnfGrammarForGbnfJsonSchema || null;
+    } catch {
+      _gbnfBuilder = null;
+    }
+  }
+  let grammar = null;
+  if (_gbnfBuilder) {
+    try { grammar = _gbnfBuilder(schema, { allowNewLines: false }); } catch { grammar = null; }
+  }
+  _gbnfCache.set(key, grammar);
+  return grammar;
+}
+
 /**
  * ★ BATCH LANE → SIDECAR, WITH TRANSPARENT FALLBACK. Returns null when the
  *   sidecar is not applicable (binary absent, custom model, tier without a
@@ -979,6 +1010,10 @@ async function trySidecarRun(opts) {
     // later tick finds the engine ready. Never awaited, never fatal.
     void sidecar.ensureBinary();
     return null;
+  }
+  if (!opts.gbnf && opts.jsonStyle === 'compact' && opts.schema) {
+    const grammar = await compactGbnfFor(opts.schema);
+    if (grammar) opts = { ...opts, gbnf: grammar };
   }
   const tier = opts.tier || DEFAULT_TIER;
   const entry = activeEntry(tier);

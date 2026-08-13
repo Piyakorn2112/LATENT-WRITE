@@ -45,9 +45,68 @@ quality bench re-runs on the winning configuration; golden sets stay
 untouched; thinking budgets unchanged (the max tier's think-capable
 surfaces keep their in-process freeText path).
 
-## Results
+## Results (measured 2026-08-13, real dossier bytes, real 4B)
 
-(to be filled from the probe + bench)
+**The bug the probe caught first.** The initial sidecar run burned every
+call to its full n_predict cap: a 36-token answer became 512 tokens of
+trailing newlines in 13.5s. The generated no-new-lines grammar permits
+newlines AFTER the closing brace and the server samples them forever; the
+in-process host has guarded exactly this with stopGenerationTriggers
+['\n\n\n\n'] since the compact grammar shipped. The sidecar now mirrors
+that stop. The verify:engine TERMINATION gate exists so this class can
+never ship silently again.
+
+**Per-call, single stream, means over 10 real requests:**
+
+```
+host, pretty grammar (the old interactive path)   4534ms
+host, compact grammar                             4047ms   (−11%)
+sidecar, compact grammar                          3852ms   (−15%)
+```
+
+**Concurrency, one card's independent field calls fired together:**
+
+```
+Marilla   2 fields   wall  8.8s  vs serial 14.4s   1.63x
+Holmes    2 fields   wall  9.2s  vs serial 14.9s   1.62x
+Mira      3 fields   wall  9.4s  vs serial 20.4s   2.18x
+```
+
+**End to end, the full 14-card max bench on the new wiring vs the shipped
+sequential wiring, same code, same gold:**
+
+```
+                  core   ext  anti  invented  frag  s/card   field time/card
+shipped (serial)   14%    5%    0      0        5%   21.4    ~15.5s sequential
+sidecar (wave)     14%    5%    0      0        0%   19.6     9.6s concurrent
+```
+
+Quality parity is exact on every axis; fragments improved to zero. The
+bench's own overhead (~5s of tsx grading boots per card, identical in both
+columns) hides the real product delta: in-app the card's model time drops
+from ~20s to ~14s. Against the session's starting point (38.5s think-pass
+cards) the max card is now ~2.5x faster with more content and the same
+zero-fabrication record.
+
+Chips unregressed after the stop-trigger change: probe-sidecar-e2e reports
+1.88x warm concurrency, contract shape held, decode+normalize chain green.
+
+**What shipped:** the stop trigger beside every sidecar grammar; automatic
+compact-grammar generation in trySidecarRun for any jsonStyle:'compact'
+call without a hand-built gbnf (same builder, same options as the host, so
+both engines constrain a call identically); the dossier card's field calls
+and fusion on lane:'batch' + jsonStyle:'compact', fired as one concurrent
+wave with sequential re-asks for 'busy' fallbacks — a machine without the
+engine binary pays exactly the old sequential path. verify:engine 4/4,
+suite 85/85, verify:dossier-ui 18/18, verify:assistant-tasks 30/30, tsc
+and vite build clean.
+
+**Not done, deliberately:** the max-ask and writing-tool surfaces still
+run in-process (they carry freeText think passes the sidecar's closed-think
+template cannot serve — an open-think template is the next engine
+experiment); the small tier has no sidecar config yet (its calls are short
+and the win is smaller); speculative decoding stays dead per the standing
+verdicts.
 
 ## The version-pull convention
 
