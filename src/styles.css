@@ -15099,16 +15099,25 @@ body.electron-window-unfocused .wc-panel::after {
    disappear, which meant the writer met the gate by being REFUSED rather than
    by being told. A mark nobody can read is not a disclosure. It carries the
    same accent as the tour's Pro badge so the control and the tour agree. */
+/* ★ SMALLER, AND FURTHER OFF THE CORNER (owner round). At 8px with a 4px
+   inset the pill nearly touched the track's rounded top-right, which reads as
+   a badge that overflowed rather than one that was placed. 7px with a wider
+   corner inset gives the curve room and lets the mark sit as a quiet
+   qualifier on MAX instead of competing with it.
+   ONLY THE SIZE MOVED — the accent colour, the 700 weight and the fill are
+   untouched, which is what keeps the 5.5px-at-52%-alpha failure above from
+   coming back by another route. Letter-spacing opens a hair because tracking
+   carries more of the legibility as type gets smaller. */
 .glass-mode-lock {
   position: absolute;
-  top: 0;
-  right: 2px;
+  top: 2.5px;
+  right: 5px;
   font-family: var(--font-ui);
-  font-size: 8px;
+  font-size: 7px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   line-height: 1;
-  padding: 2px 4px 1.5px;
+  padding: 1.5px 3.5px 1px;
   border-radius: 999px;
   color: color-mix(in srgb, var(--control-value-fill) 90%, var(--panel-text));
   background: color-mix(in srgb, var(--control-value-fill) 18%, transparent);
