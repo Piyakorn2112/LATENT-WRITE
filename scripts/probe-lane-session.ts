@@ -59,26 +59,26 @@ function entryFor(chapter: Chapter, novel: Novel): ChapterGraphEntry {
   );
 }
 
-interface Call { task: "chips" | "summary"; systemPrompt: string; userText: string; schema: object; maxTokens: number }
+interface Call { rebuild: number; task: "chips" | "summary"; systemPrompt: string; userText: string; schema: object; maxTokens: number }
 
 /** The ordered calls one key policy orders across a session. */
 function callsFor(policy: "old" | "new", states: ChapterGraphEntry[]): Call[] {
   const out: Call[] = [];
   let chipKey: string | null = null;
   let sumKey: string | null = null;
-  for (const entry of states) {
+  for (const [rebuild, entry] of states.entries()) {
     const ck = policy === "old" ? legacyKey(entry, CHIP_PROMPT_VERSION) : chipKeyFor(entry, MODEL_ID);
     const sk = policy === "old" ? legacyKey(entry, SUMMARY_PROMPT_VERSION) : summaryKeyFor(entry, MODEL_ID);
     // App.tsx drains every stale CHIP before any summary, so within one
     // rebuild the chip call comes first.
     const chipReq = buildChipRequest(entry);
     if (chipReq.candidates.length > 0 && ck !== chipKey) {
-      out.push({ task: "chips", systemPrompt: chipReq.systemPrompt, userText: chipReq.userText, schema: chipReq.schema, maxTokens: chipReq.maxTokens });
+      out.push({ rebuild, task: "chips", systemPrompt: chipReq.systemPrompt, userText: chipReq.userText, schema: chipReq.schema, maxTokens: chipReq.maxTokens });
       chipKey = ck;
     }
     if (entry.majorEvents.length > 0 && sk !== sumKey) {
       const sumReq = buildSummaryRequest(entry);
-      out.push({ task: "summary", systemPrompt: sumReq.systemPrompt, userText: sumReq.userText, schema: sumReq.schema, maxTokens: sumReq.maxTokens });
+      out.push({ rebuild, task: "summary", systemPrompt: sumReq.systemPrompt, userText: sumReq.userText, schema: sumReq.schema, maxTokens: sumReq.maxTokens });
       sumKey = sk;
     }
   }
@@ -117,6 +117,9 @@ async function replay(llama: Llama, model: LlamaModel, calls: Call[], label: str
   const t0 = Date.now();
   let prefillMs = 0, genMs = 0, genTokens = 0, reprefills = 0;
   let lastSystem = "";
+  /** Per-call wall time, indexed by the rebuild that ordered the call —
+   *  the input the residency model below needs. */
+  const durations: Array<{ rebuild: number; task: string; ms: number }> = [];
 
   for (const call of calls) {
     const gkey = JSON.stringify(call.schema);
@@ -135,6 +138,7 @@ async function replay(llama: Llama, model: LlamaModel, calls: Call[], label: str
     const done = Date.now();
     prefillMs += (firstAt || done) - c0;
     genMs += firstAt ? done - firstAt : 0;
+    durations.push({ rebuild: call.rebuild, task: call.task, ms: done - c0 });
     session.dispose({ disposeSequence: false });
   }
 
@@ -144,7 +148,7 @@ async function replay(llama: Llama, model: LlamaModel, calls: Call[], label: str
   sequence.dispose();
   await context.dispose();
 
-  const stats = { label, calls: calls.length, systemPromptReprefills: reprefills, wallMs, prefillMs, genMs, genTokens, gpuBusyMs };
+  const stats = { label, calls: calls.length, systemPromptReprefills: reprefills, wallMs, prefillMs, genMs, genTokens, gpuBusyMs, durations };
   console.log(
     `  ${label.padEnd(4)} calls=${String(stats.calls).padStart(3)}  ` +
     `full re-prefills=${String(reprefills).padStart(3)}  ` +
@@ -203,9 +207,77 @@ async function main() {
   console.log(`     gpu busy ${(oldGpu / 1000).toFixed(1)}s → ${(b.gpuBusyMs / 1000).toFixed(1)}s   -${pct(oldGpu, b.gpuBusyMs)}`);
   console.log(`     per call ${(oldWall / a.calls).toFixed(0)}ms → ${(b.wallMs / b.calls).toFixed(0)}ms   -${pct(oldWall / a.calls, b.wallMs / b.calls)}\n`);
 
+  residency(a, b, states.length);
+
   fs.mkdirSync(path.dirname(OUT), { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify({ book: BOOK, chapter: chapter.number, states: states.length, runs: [a, b, c] }, null, 2));
   console.log(`  wrote ${OUT}\n`);
+}
+
+/**
+ * ── MEMORY ──────────────────────────────────────────────────────────────────
+ *
+ * PEAK inference RSS is not a lever in this lane, and that is worth stating
+ * rather than quietly not reporting. The small tier's memory is its weights
+ * (1.06 GB, mmapped and evictable) plus a KV cache llama.cpp ALLOCATES IN FULL
+ * when the context is created — 4096 tokens at ~103 KB each, measured in
+ * plans/inference-memory-2026-08.md. How many of those cells a prompt occupies
+ * changes nothing about the allocation, so no shortening of this lane's
+ * prompts can move peak RSS. The two things that could are the model (a
+ * requant changes logits, which is a quality change) and the context size —
+ * and that context is shared with every other small-tier task, so shrinking it
+ * would reach outside this lane. Both are out of bounds for this round.
+ *
+ * What IS this lane's memory cost is how much of a session that allocation
+ * stays RESIDENT. The utility process exits on the small tier's 120s idle TTL
+ * and returns in ~1.3s from page cache, so a lane that orders fewer calls
+ * holds 1.7 GB for a smaller fraction of the session — the number a 16 GB
+ * machine sharing RAM with a browser actually feels.
+ *
+ * Every input here is measured: the call sequence each key orders, and each
+ * call's real wall time from the replay above. Only the writer's cadence is a
+ * parameter, so it is swept rather than assumed.
+ */
+const IDLE_TTL_MS = 120_000; // MODEL_REGISTRY.small.idleTtlMs
+
+function residency(
+  oldRun: { durations: Array<{ rebuild: number; ms: number }> },
+  newRun: { durations: Array<{ rebuild: number; ms: number }> },
+  rebuilds: number,
+) {
+  /** Union of [call start, call end + TTL] across a session at this cadence. */
+  const residentMs = (durations: Array<{ rebuild: number; ms: number }>, cadenceMs: number) => {
+    const spans = durations
+      .map((d) => {
+        const start = d.rebuild * cadenceMs;
+        return [start, start + d.ms + IDLE_TTL_MS] as const;
+      })
+      .sort((x, y) => x[0] - y[0]);
+    let total = 0, end = -1, from = -1;
+    for (const [s, e] of spans) {
+      if (s > end) { if (from >= 0) total += end - from; from = s; end = e; }
+      else end = Math.max(end, e);
+    }
+    if (from >= 0) total += end - from;
+    return total;
+  };
+
+  console.log("  ── memory: how much of the session the 1.7 GB stays resident (120s idle TTL)");
+  console.log("     writer cadence        old key         new key");
+  for (const cadence of [20, 45, 90, 180, 300]) {
+    const sessionMs = rebuilds * cadence * 1000;
+    const o = Math.min(residentMs(oldRun.durations, cadence * 1000), sessionMs);
+    const n = Math.min(residentMs(newRun.durations, cadence * 1000), sessionMs);
+    const pctOf = (ms: number) => `${((ms / sessionMs) * 100).toFixed(0)}%`;
+    const cut = o ? 100 - (n / o) * 100 : 0;
+    console.log(
+      `     a rebuild / ${String(cadence).padStart(3)}s     ` +
+      `${pctOf(o).padStart(5)} resident   ${pctOf(n).padStart(5)} resident   ` +
+      `${cut > 0.5 ? `-${cut.toFixed(0)}%` : "no change"}`,
+    );
+  }
+  console.log("     peak RSS is unchanged by design — the KV cache is preallocated;");
+  console.log("     see the note above this function for why that is the wall.\n");
 }
 
 await main();
