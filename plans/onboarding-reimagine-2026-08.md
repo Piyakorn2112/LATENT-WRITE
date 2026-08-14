@@ -232,6 +232,20 @@ icon-chip rows (book / pen chips, accent grammar kept, hover-reveal
 chevron, content centered so a returning writer's one-line door reads
 composed).
 
+**Packaged-build round (2026-08-14):** `electron:build` was broken on
+this machine — electron-builder 26.8's Icon Composer path compiles the
+`.icon` bundle with Xcode's actool, and only Command Line Tools are
+installed. Fix that keeps the mark: build/icon.icns generated from the
+bundle's own recipe (orb SVG at 0.9 on the white-gradient squircle,
+rendered offscreen in Electron, compiled with sips + iconutil — system
+tools); the yml documents the `.icon` line to restore when Xcode
+exists. NEW CONVENTION: scripts/verify-packaged.cjs (`npm run
+verify:packaged`) launches the actual release/.app with a scratch
+userData and a CDP port, drives the first run via playwright-core
+(welcome → sample door → editor → World), and asserts each surface —
+9/9 on the fresh DMG, including "no cast dialog on World open" and the
+populated 7-row cast, from inside the packaged renderer.
+
 **Critic round (designers-package visual critic, 2026-08-13):** verdict
 ship-after-should-fixes; all fixed same day. The blocker — the sample
 badge's single-row pill ran 400px+ into the prose column at the default

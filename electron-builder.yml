@@ -40,10 +40,15 @@ directories:
 # ─── Default DMG distribution (sideload) ──────────────────────────────────
 mac:
   category: public.app-category.productivity
-  # Use the Icon Composer bundle directly. electron-builder 26.8.x compiles
-  # this `.icon` asset into the native macOS asset catalog (`Assets.car`) and
-  # also emits `icon.icns` for compatibility/fallback.
-  icon: "Latent Write Logo.icon"
+  # The Icon Composer bundle ("Latent Write Logo.icon") is the INTENDED
+  # icon, but electron-builder 26.8.x compiles it with Xcode's actool and
+  # this machine has only Command Line Tools — the .icon path fails the
+  # whole build. build/icon.icns is the same orb mark composed on the
+  # white-gradient squircle per the bundle's own recipe (generated with
+  # sips + iconutil, both system tools). Restore the line below when a
+  # full Xcode is installed:
+  #   icon: "Latent Write Logo.icon"
+  icon: build/icon.icns
   target:
     - target: dmg
       arch:
@@ -85,7 +90,8 @@ dmg:
 # network, no microphone).
 mas:
   category: public.app-category.productivity
-  icon: "Latent Write Logo.icon"
+  # Same Xcode constraint as mac.icon above.
+  icon: build/icon.icns
   hardenedRuntime: false
   entitlements: build/entitlements.mas.plist
   entitlementsInherit: build/entitlements.mas.inherit.plist
