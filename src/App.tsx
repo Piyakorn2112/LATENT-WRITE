@@ -1300,12 +1300,15 @@ export default function App() {
     };
 
     interface Work { entry: ChapterGraphEntry; kind: "chips" | "sum"; key: string }
-    const findWork = (modelId: string): Work | null => {
+    // ★ `rich` IS PART OF THE KEY, so it travels with every lookup. Max mode
+    //   sends a longer prompt and a different schema; a key computed without
+    //   it would call one tier's stored answer a hit for the other's request.
+    const findWork = (modelId: string, rich: boolean): Work | null => {
       const entries = Object.values(storyGraphRef.current.entries)
         .filter((entry) => entry.majorEvents.length > 0)
         .sort((a, b) => a.chapterNumber - b.chapterNumber);
       for (const entry of entries) {
-        const key = chipKeyFor(entry, modelId);
+        const key = chipKeyFor(entry, modelId, { rich });
         if (entry.lmChipsKey !== key && !chipSkipRef.current.has(`chips|${entry.chapterId}|${key}`))
           return { entry, kind: "chips", key };
       }
@@ -1337,14 +1340,14 @@ export default function App() {
     /** Up to `max` stale units of ONE kind — chips before summaries, so a
      *  pool shares its system prompt (prefix cache) and the sidecar batches
      *  same-shaped work across its slots. */
-    const collectWork = (modelId: string, max: number): Work[] => {
+    const collectWork = (modelId: string, rich: boolean, max: number): Work[] => {
       const out: Work[] = [];
       const entries = Object.values(storyGraphRef.current.entries)
         .filter((entry) => entry.majorEvents.length > 0)
         .sort((a, b) => a.chapterNumber - b.chapterNumber);
       for (const entry of entries) {
         if (out.length >= max) break;
-        const key = chipKeyFor(entry, modelId);
+        const key = chipKeyFor(entry, modelId, { rich });
         if (entry.lmChipsKey !== key && !chipSkipRef.current.has(`chips|${entry.chapterId}|${key}`))
           out.push({ entry, kind: "chips", key });
       }
@@ -1379,7 +1382,7 @@ export default function App() {
           if (!alive) return;
           setStoryGraph((prev) => {
             const current = prev.entries[work.entry.chapterId];
-            if (!current || chipKeyFor(current, modelId) !== work.key) return prev;
+            if (!current || chipKeyFor(current, modelId, { rich: maxMode }) !== work.key) return prev;
             return {
               ...prev,
               entries: {
@@ -1398,7 +1401,7 @@ export default function App() {
           const current = prev.entries[work.entry.chapterId];
           // Recomputed against the CURRENT entry: a result raced by a
           // rebuild is dropped rather than stamped onto new events.
-          if (!current || chipKeyFor(current, modelId) !== outcome.lmChipsKey) return prev;
+          if (!current || chipKeyFor(current, modelId, { rich: maxMode }) !== outcome.lmChipsKey) return prev;
           return {
             ...prev,
             entries: {
@@ -1467,7 +1470,7 @@ export default function App() {
       const run: typeof assistantRunJSON = maxMode
         ? (req) => assistantRunJSON({ ...req, tier: "max", ...(sidecarReady ? { lane: "batch" as const } : {}) })
         : assistantRunJSON;
-      const works = collectWork(modelId, sidecarReady ? 3 : 1);
+      const works = collectWork(modelId, maxMode, sidecarReady ? 3 : 1);
       if (works.length === 0) return; // converged — the next kick reopens the loop
 
       chipBusyRef.current = true;
@@ -1479,7 +1482,7 @@ export default function App() {
       } finally {
         chipBusyRef.current = false;
       }
-      if (alive && findWork(modelId)) arm(delay);
+      if (alive && findWork(modelId, maxMode)) arm(delay);
     };
     const onVisible = () => { if (!document.hidden && alive) void tick(); };
     chipKickRef.current = () => arm(1200);

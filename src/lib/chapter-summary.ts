@@ -18,8 +18,7 @@
  *   budget lands. Same lesson, same reason, stated again here because the next
  *   person to tune this prompt will reach for a character count first.
  */
-import { fnv1a } from "./evidence-pack";
-import { eventFingerprint } from "./chip-picker";
+import { fnv1a, keyFields } from "./evidence-pack";
 import { tidyTruncatedText } from "./assistant-client";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { ChapterGraphEntry, MajorEvent } from "../types";
@@ -159,14 +158,38 @@ export function normalizeSummary(raw: unknown): NormalizedSummary | null {
 // ── cache key ─────────────────────────────────────────────────────────────
 
 /**
- * Same inputs as the chip key, and deliberately the same fingerprint function:
- * a summary is built from the events, so an entry whose events changed needs a
- * new summary for exactly the same reason it needs new chips.
+ * ★★ THE KEY IS THE REQUEST — the same rule as `chipKeyFor`, and the reasoning
+ *    lives there in full. Two task-specific notes:
+ *
+ *    · This answer is a pure function of the prompt ALONE. `normalizeSummary`
+ *      is mechanical text repair and reads nothing outside the response, so
+ *      unlike the chip key there is no extra judged material to fold in.
+ *    · The old key shared the chip key's `contentHash|eventFingerprint`
+ *      recipe on the reasoning that a summary is built from the events. It is,
+ *      but from only the top SUMMARY_EVENT_CAP of them and from none of their
+ *      labels, agents or types — so the summary was being recomputed for
+ *      changes it cannot see far more often than the chips were. MEASURED
+ *      (scripts/probe-lane-staleness.ts): 97% of the summary runs a local
+ *      revision triggers had a byte-identical prompt to the run before them.
  */
+const KEY_RECIPE = "r1";
+
+const requestCache = new WeakMap<ChapterGraphEntry, SummaryRequest>();
+
+function cachedSummaryRequest(entry: ChapterGraphEntry): SummaryRequest {
+  let request = requestCache.get(entry);
+  if (!request) { request = buildSummaryRequest(entry); requestCache.set(entry, request); }
+  return request;
+}
+
 export function summaryKeyFor(entry: ChapterGraphEntry, modelId: string): string {
-  return fnv1a(
-    `${entry.contentHash}|${eventFingerprint(entry.majorEvents)}|${modelId}|v${SUMMARY_PROMPT_VERSION}`,
-  );
+  const request = cachedSummaryRequest(entry);
+  return fnv1a(keyFields([
+    request.systemPrompt,
+    request.userText,
+    modelId,
+    `${KEY_RECIPE}v${SUMMARY_PROMPT_VERSION}`,
+  ]));
 }
 
 // ── the pass ──────────────────────────────────────────────────────────────

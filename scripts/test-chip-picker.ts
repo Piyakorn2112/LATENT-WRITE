@@ -297,12 +297,23 @@ console.log("\n── 3. chipKeyFor ──────────────�
     "stable across identical entries", key);
   gate(key !== chipKeyFor(ENTRY, "some-other-model"),
     "moves with the model id", `${key} vs ${chipKeyFor(ENTRY, "some-other-model")}`);
-  gate(key !== chipKeyFor(entryOf(EVENTS, { contentHash: "2401|different prose" }), "qwen3-1.7b-q4_k_m"),
-    "moves with the content hash", "different chapter text → different key");
+  // ★★ AND IT DELIBERATELY NO LONGER MOVES WITH THE CONTENT HASH.
+  //    `contentHash` is `${length}|${first 60 chars}`, so it moved on every
+  //    keystroke that changed the chapter's length — while the bytes the model
+  //    is shown often did not move at all. MEASURED over four books through
+  //    the real analysis pipeline (scripts/probe-lane-staleness.ts): 69% of
+  //    the chip runs a local revision ordered carried a prompt byte-identical
+  //    to the run before them, and at temperature 0 an identical request
+  //    cannot produce a different answer. The key is the request now, so those
+  //    runs stop happening. Everything the model or the validators can SEE
+  //    still moves it — the gates below, and verify-lane-keys.ts in full.
+  gate(key === chipKeyFor(entryOf(EVENTS, { contentHash: "2401|different prose" }), "qwen3-1.7b-q4_k_m"),
+    "survives a content-hash change that leaves the prompt byte-identical",
+    "prose edited elsewhere in the chapter costs no second inference");
 
-  // ★ THE POINT OF THE FINGERPRINT. contentHash is `length|first 60 chars`, so
-  //   a re-ranking engine leaves it byte-identical while every stored pick now
-  //   names a different event.
+  // ★ ENGINE DRIFT STILL INVALIDATES. contentHash is `length|first 60 chars`,
+  //   so a re-ranking engine leaves it byte-identical while every stored pick
+  //   now names a different event.
   const reranked = EVENTS.map((e) => ({ ...e, rank: (e.rank! + 1) % EVENTS.length }));
   gate(key !== chipKeyFor(entryOf(reranked), "qwen3-1.7b-q4_k_m"),
     "moves when the events are RE-RANKED under an unchanged contentHash",

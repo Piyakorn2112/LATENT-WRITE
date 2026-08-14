@@ -87,6 +87,19 @@ export function fnv1a(text: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+/**
+ * Join fields into a string only those exact fields can produce.
+ *
+ * ★ A DELIMITER IS NOT ENOUGH WHEN THE FIELDS ARE PROSE. Prompts, chip labels
+ *   and character names can contain any character, so any separator could be
+ *   forged by the content itself and let two different requests collide on one
+ *   cache key — which shows a stale answer as a fresh one. Prefixing each
+ *   field with its own length is unambiguous whatever the field contains.
+ */
+export function keyFields(fields: readonly string[]): string {
+  return fields.map((field) => `${field.length}:${field}`).join("");
+}
+
 const cap = (text: string, max = PARAGRAPH_CAP) =>
   text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 

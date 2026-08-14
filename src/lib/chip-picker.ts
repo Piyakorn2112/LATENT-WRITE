@@ -27,7 +27,7 @@
  *   `chipKeyFor` folds a fingerprint of the rank-ordered sentences, so engine
  *   drift invalidates exactly the affected chapters.
  */
-import { fnv1a } from "./evidence-pack";
+import { fnv1a, keyFields } from "./evidence-pack";
 import { effectiveRank } from "./narrative-events";
 import type { AssistantJSONRunner } from "./assistant-client";
 import type { ChapterGraphEntry, MajorEvent, TimelineChipPick } from "../types";
@@ -907,6 +907,9 @@ export function normalizeChipPicks(
  * Covers EVERY stored event, not only the eight that get offered: the answer is
  * resolved back through `rank`, so a change anywhere in the array can re-point
  * a pick even when the offered slice looks identical.
+ *
+ * ★ NO LONGER THE CACHE KEY — see `chipKeyFor`. Kept because it is the honest
+ *   answer to "did the engine's findings move", which other callers ask.
  */
 export function eventFingerprint(events: readonly MajorEvent[]): string {
   return fnv1a(
@@ -918,11 +921,82 @@ export function eventFingerprint(events: readonly MajorEvent[]): string {
   );
 }
 
-/** Cache key. `fnv1a` is shared with evidence-pack so the recipe lives once. */
-export function chipKeyFor(entry: ChapterGraphEntry, modelId: string): string {
-  return fnv1a(
-    `${entry.contentHash}|${eventFingerprint(entry.majorEvents)}|${modelId}|v${CHIP_PROMPT_VERSION}`,
-  );
+/**
+ * ★★ THE KEY IS THE REQUEST, AND THAT IS THE WHOLE POINT.
+ *
+ *    The answer to this task is a pure function of four things: the bytes the
+ *    model is shown, the material `normalizeChipPicks` judges the answer
+ *    against, the model, and the prompt version. Temperature is 0, so an
+ *    identical request cannot produce a different answer — and a key that
+ *    moves anyway spends a whole inference re-deriving something already on
+ *    file.
+ *
+ *    It used to be `${content.length}|${first 60 chars}` plus a fingerprint of
+ *    the events' ranks and sentences, and that was wrong in BOTH directions.
+ *
+ *    Too eager: `contentHash` moves on every keystroke that changes the
+ *    chapter's LENGTH. MEASURED over four books through the real analysis
+ *    pipeline (scripts/probe-lane-staleness.ts): of the chip runs a local
+ *    revision triggers, 69% had a byte-identical prompt to the run before
+ *    them — a word added, a sentence appended, a trailing space, none of
+ *    which the model can see. For summaries it was 97%.
+ *
+ *    Too blind: it cannot see anything OUTSIDE the chapter body, and the
+ *    prompt is full of exactly that. Renaming a chapter, a re-resolved
+ *    `agent`, a re-derived heuristic `label`, a shifted `tensionPosition`, a
+ *    changed narrative type, a cast correction — every one of them changes
+ *    what is sent (or what the validators judge with) and none of them moved
+ *    the old key. Those were stale chips, shipped.
+ *
+ *    So: hash the request. `label` and `agent` are folded in explicitly
+ *    because they reach the answer without always reaching the prompt — a
+ *    draft is only PRINTED when `draftIsTrueOfSentence` allows, yet it is the
+ *    fallback label and the polarity check either way — and the full cast is
+ *    folded in because `labelIsGrounded` reads all of it while the header
+ *    prints three.
+ *
+ * ★ MEMOISED ON ENTRY IDENTITY. The background loop asks for this key for
+ *   every chapter on every tick, so building the request each time would put
+ *   the whole prompt assembly on a 350ms timer. Graph entries are immutable
+ *   and replaced wholesale on rebuild, which makes object identity exactly the
+ *   right cache lifetime (a WeakMap, so a dropped chapter costs nothing).
+ */
+const KEY_RECIPE = "r1";
+
+export interface ChipKeyOptions {
+  /** Max mode sends a longer prompt and a different schema — a different key. */
+  rich?: boolean;
+}
+
+const requestCache = new WeakMap<ChapterGraphEntry, Map<string, ChipRequest>>();
+
+function cachedChipRequest(entry: ChapterGraphEntry, rich: boolean): ChipRequest {
+  let byMode = requestCache.get(entry);
+  if (!byMode) { byMode = new Map(); requestCache.set(entry, byMode); }
+  const mode = rich ? "rich" : "plain";
+  let request = byMode.get(mode);
+  if (!request) { request = buildChipRequest(entry, { rich }); byMode.set(mode, request); }
+  return request;
+}
+
+export function chipKeyFor(
+  entry: ChapterGraphEntry,
+  modelId: string,
+  opts: ChipKeyOptions = {},
+): string {
+  const request = cachedChipRequest(entry, opts.rich === true);
+  // ★ LENGTH-PREFIXED FIELDS, NOT A DELIMITER. A label, a name or a prompt can
+  //   contain any character, so any separator could be forged by the content
+  //   itself and make two different requests collide on one key.
+  const judged = request.candidates.flatMap((c) => [String(c.rank), c.label, c.agent ?? ""]);
+  return fnv1a(keyFields([
+    request.systemPrompt,
+    request.userText,
+    keyFields(judged),
+    keyFields([...entry.charactersPresent]),
+    modelId,
+    KEY_RECIPE + "v" + CHIP_PROMPT_VERSION,
+  ]));
 }
 
 // ── one chapter ───────────────────────────────────────────────────────────
@@ -1028,5 +1102,7 @@ export async function runChipPick(
     if (repaired.ok) finalChips = applyChipRepairs(lmChips, repaired.json, request.candidates, cast);
   }
 
-  return { lmChips: finalChips, lmChipsKey: chipKeyFor(entry, opts.modelId) };
+  // The key must describe the request that was actually sent — max mode's
+  // prompt is longer and its schema different, so `rich` travels into it.
+  return { lmChips: finalChips, lmChipsKey: chipKeyFor(entry, opts.modelId, { rich: opts.rich }) };
 }

@@ -123,10 +123,18 @@ console.log("═".repeat(70));
   const key = summaryKeyFor(base, "m1");
   gate(key === summaryKeyFor(entry(), "m1"), "same entry, same key", key);
   gate(key !== summaryKeyFor(base, "m2"), "a different model invalidates", "model id is in the key");
+  // ★★ THE CONTENT HASH IS NO LONGER IN THE KEY, ON PURPOSE. It is
+  //    `${length}|${first 60 chars}`, so it moved on every keystroke that
+  //    changed the chapter's length — while this prompt carries only the top
+  //    moments' sentences, the cast, the title and the tension peak, and
+  //    usually did not move at all. MEASURED over four books through the real
+  //    analysis pipeline (scripts/probe-lane-staleness.ts): 97% of the summary
+  //    runs a local revision ordered carried a prompt byte-identical to the
+  //    run before them. At temperature 0 those cannot say anything new.
   gate(
-    key !== summaryKeyFor(entry({ contentHash: "2401|The count came up short" }), "m1"),
-    "edited text invalidates",
-    "content hash is in the key",
+    key === summaryKeyFor(entry({ contentHash: "2401|The count came up short" }), "m1"),
+    "prose edited outside the moments does not invalidate",
+    "the key is the request; the request did not change",
   );
   gate(
     key !== summaryKeyFor(entry({
