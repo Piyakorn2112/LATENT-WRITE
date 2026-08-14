@@ -232,6 +232,17 @@ icon-chip rows (book / pen chips, accent grammar kept, hover-reveal
 chevron, content centered so a returning writer's one-line door reads
 composed).
 
+**Icon pipeline (2026-08-14, later):** the Icon Composer bundle is now
+wired to WORK the moment it can: `electron:build` runs
+scripts/electron-build.cjs, which probes `actool --version` and
+overrides the icon to the `.icon` bundle when Xcode 26+ is present,
+falling back to build/icon.icns otherwise — both branches tested (the
+Xcode branch via a faked actool probe). The only remaining step is the
+human one: installing Xcode from the App Store; the very next build
+then ships the authored liquid-glass icon with zero config changes.
+There is no actool substitute — Icon Composer.app authors but cannot
+compile, and Command Line Tools never include actool.
+
 **Packaged-build round (2026-08-14):** `electron:build` was broken on
 this machine — electron-builder 26.8's Icon Composer path compiles the
 `.icon` bundle with Xcode's actool, and only Command Line Tools are

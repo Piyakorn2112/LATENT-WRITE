@@ -37,7 +37,7 @@
     "bench:glass-glow": "electron scripts/glass-glow-bench.cjs",
     "profile:glass-app": "electron scripts/glass-app-profile.cjs",
     "electron:dev": "npm run build && electron .",
-    "electron:build": "npm run build && electron-builder --mac --config electron-builder.yml",
+    "electron:build": "npm run build && node scripts/electron-build.cjs",
     "test:event-detect": "tsx scripts/test-event-detect.ts",
     "test:knowledge-ledger": "tsx scripts/test-knowledge-ledger.ts",
     "test:evidence-pack": "tsx scripts/test-evidence-pack.ts",
