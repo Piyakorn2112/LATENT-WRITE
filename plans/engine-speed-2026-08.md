@@ -378,3 +378,48 @@ Next version needs the ORIGINAL conditions (the app's own sidecar under the
 fullscreen glass surface, not an external server) and a frame source the OS
 cannot re-schedule (CVDisplayLink or compositor frame callbacks rather than
 requestAnimationFrame in a renderer).
+
+
+### On mode: the copy step CANNOT ship on the 1.7B (2026-08-18)
+
+**The shipped setting is safe on the 4B and corrupts the 1.7B.** Measured
+llama-server against llama-server, same model, same f16 KV, the only variable
+being --spec-type: base 89-90 tok/s, ngram-mod match48 227 tok/s (+151%), and
+**3 of 8 answers changed**. Less-eager settings do not rescue it — match 64
+(2/8), 96 (3/8), 128 (3/8), 192 (3/8) all corrupt. There is no safe setting on
+this tier at any point tested, so On mode does not get the copy step.
+
+**★★ THE FAILURE HAS A SHAPE, AND IT NAMES THE BUG. All three divergences are
+SUMMARIES. Zero chips diverged, in any run, at any setting.** Chips quote
+their labels out of the prompt, so nearly every draft is accepted and the
+REJECTION path barely executes; summaries compose original prose, so drafts
+are rejected constantly and that path runs on almost every token. The leak is
+in rejection handling. That also explains the 4B's behaviour: summary/trap was
+the case that broke there under eager settings, and it is a summary.
+
+What changed:
+
+```
+summary/strong   "resigned before the second bell" → "resigned in writing"
+                 throughline "signing, resigning, burning, refusing"
+                          → "Signs of betrayal and resignation"   (editorialising)
+summary/quiet    entire summary flips PRESENT tense → PAST tense
+summary/pronoun  "walked the bank alone until dawn, finding the marker gone"
+                          → "walked the bank to find the marker gone"  (detail lost)
+```
+
+**Consequences beyond On mode.** The guarantee is MODEL-DEPENDENT, not
+universal, so verify:spec-decode is not a formality on the 4B — it is the only
+thing standing between the shipped configuration and this. Any future model
+swap, quant change or engine bump must re-run it before being believed, and
+the gate must keep at least one composed-prose task (a summary) in its set,
+because a chips-only gate would pass every corrupt configuration measured
+today.
+
+**What is left for On mode**, and it is a product decision rather than a
+measurement: a small-tier sidecar with --spec-type none. Per-call decode is a
+wash (sidecar 90.5 tok/s against the in-process 88 already on record), so the
+value would be the sidecar's concurrency and its partial prefix reuse, bought
+at roughly 2.1GB for a second warm engine (1.06GB weights + ~844MB of f16 KV
+at 4x2048, since Q8_0 KV is separately blocked on this tier). The memory round
+deferred exactly this trade; nothing measured today makes it cheaper.

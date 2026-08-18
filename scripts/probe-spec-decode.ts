@@ -68,7 +68,15 @@ import fixture from "./fixtures/assistant-tasks.json";
 import type { ChapterGraphEntry } from "../src/types";
 
 const SUPPORT = path.join(os.homedir(), "Library/Application Support/Latent Write");
-const MODEL = path.join(SUPPORT, "models/Qwen3-4B-Thinking-2507-Q4_K_M.gguf");
+/** ★ THE SMALL TIER IS NOT JUST A SMALLER MODEL, IT IS A DIFFERENT KV POLICY.
+ *  Q8_0 KV was measured CHANGING AN ANSWER on the 1.7B (probe:kv-cache), so
+ *  the registry leaves it at f16 there while the 4B runs Q8_0. A probe that
+ *  inherited the 4B's flags would be measuring a configuration the app is
+ *  forbidden to ship. */
+const SMALL = process.env.SPEC_MODEL === "small";
+const MODEL = path.join(SUPPORT, SMALL
+  ? "models/Qwen3-1.7B-Q4_K_M.gguf"
+  : "models/Qwen3-4B-Thinking-2507-Q4_K_M.gguf");
 const DRAFT = process.env.SPEC_DRAFT_MODEL || path.join(SUPPORT, "models/Qwen3-0.6B-Q4_K_M.gguf");
 const ENGINE = path.join(SUPPORT, "engine", process.env.SPEC_BUILD || "llama-b10298", "llama-server");
 const ROUNDS = Number(process.env.SPEC_ROUNDS) || 1;
@@ -95,6 +103,14 @@ const CONFIGS: Record<string, string[]> = {
   "mod-match40": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "40"],
   "mod-match48": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "48"],
   "mod-match64": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "64"],
+  // ★ THE SAFE DIRECTION. Every configuration that has corrupted an answer was
+  //   EAGER (short match, short draft). If the leak is in the rejection path,
+  //   a LESS eager setting drafts only where it is confident and should stop
+  //   exercising it. Tested on the small tier, where the shipped 48 corrupts
+  //   3 of 8.
+  "mod-match96": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "96"],
+  "mod-match128": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "128"],
+  "mod-match192": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "192"],
   "mod-n32": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-min", "24", "--spec-ngram-mod-n-max", "32"],
   "mod-n96": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-min", "64", "--spec-ngram-mod-n-max", "96"],
   "mod+simple": ["--spec-type", "ngram-mod,ngram-simple"],
@@ -167,8 +183,12 @@ const WRITING_REQS: Req[] = REWRITE_CASES.map((c) => {
 
 const LANE_REQS: Req[] = [
   ...chipCases.map((c) => {
-    const r = buildChipRequest(chipEntry(c), { rich: true });
-    return { label: `chip/${c.id}`, systemPrompt: r.systemPrompt, userText: r.userText, gbnf: CHIP_RICH_GBNF, maxTokens: r.maxTokens };
+    // rich is the MAX-tier wire; the small tier still emits keyed objects.
+    const r = buildChipRequest(chipEntry(c), { rich: !SMALL });
+    return {
+      label: `chip/${c.id}`, systemPrompt: r.systemPrompt, userText: r.userText,
+      gbnf: SMALL ? gbnfFor(r.schema) : CHIP_RICH_GBNF, maxTokens: r.maxTokens,
+    };
   }),
   ...sumCases.map((c) => {
     const r = buildSummaryRequest(sumEntry(c));
@@ -185,7 +205,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function baseArgs(port: number): string[] {
   return [
     "-m", MODEL, "-c", String(4 * 2048), "-np", "4", "-fa", "on",
-    "-ctk", "q8_0", "-ctv", "q8_0", "-kvu", "-ub", "128",
+    ...(SMALL ? [] : ["-ctk", "q8_0", "-ctv", "q8_0"]),
+    "-kvu", "-ub", "128",
     "--cache-ram", "512", "--host", "127.0.0.1", "--port", String(port), "--no-webui",
   ];
 }
@@ -264,7 +285,7 @@ async function runPass(config: string, round: number): Promise<Pass> {
 
 // ── paired sweep ────────────────────────────────────────────────────────────
 
-console.log(`engine: ${path.basename(path.dirname(ENGINE))}`);
+console.log(`engine: ${path.basename(path.dirname(ENGINE))}   model: ${path.basename(MODEL)}   kv: ${SMALL ? "f16" : "q8_0"}`);
 console.log(`configs: ${WANT.join(", ")}   rounds: ${ROUNDS}   requests: ${REQS.length}\n`);
 
 const passes: Pass[] = [];
