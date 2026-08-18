@@ -335,3 +335,46 @@ on that surface.
 that only tested the lane would not have caught a writing-side divergence,
 and the two surfaces have now been shown to behave differently enough that
 one cannot stand in for the other.
+
+
+### -ub 128 re-opened, and NOT resolved (2026-08-18)
+
+The copy step changed decode from one position per pass to up to 49, so the
+dispatch pattern `-ub 128` was chosen against no longer exists. Two questions
+followed: did shipping it cost frames, and can -ub now go up and buy prefill
+(and therefore TTFT) back. **Neither is answered.**
+
+scripts/probe-ub-smoothness.cjs drives the real app fullscreen under a real
+saturated llama-server and counts frame intervals with vsync on. With both
+witnesses satisfied — the client reporting 4 completed requests and 256
+generated tokens, and `ioreg` reporting the Metal accelerator at 97-100%
+against 1-15% idle — every configuration returned 120 fps, p95 ~9ms, zero
+frames over 25ms:
+
+```
+idle      120.2 fps   p95 9.3   >25ms 0    gpu  15%
+off/128   120.6 fps   p95 9.1   >25ms 0    gpu  99%
+on/128    120.0 fps   p95 9.2   >25ms 0    gpu  97%
+on/512    120.1 fps   p95 9.0   >25ms 0    gpu  99%
+on/2048   120.2 fps   p95 9.2   >25ms 0    gpu 100%   ← positive control
+```
+
+**on/2048 is the finding.** Sixteen times the shipped dispatch size cannot be
+distinguished from the shipped one, and neither can on/512, which the original
+round measured dropping ~12% of frames (p95 17ms, worst 75ms). A harness that
+cannot separate a known-bad configuration from the shipped one says nothing
+about the configurations. -ub stays at 128 on the old evidence, and the copy
+step's frame cost is unmeasured rather than zero.
+
+★★ FIVE ATTEMPTS, AND EVERY FAILURE PRINTED A CLEAN TABLE. Chromium parked the
+unfocused window (a 65-second "frame gap"); the load never completed a request
+inside the window, so its counter read zero beside a perfect frame trace; a
+random ephemeral port collided with VS Code; and the setAlwaysOnTop fix for
+the first failure plausibly caused the fourth by giving the window compositor
+priority. Not one of these announced itself as an error. The controls caught
+all of them, which is the only reason none became "raise -ub".
+
+Next version needs the ORIGINAL conditions (the app's own sidecar under the
+fullscreen glass surface, not an external server) and a frame source the OS
+cannot re-schedule (CVDisplayLink or compositor frame callbacks rather than
+requestAnimationFrame in a renderer).
