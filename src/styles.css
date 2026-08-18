@@ -8174,16 +8174,24 @@ body.electron-window-unfocused .toolbar-ambient-orb {
 
 /* ─── Hero orb (large-scale wrapper) ────────────────────────────────────── */
 /* The hero is the production OrbEngine at hero size (the toolbar's own
-   canvas, the product's identity mark). The wrapper only centers it and
-   adds a quiet halo; the engine's canvas extends ~50% beyond the box for
-   its own glow, so overflow stays visible by default. */
+   canvas, the product's identity mark). The wrapper only centers it; the
+   engine's canvas extends ~50% beyond the box for its own glow, so overflow
+   stays visible by default.
+
+   ★ NO CSS HALO (owner round). The wrapper used to add
+   `drop-shadow(0 8px 40px rgba(168,145,255,0.22))`, a violet wash that sat
+   BEHIND the six petals and read as a second, blurrier orb. The engine
+   already paints its own light, so the CSS halo was a duplicate glow in a
+   colour none of the six petals actually use, and at hero size it was the
+   loudest thing on a screen whose job is the sentence underneath it.
+   Removing the filter also removes the stacking context it silently created
+   — verified in the booted app (scripts/shot-onb-orb.cjs) that the canvas
+   still paints in the same place and still overflows the box. */
 .onb-orb {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Subtle glow halo behind the orb — playful but not loud. */
-  filter: drop-shadow(0 8px 40px rgba(168, 145, 255, 0.22));
 }
 
 /* ─── Mock widget cards (page 3) ──────────────────────────────────────────
