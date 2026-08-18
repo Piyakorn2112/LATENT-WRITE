@@ -270,3 +270,57 @@ as-is: the app-wide --text-tertiary quiet register (~3:1, a system
 token used consistently, duplicated information at full contrast
 nearby) and the badge's fuller glass vs the word-count pill (it is
 interactive and temporary; the pill is inert and permanent).
+
+**Icon shipped for real (2026-08-18):** Xcode 27 beta went on the
+machine, and the build still chose the fallback. Installing Xcode is
+not the same as being able to run its tools: `xcode-select -p` stays
+pointed at /Library/Developer/CommandLineTools until someone runs
+`sudo xcode-select -s`, and the /usr/bin/actool on PATH is only a shim
+that forwards to whatever that setting names, so it exited non-zero
+with Xcode sitting in /Applications. scripts/electron-build.cjs now
+resolves a developer directory that actually CONTAINS actool (explicit
+LW_DEVELOPER_DIR, then DEVELOPER_DIR, then xcode-select, then a scan of
+/Applications and ~/Applications preferring release over beta) and
+hands it to electron-builder on both DEVELOPER_DIR and PATH, because
+electron-builder spawns a bare `actool` while anything going through
+xcrun reads the env var. No sudo, and a beta Xcode counts.
+
+The packaged app now carries Contents/Resources/Assets.car (1.77 MB)
+with CFBundleIconName=Icon: three layer stacks, three layer groups, the
+orb as a Vector rather than a raster, dark and tintable renditions, and
+a 1024 master. That is the authored liquid-glass document, not a plate
+with an SVG on it.
+
+REGRESSION FOUND IN THE FIX: actool's companion Icon.icns stops at
+256px (ic04/ic11/ic07/ic13 and nothing above), because on macOS 26+
+nothing reads it higher. The flat build/icon.icns went to 1024. On any
+older macOS the icns is the ONLY icon the system has and Finder asks
+for 512 and 1024, so switching to the authored icon would have traded a
+crisp wrong icon for a blurry right one on every pre-26 machine.
+scripts/after-pack.cjs (wired as electron-builder's afterPack, which
+runs before signing and before the DMG) renders the full ladder out of
+the compiled catalog with `iconutil --convert icns Assets.car Icon`,
+gaining ic05/ic08/ic09/ic10/ic12/ic14. Same authored artwork, carried
+down to the older API. It refuses any conversion that loses a size
+class or lacks 1024, and never fails the build.
+
+METHOD, because neither artifact is byte-reproducible: the catalog
+header carries a timestamp and the rasteriser jitters, so 7 of 22 asset
+digests move between identical compiles and icns chunk lengths move up
+to 0.571% across four runs. verify:app-icon therefore compares only the
+reproducible parts. Every catalog asset that is not a rendered bitmap
+(the vector, the colours, the gradients, the groups) is matched by its
+own SHA1 against a fresh actool compile of the source .icon, and all 12
+match exactly. The icns is matched against a fresh iconutil render of
+the app's OWN catalog by size-class set plus per-class length inside a
+5% band, about 9x the measured jitter. A band that accepts everything
+proves nothing, so the same comparison is run against build/icon.icns
+and required to FAIL: the shipped icns sits 0.4% off, the flat fallback
+121.1% off, a 300x separation. The DMG is mounted and checked too,
+since that is what anyone actually receives.
+
+Gates: verify:icon-toolchain 12/12 (the no-Xcode branch is exercised ON
+a machine that has Xcode, via LW_XCODE_SEARCH_ROOTS plus a stub actool,
+along with the version floor, release-over-beta ordering and the
+override), verify:app-icon 33/33, verify:packaged 9/9 on the rebuilt
+DMG.

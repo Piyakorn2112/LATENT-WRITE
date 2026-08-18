@@ -38,6 +38,8 @@
     "profile:glass-app": "electron scripts/glass-app-profile.cjs",
     "electron:dev": "npm run build && electron .",
     "electron:build": "npm run build && node scripts/electron-build.cjs",
+    "verify:icon-toolchain": "node scripts/verify-icon-toolchain.cjs",
+    "verify:app-icon": "node scripts/verify-app-icon.cjs",
     "test:event-detect": "tsx scripts/test-event-detect.ts",
     "test:knowledge-ledger": "tsx scripts/test-knowledge-ledger.ts",
     "test:evidence-pack": "tsx scripts/test-evidence-pack.ts",

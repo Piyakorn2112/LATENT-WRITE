@@ -37,6 +37,12 @@ directories:
   output: release
   buildResources: build
 
+# Runs after the .app is packed and before signing / DMG. When the build used
+# the Icon Composer bundle, this renders the full 16-1024 icns ladder out of the
+# compiled Assets.car so macOS 25 and earlier get the authored icon at every
+# size instead of actool's 256px-capped companion. See scripts/after-pack.cjs.
+afterPack: scripts/after-pack.cjs
+
 # ─── Default DMG distribution (sideload) ──────────────────────────────────
 mac:
   category: public.app-category.productivity
