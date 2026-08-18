@@ -15110,8 +15110,8 @@ body.electron-window-unfocused .wc-panel::after {
    carries more of the legibility as type gets smaller. */
 .glass-mode-lock {
   position: absolute;
-  top: 2.5px;
-  right: 5px;
+  top: 4px;
+  right: 7.5px;
   font-family: var(--font-ui);
   font-size: 7px;
   font-weight: 700;
