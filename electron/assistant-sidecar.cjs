@@ -287,6 +287,44 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     //   nothing and taskpolicy -b starved GPU feeding (177ms stalls).
     '-ub', '128',
     ...(Number(process.env.ASSISTANT_SIDECAR_BATCH) ? ['-b', String(Number(process.env.ASSISTANT_SIDECAR_BATCH))] : []),
+    // ★★ THE COPY STEP: 2.41x DECODE FOR NOTHING, AND THE ANSWER IS THE SAME.
+    //
+    //    Roughly 80% of a chip answer already exists in its own prompt. The
+    //    picker is handed candidate sentences and told to choose and label
+    //    them, so the labels and details it returns are quoted out of what it
+    //    was shown, and the JSON scaffolding repeats once per pick. ngram-mod
+    //    matches the tail just written against everything already in the
+    //    context, copies forward whatever followed last time, and hands the
+    //    whole span to the model as ONE forward pass instead of one pass per
+    //    token. Measured on a real chip request: 72 tokens came out of 17
+    //    model runs instead of 72, and 2108ms became 665ms.
+    //
+    // ★  THE OUTPUT CANNOT DRIFT, BY CONSTRUCTION. The model computes its own
+    //    token at every drafted position and a copy survives only where the
+    //    two agree; the first disagreement discards the rest. At temperature 0
+    //    there is no randomness, so what the model would have said is a fixed
+    //    answer. Verified rather than assumed: every answer byte-identical
+    //    across every configuration in scripts/probe-spec-decode.ts, gated by
+    //    npm run verify:spec-decode.
+    //
+    // ★★ 48 IS THE PLATEAU, AND THE FASTEST SETTING IS NOT THE ONE THAT SHIPS.
+    //    Match-length sweep, paired against a fresh baseline each round
+    //    (noise floor 2.5%): 12 gave +24%, 24 gave +48%, 32 gave +112%, 48
+    //    gave +141%, 64 gave +141%. Two points agreeing to 0.1% is a real
+    //    ceiling, so 48 it is. Separately --spec-ngram-mod-n-min 24 with
+    //    --spec-ngram-mod-n-max 32 measured 70.7 tok/s against match32's
+    //    70.0, a rounding error apart, AND REWROTE A CHAPTER SUMMARY into
+    //    different events. The theory says that is impossible, so the
+    //    guarantee leaks somewhere in that path. Do not chase the last
+    //    percent through those two knobs.
+    //
+    //    Costs no memory: there is no draft model, only a lookup over context
+    //    the engine already holds. It helps the saturated 4-slot case too
+    //    (+33% wave), so it is not borrowing compute the batch needed.
+    ...(process.env.ASSISTANT_SIDECAR_SPEC === 'none' ? [] : [
+      '--spec-type', process.env.ASSISTANT_SIDECAR_SPEC || 'ngram-mod',
+      '--spec-ngram-mod-n-match', String(Number(process.env.ASSISTANT_SIDECAR_SPEC_MATCH) || 48),
+    ]),
     // ★★ THE HOST-RAM PROMPT CACHE DEFAULTS TO 8192 MiB, ON. b10298 keeps
     //   evicted slot KV states in host memory (PR #16391) and re-matches
     //   them by prefix — a real win for our byte-identical per-task system

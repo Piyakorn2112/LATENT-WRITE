@@ -9,8 +9,10 @@ and most of the obvious levers are settled. Do not re-litigate these:
 
 | lever | verdict | where measured |
 |---|---|---|
-| prompt-lookup drafting | REJECTED, +18% slower (output not in prompt) | probe-decode-speed |
-| 1.7B drafting for the 4B | REJECTED, 4x slower AND grammar bypassed | probe-draft-speculative |
+| prompt-lookup drafting | REJECTED **on the binding only, see §Copy step** | probe-decode-speed |
+| 1.7B drafting for the 4B | REJECTED **on the binding only, see §Copy step** | probe-draft-speculative |
+| ngram-mod on llama-server | **ADOPTED, 2.4x decode, byte-identical** | probe-spec-decode |
+| llama.cpp b10298 → b10472 | REFUTED, -3.0% against 8.4% bracket drift | probe-engine-build |
 | parallel decode on node-llama-cpp | REFUTED, JS-side serialization, temp-0 determinism lost | probe-parallel-decode |
 | flash attention | ON both tiers (byte-identical, lean) | probe-kv-cache |
 | KV Q8_0 | 1.7B NO (answer changed), 4B YES | probe-kv-cache, registry |
@@ -174,3 +176,100 @@ everything else.
 Batch-geometry prefill tuning (-ub above 128) was left alone: the 128
 setting owns a measured UI-smoothness number, and the prewarm removes the
 same seconds without touching that trade.
+
+
+## The copy step (2026-08-18): 2.4x decode, and why the old verdict did not apply
+
+**Both speculative verdicts in the table above were measured on
+node-llama-cpp, and the sidecar inherited them untested.** That is the whole
+finding. The 1.7B-drafting run did not just lose on speed, it printed
+`"pushed tokens are incompatible with the grammar evaluation state. The
+grammar will be ignored"` — which is a statement about THAT BINDING's draft
+predictor, not about the technique and not about llama.cpp. llama-server
+carries its own implementations behind `--spec-type`, the sidecar arrived
+months after the verdict, and nobody re-ran it there. Neither did the memory
+objection survive: the ngram family reads the context the engine already
+holds, so there is no second model and no extra RAM.
+
+**Why it works on THIS workload.** Measured on the real chip answer against
+the candidate list it was shown, **206 of 258 characters, 80%, already
+existed word for word in its own prompt**. The picker is handed candidate
+sentences and told to choose and label them, so the labels and details come
+back quoted, and the JSON scaffolding repeats once per pick. A copier that
+matches the tail just written against the context and copies forward what
+followed last time gets that 80% for free. The model then verifies the whole
+span in ONE forward pass, keeps the run that agrees with what it would have
+produced, and cuts at the first disagreement. At temperature 0 that makes the
+output identical by construction.
+
+**The arithmetic, from a real trace of one chip request:**
+
+```
+                    model runs   ms per run   total     tok/s
+base                        72         29ms   2108ms     34.1
+--spec-type ngram-mod       17         39ms    665ms    108.3
+                                                   (draft_n 55, accepted 55)
+```
+
+Each run got MORE expensive, because it now covers several positions instead
+of one. There are 4.2x fewer of them.
+
+**Match-length sweep, paired against a fresh baseline each round:**
+
+```
+match 12   +24%      match 32   +112%      match 64   +141%
+match 24   +48%      match 48   +141%   ← shipped, plateau
+```
+
+48 and 64 agreeing to 0.1% is a ceiling, not a lucky point. Shipped
+`--spec-type ngram-mod --spec-ngram-mod-n-match 48`, env-overridable via
+`ASSISTANT_SIDECAR_SPEC` (`none` disables) and `ASSISTANT_SIDECAR_SPEC_MATCH`.
+
+**★★ THE FASTEST SETTING IS THE ONE THAT MUST NOT SHIP.**
+`--spec-ngram-mod-n-min 24 --spec-ngram-mod-n-max 32` measured 70.7 tok/s
+against match32's 70.0, a rounding error apart, and **rewrote a chapter
+summary into different events** (base: "watched the seal run off the harbour
+writ as he tried to reach the pier"; that config: "watched the harbour writ
+burn as the seal ran off it"). By the greedy-verification argument this is
+impossible, so the guarantee leaks somewhere in that path, most likely the
+grammar state not being reapplied identically when drafted chunks are short
+and frequent. The leak was not diagnosed and does not need to be. The lesson
+is that the theory said all of these were safe and one measurably was not,
+which is why byte comparison is a GATE and not a comment.
+
+**Gates.** New `verify:spec-decode` asserts three things: every answer
+byte-identical to a copy-step-off baseline, decode above a +25% floor so a
+silently ignored flag after an engine bump fails loudly instead of leaving
+every other gate green, and the shipped defaults read back out of
+assistant-sidecar.cjs so the gate is measuring the config the sidecar
+actually spawns rather than one the probe defines. 5/5. verify:engine 4/4,
+verify:assistant-tasks 30/30 and its aggregate moved 71.4 → 83.6 tok/s
+(+17% on the real mixed suite through the app bridge).
+
+**Scope.** Max tier only. The small tier has no sidecar entry, so On mode
+runs in-process on node-llama-cpp, which has no equivalent. Within max mode
+every surface gains, because chips, summaries, the dossier, max-ask and the
+writing tools all already carry `lane:'batch'`.
+
+**Bracketing earned its keep twice.** The b10298 → b10472 bump looked like a
+3% regression and was nothing at all: three passes of the SAME build decayed
+8.4% across the run, so the gap was inside the drift. Every number above is
+paired against a baseline measured in the same minute.
+
+**Still open, in order of expected payoff:** the writing tools and the
+dossier should gain MORE than chips, because a proofread returns your own
+paragraph with a few fixes in it (unmeasured, predicted from the mechanism);
+`-ub 128` deserves re-opening now that each pass covers ~4 positions instead
+of 1, which is a different UI-smoothness trade from the one that set it;
+EAGLE-3 (`--spec-type draft-eagle3`, already in the build's menu, third-party
+Qwen3 checkpoints exist) stacks with ngram-mod and attacks the novel tokens
+the copier structurally cannot help with; and On mode has no sidecar at all,
+which is the largest total-time lever left.
+
+**Not a lever, stated because it will be asked again.** Apple's "LLM in a
+Flash" (arXiv 2312.11514) does not transfer. It solves "the model does not
+fit in RAM", and our 4B is 2.5GB on a 16GB machine. Its core trick also needs
+FFN activation sparsity from ReLU-family activations; Qwen3 uses SwiGLU and
+is not sparse that way, and making it so would change the model's outputs.
+The transferable half of Apple's stack is the draft model they pair with
+their 3.18B base, which is the technique above in its learned form.
