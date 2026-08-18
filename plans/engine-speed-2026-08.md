@@ -273,3 +273,65 @@ FFN activation sparsity from ReLU-family activations; Qwen3 uses SwiGLU and
 is not sparse that way, and making it so would change the model's outputs.
 The transferable half of Apple's stack is the draft model they pair with
 their 3.18B base, which is the technique above in its learned form.
+
+
+### Per-surface, measured after shipping (2026-08-18, same day)
+
+The lane number is not the app's number. Measured on the writing tools
+through the real `buildWritingRequest` on the nine frozen reference cases:
+
+```
+                       tokens out   gain at match 48
+proofread / typos            55        +465%
+custom / hard-priority       67        +430%
+custom / hard-longpass      175        +364%
+custom / hard-multipart      78        +231%
+proofread / CLEAN            44          +3%
+custom / tense, voice, tighten 35-42     +3%
+rewrite / flat               45          +1%
+```
+
+**A cliff, not a gradient**, and the `rewrite` op itself is on the wrong
+side of it. Group total +106%, which is four cases carrying five.
+
+**Two conditions decide it, both required.** (1) The answer must genuinely
+REPEAT a long run from the context. (2) The match threshold must be short
+enough to be met inside an answer that length. The first is the dominant one:
+proofreading CLEAN prose is a near-total echo of its input and still gains
+nothing at match 48, because a 44-token answer cannot satisfy a 48-token
+match (it gains **+178% at match 20**); `rewrite-flat` is the same 45 tokens
+and gains nothing at ANY setting, because it composes new prose and there is
+nothing to copy. A first pass blamed answer LENGTH alone; the two 44-45 token
+cases behaving oppositely killed that.
+
+**The surfaces want different numbers, and it does not matter.** Lane:
+12→+24%, 20→+43%, 32→+111%, 48→+139%, 64→+141%. Writing: 20→+123%,
+48→+106%. Per-request tuning is not available — `/completion` takes
+`speculative.n_max/n_min/p_min` per request but those are the DRAFT-MODEL
+knobs; the ngram-mod parameters are startup flags only. The tie resolves
+itself anyway:
+
+**★★ match 20 CHANGED AN ANSWER, and it is the same answer -n-min 24/-n-max
+32 changed.** Same fixture (summary/trap), same divergence point, and
+CHARACTER-FOR-CHARACTER the same wrong summary, from two configurations
+measured hours apart. That rules out noise: eager copying takes a
+deterministic wrong branch. Every configuration that has broken byte-identity
+so far is an eager one, two for two. **Treat anything more eager than the
+shipped setting as guilty until a byte comparison says otherwise**, and note
+that match 20 was also SLOWER on the lane, so correctness and speed agreed
+for once.
+
+Also measured: low thresholds are actively harmful, not merely useless.
+match 6 and match 12 regress individual writing cases to -34% and cost 19% on
+the concurrent wave, because guessing constantly means guessing wrong and
+paying for rejected drafts.
+
+And the concurrency caveat came true. The writing tools' 4-slot wave gained
+**+0.7%**, against +32% on the lane. Speculation spends spare compute, and
+four short requests already saturate the GPU. The win is a single-stream win
+on that surface.
+
+`verify:spec-decode` now runs BOTH surfaces (SPEC_SET=lane|writing). A gate
+that only tested the lane would not have caught a writing-side divergence,
+and the two surfaces have now been shown to behave differently enough that
+one cannot stand in for the other.

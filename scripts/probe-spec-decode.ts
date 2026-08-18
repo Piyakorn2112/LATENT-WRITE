@@ -27,6 +27,28 @@
  *   adjacent to a fresh baseline pass and is judged on the within-pair delta,
  *   never on an absolute number from a different minute.
  *
+ * ★★ EAGER SETTINGS ARE THE ONES THAT BREAK, AND THEY BREAK THE SAME WAY.
+ *    Two configurations have now produced a changed answer: -n-min 24/-n-max
+ *    32, and -n-match 20. Both are short/eager, both diverged on the SAME
+ *    fixture (summary/trap), and both produced CHARACTER-FOR-CHARACTER the
+ *    same wrong summary. That rules out noise: it is a deterministic wrong
+ *    branch that eager copying takes. Greedy verification says this cannot
+ *    happen, so the guarantee leaks in llama.cpp somewhere along that path.
+ *    Treat any setting more eager than the shipped one as guilty until a
+ *    byte comparison says otherwise.
+ *
+ * ★  SURFACES DIFFER, SO THE GATE RUNS BOTH (SPEC_SET=lane|writing). The
+ *    timeline lane wants a LONG match (12→+24%, 20→+43%, 32→+111%,
+ *    48→+139%, 64→+141%); the writing tools peak lower (20→+123%,
+ *    48→+106%). Two conditions decide whether a request gains at all:
+ *    the answer must genuinely repeat a long run from the context, AND the
+ *    match threshold must be short enough to be met inside an answer that
+ *    length. Proofreading CLEAN prose quotes everything and still gains
+ *    nothing at match 48, because a 44-token answer cannot satisfy a
+ *    48-token match; the rewrite op composes new prose and gains nothing at
+ *    ANY setting. The lane's number wins the tie because match 20 is
+ *    disqualified on correctness regardless.
+ *
  *   ./node_modules/.bin/tsx scripts/probe-spec-decode.ts
  *   SPEC_CONFIGS=base,ngram-mod SPEC_ROUNDS=2 ... (paired confirmation)
  */
@@ -39,6 +61,9 @@ import type { ChildProcess } from "node:child_process";
 
 import { buildChipRequest, CHIP_RICH_GBNF } from "../src/lib/chip-picker";
 import { buildSummaryRequest, SUMMARY_GBNF } from "../src/lib/chapter-summary";
+import { buildWritingRequest, planWritingBatches } from "../src/lib/writing-tool";
+import { REWRITE_CASES } from "./fixtures/ask-rewrite-reference";
+import { pathToFileURL } from "node:url";
 import fixture from "./fixtures/assistant-tasks.json";
 import type { ChapterGraphEntry } from "../src/types";
 
@@ -58,7 +83,9 @@ const CONFIGS: Record<string, string[]> = {
   "ngram-map-k4v": ["--spec-type", "ngram-map-k4v"],
   "ngram-mod": ["--spec-type", "ngram-mod"],
   // ngram-mod's own knobs: how long a match it needs, and how much it drafts.
+  "mod-match6": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "6"],
   "mod-match12": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "12"],
+  "mod-match20": ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "20"],
   // The configuration the sidecar actually ships. Named so --gate can ask
   // for it by name and the table reads the same as the shipped flags.
   shipped: ["--spec-type", "ngram-mod", "--spec-ngram-mod-n-match", "48"],
@@ -73,6 +100,21 @@ const CONFIGS: Record<string, string[]> = {
   "mod+simple": ["--spec-type", "ngram-mod,ngram-simple"],
   "draft-0.6b": ["--spec-type", "draft-simple", "-md", DRAFT, "-ngld", "99", "-ctkd", "q8_0", "-ctvd", "q8_0"],
 };
+/** The surface under test. The lane was measured first because it is the
+ *  highest-volume path; the writing tools are the interesting one, because a
+ *  proofread hands back the writer's own paragraph with a few fixes in it,
+ *  which is the most quotable output the app produces. */
+const SET = process.env.SPEC_SET || "lane";
+
+// The compact grammar generator the host reaches past the exports map for.
+// The sidecar autogenerates the same grammar for any jsonStyle:'compact' call
+// without a hand-built gbnf, so a probe that skipped it would be measuring a
+// different constraint than the app runs under.
+const { getGbnfGrammarForGbnfJsonSchema } = (await import(pathToFileURL(
+  path.join(process.cwd(), "node_modules/node-llama-cpp/dist/utils/gbnfJson/getGbnfGrammarForGbnfJsonSchema.js"),
+).href)) as { getGbnfGrammarForGbnfJsonSchema: (schema: never, opts?: { allowNewLines?: boolean }) => string };
+const gbnfFor = (schema: object) => getGbnfGrammarForGbnfJsonSchema(schema as never, { allowNewLines: false });
+
 const WANT = (process.env.SPEC_CONFIGS || "base,ngram-simple,ngram-cache,ngram-map-k,ngram-map-k4v,ngram-mod").split(",");
 
 // ── request set: the product's own builders on the frozen fixture ───────────
@@ -109,7 +151,21 @@ function sumEntry(c: SumCase): ChapterGraphEntry {
 }
 
 interface Req { label: string; systemPrompt: string; userText: string; gbnf: string; maxTokens: number }
-const REQS: Req[] = [
+
+/** The writing tools, through the real builder on the frozen reference cases. */
+const WRITING_REQS: Req[] = REWRITE_CASES.map((c) => {
+  const batch = planWritingBatches(c.text, undefined, c.op === "proofread")[0];
+  const r = buildWritingRequest(c.op, batch, {
+    before: c.before, revisedTail: "", instruction: c.instruction,
+  });
+  return {
+    label: `${c.op}/${c.id}`,
+    systemPrompt: r.systemPrompt, userText: r.userText,
+    gbnf: gbnfFor(r.schema), maxTokens: r.maxTokens,
+  };
+});
+
+const LANE_REQS: Req[] = [
   ...chipCases.map((c) => {
     const r = buildChipRequest(chipEntry(c), { rich: true });
     return { label: `chip/${c.id}`, systemPrompt: r.systemPrompt, userText: r.userText, gbnf: CHIP_RICH_GBNF, maxTokens: r.maxTokens };
@@ -119,6 +175,8 @@ const REQS: Req[] = [
     return { label: `summary/${c.id}`, systemPrompt: r.systemPrompt, userText: r.userText, gbnf: SUMMARY_GBNF, maxTokens: r.maxTokens };
   }),
 ];
+
+const REQS: Req[] = SET === "writing" ? WRITING_REQS : LANE_REQS;
 
 // ── engine ──────────────────────────────────────────────────────────────────
 
