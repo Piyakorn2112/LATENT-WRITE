@@ -123,7 +123,8 @@
     "test:assistant-lanes": "tsx scripts/test-assistant-lanes.ts",
     "probe:timeline-stutter": "electron scripts/probe-timeline-stutter.cjs",
     "probe:engine-collision": "electron scripts/probe-engine-collision.cjs",
-    "probe:bg-schedule": "electron scripts/probe-bg-schedule.cjs"
+    "probe:bg-schedule": "electron scripts/probe-bg-schedule.cjs",
+    "verify:assistant-lanes": "tsx scripts/verify-assistant-lanes.ts"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",
