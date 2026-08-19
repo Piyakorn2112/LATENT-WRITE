@@ -42,6 +42,13 @@ const BOOK = process.env.BOOK
 const CHAPTERS = Number(process.env.CHAPTERS || 6);
 const PHASE_S = Number(process.env.PHASE_S || 25);
 const STALL_MS = Number(process.env.STALL_MS || 40);
+/** ★ CONCURRENCY IS A KNOB HERE FOR A MEMORY REASON, not a throughput one.
+ *   Flipping the in-process host between the 1.7B and the 4B while the
+ *   sidecar holds its own 4B puts ~5GB of weights in flight, and the first
+ *   attempt at the conjunction phase took the whole app down. Two engines
+ *   coexisting IS the shipped max-mode arrangement, so the phase stays — it
+ *   just gets to choose how hard it leans on the machine. */
+const DECODE = Number(process.env.DECODE || 2);
 const REQS = JSON.parse(fs.readFileSync(process.env.REQS || '/tmp/bg-reqs.json', 'utf8'));
 const REAL_USER_DATA = path.join(os.homedir(), 'Library', 'Application Support', 'Latent Write');
 
@@ -73,6 +80,17 @@ const assistant = require(path.join(ROOT, 'electron', 'assistant.cjs'));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const js = (w, src) => w.webContents.executeJavaScript(src, true);
+
+/** ★ THE GUARD MUST DECLARE ITSELF. ensureLoaded stops the sidecar outright
+ *   when an in-process load will not fit ('yield-to-interactive'). If that
+ *   fires during the conjunction phase then the two engines were never
+ *   actually coexisting and the row means something else. */
+const SIDECAR_STOPS = [];
+const _realStop = assistant.sidecar.stop;
+assistant.sidecar.stop = function wrappedStop(reason) {
+  SIDECAR_STOPS.push(String(reason || ''));
+  return _realStop.apply(this, arguments);
+};
 
 const STOPS = [];
 const realSidecarStop = assistant.sidecar.stop;
@@ -192,6 +210,7 @@ async function phase(w, name, { decode, reload, lane = 'batch' }) {
   stop.done = true;
   await Promise.race([Promise.all([decoding, reloading]), sleep(60_000)]);
   const realLoads = loads.filter((L) => !L.reused);
+  const evicted = SIDECAR_STOPS.splice(0);
   console.log(
     `  ${name.padEnd(28)}│ ${r.fps.toFixed(1).padStart(5)} fps  ${String(r.stalls.length).padStart(3)} frames >${STALL_MS}ms  ` +
     `${String(r.stallMsTotal).padStart(5)}ms lost  worst ${String(r.stalls.length ? Math.max(...r.stalls.map((x) => x.ms)) : 0).padStart(4)}ms  ` +
@@ -199,6 +218,7 @@ async function phase(w, name, { decode, reload, lane = 'batch' }) {
   );
   if (r.stalls.length) console.log(`                         stalls: ${r.stalls.slice(0, 12).map((x) => `${x.t}s/${x.ms}ms`).join(' ')}`);
   if (realLoads.length) console.log(`                         loads:  ${realLoads.map((L) => `${L.tier}@${L.t}-${L.end}s${L.ok ? '' : `!${L.error}`}`).join(' ')}`);
+  if (evicted.length) console.log(`                         ‼ sidecar stopped during the phase: ${evicted.join(', ')}`);
   if (STOPS.length) console.log(`                         sidecar stopped ${STOPS.length}x: ${[...new Set(STOPS)].join(', ')}`);
   return { name, lane, decode: decode || 0, reload: !!reload, ...r, decodes: meter.done, failed: meter.failed, reasons: meter.reasons, loads: realLoads, sidecarStops: STOPS.splice(0) };
 }
@@ -233,11 +253,14 @@ app.whenReady().then(async () => {
   rows.push(await phase(w, 'quiet', {}));
   rows.push(await phase(w, 'host reloads alone', { reload: true }));
   rows.push(await phase(w, 'sidecar decoding', { decode: 2 }));
-  rows.push(await phase(w, 'BOTH (batch lane)', { decode: 2, reload: true }));
-  // ★ THE FIX, MEASURED AGAINST ITSELF. Same collision, same 25 seconds; the
-  //   only difference is that the decoding declares itself background, so main
-  //   keeps the load off it and refuses to let it evict a live engine.
-  rows.push(await phase(w, 'BOTH (background lane)', { decode: 2, reload: true, lane: 'background' }));
+  rows.push(await phase(w, 'BOTH', { decode: 2, reload: true }));
+  // ★★ THERE WAS A SECOND 'BOTH' ROW HERE THAT PROVED NOTHING, and it is worth
+  //    a line so it is not re-added. It passed lane:'background' expecting to
+  //    measure the renderer's new priority split — but 'background' is a
+  //    RENDERER-side concept: main routes on lane === 'batch' and nothing
+  //    else, so the phase skipped the sidecar altogether and ran every request
+  //    on the in-process host. It reported a clean 120.2 fps, which read like
+  //    the fix working and was actually the fix not being under test.
   rows.push(await phase(w, 'quiet (again)', {}));
 
   const file = path.join(OUT, 'engine-collision.json');
