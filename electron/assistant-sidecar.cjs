@@ -285,7 +285,7 @@ async function ensureStarted({ modelPath, slots, slotContext, tier, idleTtlMs })
     //   and ~3% concurrent throughput (389 vs 405 tok/s; decode unchanged).
     //   Process-priority knobs were measured and REJECTED: --prio -1 moved
     //   nothing and taskpolicy -b starved GPU feeding (177ms stalls).
-    '-ub', '128',
+    '-ub', String(Number(process.env.ASSISTANT_SIDECAR_UB) || 128),
     ...(Number(process.env.ASSISTANT_SIDECAR_BATCH) ? ['-b', String(Number(process.env.ASSISTANT_SIDECAR_BATCH))] : []),
     // ★★ THE COPY STEP: 2.41x DECODE FOR NOTHING, AND THE ANSWER IS THE SAME.
     //
