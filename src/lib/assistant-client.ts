@@ -235,9 +235,24 @@ const BACKGROUND_CONCURRENCY = 2;
 const bgQueue: Job[] = [];
 const bgInflight = new Set<Job>();
 
-/** Anything interactive queued or running. Background yields to all of it. */
+/**
+ * Anything that is not background, queued or running — in EITHER lane.
+ *
+ * ★★ THE SINGLE-FLIGHT LANE COUNTS TOO, and leaving it out was the hole in the
+ *    first version of this. The two engines share one GPU, and the measured
+ *    cost is not the work but the overlap: a model load landing on a decoding
+ *    engine costs 15 bad frames and 757ms in twenty-five seconds, where either
+ *    alone costs zero (scripts/probe-engine-collision.cjs). Unlaned callers —
+ *    the review sweep, the adjudication sweep, the World panel's referent pass
+ *    — run on the IN-PROCESS host, which is the very engine whose loads
+ *    collide with the sidecar. Yielding to the batch pool alone would have
+ *    left exactly the collision this exists to prevent.
+ *
+ *    The rule it settles into is the simple one: one engine works at a time.
+ */
 function interactiveBusy(): boolean {
-  return batchQueue.length > 0 || batchInflight.size > 0;
+  return batchQueue.length > 0 || batchInflight.size > 0
+    || queue.length > 0 || inflight !== null;
 }
 
 function pumpBatch(): void {
@@ -383,6 +398,7 @@ async function pump(): Promise<void> {
     }
   } finally {
     pumping = false;
+    pumpBackground();
   }
 }
 
@@ -411,6 +427,7 @@ export function assistantRunJSON<T>(req: AssistantJSONRequest): Promise<Assistan
       pumpBatch();
     } else {
       queue.push(job);
+      preemptBackground();
       void pump();
     }
   });

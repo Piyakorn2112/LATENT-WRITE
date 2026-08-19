@@ -24,7 +24,10 @@
  *      independent field calls still ride together
  *   8. the real lane reaches the wire — main needs the priority too, because
  *      that is where the two engines meet
- *   9. cancelWhere reaches the background lane, queued and in flight
+ *   9. the SINGLE-FLIGHT lane preempts background work too — its callers run
+ *      on the in-process host, the very engine whose loads collide with the
+ *      sidecar, so yielding only to the batch pool would leave the collision
+ *  10. cancelWhere reaches the background lane, queued and in flight
  *
  *   /opt/homebrew/bin/node node_modules/tsx/dist/cli.mjs scripts/test-assistant-lanes.ts
  */
@@ -168,15 +171,53 @@ gate(
   `in flight: ${inFlightTasks().join(",") || "none"}`,
 );
 
-// 9 — cancellation reaches the new lane.
+// 9 — the unlaned single-flight lane preempts too.
+console.log("\n── the single-flight lane ──────────────────────────────────────\n");
+const bg2 = [5, 6].map((n) => assistantRunJSON(req(`bg-${n}`, "background")));
+await settle();
+gate(
+  inFlightTasks().filter((t) => t.startsWith("bg-")).length > 0,
+  "background work is running again before the unlaned request arrives",
+  `in flight: ${inFlightTasks().join(",") || "none"}`,
+);
+const sweep = assistantRunJSON(req("scene-review"));
+await settle();
+gate(
+  inFlightTasks().includes("scene-review"),
+  "an unlaned request (the review sweep, in-process) is in flight",
+  `in flight: ${inFlightTasks().join(",") || "none"}`,
+);
+gate(
+  !inFlightTasks().some((t) => t.startsWith("bg-")),
+  "★ …and it reclaimed the background slots — one engine works at a time",
+  `in flight: ${inFlightTasks().join(",")}`,
+);
+finish("scene-review");
+await sweep;
+await settle();
+gate(
+  inFlightTasks().filter((t) => t.startsWith("bg-")).length > 0,
+  "background resumes when the single-flight lane drains",
+  `in flight: ${inFlightTasks().join(",") || "none"}`,
+);
+await Promise.allSettled(bg2.map((p) => p.catch(() => null)));
+
+// 10 — cancellation reaches the new lane.
 console.log("\n── cancellation ────────────────────────────────────────────────\n");
+// ★ THE LANE IS REFILLED FIRST. Asserting "cancelWhere affected at least as
+//   many as were pending" against an EMPTY lane passes without cancelling
+//   anything — a gate that cannot fail. Three jobs go in, one runs, two queue,
+//   and the count has to reach all three.
+const bg3 = [7, 8, 9].map((n) => assistantRunJSON(req(`bg-${n}`, "background")));
+await settle();
 const before = assistantPending();
+gate(before.bgInFlight + before.bgQueued === 3,
+  `three background jobs are pending before the cancel (${before.bgInFlight} in flight, ${before.bgQueued} queued)`);
 const hit = cancelWhere(({ task }) => task.startsWith("bg-"));
-gate(hit >= before.bgQueued + before.bgInFlight,
-  `cancelWhere reaches queued and in-flight background jobs (${hit} affected)`);
+gate(hit === 3, `cancelWhere reaches every one of them, queued and in flight (${hit} affected)`);
 await settle();
 gate(assistantPending().bgQueued === 0, "…the background queue is empty afterwards");
-await Promise.allSettled(bg);
+await Promise.allSettled([...bg, ...bg3].map((x) => x.catch(() => null)));
 
 console.log(`\n  ${started.length} requests reached the runtime\n`);
 console.log(failures === 0 ? "✓ ALL GATES GREEN" : `✗ ${failures} GATE(S) FAILED`);

@@ -82,10 +82,10 @@ assistant.sidecar.stop = function wrappedStop(reason) {
 };
 
 let _seq = 0;
-async function sidecarCall(i) {
+async function sidecarCall(i, lane = 'batch') {
   const req = REQS[i % REQS.length];
   return assistant.run({
-    requestId: `col-${++_seq}`, task: 'timeline-chips', tier: 'max', lane: 'batch',
+    requestId: `col-${++_seq}`, task: 'timeline-chips', tier: 'max', lane,
     jsonStyle: 'compact', systemPrompt: req.systemPrompt, userText: req.userText,
     schema: req.schema, gbnf: req.gbnf, maxTokens: req.maxTokens, timeoutMs: 120_000,
   }).catch(() => null);
@@ -100,11 +100,11 @@ async function sidecarCall(i) {
  *    printing. The backoff below is the fix; the failure reasons are recorded
  *    because the eviction it exposed is part of the finding, not noise.
  */
-function startDecoding(conc, stopFlag, meter) {
+function startDecoding(conc, stopFlag, meter, lane = 'batch') {
   const one = async (k) => {
     let i = k;
     while (!stopFlag.done) {
-      const r = await sidecarCall(i);
+      const r = await sidecarCall(i, lane);
       i += conc;
       if (r && r.ok) meter.done++;
       else {
@@ -180,12 +180,12 @@ function prep(x) {
   app.focus({ steal: true }); x.show(); x.focus(); x.moveTop();
 }
 
-async function phase(w, name, { decode, reload }) {
+async function phase(w, name, { decode, reload, lane = 'batch' }) {
   const T0 = Date.now();
   const stop = { done: false };
   const meter = { done: 0, failed: 0, reasons: {} };
   const loads = [];
-  const decoding = decode ? startDecoding(decode, stop, meter) : Promise.resolve();
+  const decoding = decode ? startDecoding(decode, stop, meter, lane) : Promise.resolve();
   const reloading = reload ? hostReloadLoop(stop, loads, T0) : Promise.resolve();
   if (decode) await sleep(1500); // let the engine be genuinely mid-flight
   const r = await js(w, TRACE(PHASE_S, STALL_MS));
@@ -193,14 +193,14 @@ async function phase(w, name, { decode, reload }) {
   await Promise.race([Promise.all([decoding, reloading]), sleep(60_000)]);
   const realLoads = loads.filter((L) => !L.reused);
   console.log(
-    `  ${name.padEnd(22)}│ ${r.fps.toFixed(1).padStart(5)} fps  ${String(r.stalls.length).padStart(3)} frames >${STALL_MS}ms  ` +
+    `  ${name.padEnd(28)}│ ${r.fps.toFixed(1).padStart(5)} fps  ${String(r.stalls.length).padStart(3)} frames >${STALL_MS}ms  ` +
     `${String(r.stallMsTotal).padStart(5)}ms lost  worst ${String(r.stalls.length ? Math.max(...r.stalls.map((x) => x.ms)) : 0).padStart(4)}ms  ` +
     `longtask ${r.longtaskMs}ms │ ${String(meter.done).padStart(2)} decodes  ${String(realLoads.length).padStart(2)} loads`,
   );
   if (r.stalls.length) console.log(`                         stalls: ${r.stalls.slice(0, 12).map((x) => `${x.t}s/${x.ms}ms`).join(' ')}`);
   if (realLoads.length) console.log(`                         loads:  ${realLoads.map((L) => `${L.tier}@${L.t}-${L.end}s${L.ok ? '' : `!${L.error}`}`).join(' ')}`);
   if (STOPS.length) console.log(`                         sidecar stopped ${STOPS.length}x: ${[...new Set(STOPS)].join(', ')}`);
-  return { name, decode: decode || 0, reload: !!reload, ...r, decodes: meter.done, failed: meter.failed, reasons: meter.reasons, loads: realLoads, sidecarStops: STOPS.splice(0) };
+  return { name, lane, decode: decode || 0, reload: !!reload, ...r, decodes: meter.done, failed: meter.failed, reasons: meter.reasons, loads: realLoads, sidecarStops: STOPS.splice(0) };
 }
 
 app.whenReady().then(async () => {
@@ -233,7 +233,11 @@ app.whenReady().then(async () => {
   rows.push(await phase(w, 'quiet', {}));
   rows.push(await phase(w, 'host reloads alone', { reload: true }));
   rows.push(await phase(w, 'sidecar decoding', { decode: 2 }));
-  rows.push(await phase(w, 'BOTH', { decode: 2, reload: true }));
+  rows.push(await phase(w, 'BOTH (batch lane)', { decode: 2, reload: true }));
+  // ★ THE FIX, MEASURED AGAINST ITSELF. Same collision, same 25 seconds; the
+  //   only difference is that the decoding declares itself background, so main
+  //   keeps the load off it and refuses to let it evict a live engine.
+  rows.push(await phase(w, 'BOTH (background lane)', { decode: 2, reload: true, lane: 'background' }));
   rows.push(await phase(w, 'quiet (again)', {}));
 
   const file = path.join(OUT, 'engine-collision.json');
