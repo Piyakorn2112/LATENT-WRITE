@@ -22,7 +22,8 @@
  *   6. background work resumes once the interactive lane drains
  *   7. interactive concurrency is unchanged (3), so the dossier's three
  *      independent field calls still ride together
- *   8. the wire says "batch" for both — the priority is a renderer decision
+ *   8. the real lane reaches the wire — main needs the priority too, because
+ *      that is where the two engines meet
  *   9. cancelWhere reaches the background lane, queued and in flight
  *
  *   /opt/homebrew/bin/node node_modules/tsx/dist/cli.mjs scripts/test-assistant-lanes.ts
@@ -38,7 +39,7 @@ interface Pending {
 }
 const live = new Map<string, Pending>();
 const started: string[] = [];
-const wireLanes: Array<string | undefined> = [];
+const wire: Array<{ task: string; lane?: string }> = [];
 
 const api = {
   isElectron: true,
@@ -55,7 +56,7 @@ const api = {
   },
   assistantRun: (req: { requestId: string; task: string; lane?: string }) => {
     started.push(req.task);
-    wireLanes.push(req.lane);
+    wire.push({ task: req.task, lane: req.lane });
     return new Promise((resolve) => {
       live.set(req.requestId, { requestId: req.requestId, task: req.task, resolve, cancelled: false, lane: req.lane });
     });
@@ -147,10 +148,14 @@ gate(
 gate(assistantPending().batchQueued === 1, `…and the fourth waits its turn (${assistantPending().batchQueued} queued)`);
 
 // 8 — one word on the wire.
+// ★ ASSERTED PER REQUEST, NOT AS A COUNT. A fixed tally of lane words bakes in
+//   how many jobs happened to have started by this line — which the preemption
+//   under test is free to change. What must hold is the mapping.
 gate(
-  wireLanes.every((l) => l === "batch"),
-  "every laned request says \"batch\" on the wire; the priority never leaves the renderer",
-  `saw ${JSON.stringify([...new Set(wireLanes)])}`,
+  wire.length > 0
+    && wire.every(({ task, lane }) => (task.startsWith("bg-") ? lane === "background" : lane === "batch")),
+  "the real lane reaches the wire, so main can keep a background load off a decoding engine",
+  `saw ${JSON.stringify(wire)}`,
 );
 
 // 6 — drain the interactive lane; background resumes.

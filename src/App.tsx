@@ -1326,7 +1326,15 @@ export default function App() {
     //   those is exactly how max mode silently stopped updating chips. A
     //   transient failure backs off and retries; three strikes converts it.
     const CONTENT_FAILURES = new Set(["parse", "no-json", "schema"]);
+    // ★★ PREEMPTION IS NOT A FAILURE AT ALL. The background lane hands its
+    //    slot back the moment the writer asks for something, and the runtime
+    //    reports that the only way it can — as a cancelled request. Counted as
+    //    a transient strike it would take three asks near the same chapter to
+    //    silence that chapter for the session, which is precisely backwards:
+    //    the chapters the writer works next to are the ones that go stale
+    //    most. It costs one redo and earns nothing else.
     const noteFailure = (skipId: string, reason: string | null): number => {
+      if (reason === "preempted") return 1200;
       if (reason === null || CONTENT_FAILURES.has(reason)) {
         chipSkipRef.current.add(skipId);
         return 350;
@@ -1467,9 +1475,15 @@ export default function App() {
       // two of them manufacture 'busy' strikes every tick.
       const sc = (status as { sidecar?: { available?: boolean; error?: string } } | null)?.sidecar;
       const sidecarReady = maxMode && !!sc?.available && !sc?.error;
+      // ★★ THE TICK RUNS IN THE BACKGROUND LANE, ALWAYS — including on a
+      //    machine with no sidecar binary, where the lane still routes
+      //    exactly as before (main tries the sidecar, finds none, falls
+      //    through in-process) but the PRIORITY now applies everywhere. The
+      //    lane is what keeps an ask from queueing behind three chapters, and
+      //    the single-flight fallback is where that mattered most.
       const run: typeof assistantRunJSON = maxMode
-        ? (req) => assistantRunJSON({ ...req, tier: "max", ...(sidecarReady ? { lane: "batch" as const } : {}) })
-        : assistantRunJSON;
+        ? (req) => assistantRunJSON({ ...req, tier: "max", lane: "background" as const })
+        : (req) => assistantRunJSON({ ...req, lane: "background" as const });
       const works = collectWork(modelId, maxMode, sidecarReady ? 3 : 1);
       if (works.length === 0) return; // converged — the next kick reopens the loop
 

@@ -199,8 +199,10 @@ export interface AssistantRunRequest {
   timeoutMs?: number;
   /** "compact" = JSON grammar without pretty-printing; see assistant-client. */
   jsonStyle?: "compact";
-  /** "batch" routes to the llama-server sidecar when available. */
-  lane?: "batch";
+  /** Both reach the llama-server sidecar when available; the word also tells
+   *  main the request's PRIORITY, which is what keeps a background model load
+   *  off a decoding engine and stops background work evicting a live one. */
+  lane?: "batch" | "background";
   /** Precompiled compact GBNF for the sidecar path; host path ignores it. */
   gbnf?: string;
 }

@@ -855,8 +855,45 @@ function residentCreditBytes(modelPath) {
   }
 }
 
+// ── engine coexistence ──────────────────────────────────────────────────────
+//
+// ★★ A MODEL LOAD MUST NOT LAND ON A DECODING ENGINE. Measured on the
+//    full-screen timeline (scripts/probe-engine-collision.cjs, 25s phases,
+//    bracketed 120.4 / 120.2 fps either side):
+//
+//      host reloads alone   120.4 fps    0 frames >40ms      8 loads
+//      sidecar decoding     122.0 fps    0 frames >40ms      9 decodes
+//      BOTH                 115.0 fps   15 frames >40ms, 757ms lost
+//
+//    Eight full model loads cost nothing. Nine chapter-sized decodes cost
+//    nothing. Overlap them and the compositor starves — every one of those
+//    bad frames reports 0ms of blocking script, so the renderer was not the
+//    one that was busy. In max mode the overlap is the DEFAULT: the sidecar
+//    holds the 4B for chips and summaries while every caller that passes no
+//    tier (the review sweep, adjudication, alias-referent) loads the 1.7B
+//    in-process.
+//
+// ★ THE WAIT IS BOUNDED AND THEN GIVES UP, so the worst case is exactly what
+//   shipped before this existed. Interactive work waits briefly; background
+//   work, which nobody is waiting for, waits longer.
+const ENGINE_QUIET_POLL_MS = 40;
+const ENGINE_QUIET_INTERACTIVE_MS = 1500;
+const ENGINE_QUIET_BACKGROUND_MS = 6000;
+
+async function waitForQuiet(isQuiet, timeoutMs) {
+  if (isQuiet()) return true;
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    await new Promise((r) => setTimeout(r, ENGINE_QUIET_POLL_MS));
+    if (isQuiet()) return true;
+  }
+  return false;
+}
+const sidecarIsQuiet = () => !sidecar.status().alive || sidecar.status().inflight === 0;
+const hostIsQuiet = () => !_inflight && !_claiming && !_hostLoading;
+
 /** Fork (if needed), guard memory, then load the model in the host. */
-async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
+async function ensureLoaded({ tier = DEFAULT_TIER, contextSize, background = false } = {}) {
   const entry = activeEntry(tier);
   const modelPath = modelPathFor(tier);
   const wantContext = Number(contextSize) || entry.contextSize;
@@ -899,7 +936,19 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
       //   the sidecar, let the OS reclaim, and re-fit once. Batch work
       //   falls back in-process behind the single-flight queue and the
       //   sidecar restarts on a later tick.
-      if (sidecar.status().alive) {
+      //
+      // ★★ AND ONLY INTERACTIVE WORK. Background work taking this branch is
+      //    what turns a tight memory fit into a thrash: the tick's next unit
+      //    boots the sidecar straight back up (13.4s, measured), the host
+      //    tries again and answers low-memory, and round it goes. Measured in
+      //    one 25-second window: the sidecar stopped FIVE times, four of
+      //    seven loads refused low-memory, and decode throughput fell from 9
+      //    units to 2. Nobody is waiting for a chip; it can have the engine
+      //    later, or never, and neither costs the writer anything.
+      if (!background && sidecar.status().alive) {
+        // The sidecar is about to be killed either way; waiting for it to
+        // finish what it holds turns an abort into a clean handover.
+        await waitForQuiet(sidecarIsQuiet, ENGINE_QUIET_INTERACTIVE_MS);
         sidecar.stop('yield-to-interactive');
         await new Promise((r) => setTimeout(r, 600));
         const retryAvailable = availableMemoryBytes() + residentCreditBytes(modelPath);
@@ -909,7 +958,7 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
             ? { tier: entry.tier, wanted: wantContext, using: retryFit, availableBytes: retryAvailable }
             : null;
           _lowMemory = null;
-          return loadInHost(entry, modelPath, retryFit, verified);
+          return loadInHost(entry, modelPath, retryFit, verified, background);
         }
       }
       const needBytes = loadCostBytes(entry, modelPath, Number(entry.minContextSize) || wantContext);
@@ -921,15 +970,21 @@ async function ensureLoaded({ tier = DEFAULT_TIER, contextSize } = {}) {
       ? { tier: entry.tier, wanted: wantContext, using: fitContext, availableBytes }
       : null;
     _lowMemory = null;
-    return loadInHost(entry, modelPath, fitContext, verified);
+    return loadInHost(entry, modelPath, fitContext, verified, background);
   })().finally(() => { _loadPromise = null; });
 
   return _loadPromise;
 }
 
 /** The actual host load, shared by the normal path and the yield-retry. */
-async function loadInHost(entry, modelPath, fitContext, verified) {
+async function loadInHost(entry, modelPath, fitContext, verified, background = false) {
   await ensureHost();
+  // ★ The one line the collision measurement bought: do not start reading a
+  //   gigabyte of weights onto the GPU while the other engine is mid-decode.
+  await waitForQuiet(
+    sidecarIsQuiet,
+    background ? ENGINE_QUIET_BACKGROUND_MS : ENGINE_QUIET_INTERACTIVE_MS,
+  );
   _hostLoading = true;
 
   const loaded = await new Promise((resolve) => {
@@ -1073,6 +1128,13 @@ async function trySidecarRun(opts) {
   }
   if (slots < 1) return null;
 
+  // ★ THE SAME RULE IN THE OTHER DIRECTION. Booting llama-server reads 2.4GB
+  //   onto the GPU; doing that while the in-process host is mid-decode is the
+  //   same collision from the other side. Bounded, then it proceeds anyway.
+  await waitForQuiet(
+    hostIsQuiet,
+    opts.lane === 'background' ? ENGINE_QUIET_BACKGROUND_MS : ENGINE_QUIET_INTERACTIVE_MS,
+  );
   const started = await sidecar.ensureStarted({
     modelPath, slots, slotContext, tier: entry.tier,
     idleTtlMs: entry.idleTtlMs,
@@ -1081,8 +1143,17 @@ async function trySidecarRun(opts) {
   return sidecar.run(opts, entry);
 }
 
+/** Both lanes reach the sidecar; only the priority differs. */
+function isLaned(opts) { return opts.lane === 'batch' || opts.lane === 'background'; }
+
 async function run(opts = {}) {
-  if (opts.lane === 'batch') {
+  // ★★ THE RENDERER'S PRIORITY REACHES MAIN, because main is where the two
+  //    engines meet. assistant-client splits its batch pool into interactive
+  //    and background; both route here identically, but a background request
+  //    must never evict a live sidecar or push a model load onto a decoding
+  //    one. See the coexistence block above ensureLoaded for the numbers.
+  const background = opts.lane === 'background';
+  if (isLaned(opts)) {
     const viaSidecar = await trySidecarRun(opts);
     if (viaSidecar) return viaSidecar;
     // fall through: the in-process path serves the request unchanged
@@ -1099,7 +1170,7 @@ async function run(opts = {}) {
   let loaded;
   try {
     const tier = opts.tier || DEFAULT_TIER;
-    loaded = await ensureLoaded({ tier, contextSize: opts.contextSize });
+    loaded = await ensureLoaded({ tier, contextSize: opts.contextSize, background });
   } finally {
     _claiming = false;
   }

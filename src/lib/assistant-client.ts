@@ -97,13 +97,28 @@ export interface AssistantJSONRequest {
    */
   onPartialText?: (text: string) => void;
   /**
-   * "batch" routes to the llama-server sidecar (true parallel slots) when
-   * available, and lets up to BATCH_CONCURRENCY of these run at once from
-   * this renderer. Background convergence work only — interactive requests
-   * keep the single-flight lane and its latency guarantees. Falls back to
-   * the in-process host transparently (where it is serialised as before).
+   * Which pool this request runs in. Both reach the llama-server sidecar's
+   * parallel slots (falling back to the in-process host transparently, where
+   * they are serialised as before); what differs is who gets to wait.
+   *
+   *   "batch"      the writer is waiting for this — an ask, a rewrite, a
+   *                dossier field, a prewarm for one of them. Up to
+   *                BATCH_CONCURRENCY at once, first come first served.
+   *
+   *   "background" nobody is waiting for this — chips, chapter summaries,
+   *                any convergence pass that will simply run again if it does
+   *                not finish. Runs only while the interactive pool is empty,
+   *                and is CANCELLED the moment an interactive request arrives.
+   *
+   * ★★ ONE FIFO POOL SHARED BY BOTH IS WHY THIS SPLIT EXISTS. Every caller
+   *    used lane:"batch", so an ask arriving while the chip tick held all
+   *    three slots queued behind up to three chapter-sized requests before it
+   *    could even start — including the popover's own prewarm, whose whole
+   *    purpose is to be ready before the writer clicks. Background work is
+   *    keyed and idempotent, so reclaiming its slot costs one redo and buys
+   *    the writer the latency the prewarm was measured to deliver.
    */
-  lane?: "batch";
+  lane?: "batch" | "background";
   /**
    * Precompiled compact GBNF for the sidecar, whose own json_schema
    * conversion allows pretty-printing (~35% of a chip answer measured).
@@ -192,6 +207,10 @@ interface Job {
   req: AssistantJSONRequest;
   settle: (result: AssistantJSONResult<unknown>) => void;
   cancelled: boolean;
+  /** Set when an interactive arrival reclaimed this job's slot. The caller
+   *  must be able to tell that from a real failure — see noteFailure in
+   *  App.tsx, where a strike would eventually silence the chapter. */
+  preempted?: boolean;
 }
 
 const queue: Job[] = [];
@@ -199,13 +218,27 @@ let inflight: Job | null = null;
 let pumping = false;
 
 /**
- * The batch lane: its own queue, pumped up to BATCH_CONCURRENCY at once.
- * Sized one UNDER the sidecar's 4 slots, so the engine keeps a free slot
+ * The interactive batch lane: its own queue, pumped up to BATCH_CONCURRENCY at
+ * once. Sized one UNDER the sidecar's 4 slots, so the engine keeps a free slot
  * instead of answering `busy` at exactly full load.
  */
 const BATCH_CONCURRENCY = 3;
 const batchQueue: Job[] = [];
 const batchInflight = new Set<Job>();
+
+/**
+ * The background lane. Deliberately narrower than the interactive one: two
+ * units in flight keep the sidecar's continuous batching fed while leaving
+ * slots free, and nothing here is being waited for.
+ */
+const BACKGROUND_CONCURRENCY = 2;
+const bgQueue: Job[] = [];
+const bgInflight = new Set<Job>();
+
+/** Anything interactive queued or running. Background yields to all of it. */
+function interactiveBusy(): boolean {
+  return batchQueue.length > 0 || batchInflight.size > 0;
+}
 
 function pumpBatch(): void {
   while (batchInflight.size < BATCH_CONCURRENCY && batchQueue.length > 0) {
@@ -218,7 +251,46 @@ function pumpBatch(): void {
         batchInflight.delete(job);
         job.settle(result);
         pumpBatch();
+        // The writer's work is done with the engine; let convergence resume.
+        pumpBackground();
       });
+  }
+}
+
+function pumpBackground(): void {
+  if (interactiveBusy()) return;
+  while (bgInflight.size < BACKGROUND_CONCURRENCY && bgQueue.length > 0) {
+    const job = bgQueue.shift()!;
+    if (job.cancelled) { job.settle({ ok: false, reason: "cancelled" }); continue; }
+    bgInflight.add(job);
+    void execute(job)
+      .catch((err): AssistantJSONResult<unknown> => ({ ok: false, reason: `client-failed:${message(err)}` }))
+      .then((result) => {
+        bgInflight.delete(job);
+        // ★ A RECLAIMED SLOT IS NOT A FAILURE, and it must not read like one.
+        //   The runtime answers a cancel with `cancelled`, which the chip
+        //   tick counts as a transient strike — three of those and the chapter
+        //   is skipped for the session. Preemption would have silenced exactly
+        //   the chapters the writer works near, which are the ones that go
+        //   stale most often.
+        job.settle(job.preempted && !result.ok ? { ok: false, reason: "preempted" } : result);
+        pumpBackground();
+      });
+  }
+}
+
+/**
+ * Reclaim the engine for an interactive arrival.
+ *
+ * Only in-flight work is cancelled: a queued background job costs nothing to
+ * leave where it is, and `pumpBackground` will not start it while the
+ * interactive lane has anything at all.
+ */
+function preemptBackground(): void {
+  for (const job of bgInflight) {
+    if (job.preempted) continue;
+    job.preempted = true;
+    requestCancel(job.requestId);
   }
 }
 
@@ -271,6 +343,10 @@ async function execute(job: Job): Promise<AssistantJSONResult<unknown>> {
       ...(job.req.noThink === false ? { noThink: false } : {}),
       ...(job.req.contextSize ? { contextSize: job.req.contextSize } : {}),
       ...(job.req.jsonStyle ? { jsonStyle: job.req.jsonStyle } : {}),
+      // ★★ THE PRIORITY TRAVELS. It began as a renderer-only concern and had
+      //   to grow: main is where the sidecar and the in-process host meet, and
+      //   a background request must not evict a live engine or drop a model
+      //   load onto a decoding one (scripts/probe-engine-collision.cjs).
       ...(job.req.lane ? { lane: job.req.lane } : {}),
       ...(job.req.gbnf ? { gbnf: job.req.gbnf } : {}),
     });
@@ -325,8 +401,13 @@ export function assistantRunJSON<T>(req: AssistantJSONRequest): Promise<Assistan
       cancelled: false,
       settle: resolve as unknown as (result: AssistantJSONResult<unknown>) => void,
     };
-    if (req.lane === "batch") {
+    if (req.lane === "background") {
+      bgQueue.push(job);
+      pumpBackground();
+    } else if (req.lane === "batch") {
       batchQueue.push(job);
+      // Before pumping: the arrival itself is what frees the slot.
+      preemptBackground();
       pumpBatch();
     } else {
       queue.push(job);
@@ -346,7 +427,7 @@ export function cancelWhere(
   reason = "cancelled",
 ): number {
   let count = 0;
-  for (const lane of [queue, batchQueue]) {
+  for (const lane of [queue, batchQueue, bgQueue]) {
     for (let i = lane.length - 1; i >= 0; i--) {
       const job = lane[i];
       if (!predicate({ task: job.task, tag: job.tag })) continue;
@@ -360,10 +441,12 @@ export function cancelWhere(
     requestCancel(inflight.requestId);
     count++;
   }
-  for (const job of batchInflight) {
-    if (predicate({ task: job.task, tag: job.tag })) {
-      requestCancel(job.requestId);
-      count++;
+  for (const set of [batchInflight, bgInflight]) {
+    for (const job of set) {
+      if (predicate({ task: job.task, tag: job.tag })) {
+        requestCancel(job.requestId);
+        count++;
+      }
     }
   }
   return count;
@@ -374,12 +457,18 @@ export function cancelAll(reason = "cancelled"): number {
 }
 
 /** Debug/status read-out — the queues are otherwise invisible to the UI. */
-export function assistantPending(): { queued: number; inFlight: string | null; batchQueued: number; batchInFlight: number } {
+export function assistantPending(): {
+  queued: number; inFlight: string | null;
+  batchQueued: number; batchInFlight: number;
+  bgQueued: number; bgInFlight: number;
+} {
   return {
     queued: queue.length,
     inFlight: inflight ? inflight.requestId : null,
     batchQueued: batchQueue.length,
     batchInFlight: batchInflight.size,
+    bgQueued: bgQueue.length,
+    bgInFlight: bgInflight.size,
   };
 }
 
