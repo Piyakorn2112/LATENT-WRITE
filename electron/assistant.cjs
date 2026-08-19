@@ -1131,10 +1131,19 @@ async function trySidecarRun(opts) {
   // ★ THE SAME RULE IN THE OTHER DIRECTION. Booting llama-server reads 2.4GB
   //   onto the GPU; doing that while the in-process host is mid-decode is the
   //   same collision from the other side. Bounded, then it proceeds anyway.
-  await waitForQuiet(
-    hostIsQuiet,
-    opts.lane === 'background' ? ENGINE_QUIET_BACKGROUND_MS : ENGINE_QUIET_INTERACTIVE_MS,
-  );
+  //
+  // ★★ ONLY WHEN A BOOT IS ACTUALLY NEEDED. ensureStarted is called on EVERY
+  //    sidecar request and returns early when the server is already up — so
+  //    waiting here unconditionally would have put a poll of up to 1.5s (6s
+  //    for background) in front of every chip request for as long as the
+  //    in-process host stayed busy. The collision is a LOAD landing on a
+  //    decoding engine; a request that loads nothing has nothing to yield to.
+  if (!sidecar.status().alive) {
+    await waitForQuiet(
+      hostIsQuiet,
+      opts.lane === 'background' ? ENGINE_QUIET_BACKGROUND_MS : ENGINE_QUIET_INTERACTIVE_MS,
+    );
+  }
   const started = await sidecar.ensureStarted({
     modelPath, slots, slotContext, tier: entry.tier,
     idleTtlMs: entry.idleTtlMs,
