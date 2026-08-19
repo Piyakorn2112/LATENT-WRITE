@@ -119,7 +119,11 @@
     "verify:lane-keys": "tsx scripts/verify-lane-keys.ts",
     "probe:lane-staleness": "tsx scripts/probe-lane-staleness.ts",
     "probe:lane-session": "tsx scripts/probe-lane-session.ts",
-    "probe:timeline-lane": "tsx scripts/probe-timeline-lane.ts"
+    "probe:timeline-lane": "tsx scripts/probe-timeline-lane.ts",
+    "test:assistant-lanes": "tsx scripts/test-assistant-lanes.ts",
+    "probe:timeline-stutter": "electron scripts/probe-timeline-stutter.cjs",
+    "probe:engine-collision": "electron scripts/probe-engine-collision.cjs",
+    "probe:bg-schedule": "electron scripts/probe-bg-schedule.cjs"
   },
   "dependencies": {
     "@xenova/transformers": "^2.17.2",
