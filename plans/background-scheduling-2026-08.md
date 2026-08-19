@@ -150,7 +150,7 @@ BOTH  background lane    120.2      0     0ms     17        0       0x
 Both arms now sit exactly on the single-engine phases. Throughput recovered
 **2 → 19**.
 
-Gates: `test:assistant-lanes` (16, ordering and preemption against a fake
+Gates: `test:assistant-lanes` (18, ordering and preemption against a fake
 runtime whose requests finish on command), `verify:assistant-tasks` 30/30 at
 82.0 tok/s against 83.6 recorded, plus `test:chip-picker`,
 `test:chapter-summary`, `test:assist-reviews`, `verify:lane-keys`.
