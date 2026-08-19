@@ -877,7 +877,16 @@ function residentCreditBytes(modelPath) {
 //   shipped before this existed. Interactive work waits briefly; background
 //   work, which nobody is waiting for, waits longer.
 const ENGINE_QUIET_POLL_MS = 40;
-const ENGINE_QUIET_INTERACTIVE_MS = 1500;
+// ★ 800ms IS A CAP, NOT A MEASURED OPTIMUM, and it is sized against what a
+//   collision costs rather than against how long a wait helps. The common case
+//   resolves in tens of milliseconds — the renderer cancels background work
+//   the instant an interactive request arrives, so the sidecar drains almost
+//   at once. The case this bounds is the rare one: an interactive in-process
+//   load (the World panel's referent pass, or a 'busy' fallback) while the
+//   sidecar is serving OTHER interactive work, which cannot be preempted. A
+//   collision there costs ~500ms of frozen frames; waiting under a second to
+//   avoid it is the better side of the trade, and waiting 1.5s was not.
+const ENGINE_QUIET_INTERACTIVE_MS = 800;
 const ENGINE_QUIET_BACKGROUND_MS = 6000;
 
 async function waitForQuiet(isQuiet, timeoutMs) {

@@ -382,6 +382,13 @@ if (process.env.SPEC_GATE) {
   console.log("\nshipped configuration");
   g(declaredType === shipped[1], `assistant-sidecar.cjs spawns --spec-type ${shipped[1]} (${declaredType})`);
   g(declaredMatch === shipped[3], `assistant-sidecar.cjs spawns match ${shipped[3]} (${declaredMatch})`);
+  // ★ THE MICRO-BATCH IS A MEASURED CONSTANT TOO, and it became overridable by
+  //   env when the collision sweep needed to move it without a rebuild. It is
+  //   the UI-smoothness lever (probe-engine-collision.cjs; -ub 2048 is the
+  //   positive control that separates), so its shipped DEFAULT gets the same
+  //   readback the copy step's flags get.
+  const declaredUb = /ASSISTANT_SIDECAR_UB) || (\d+)/.exec(src)?.[1];
+  g(declaredUb === "128", `assistant-sidecar.cjs spawns -ub 128 by default (${declaredUb})`);
 
   const shippedPasses = passes.filter((x) => x.config === "shipped");
   const identical = shippedPasses.every((x) => x.answers.every((a) => refSha.get(a.label) === a.sha));
