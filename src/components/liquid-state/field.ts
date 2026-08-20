@@ -45,7 +45,23 @@
 
 /** One body of the mass: an axis-aligned ellipse, because a squash is a scale and a
  *  scaled circle is an ellipse. Radii, not scales, so the field never has to know what
- *  a body's rest size was. */
+ *  a body's rest size was.
+ *
+ *  ★★ EVERY BODY CARRIES ITS OWN BLEND RADIUS, and that is the fix for an entire class
+ *     of bug rather than a feature. With ONE blend radius for the whole field, a frame
+ *     that wants two dots necking at k=0.1 and a swell riding inside the mass at k=0.05
+ *     cannot have both — and worse, a mass that has finished merging has two coincident
+ *     bodies blended at k, which is a circle INFLATED BY EXACTLY k. The only way out
+ *     was to stop drawing the second body once it had arrived, which is a discrete
+ *     branch in the middle of a continuous animation: the picture stepped by 160 square
+ *     pixels in one frame at the end of every merge and every split. Per-body k lets
+ *     the merged pair sit at k=0, where the blend is exactly min() and two coincident
+ *     circles are one circle, so nothing ever has to be dropped.
+ *
+ *  ★ THE INVARIANT THAT KEEPS IT SAFE: a body's k must reach zero no later than its
+ *    radius does. A zero-radius body with k=0 contributes nothing at all (min() with a
+ *    point that lies inside the mass is a no-op); a zero-radius body with k>0 is a
+ *    dimple in the surface. `choreography.fieldOf` ties the two together. */
 export interface Body {
   /** centre, unit box */
   x: number;
@@ -53,13 +69,14 @@ export interface Body {
   /** radii, unit box */
   rx: number;
   ry: number;
+  /** blend radius used when folding THIS body into the ones before it. Unit box.
+   *  0 = hard union, and for the first body it is unused. */
+  k: number;
 }
 
-/** A frame of the mass: the bodies, and the surface tension holding them together. */
+/** A frame of the mass. */
 export interface Field {
   bodies: Body[];
-  /** blend radius in unit-box units. 0 = hard union (no neck at all). */
-  k: number;
 }
 
 /** iq's circular smooth-minimum, normalised so `k` IS the blend band's half-width in
@@ -75,9 +92,25 @@ export function sminCircular(a: number, b: number, k: number): number {
 
 /** iq's ellipse distance approximation. Exact for a circle (rx === ry), and within a
  *  fraction of a pixel of true distance at the eccentricities a squash produces —
- *  which is what lets a squashed body take part in the blend without the neck
- *  changing width as it deforms. */
+ *  which is what lets a squashed body take part in the blend without the neck changing
+ *  width as it deforms.
+ *
+ *  ★★ THE ZERO-RADIUS GUARD LIVES HERE, IN THE ONE FUNCTION BOTH HALVES CALL. It was
+ *     originally a clamp inside the rasteriser's setup loop, so the painter was safe
+ *     and `sdField` — which is what every probe and every test measures the geometry
+ *     with — divided by zero and returned NaN. Nothing threw. The rendered picture was
+ *     perfect and three separate gates silently reported that a gap of 0.00px was the
+ *     widest one they could find, because `NaN < worst` is false forever. A guard that
+ *     only one of two halves applies is not a guard. */
 export function sdEllipse(px: number, py: number, rx: number, ry: number): number {
+  /* ★★ A BODY WITH NO RADIUS IS ABSENT, NOT A POINT. Clamping the radius to something
+   *    tiny instead makes the function return the distance to that point — which is
+   *    ~0 AT THE POINT ITSELF, so folding an "empty" body into the mass punches a
+   *    half-lit pixel wherever its centre happens to sit. While thinking, that centre
+   *    sits in the gap between the two dots: a faint speck, one pixel, flickering as
+   *    the pixel grid moves under it. Infinity is inert under min() at every k, which
+   *    is what "not there" actually means. */
+  if (rx <= 0 || ry <= 0) return Infinity;
   const k1 = Math.hypot(px / rx, py / ry);
   if (k1 === 0) return -Math.min(rx, ry);
   const k2 = Math.hypot(px / (rx * rx), py / (ry * ry));
@@ -89,12 +122,12 @@ export function sdEllipse(px: number, py: number, rx: number, ry: number): numbe
  *  the picture and any measurement of it must come from one function, or they will
  *  eventually disagree and nothing will say so. */
 export function sdField(field: Field, x: number, y: number): number {
-  const { bodies, k } = field;
+  const { bodies } = field;
   if (bodies.length === 0) return Infinity;
   let d = sdEllipse(x - bodies[0].x, y - bodies[0].y, bodies[0].rx, bodies[0].ry);
   for (let i = 1; i < bodies.length; i++) {
     const b = bodies[i];
-    d = sminCircular(d, sdEllipse(x - b.x, y - b.y, b.rx, b.ry), k);
+    d = sminCircular(d, sdEllipse(x - b.x, y - b.y, b.rx, b.ry), b.k);
   }
   return d;
 }
@@ -123,20 +156,21 @@ export function rasterise(
   const r = rgb[0];
   const g = rgb[1];
   const b = rgb[2];
-  const { bodies, k } = field;
+  const { bodies } = field;
   const n = bodies.length;
   // Unit box → device pixels, once.
   const bx = new Float64Array(n);
   const by = new Float64Array(n);
   const brx = new Float64Array(n);
   const bry = new Float64Array(n);
+  const bk = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     bx[i] = bodies[i].x * size;
     by[i] = bodies[i].y * size;
-    brx[i] = Math.max(bodies[i].rx * size, 1e-4);
-    bry[i] = Math.max(bodies[i].ry * size, 1e-4);
+    brx[i] = bodies[i].rx * size;
+    bry[i] = bodies[i].ry * size;
+    bk[i] = bodies[i].k * size;
   }
-  const kPx = k * size;
 
   for (let py = 0; py < size; py++) {
     const sy = py + 0.5;
@@ -145,7 +179,7 @@ export function rasterise(
       let d = Infinity;
       for (let i = 0; i < n; i++) {
         const di = sdEllipse(sx - bx[i], sy - by[i], brx[i], bry[i]);
-        d = i === 0 ? di : sminCircular(d, di, kPx);
+        d = i === 0 ? di : sminCircular(d, di, bk[i]);
       }
       let cov = 0.5 - d;
       if (cov > 0) {

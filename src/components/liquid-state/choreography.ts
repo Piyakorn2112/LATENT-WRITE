@@ -59,33 +59,55 @@ export type LiquidStateName = "reading" | "thinking" | "writing";
  *  difference between a landing and a shrink. */
 const GROUND = 0.72;
 /** Rest radius of one thinking dot. */
-const R_DOT = 0.175;
+const R_DOT = 0.162;
 /** Rest radius of the single body. Two dots of R_DOT have area 2πR², so one body of
  *  the same volume is R√2 = 0.247; a touch under that reads better at 18px, and the
  *  merge is a droplet coalescing, not a conservation law. */
-const R_ONE = 0.234;
+const R_ONE = 0.229;
 /** Half the centre-to-centre separation while thinking. */
-const HALF = 0.203;
+const HALF = 0.222;
 /** How high a dot jumps. */
 const JUMP = 0.152;
 /** Flight stretch at maximum vertical speed. Round at the apex, longest at launch and
  *  landing — and it is derived from the arc's own velocity, not authored per beat. */
 const STRETCH = 0.17;
 /** How flat a dot goes on impact. */
-const SPLAT = 0.76;
+const SPLAT = 0.80;
 /** How far the single body sweeps while reading. */
 const SWEEP = 0.108;
+/** Where along the reading cycle the body reaches each end and slams into the turn.
+ *  Named because the squash is placed by DISTANCE FROM A TURN, wrapped — authoring it
+ *  as a branch on the cycle phase is what put a step at the boundary. */
+const TURN_AT = [0.44, 0.94] as const;
+const TURN_IN = 0.07;
+const TURN_RING = 0.19;
+const TURN_SQUASH = 0.88;
 
-/** Surface tension at rest between two separate dots. Small: the two dots must read as
- *  TWO DOTS, undeformed, and the circular smin is rigid outside its band — so a small
- *  k means the neck only exists when they are genuinely close. */
-const K_APART = 0.022;
+/** Surface tension between two separate dots: NONE.
+ *
+ *  ★ The blend band is `k / (1 − √½)` wide — 3.4× k — so a k of 0.014 draws a band
+ *    0.86px across at 18px, and the narrowest the dots ever get is 0.75px apart (a
+ *    crouch beside a splat, twice a cycle). A band wider than the gap is a neck, and a
+ *    neck at that moment is the two dots reading as one lump exactly when they are
+ *    supposed to be most clearly two. Measured: 0.11px of clearance at 210ms.
+ *
+ *  The dots do not need to be aware of each other while apart — the surface tension
+ *  belongs to the tear and the collision, where there is a gap worth bridging. Zero
+ *  here, and the gate demands more than half a pixel of daylight for the whole cycle. */
+const K_APART = 0;
 /** Surface tension while a mass is tearing or coalescing: the band has to be wide
  *  enough to bridge the gap before contact, which is what draws the neck. */
 const K_NECK = 0.105;
-/** Surface tension inside a single body. Near zero: two coincident bodies blended at k
- *  read as ONE body inflated by k, so anything else quietly changes the blob's size. */
-const K_ONE = 0.008;
+/** Surface tension inside a single body: ZERO, and it has to be exactly zero. Two
+ *  coincident bodies blended at k read as one body inflated by EXACTLY k, so any other
+ *  value silently makes the merged blob a different size than the one authored — and
+ *  the gate that compares the painted width with `R_ONE` would be measuring the blend
+ *  rather than the radius. At k=0 the blend is min() and two coincident circles are one
+ *  circle. See field.ts on why every body carries its own k. */
+const K_ONE = 0;
+/** The blend that holds the travelling swell inside the writing body. Its own, because
+ *  the swell has to stay soft-edged at the same moment the merged pair is at k=0. */
+const K_SWELL = 0.062;
 
 /* ── the pose ───────────────────────────────────────────────────────────────────── */
 
@@ -130,35 +152,62 @@ function onePose(r: number, cx = 0.5): Pose {
   };
 }
 
-/** Bodies, in the order `field.ts` folds them. The two dots first (so the neck between
- *  them is always the same blend), then the swell. */
+/**
+ * Bodies, in the order `field.ts` folds them: the two dots first (so the neck between
+ * them is always the same blend), then the swell.
+ *
+ * ★★ ALWAYS THREE BODIES, NEVER A CONDITIONAL. An earlier version dropped the second
+ *    body once the pair had merged and dropped the swell once its radius reached zero,
+ *    which is a discrete branch in the middle of a continuous animation — the picture
+ *    stepped by ~160 square pixels in a single frame at the end of every merge, split
+ *    and entrance, and only a scaling continuity gate found it. Instead every body is
+ *    always present and a body that should not be seen is made to contribute NOTHING:
+ *    zero radius AND zero blend. A point with k=0 folded into a mass it lies inside is
+ *    exactly min(), which is a no-op. That is why the swell's blend is tied to its own
+ *    radius here rather than authored beside it — the invariant is enforced at the one
+ *    place it can be, not remembered at every call site.
+ */
 export function fieldOf(pose: Pose): Field {
-  const bodies: Field["bodies"] = [];
   const ry0 = pose.r0 * pose.sy0;
   const ry1 = pose.r1 * pose.sy1;
-  bodies.push({
-    x: pose.cx - pose.half,
-    y: GROUND - ry0 - pose.lift0,
-    rx: pose.r0 * pose.sx0,
-    ry: ry0,
-  });
-  if (pose.half > 1e-4 || pose.r1 !== pose.r0 || pose.lift1 !== pose.lift0) {
-    bodies.push({
-      x: pose.cx + pose.half,
-      y: GROUND - ry1 - pose.lift1,
-      rx: pose.r1 * pose.sx1,
-      ry: ry1,
-    });
-  }
-  if (pose.br > 1e-4) {
-    bodies.push({
-      x: pose.cx + pose.bx,
-      y: GROUND - pose.r0 + pose.by,
-      rx: pose.br,
-      ry: pose.br,
-    });
-  }
-  return { bodies, k: pose.k };
+  /* Ties the swell's blend to its own radius: full blend at its working size, gone by
+   * the time it has shrunk away. */
+  const swell = Math.min(pose.br / (0.34 * R_ONE), 1);
+  /* ★★ AND TIES THE PAIR'S BLEND TO THEIR SEPARATION, which is the same invariant
+   *    pointing the other way. `smin(a, a, k)` is `a − k` exactly: two COINCIDENT
+   *    bodies blended at k are one body INFLATED BY k. Authored k is meant to draw a
+   *    neck across a gap, so at zero gap it is drawing nothing and must be zero — and
+   *    if it is not, the merged blob is silently a different size than R_ONE says.
+   *    Measured before this existed: the entrance into `reading` held k at K_NECK over
+   *    a coincident pair and painted a body 5.7 device pixels too wide, off the left of
+   *    the canvas. Enforcing it here rather than at each author site means no
+   *    transition can get it wrong, and none has to remember. */
+  const pair = Math.min(pose.half / (0.5 * pose.r0), 1);
+  return {
+    bodies: [
+      {
+        x: pose.cx - pose.half,
+        y: GROUND - ry0 - pose.lift0,
+        rx: pose.r0 * pose.sx0,
+        ry: ry0,
+        k: 0,
+      },
+      {
+        x: pose.cx + pose.half,
+        y: GROUND - ry1 - pose.lift1,
+        rx: pose.r1 * pose.sx1,
+        ry: ry1,
+        k: pose.k * pair,
+      },
+      {
+        x: pose.cx + pose.bx,
+        y: GROUND - pose.r0 + pose.by,
+        rx: pose.br,
+        ry: pose.br,
+        k: K_SWELL * swell * swell,
+      },
+    ],
+  };
 }
 
 /* ── deterministic jitter ───────────────────────────────────────────────────────────
@@ -182,16 +231,23 @@ const P_READ = 1560;
  *  `thinking` hands over to.
  *
  *      rest      0.00 – 0.12   nothing; the beat needs a floor or it reads as a jitter
- *      crouch    0.12 – 0.26   sy 1 → 0.88, gathering. Anticipation, on a curve that
+ *      crouch    0.12 – 0.26   sy 1 → 0.90, gathering. Anticipation, on a curve that
  *                              does NOT ring — a crouch that wobbles reads as a fault
- *      push-off  0.26 – 0.32   sy 0.88 → flight, on IN_2. Accelerating out of the
+ *      push-off  0.26 – 0.32   sy 0.90 → flight, on IN_2. Accelerating out of the
  *                              crouch is what makes the launch read as effort
  *      flight    0.26 – 0.68   lift on a parabola; the stretch is DERIVED from the
  *                              arc's own velocity, so the dot is longest where it is
  *                              fastest and perfectly round at the apex
- *      impact    0.68 – 0.755  sy 1.17 → 0.76 on IN_2. 61ms, and it has to be that
+ *      impact    0.68 – 0.755  sy 1.17 → 0.80 on IN_2. 61ms, and it has to be that
  *                              fast: an impact you can watch is not an impact
  *      ring      0.755 – 1.00  back to round on ELASTIC, 201ms of settling
+ *
+ *  ★ THE TWO DOTS MUST STAY TWO. Both are on the floor for two short windows per
+ *    cycle, and in them the widest thing one dot does (the splat) meets the widest
+ *    thing the other does (the crouch). R_DOT, HALF, SPLAT and the crouch are sized
+ *    together so the surfaces still clear each other by more than K_APART; a gate
+ *    samples the field between the dots across the whole cycle and requires it to
+ *    stay outside. Change any one of those four and that gate is the one that fires.
  */
 function dotBeat(phase: number, jumpScale: number): { lift: number; sx: number; sy: number } {
   const f = phase - Math.floor(phase);
@@ -207,8 +263,8 @@ function dotBeat(phase: number, jumpScale: number): { lift: number; sx: number; 
 
   let sy: number;
   if (f < 0.12) sy = 1;
-  else if (f < 0.26) sy = mix(1, 0.88, window_(f, 0.12, 0.26, OUT_STRONG));
-  else if (f < 0.32) sy = mix(0.88, flightSy(u), window_(f, 0.26, 0.32, IN_2));
+  else if (f < 0.26) sy = mix(1, 0.90, window_(f, 0.12, 0.26, OUT_STRONG));
+  else if (f < 0.32) sy = mix(0.90, flightSy(u), window_(f, 0.26, 0.32, IN_2));
   else if (f < AIR_B) sy = flightSy(u);
   else if (f < 0.755) sy = mix(flightSy(1), SPLAT, window_(f, AIR_B, 0.755, IN_2));
   else sy = mix(SPLAT, 1, window_(f, 0.755, 1, ELASTIC));
@@ -236,13 +292,31 @@ function thinkingPose(clock: number): Pose {
 }
 
 /** Where the reading body is along its sweep, 0..1 → cx. Right on the first half, back
- *  on the second, with a beat of dwell at each end where it slams into the turn. */
+ *  on the second, with a beat of dwell at each end where it slams into the turn.
+ *  Clock zero is the LEFT end, at rest, about to set off. */
 function sweepAt(f: number): number {
   const g = f - Math.floor(f);
-  if (g < 0.42) return mix(0.5 - SWEEP, 0.5 + SWEEP, IN_OUT_3(g / 0.42));
+  if (g < TURN_AT[0]) return mix(0.5 - SWEEP, 0.5 + SWEEP, IN_OUT_3(g / TURN_AT[0]));
   if (g < 0.5) return 0.5 + SWEEP;
-  if (g < 0.92) return mix(0.5 + SWEEP, 0.5 - SWEEP, IN_OUT_3((g - 0.5) / 0.42));
+  if (g < TURN_AT[1]) return mix(0.5 + SWEEP, 0.5 - SWEEP, IN_OUT_3((g - 0.5) / (TURN_AT[1] - 0.5)));
   return 0.5 - SWEEP;
+}
+
+/** How much the body is squashed against the end of its run, at cycle phase `g`.
+ *
+ *  ★ MEASURED AS A WRAPPED DISTANCE FROM EACH TURN, not as a branch on `g`. The first
+ *    version of this was a branch, and a branch has to special-case the turn whose
+ *    ring crosses the cycle boundary — which is exactly where it stepped by 0.12 in
+ *    one frame. Distance-from-an-event has no boundary to get wrong. */
+function turnSquash(g: number): number {
+  let s = 1;
+  for (const c of TURN_AT) {
+    let d = g - c;
+    d -= Math.round(d); /* wrap to [-0.5, 0.5] */
+    if (d >= -TURN_IN && d < 0) s *= mix(1, TURN_SQUASH, IN_2((d + TURN_IN) / TURN_IN));
+    else if (d >= 0 && d < TURN_RING) s *= mix(TURN_SQUASH, 1, ELASTIC_TIGHT(d / TURN_RING));
+  }
+  return s;
 }
 
 function readingPose(clock: number): Pose {
@@ -255,19 +329,13 @@ function readingPose(clock: number): Pose {
    *   after someone retimes the sweep — and nothing would report that. */
   const eps = 0.004;
   const v = (sweepAt(f + eps) - sweepAt(f - eps)) / (2 * eps);
-  const vmax = SWEEP * 2 * 2.2; /* the inOut curve's peak slope, in units per cycle */
+  /* The peak slope of power4.inOut is 4 over its own window, so the fastest the sweep
+   * ever travels is exact rather than guessed — a guessed maximum clips the lean flat
+   * for part of every run and nothing says so. */
+  const vmax = (2 * SWEEP * 4) / TURN_AT[0];
   const lean = Math.min(Math.abs(v) / vmax, 1);
 
-  /* And at each turn it sloshes against the end of its run: squashed on the axis it
-   * was travelling along, ringing back. */
-  const g = f - Math.floor(f);
-  const turn = g >= 0.42 && g < 0.62
-    ? mix(0.88, 1, window_(g, 0.44, 0.62, ELASTIC_TIGHT))
-    : g >= 0.92 || g < 0.12
-      ? mix(0.88, 1, window_(g >= 0.92 ? g - 0.92 : g + 0.08, 0.02, 0.20, ELASTIC_TIGHT))
-      : 1;
-
-  const sx = (1 + 0.20 * lean) * turn;
+  const sx = (1 + 0.20 * lean) * turnSquash(f - Math.floor(f));
   return { ...onePose(R_ONE, cx), sx0: sx, sy0: 1 / sx, sx1: sx, sy1: 1 / sx };
 }
 
@@ -423,7 +491,10 @@ function mergePose(from: Pose, to: Pose, p: number): Pose {
     lift0: [0.0, 0.26, IN_2],
     lift1: [0.0, 0.26, IN_2],
     half: [0.20, 0.52, IN_2],
-    cx: [0.10, 0.62, OUT_STRONG],
+    /* ★ THE MASS DOES NOT TRAVEL UNTIL IT IS ONE MASS. Moving `cx` toward the target
+     *   while `half` is still open carries the trailing dot off the canvas — measured,
+     *   as border ink, on the merge into `reading` whose loop starts at the left end. */
+    cx: [0.52, 1.0, OUT_STRONG],
     r0: [0.30, 0.80, OUT_STRONG],
     r1: [0.30, 0.80, OUT_STRONG],
     sx0: [0.20, 0.44, OUT_STRONG],
@@ -475,29 +546,47 @@ function reformPose(from: Pose, to: Pose, p: number): Pose {
   return out;
 }
 
-/** The arrival: a droplet falls in from above and splats. It never fades in — a liquid
- *  indicator that dissolves into existence has already told you it is a picture. */
+/**
+ * THE ARRIVAL — a droplet falls in from above and splats. It never fades in: a liquid
+ * indicator that dissolves into existence has already told you it is a picture.
+ *
+ * ★ IT LANDS ON THE TARGET LOOP'S CLOCK-ZERO POSE LIKE EVERY OTHER TRANSITION, which
+ *   for `thinking` means the splat also has to TEAR — that loop's first frame has one
+ *   dot on the floor and the other already at the top of its jump. So the impact is
+ *   what throws them apart, and the entrance into thinking reads as one drop landing
+ *   and splitting rather than as two dots appearing.
+ *
+ * ★ A FALLING DROPLET IS SMALL AND LONG. At full size and 1.46 stretch there is no
+ *   headroom above its own landing spot (GROUND − 2·ry leaves none), and the first
+ *   frames were clipped flat against the top of the canvas. It grows as it lands.
+ */
 function enterPose(to: Pose, p: number): Pose {
-  const drop = window_(p, 0.0, 0.46, IN_2);
+  const two = to.half > 1e-4;
+  const drop = window_(p, 0.0, 0.42, IN_2);
   const out: Pose = { ...to };
-  out.lift0 = mix(0.30, 0, drop);
-  out.lift1 = out.lift0;
-  out.r0 = mix(to.r0 * 0.86, to.r0, window_(p, 0.1, 0.7, OUT_STRONG));
-  out.r1 = out.r0;
-  out.half = to.half * window_(p, 0.46, 1.0, OUT_STRONG);
 
-  /* Stretched by the fall, flattened by the floor, and back on the pop spring — the
-   * loudest curve in the family, because this body has just arrived from nowhere. */
-  const fall = drop * (1 - window_(p, 0.40, 0.46, IN_1));
-  const splat = window_(p, 0.46, 0.52, IN_2) * (1 - window_(p, 0.52, 1.0, POP));
-  const sy = mix(1, 1.34, fall) * mix(1, 0.66, splat);
-  out.sy0 = sy;
-  out.sy1 = sy;
-  out.sx0 = 1 / sy;
-  out.sx1 = 1 / sy;
-  out.br = 0;
+  out.lift0 = mix(0.28, to.lift0, drop);
+  out.half = to.half * window_(p, 0.44, 0.88, IN_2);
+  /* The half thrown up out of the splat arrives at the loop's apex with nothing left,
+   * on a decelerating curve — same handshake the split makes. */
+  out.lift1 = two ? mix(0.28, to.lift1, window_(p, 0.44, 1.0, OUT_2)) : out.lift0;
+  out.r0 = mix(to.r0 * 0.56, to.r0, window_(p, 0.28, 0.86, OUT_STRONG));
+  out.r1 = out.r0 * (to.r1 / to.r0);
+
+  const fall = drop * (1 - window_(p, 0.36, 0.42, IN_1));
+  const splat = window_(p, 0.42, 0.50, IN_2) * (1 - window_(p, 0.50, 1.0, POP));
+  const sy = mix(1, 1.46, fall) * mix(1, 0.68, splat);
+  out.sy0 = to.sy0 * sy;
+  out.sx0 = to.sx0 / sy;
+  out.sy1 = to.sy1 * sy;
+  out.sx1 = to.sx1 / sy;
+
+  out.br = to.br * window_(p, 0.70, 1.0, OUT_STRONG);
+  out.bx = to.bx;
+  out.by = to.by;
+  /* Tension high through the tear, then away — the same beat the split uses. */
+  out.k = mix(K_NECK, to.k, window_(p, 0.5, 0.92, IN_2));
   out.alpha = window_(p, 0, 0.12, OUT_STRONG);
-  out.k = to.k;
   return out;
 }
 
@@ -557,4 +646,4 @@ export function staticPose(state: LiquidStateName): Pose {
   return onePose(R_ONE);
 }
 
-export const GEOMETRY = { GROUND, R_DOT, R_ONE, HALF, JUMP, SWEEP, K_APART, K_NECK, K_ONE, P_THINK, P_WRITE, P_READ };
+export const GEOMETRY = { GROUND, R_DOT, R_ONE, HALF, JUMP, SWEEP, K_APART, K_NECK, K_ONE, K_SWELL, P_THINK, P_WRITE, P_READ };

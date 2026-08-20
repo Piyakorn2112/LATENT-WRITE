@@ -97,44 +97,100 @@ for (const from of STATES) {
   check("negative control — a merge cut 16ms short does not land", d.d > 1e-6, `Δ ${d.d.toFixed(5)} on ${d.key}`);
 }
 
-/* ── 2. continuity ──────────────────────────────────────────────────────────────── */
-console.log("\ncontinuity — no pose parameter jumps between adjacent frames");
-const STEP = 4;
-/* Per-frame limits, in pose units per 4ms. Generous enough for an impact (76ms to
- * flatten a dot) and tight enough to catch a beat boundary that does not meet. */
-const LIMIT: Record<string, number> = {
-  cx: 0.02, half: 0.02, r0: 0.02, r1: 0.02, lift0: 0.02, lift1: 0.02,
-  sx0: 0.06, sy0: 0.06, sx1: 0.06, sy1: 0.06, bx: 0.02, by: 0.03, br: 0.02, k: 0.02, alpha: 0.10,
-};
+/* ── 2. continuity, measured on the picture ─────────────────────────────────────── */
+console.log("\ncontinuity — halve the timestep and the frame-to-frame change must halve");
+/*
+ * ★ THE OBSERVABLE IS THE RENDERED ALPHA, NOT THE POSE. The first version of this gate
+ *   compared pose parameters against hand-picked per-frame limits, and it was wrong in
+ *   both directions at once:
+ *
+ *   · it FAILED on something that is not a bug. `bx` — where the travelling swell sits
+ *     inside the writing body — snaps back to zero at the end of each cycle, at a
+ *     moment when the swell's radius is zero and it is not drawn at all. A parameter of
+ *     a body that does not exist may do whatever it likes. The picture is what has to
+ *     be continuous.
+ *   · it PASSED nothing in particular, because the limits were guesses. A 61ms impact
+ *     legitimately moves `sx` by 0.11 between two frames, so the limit had to be loose
+ *     enough to allow that — at which point it could no longer catch a step of 0.10.
+ *
+ * ★ SO THE TEST IS A SCALING TEST, AND IT NEEDS NO CONSTANT AT ALL. For any continuous
+ *   piecewise-smooth motion the largest change between adjacent frames is bounded by
+ *   h·max|f′|, so halving h halves it. Across a genuine STEP the change IS the step and
+ *   does not shrink. Sampled at 4ms and at 0.5ms, continuous motion gives a ratio near
+ *   8; a discontinuity gives a ratio near 1. Coverage is linear in sub-pixel offset, so
+ *   the rendered alpha inherits the same scaling — an antialiased edge is not a step.
+ */
+const CPX = 32;
+const inkA = new Uint8ClampedArray(CPX * CPX * 4);
+const inkB = new Uint8ClampedArray(CPX * CPX * 4);
+const BLACK: [number, number, number] = [0, 0, 0];
+
+function inkOf(target: Uint8ClampedArray, pose: Pose) {
+  rasterise(target, CPX, fieldOf(pose), BLACK, 1);
+}
+function alphaDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
+  let sum = 0;
+  for (let i = 3; i < a.length; i += 4) sum += Math.abs(a[i] - b[i]);
+  return sum / 255;
+}
+/** Largest ink change between adjacent frames, sampling `frame` over [t0, t1) at h. */
+function worstStep(frame: (t: number) => Pose, t0: number, t1: number, h: number): { d: number; at: number } {
+  let prev = inkA;
+  let next = inkB;
+  inkOf(prev, frame(t0));
+  let worst = { d: 0, at: t0 };
+  for (let t = t0 + h; t <= t1; t += h) {
+    inkOf(next, frame(t));
+    const d = alphaDiff(prev, next);
+    if (d > worst.d) worst = { d, at: t - h };
+    const swap = prev; prev = next; next = swap;
+  }
+  return worst;
+}
+function continuityRatio(name: string, frame: (t: number) => Pose, t0: number, t1: number) {
+  const coarse = worstStep(frame, t0, t1, 4);
+  const fine = worstStep(frame, t0, t1, 0.5);
+  const ratio = fine.d < 1e-9 ? Infinity : coarse.d / fine.d;
+  check(name, ratio >= 4,
+    `ratio ${ratio.toFixed(2)} (ideal 8) — worst 4ms step ${coarse.d.toFixed(2)}px² at ${coarse.at.toFixed(0)}ms, 0.5ms step ${fine.d.toFixed(2)}px²`);
+}
+
 for (const s of STATES) {
   const period = s === "thinking" ? GEOMETRY.P_THINK : s === "writing" ? GEOMETRY.P_WRITE : GEOMETRY.P_READ;
-  let worst = { key: "", d: 0, at: 0 };
-  /* Two full cycles, so the wrap is sampled too. */
-  for (let t = 0; t < period * 2; t += STEP) {
-    const d = maxDelta(loopPose(s, t), loopPose(s, t + STEP));
-    if (d.d / LIMIT[d.key] > worst.d / (LIMIT[worst.key] || 1)) worst = { ...d, at: t };
-  }
-  check(`${s} loop`, worst.d <= LIMIT[worst.key], `worst ${worst.key} Δ${worst.d.toFixed(4)} at ${worst.at}ms (limit ${LIMIT[worst.key]})`);
+  continuityRatio(`${s} loop`, (t) => loopPose(s, t), 0, period * 1.02);
 }
 for (const from of STATES) {
   for (const to of STATES) {
     if (from === to) continue;
     const kind = kindFor(from, to);
-    let worst = { key: "", d: 0, at: 0 };
     const m = motionFor(from, to, 0);
-    for (let e = 0; e < DURATION[kind]; e += STEP) {
-      const a = { ...m, elapsed: e };
-      const b = { ...m, elapsed: e + STEP };
-      const pa = poseAt(to, 0, a);
-      /* Past the end the loop owns the picture — which is exactly the handover this
-       * has to prove is seamless. */
-      const pb = e + STEP >= DURATION[kind] ? loopPose(to, e + STEP - DURATION[kind]) : poseAt(to, 0, b);
-      const d = maxDelta(pa, pb);
-      if (d.d / LIMIT[d.key] > worst.d / (LIMIT[worst.key] || 1)) worst = { ...d, at: e };
-    }
-    check(`${from} → ${to} and into the loop`, worst.d <= LIMIT[worst.key],
-      `worst ${worst.key} Δ${worst.d.toFixed(4)} at ${worst.at}ms (limit ${LIMIT[worst.key]})`);
+    /* Past DURATION the loop owns the picture — which is exactly the handover this has
+     * to prove is seamless, so the window runs past the end of the transition. */
+    const frame = (t: number) => (t < DURATION[kind]
+      ? poseAt(to, 0, { ...m, elapsed: t })
+      : loopPose(to, t - DURATION[kind]));
+    continuityRatio(`${from} → ${to} and into the loop`, frame, 0, DURATION[kind] + 240);
   }
+}
+{
+  const m: Motion = { from: null, to: "thinking", kind: "enter", fromPose: loopPose("thinking", 0), elapsed: 0 };
+  const frame = (t: number) => (t < DURATION.enter
+    ? poseAt("thinking", 0, { ...m, elapsed: t })
+    : loopPose("thinking", t - DURATION.enter));
+  continuityRatio("the entrance and into the loop", frame, 0, DURATION.enter + 240);
+}
+/* Negative control: a 0.04-unit step planted mid-cycle must collapse the ratio. If this
+ * one ever passes, the gate above has stopped being able to fail. */
+{
+  const period = GEOMETRY.P_THINK;
+  const broken = (t: number): Pose => {
+    const pose = loopPose("thinking", t);
+    return t > period / 2 ? { ...pose, cx: pose.cx + 0.04 } : pose;
+  };
+  const coarse = worstStep(broken, 0, period, 4).d;
+  const fine = worstStep(broken, 0, period, 0.5).d;
+  const ratio = fine < 1e-9 ? Infinity : coarse / fine;
+  check("negative control — a planted 0.04 step is caught", ratio < 4, `ratio ${ratio.toFixed(2)}`);
 }
 
 /* ── 3. containment, measured on the rendered alpha ─────────────────────────────── */
@@ -203,7 +259,6 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
     const pose = poseAt("writing", 0, { ...m, elapsed: e });
     if (pose.half <= 1e-4) continue;
     const f = fieldOf(pose);
-    if (f.bodies.length < 2) continue;
     const [a, b] = f.bodies;
     const gap = Math.abs(b.x - a.x) - (a.rx + b.rx);
     if (gap <= 0) continue;
@@ -222,7 +277,6 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
     const pose = poseAt("thinking", 0, { ...m, elapsed: e });
     if (pose.half <= 1e-4) continue;
     const f = fieldOf(pose);
-    if (f.bodies.length < 2) continue;
     const [a, b] = f.bodies;
     const gap = Math.abs(b.x - a.x) - (a.rx + b.rx);
     if (gap <= 0) continue;
@@ -240,7 +294,6 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
     const pose = { ...poseAt("writing", 0, { ...m, elapsed: e }), k: 0 };
     if (pose.half <= 1e-4) continue;
     const f = fieldOf(pose);
-    if (f.bodies.length < 2) continue;
     const [a, b] = f.bodies;
     if (Math.abs(b.x - a.x) - (a.rx + b.rx) <= 0) continue;
     if (sdField(f, (a.x + b.x) / 2, (a.y + b.y) / 2) < 0) bridged = true;
@@ -259,8 +312,46 @@ console.log("\nthinking reads as TWO dots for its whole cycle");
     const d = sdField(f, (a.x + b.x) / 2, (a.y + b.y) / 2);
     if (d < worst) { worst = d; at = t; }
   }
+  /* Strictly outside, for the whole cycle. How much daylight there actually is between
+   * the facing surfaces is a separate question, and it is answered in pixels below —
+   * this distance is measured at the midpoint of the two centres, which is off both
+   * ellipses' axes and so reads lower than the gap. Two gates, two observables. */
   check("never bridges while thinking", worst > 0,
-    `closest the midpoint gets to inside: ${(worst * 18).toFixed(2)}px at ${at}ms`);
+    `field at the midpoint stays outside by ${(worst * 18).toFixed(2)}px of 18, closest at ${at}ms`);
+}
+{
+  /* And the same thing said in pixels: no ink at all in the corridor between the dots,
+   * at any point in the cycle. This is the gate that would have caught the stray speck
+   * the empty third body used to paint there — the distance probe above reported it as
+   * "0.00px of clearance" and passed, because zero is still not negative. */
+  let worstInk = 0;
+  let at = 0;
+  let narrowest = Infinity;
+  for (let t = 0; t < GEOMETRY.P_THINK * 2; t += 4) {
+    const f = fieldOf(loopPose("thinking", t));
+    /* The corridor is the space between the FACING EDGES at this instant, inset a
+     * pixel on each side so the dots' own antialias ramps are not counted. It moves
+     * as they squash, which is the point: a fixed window would be inside a dot for
+     * part of the cycle and would not be a test of anything. */
+    const lo = (f.bodies[0].x + f.bodies[0].rx) * PX + 1;
+    const hi = (f.bodies[1].x - f.bodies[1].rx) * PX - 1;
+    if (hi - lo < narrowest) narrowest = hi - lo;
+    if (hi <= lo) continue;
+    buf.fill(0);
+    rasterise(buf, PX, fieldOf(loopPose("thinking", t)), [0, 0, 0], 1);
+    for (let py = 0; py < PX; py++) {
+      for (let px = Math.ceil(lo); px <= Math.floor(hi); px++) {
+        const a = buf[(py * PX + px) * 4 + 3];
+        if (a > worstInk) { worstInk = a; at = t; }
+      }
+    }
+  }
+  /* ★ AND THE CORRIDOR MUST NEVER CLOSE, or the emptiness above is emptiness in a
+   *   window of zero width and the gate has quietly stopped testing anything. */
+  check("the corridor between the dots stays empty", worstInk === 0,
+    `max alpha ${worstInk} at ${at}ms`);
+  check("the corridor never closes", narrowest >= 1,
+    `narrowest ${narrowest.toFixed(2)} device px of ${PX} (≈${(narrowest / PX * 18 + 2 / PX * 18).toFixed(2)}px of daylight at 18px)`);
 }
 
 /* ── 6. position does not overshoot, shape does ring ────────────────────────────── */
@@ -310,11 +401,13 @@ console.log("\nthe painter and the author agree");
 /* ── 8. reduced motion still says something ─────────────────────────────────────── */
 console.log("\nreduced motion keeps the meaning");
 {
-  const t = fieldOf(staticPose("thinking"));
-  const w = fieldOf(staticPose("writing"));
-  check("thinking is two bodies at rest", t.bodies.length === 2 && t.bodies.every((b) => b.rx === b.ry));
-  check("writing is one body at rest", w.bodies.length === 1);
-  check("the two are visibly different", Math.abs(t.bodies[0].rx - w.bodies[0].rx) > 0.02);
+  const drawn = (pose: Pose) => fieldOf(pose).bodies.filter((b) => b.rx > 1e-3);
+  const t = drawn(staticPose("thinking"));
+  const w = drawn(staticPose("writing"));
+  const tp = staticPose("thinking");
+  check("thinking is two separated bodies at rest", t.length === 2 && tp.half > 0.1 && t.every((b) => Math.abs(b.rx - b.ry) < 1e-9));
+  check("writing is one body at rest", w.length === 2 && staticPose("writing").half === 0);
+  check("the two are visibly different", Math.abs(t[0].rx - w[0].rx) > 0.02);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
