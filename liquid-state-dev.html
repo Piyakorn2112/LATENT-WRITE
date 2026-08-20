@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- Dev-only harness for the liquid state indicator (not part of the app build).
+     ./node_modules/.bin/vite  →  http://localhost:5173/liquid-state-dev.html -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Liquid state — dev harness</title>
+    <style>
+      body { margin: 0; font-family: system-ui; display: flex; min-height: 100vh; }
+      .half { flex: 1; padding: 28px; box-sizing: border-box; }
+      .light { background: #f4f4f3; color: #1b1b1a; --control-value-fill: rgba(59, 130, 246, 0.88); }
+      .dark  { background: #16161a; color: #e9e9e6; --control-value-fill: rgba(96, 155, 255, 0.92); }
+    </style>
+  </head>
+  <body>
+    <div id="root" style="display:flex;flex:1"></div>
+    <script type="module" src="/src/liquid-state-dev.tsx"></script>
+  </body>
+</html>
