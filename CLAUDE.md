@@ -403,6 +403,76 @@ to break by "simplifying":
 - `image/webp` at quality 1.0 is lossless, but PNG encodes 5-7x faster and
   2-4x smaller for these maps and decodes to identical pixels.
 
+## Liquid state indicator — what the model is doing
+
+`src/components/liquid-state/` is the 18px indicator the app shows while the
+language model is working, in the ask popover, the writing tool and the world
+dossier. It is not a spinner: it has three shapes and each says which of three
+things the model is doing.
+
+| state | shape | when |
+|---|---|---|
+| `reading` | a flat lozenge sweeping the box | evidence is being gathered — "Reading chapter 3 of 12…" |
+| `thinking` | two dots taking turns jumping | the reasoning pass — the rotating `ThinkingLabel` |
+| `writing` | one body reaching out to the right | tokens are being produced — "Writing the card…" |
+
+Each surface maps its own vocabulary onto those three. `MaxAskPopover` carries
+`work` beside `label` because the ask harness narrates five phases and there
+are three shapes — that collapse is a translation, and it belongs at the call
+site, not inside the component.
+
+**It is an analytic metaball, not a goo filter.** `field.ts` evaluates a
+circular smooth-minimum per pixel in float at device density. The usual
+blur-then-threshold trick is wrong at this size for reasons that are not
+matters of taste: a blur wide enough to merge two 6px dots is wider than the
+dots, its rim width is a function of its σ so the outline visibly inflates the
+moment anything moves, and it is authored at the layout box and magnified by
+any transform. Same lesson as the glass engine — when a small element's effect
+keeps producing artifacts, stop tuning the map and paint it.
+
+**Rules that are load-bearing, all of them learned by breaking them:**
+
+- **Position and shape never share a curve.** Separation and travel land
+  without overshoot; `sx`/`sy` ring on an elastic whose window starts earlier
+  and ends later. That lag is the entire liquid effect. Curves come from
+  `curves.ts`, ported from `@stephantechlab/ui`'s liquid family.
+- **Every transition ends exactly on its target loop's clock-zero pose.** There
+  is no crossfade and no settling step. The split therefore ends with one half
+  thrown up to the apex of its first jump — the tear's energy becomes the
+  loop's first beat.
+- **`fieldOf` always emits every body.** A body that should not be seen gets
+  zero radius *and* zero blend, which is inert under `min()`. Dropping it
+  instead is a discrete branch inside a continuous animation and steps the
+  picture by ~160 square pixels in one frame.
+- **`smin(a, a, k)` is `a − k`.** Two coincident bodies blended at k are one
+  body inflated by k, so the pair's blend is tied to their separation in
+  `fieldOf` and cannot be got wrong by an author.
+- **A zero-radius body is absent, not a point.** `sdEllipse` returns Infinity.
+  Clamping the radius to something tiny makes it report distance ≈ 0 at its own
+  centre, which paints a stray half-lit pixel wherever it happens to sit.
+
+**Three gates, and they answer different questions.**
+
+- `npm run test:liquid-state` — 41 headless checks against the same functions
+  the component paints. Continuity is a **scaling test** and needs no constant:
+  halve the timestep and the largest frame-to-frame change in the rendered
+  alpha must halve. Continuous motion reads 7.2–7.8 against an ideal 8; a
+  planted 0.04 step reads 1.00, and that planted step is in the suite.
+- `npm run verify:liquid-state` — 13 checks in a real Electron renderer:
+  backing store density, rAF, the pause path, reduced motion, and a **tint
+  negative control** that sets `--control-value-fill` to a magenta nothing else
+  uses and requires the painted pixels to be it.
+- `npm run film:liquid-state <dir>` — contact sheets of every loop and every
+  transition, at 96px and at the real 18px blown up 4×. **Look at the second
+  one.** Four decisions the 96px sheet would have let through were wrong at 18:
+  the writing state was invisible, reading and writing had the same silhouette,
+  thinking was bobbing rather than jumping, and the merge's droplet evaporated
+  at the top of its arc.
+
+Do not measure "is it animating" by total ink. Every squash sets `sx = 1/sy`,
+so the painted area is conserved to 0.02% and two samples read identically.
+Use the centroid.
+
 ## Renderer chat commands — when to use which
 
 The renderer chat in the app handles these slash commands. Use this decision table when the user asks about novel writing or which command to run:
