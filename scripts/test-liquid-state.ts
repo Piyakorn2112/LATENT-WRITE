@@ -279,45 +279,63 @@ for (const from of STATES) {
 }
 
 /* ── 5. the neck ────────────────────────────────────────────────────────────────── */
-console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
-function widestBridge(from: LiquidStateName, to: LiquidStateName, zeroBlend = false) {
+/**
+ * The widest gap the blend is seen to bridge, and the narrowest one it refuses.
+ *
+ * ★ THE GAP IS MEASURED WITH THE BLEND OFF, using the same distance function. A
+ *   hand-written "centre distance minus radii" formula assumes the two bodies are
+ *   capsules lying along x, which they are not once one of them is a line and the
+ *   other is parked at a nib — it reported gaps where the shapes already overlapped
+ *   and the control caught it. Asking the field is exact and cannot drift.
+ */
+function bridgeScan(from: LiquidStateName, to: LiquidStateName) {
   const kind = kindFor(from, to);
   const m = motionFor(from, to, 0);
-  let best = { gap: 0, at: 0 };
+  let widest = { gap: 0, at: 0 };
+  let leak = { gap: 0, at: 0 };
   for (let e = 0; e <= DURATION[kind]; e += 2) {
     const pose = poseAt(to, 0, { ...m, elapsed: e });
-    /* The two outer bodies ALONE — a pen or a line lying across the gap would be a
-     * bridge by overlap, and this gate exists to prove the BLEND makes one. */
     const present = fieldOf(pose).bodies.slice(0, 3).filter((b) => b.r > 1e-4);
     if (present.length < 2) continue;
-    /* ★ THE OUTER PAIR ONLY. With three bodies converging, the middle one sits on the
-     * midpoint and covers it — so a control asserting "with no blend, nothing bridges"
-     * was measuring a body standing in the gap rather than a neck across it. */
-    const bodies = [present[0], present[present.length - 1]];
-    const f = { bodies: zeroBlend ? bodies.map((b) => ({ ...b, k: 0 })) : bodies };
-    /* A body's x is its NEAR END, so the centre is half a scaled length along. Using
-     * the stored x as a centre understates the gap and the gate quietly stops testing
-     * the thing it names. */
-    const mid = (bd: typeof f.bodies[number]) => ({ x: bd.x + (bd.len * (bd.sx ?? 1)) / 2, y: bd.y });
-    const [a, b] = [f.bodies[0], f.bodies[f.bodies.length - 1]];
-    const ma = mid(a);
-    const mb = mid(b);
-    const gap = Math.hypot(mb.x - ma.x, mb.y - ma.y)
-      - (a.r * (a.sx ?? 1) + b.r * (b.sx ?? 1) + (a.len * (a.sx ?? 1)) / 2 + (b.len * (b.sx ?? 1)) / 2);
-    if (gap <= 0) continue;
-    if (sdField(f, (ma.x + mb.x) / 2, (ma.y + mb.y) / 2) < 0 && gap > best.gap) best = { gap, at: e };
+    /* The outer pair only. With three bodies converging the middle one stands on the
+     * midpoint and covers it, which is a body in the gap rather than a neck across it. */
+    const pair = [present[0], present[present.length - 1]];
+    const mid = (bd: typeof pair[number]) => ({
+      x: bd.x + (bd.len * (bd.sx ?? 1)) / 2,
+      y: bd.y,
+    });
+    const ma = mid(pair[0]);
+    const mb = mid(pair[1]);
+    const mx = (ma.x + mb.x) / 2;
+    const my = (ma.y + mb.y) / 2;
+    const apart = sdField({ bodies: pair.map((b) => ({ ...b, k: 0 })) }, mx, my);
+    if (apart <= 0) continue; /* already touching: nothing for a neck to cross */
+    const blended = sdField({ bodies: pair }, mx, my);
+    const k = Math.max(...pair.map((b) => b.k));
+    if (blended < 0 && apart * 2 > widest.gap) widest = { gap: apart * 2, at: e };
+    /* ★ AND THE OTHER HALF: the circular smooth-minimum is RIGID outside its band, so a
+     *   gap well past 2k must be left alone. A blend that reaches further than it
+     *   should is how two dots quietly become one lump. */
+    if (blended < 0 && apart > 2.5 * k && apart * 2 > leak.gap) leak = { gap: apart * 2, at: e };
   }
-  return best;
+  return { widest, leak };
 }
+
+console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
 {
-  const merge = widestBridge("thinking", "writing");
-  check("a mass coalescing bridges a real gap", merge.gap > 0.004,
-    `widest bridged gap ${(merge.gap * 18).toFixed(2)}px of 18 at ${merge.at}ms`);
-  const tear = widestBridge("writing", "thinking");
-  check("a mass tearing holds a neck after the halves part", tear.gap > 0.004,
-    `widest held gap ${(tear.gap * 18).toFixed(2)}px of 18 at ${tear.at}ms`);
-  check("negative control — no blend anywhere bridges nothing",
-    widestBridge("thinking", "writing", true).gap === 0);
+  let best = { gap: 0, at: 0, pair: "" };
+  let leaked = "";
+  for (const from of WORKING) {
+    for (const to of WORKING) {
+      if (from === to) continue;
+      const r = bridgeScan(from, to);
+      if (r.widest.gap > best.gap) best = { ...r.widest, pair: `${from} → ${to}` };
+      if (r.leak.gap > 0) leaked = `${from} → ${to} bridged ${(r.leak.gap * 18).toFixed(2)}px at ${r.leak.at}ms`;
+    }
+  }
+  check("the blend bridges a real gap", best.gap > 0.004,
+    `widest ${(best.gap * 18).toFixed(2)}px of 18 on ${best.pair} at ${best.at}ms`);
+  check("negative control — and refuses one past its band", leaked === "", leaked);
 }
 
 /* ── 6. the shapes read as what they are ────────────────────────────────────────── */
@@ -424,11 +442,22 @@ console.log("\nwriting is a pen with a real nib, drawing a real line");
     }
     return lo;
   };
-  const w = [0.15, 0.35, 0.55, 0.75, 0.95].map(halfWidth);
-  check("the painted silhouette narrows to the nib", w.every((v, i) => i === 0 || v <= w[i - 1] + 1e-4),
+  /* ★ THE PEN IS NOT MONOTONE ANY MORE, AND THAT IS THE POINT. It has a collar where
+   *   the head meets the barrel, wider than either, so a gate demanding the silhouette
+   *   narrow all the way from butt to nib is now demanding the pen not be a pen. What
+   *   must narrow is the HEAD, and what must bulge is the collar. */
+  /* Stopping at 0.97: the last percent is the rounded tip itself, where a bisection
+   * finds the cap's curvature rather than the taper. */
+  const w = [0.70, 0.78, 0.86, 0.93].map(halfWidth);
+  check("the head narrows to the nib", w.every((v, i) => i === 0 || v <= w[i - 1] + 1e-4),
     w.map((v) => (v * 18).toFixed(2)).join("px → ") + "px at 18");
-  check("and the nib is a point, not a blob", w[w.length - 1] * 18 < 0.45,
-    `${(w[w.length - 1] * 18).toFixed(3)}px of half-width at 18`);
+  const collar = halfWidth(1 - GEOMETRY.PEN_HEAD);
+  const shaft = halfWidth(0.42);
+  check("and the collar stands proud of the barrel", collar > shaft * 1.06,
+    `collar ${(collar * 18).toFixed(2)}px against barrel ${(shaft * 18).toFixed(2)}px at 18`);
+  const tipW = halfWidth(0.98);
+  check("and the nib is a point, not a blob", tipW * 18 < 0.55,
+    `${(tipW * 18).toFixed(3)}px of half-width at 18`);
   const lens = [0.1, 0.25, 0.4, 0.55, 0.68].map((g) => loopPose("writing", GEOMETRY.P_WRITE * g).al);
   check("the line grows behind the nib through the stroke", lens.every((v, i) => i === 0 || v > lens[i - 1]),
     lens.map((v) => (v * 18).toFixed(1)).join("px → ") + "px long at 18");

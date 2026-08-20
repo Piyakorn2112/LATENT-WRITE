@@ -73,15 +73,25 @@ const R_DOT = 0.098;
 const DOT_GAP = 0.285;
 /** How high a dot jumps, and how much it stretches at full speed. */
 const JUMP = 0.20;
+/** How far apart in the cycle adjacent dots are. See thinkingPose. */
+const DOT_WAVE = 0.17;
 const STRETCH = 0.17;
 /** How flat a dot goes on impact. */
 const SPLAT = 0.84;
 
 /** The three lines of the paragraph: where they sit, how long each is, how thick. */
-const LINE_Y = [0.28, 0.5, 0.72] as const;
-const LINE_LEN = [0.56, 0.68, 0.4] as const;
-const LINE_LEFT = 0.16;
-const LINE_R = 0.032;
+const LINE_Y = [0.29, 0.5, 0.71] as const;
+/** ★ THE PARAGRAPH IS SIZED AGAINST THE NECK, not against the box. `smin(a, a, k)` is
+ *  `a − k`, so while a transition's tension is up the whole mass is INFLATED by k in
+ *  every direction — which is invisible on three dots near the centre and took the
+ *  longest line clean off the left edge. Lines, tension and wind-up are one budget. */
+const LINE_LEN = [0.5, 0.6, 0.36] as const;
+const LINE_LEFT = 0.17;
+/** ★ THE LINES CARRY THE SAME WEIGHT AS THE DOTS. At 0.032 they were 1.1px at the
+ *  shipping size against a 3.5px dot, so `reading` read as a lighter, thinner thing
+ *  than the state either side of it — and weight is the first thing the eye compares
+ *  between two marks that share a slot. */
+const LINE_R = 0.046;
 
 /** The pen. A barrel of constant width, a shoulder where it steps in, and a short cone
  *  to the nib — a nib is a POINT, and no union of ellipses makes one. */
@@ -90,6 +100,14 @@ const PEN_R = 0.062;
 const PEN_TIP = 0.008;
 const PEN_HEAD = 0.34;
 const PEN_NECK = 0.6;
+/** ★ A PEN HAS MORE THAN TWO PARTS. Barrel and head alone is a shape that tapers once;
+ *  what makes a pen legible in silhouette is the FERRULE — the collar where the head
+ *  meets the barrel, wider than either — and a barrel that narrows toward its end
+ *  rather than running parallel. The metaball joins the three into one body with a
+ *  waist at the collar, which is the detail that reads. */
+const PEN_FERRULE = 1.16;
+const PEN_FERRULE_LEN = 0.1;
+const PEN_BUTT = 0.78;
 /** Held at 135°: barrel up and to the right, nib down and to the left. */
 const PEN_ROT = 2.36;
 const PEN_TRAVEL = 0.085;
@@ -107,7 +125,7 @@ const HANDOFF_R = 0.108;
  *  wider than the gap between two dots — tension exists for the moment a mass is
  *  tearing or coalescing, where there is a gap worth bridging. */
 const K_REST = 0;
-const K_NECK = 0.105;
+const K_NECK = 0.06;
 /** Inside one mass: exactly zero. `smin(a, a, k)` is `a − k`, so two coincident bodies
  *  blended at k are one body INFLATED by k. */
 const K_ONE = 0;
@@ -216,17 +234,24 @@ export function fieldOf(pose: Pose): Field {
   let seen = 0;
   for (const key of BODIES) {
     const sx = num(pose, key + "sx");
-    const len = num(pose, key + "l");
+    /* ★ A SQUASH SCALES A RADIUS; IT SHOULD BARELY SCALE A LENGTH. The deform is
+     *   authored as a fraction — the kit's 22% — and 22% of a dot's radius is a pixel
+     *   while 22% of a line spanning most of the box is a sixth of the box, which took
+     *   the longest line clean off the canvas. The length takes a third of the share,
+     *   so a stretch still reads on a line and stays inside it. */
+    const len = num(pose, key + "l") * (1 + (sx - 1) * 0.35);
     const presence = smooth(Math.min(num(pose, key + "r") / LINE_R, 1));
     bodies.push({
       /* A cone runs from its near end along +x, so a body stored by its CENTRE starts
        * half a (scaled) length back. At len = 0 that is the centre — which is why a dot
        * and a line are the same parameterisation and tween into one another with no
        * special case anywhere. */
-      x: num(pose, key + "x") - (len * sx) / 2,
+      x: num(pose, key + "x") - len / 2,
       y: num(pose, key + "y"),
       r: num(pose, key + "r"),
-      len,
+      /* The body's own space is already scaled by sx, so the length passed in is
+       * pre-divided — the scale must not apply to it twice. */
+      len: len / sx,
       sx,
       sy: num(pose, key + "sy"),
       skew: num(pose, key + "sk"),
@@ -264,12 +289,24 @@ export function fieldOf(pose: Pose): Field {
       k: K_PEN * penPresence * seen,
     },
     {
+      /* The collar: short, a shade wider than the barrel, sitting on the joint. It is
+       * what turns a taper into a pen. */
+      x: pose.px - dirX * headLen,
+      y: pose.py - dirY * headLen,
+      r: pose.pr * PEN_FERRULE,
+      len: penLen * PEN_FERRULE_LEN,
+      rot: pose.prot + Math.PI,
+      k: K_PEN * 0.5 * penPresence,
+    },
+    {
+      /* The barrel, narrowing toward the butt. Folds onto the collar, which shares its
+       * presence. */
       x: pose.px - dirX * headLen,
       y: pose.py - dirY * headLen,
       r: pose.pr,
+      tip: pose.pr * PEN_BUTT,
       len: penLen - headLen,
       rot: pose.prot + Math.PI,
-      /* The barrel folds onto the head, which shares its presence. */
       k: K_PEN * 0.5 * penPresence,
     },
   );
@@ -347,7 +384,12 @@ function thinkingPose(clock: number): Pose {
    *   middle, right, so the wave travels rather than bounces. */
   const pose = emptyPose();
   BODIES.forEach((key, i) => {
-    const off = i / 3;
+    /* ★ A WAVE, NOT A RELAY. At a third of a cycle apart each dot lands as the next one
+     *   launches, which reads as three separate hops taking turns. Closer together they
+     *   overlap in the air and the row moves as ONE thing with a crest travelling along
+     *   it — which is what makes three dots a single gesture rather than three
+     *   animations sharing a row. */
+    const off = i * DOT_WAVE;
     const beat = dotBeat(t + off, 0.94 + 0.12 * jitter(Math.floor(t + off), i + 1));
     put(pose, key + "r", R_DOT);
     put(pose, key + "l", 0);
@@ -379,11 +421,16 @@ function thinkingPose(clock: number): Pose {
  *    thickness comes up three times faster than its length, so it is a line from the
  *    first frame rather than a dot that stretches.
  */
+/** ★ THE PAGE IS MOSTLY WRITTEN ON. The earlier split left each line blank for a
+ *  quarter of its cycle, so the box spent much of its time nearly empty and the state
+ *  read as sparse rather than as a paragraph. A line is drawn for 88% of its cycle now
+ *  and clear for 12%; with three of them, at least two are always up. The cascade is
+ *  still what moves — it moves through text rather than through space. */
 function lineWave(u: number): number {
   const g = u - Math.floor(u);
-  if (g < 0.16) return smooth(g / 0.16);
-  if (g < 0.58) return 1;
-  if (g < 0.74) return 1 - smooth((g - 0.58) / 0.16);
+  if (g < 0.12) return smooth(g / 0.12);
+  if (g < 0.76) return 1;
+  if (g < 0.88) return 1 - smooth((g - 0.76) / 0.12);
   return 0;
 }
 
@@ -568,6 +615,22 @@ function blendPose(a: Pose, b: Pose, t: number): Pose {
 const GEO_AT = 0;
 const GEO_TO = 0.54;
 
+/** ★★ THE THREE BODIES DO NOT LEAVE TOGETHER. A stagger is the difference between a row
+ *  of things moving and a row of things being moved, and the kit is specific about how
+ *  to spend it: the value sets the TOTAL SPREAD across the group, not the gap between
+ *  neighbours — otherwise a group of three and a group of six travel at different
+ *  speeds for the same setting. The spread is fixed here and each body's window shifts
+ *  by its share, so the last one still arrives inside the geometry window and the
+ *  handshake is untouched. */
+const STAGGER_SPREAD = 0.14;
+
+/** ★ AND EACH ONE GATHERS BEFORE IT GOES. A body that simply starts moving has no
+ *  weight; one that leans back first has mass. The wind-up is a smootherstep bump —
+ *  zero at both ends and zero SLOPE at both ends — so it adds a beat without adding a
+ *  kink. That is the whole trick: anticipation usually costs smoothness because it is
+ *  authored as an extra keyframe, and a bump is not a keyframe. */
+const ANTICIPATE_BY = 0.055;
+
 /**
  * The deform envelope — the shape half of the choreography, and all of it.
  *
@@ -580,7 +643,17 @@ const GEO_TO = 0.54;
  * its target pose without anything being lined up by hand.
  */
 function deformAt(p: number): number {
+  if (p <= 0) return 0;
   return window_(p, 0, 0.2, OUT_2) * (1 - window_(p, 0.22, 1, ELASTIC));
+}
+
+/** A smootherstep bump: 0 → 1 → 0 across [a, b], with zero slope at both ends and at
+ *  the peak. The shape anticipation is drawn with, because it has to add a beat without
+ *  adding a corner. */
+function bump(p: number, a: number, b: number): number {
+  if (p <= a || p >= b) return 0;
+  const t = (p - a) / (b - a);
+  return smooth(t < 0.5 ? t * 2 : (1 - t) * 2);
 }
 
 /**
@@ -592,21 +665,31 @@ function deformAt(p: number): number {
  *   move look alive is to bounce it, and bouncing reads as a performance rather than as
  *   a material.
  */
-function travelBody(out: Pose, from: Pose, to: Pose, key: BodyKey, p: number) {
-  const g = window_(p, GEO_AT, GEO_TO, POS_EASE);
+function travelBody(out: Pose, from: Pose, to: Pose, key: BodyKey, p: number, index = 0) {
+  const shift = (index / (BODIES.length - 1)) * STAGGER_SPREAD;
+  const g = window_(p, GEO_AT + shift, GEO_TO + shift, POS_EASE);
   const x0 = num(from, key + "x");
   const y0 = num(from, key + "y");
   const x1 = num(to, key + "x");
   const y1 = num(to, key + "y");
 
-  put(out, key + "x", mix(x0, x1, g));
-  put(out, key + "y", mix(y0, y1, g));
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const dist = Math.hypot(dx, dy);
+  /* The wind-up: a lean back along the travel, biggest just before the body sets off
+   * and gone by the time it is a third of the way there. */
+  /* Scaled down for a long body, for the same reason the squash is: a lean is a small
+   * absolute move, and a fraction of a line spanning half the box is not small. */
+  const bulk = 1 / (1 + Math.max(num(from, key + "l"), num(to, key + "l")) * 3);
+  const wind = dist > 1e-6
+    ? (ANTICIPATE_BY * bulk * Math.min(dist / DEFORM_REF, 1) * bump(p, shift, shift + 0.34)) / dist
+    : 0;
+  put(out, key + "x", mix(x0, x1, g) - dx * wind);
+  put(out, key + "y", mix(y0, y1, g) - dy * wind);
   put(out, key + "r", mix(num(from, key + "r"), num(to, key + "r"), g));
   put(out, key + "l", mix(num(from, key + "l"), num(to, key + "l"), g));
 
-  const dx = x1 - x0;
-  const dy = y1 - y0;
-  const amount = Math.min(Math.hypot(dx, dy) / DEFORM_REF, 1) * deformAt(p);
+  const amount = Math.min(dist / DEFORM_REF, 1) * deformAt(p - shift * 0.5);
   const horizontal = Math.abs(dx) >= Math.abs(dy);
   const dir = Math.sign(horizontal ? dx : dy) || 1;
 
@@ -642,7 +725,7 @@ function travelRest(
 /** Between two working states: three bodies travelling, and a neck while they do. */
 function morphPose(from: Pose, to: Pose, p: number): Pose {
   const out = {} as Pose;
-  for (const key of BODIES) travelBody(out, from, to, key, p);
+  BODIES.forEach((key, i) => travelBody(out, from, to, key, p, i));
   travelRest(out, from, to, p, {
     /* The pen grows and shrinks a beat behind the bodies, so the mass has arrived at
      * the nib before the pen extends out of it. */
@@ -681,7 +764,7 @@ function handoffPose(from: Pose, to: Pose, p: number): Pose {
   const leaving = from.oa > to.oa;
   const out = {} as Pose;
   const bodyP = leaving ? remap(p, 0.34, 1) : remap(p, 0, 0.72);
-  for (const key of BODIES) travelBody(out, from, to, key, bodyP);
+  BODIES.forEach((key, i) => travelBody(out, from, to, key, bodyP, i));
 
   travelRest(out, from, to, p, leaving
     ? {
@@ -731,7 +814,11 @@ function enterPose(to: Pose, p: number): Pose {
      * is a jerk even though no pixel jumps, which is most of what "not smooth" means. */
     put(out, key + "r", num(to, key + "r") * mix(0.62, 1, window_(p, 0.2, 0.86, POS_EASE)));
     put(out, key + "x", mix(0.5, num(to, key + "x"), window_(p, 0.46, 1, POS_EASE)));
-    put(out, key + "y", mix(num(to, key + "y") - 0.24, num(to, key + "y"), drop));
+    /* ★ IT FALLS FROM WHATEVER HEADROOM THERE IS. A fixed 0.24 is fine above a dot
+     *   resting near the floor and clips the moment the target is `reading`, whose top
+     *   line sits at 0.29. The drop is bounded by the room above the body itself. */
+    const room = Math.min(0.24, Math.max(num(to, key + "y") - num(to, key + "r") * 1.6, 0.02));
+    put(out, key + "y", mix(num(to, key + "y") - room, num(to, key + "y"), drop));
     put(out, key + "sy", num(to, key + "sy") * sy);
     put(out, key + "sx", num(to, key + "sx") / sy);
   }
