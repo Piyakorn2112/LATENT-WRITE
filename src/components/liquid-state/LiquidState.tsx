@@ -129,7 +129,13 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
      *   the edges are exact at whatever density the screen actually has. Capped at 3
      *   because past that the cost doubles for a difference nothing can see. */
     const dpr = Math.min(window.devicePixelRatio || 1, 3);
-    const px = Math.max(2, Math.round(size * dpr));
+    /* ★★ AND CAPPED IN ABSOLUTE PIXELS. Cost is (pixels × bodies), which at 18px is
+     *    nothing and at a 150px specimen on a sheet is 450×450×7 — over a million
+     *    distance evaluations a frame, in JavaScript, several of those on one page.
+     *    That does not hold 60fps and visibly does not. The app never asks for more
+     *    than 18, so the cap costs it nothing; a large specimen renders at 288 and is
+     *    scaled up by under 2×, which on shapes made of smooth curves is invisible. */
+    const px = Math.max(2, Math.min(Math.round(size * dpr), 288));
     canvas.width = px;
     canvas.height = px;
 

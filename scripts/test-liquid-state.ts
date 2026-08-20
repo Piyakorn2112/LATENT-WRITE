@@ -323,13 +323,22 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
 /* ── 5. two dots stay two ───────────────────────────────────────────────────────── */
 console.log("\nthinking reads as TWO dots for its whole cycle");
 {
+  /* ★ THREE DOTS MEANS TWO GAPS. The midpoint of the OUTER pair is now inside the
+   * middle dot, so the old probe measured the middle dot and reported the row as
+   * fused. Adjacent pairs are what "reads as separate dots" actually means. */
+  const dots = (pose: Pose) => {
+    const b = fieldOf(pose).bodies;
+    return [b[0], b[2], b[1]]; /* left, middle, right — fixed indices, see fieldOf */
+  };
   let worst = Infinity;
   let at = 0;
   for (let t = 0; t < GEOMETRY.P_THINK * 2; t += 2) {
-    const f = fieldOf(loopPose("thinking", t));
-    const [a, b] = f.bodies;
-    const d = sdField(f, (a.x + b.x) / 2, (a.y + b.y) / 2);
-    if (d < worst) { worst = d; at = t; }
+    const pose = loopPose("thinking", t);
+    const f = { bodies: dots(pose) };
+    for (const [a, b] of [[f.bodies[0], f.bodies[1]], [f.bodies[1], f.bodies[2]]]) {
+      const d = sdField(f, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      if (d < worst) { worst = d; at = t; }
+    }
   }
   /* Strictly outside, for the whole cycle. How much daylight there actually is between
    * the facing surfaces is a separate question, and it is answered in pixels below —
@@ -352,8 +361,9 @@ console.log("\nthinking reads as TWO dots for its whole cycle");
      * pixel on each side so the dots' own antialias ramps are not counted. It moves
      * as they squash, which is the point: a fixed window would be inside a dot for
      * part of the cycle and would not be a test of anything. */
-    const lo = (f.bodies[0].x + f.bodies[0].rx) * PX + 1;
-    const hi = (f.bodies[1].x - f.bodies[1].rx) * PX - 1;
+    const d3 = [f.bodies[0], f.bodies[2], f.bodies[1]];
+    const lo = (d3[0].x + d3[0].rx) * PX + 1;
+    const hi = (d3[1].x - d3[1].rx) * PX - 1;
     if (hi - lo < narrowest) narrowest = hi - lo;
     if (hi <= lo) continue;
     buf.fill(0);
@@ -413,10 +423,19 @@ console.log("\nwriting is a pen with a real nib, drawing a real line");
    * them tapers. Picking "the body with a length" finds whichever comes first, which
    * is the ink, and the gate then cheerfully reports that a stroke of ink is not
    * pointy. Name the shape by the property that distinguishes it. */
-  const pen = fieldOf(pose).bodies.find((b) => b.len !== undefined && b.len > 0.1 && (b.tip ?? b.rx) < b.rx * 0.5);
-  check("the pen is a cone, not a stack of blobs", !!pen && pen.len! > 0.2, `len ${pen?.len?.toFixed(3)}`);
-  check("and it tapers to a point", !!pen && pen.tip! < pen.rx * 0.25,
-    `tip ${pen?.tip?.toFixed(4)} against a barrel of ${pen?.rx.toFixed(4)}`);
+  const bodies = fieldOf(pose).bodies;
+  /* A pen is a barrel and a head: a capsule of constant width, and a short cone that
+   * steps in at the shoulder and runs to a point. The step is what makes it read as a
+   * pen rather than as a sharpened stick, so both halves are named and checked. */
+  const head = bodies.find((b) => b.len! > 0.02 && (b.tip ?? b.rx) < b.rx * 0.5);
+  const barrel = bodies.find((b) => b.len! > 0.02 && b.tip === b.rx && b.rx > GEOMETRY.INK_H * 1.5);
+  check("the pen has a head and a barrel", !!head && !!barrel,
+    `head len ${head?.len?.toFixed(3)}, barrel len ${barrel?.len?.toFixed(3)}`);
+  check("the head tapers to a point", !!head && head.tip! < head.rx * 0.25,
+    `tip ${head?.tip?.toFixed(4)} against a neck of ${head?.rx.toFixed(4)}`);
+  check("and the barrel steps out at the shoulder", !!head && !!barrel && barrel.rx > head.rx * 1.3,
+    `barrel ${barrel?.rx.toFixed(4)} against neck ${head?.rx.toFixed(4)}`);
+  const pen = head;
 
   /* ★ MEASURED OFF THE FIELD, not off the parameters. A cone can be authored with a
    *   tiny tip and still be painted blunt — the blend with the ink it is touching can

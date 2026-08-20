@@ -137,9 +137,13 @@ export function sdEllipse(px: number, py: number, rx: number, ry: number): numbe
    *    the pixel grid moves under it. Infinity is inert under min() at every k, which
    *    is what "not there" actually means. */
   if (rx <= 0 || ry <= 0) return Infinity;
-  const k1 = Math.hypot(px / rx, py / ry);
+  const ax = px / rx;
+  const ay = py / ry;
+  const k1 = Math.sqrt(ax * ax + ay * ay);
   if (k1 === 0) return -Math.min(rx, ry);
-  const k2 = Math.hypot(px / (rx * rx), py / (ry * ry));
+  const bx2 = px / (rx * rx);
+  const by2 = py / (ry * ry);
+  const k2 = Math.sqrt(bx2 * bx2 + by2 * by2);
   return (k1 * (k1 - 1)) / k2;
 }
 
@@ -164,8 +168,8 @@ export function sdRoundCone(px: number, py: number, r1: number, r2: number, h: n
   const b = (r1 - r2) / h;
   const a = Math.sqrt(Math.max(1 - b * b, 0));
   const k = qx * -b + qy * a;
-  if (k < 0) return Math.hypot(qx, qy) - r1;
-  if (k > a * h) return Math.hypot(qx, qy - h) - r2;
+  if (k < 0) return Math.sqrt(qx * qx + qy * qy) - r1;
+  if (k > a * h) { const dy = qy - h; return Math.sqrt(qx * qx + dy * dy) - r2; }
   return qx * a + qy * b - r1;
 }
 
@@ -210,6 +214,22 @@ export function sdField(field: Field, x: number, y: number): number {
 
 /**
  * Rasterise the mass into an RGBA buffer.
+ *
+ * ★★ IT IS CULLED TWICE, AND IT HAS TO BE. The naive loop is (pixels × bodies), and at
+ *    18px that is nothing — 36×36×6 — but the same component at 150px on a specimen
+ *    sheet is 450×450×6 = 1.2 million distance evaluations a frame, in JavaScript,
+ *    which does not hold 60fps and visibly does not. Two cheap cuts fix it without
+ *    changing a pixel:
+ *
+ *    · the whole mass gets one bounding box (each body's extent plus its blend band),
+ *      and only those rows and columns are visited; everything outside is cleared;
+ *    · each ROW gets its own list of bodies whose boxes reach it, so a pixel on the
+ *      pen's row never evaluates the ink capsule three rows below.
+ *
+ *    And `Math.hypot` is replaced by `Math.sqrt(x*x + y*y)`. hypot does overflow-safe
+ *    scaling that costs several times a plain square root, and it is called three
+ *    times per body per pixel. (The repo's glass engine has a note that these differ
+ *    for subnormals — true, and irrelevant here: these are device-pixel distances.)
  *
  * `rgb` is written flat across the whole shape and only the ALPHA varies, which is
  * what keeps an antialiased edge from darkening into a fake outline: a constant colour
@@ -266,12 +286,71 @@ export function rasterise(
     n2++;
   }
 
+  /* Per-body boxes, in device pixels, grown by the blend band (3.4×k, the width of
+   * the circular smin's influence) and by the coverage ramp. */
+  const x0 = new Float64Array(n2);
+  const x1 = new Float64Array(n2);
+  const y0 = new Float64Array(n2);
+  const y1 = new Float64Array(n2);
+  let ux0 = Infinity;
+  let ux1 = -Infinity;
+  let uy0 = Infinity;
+  let uy1 = -Infinity;
+  for (let i = 0; i < n2; i++) {
+    /* A rotated cone's extent is bounded by its own length plus its widest radius, so
+     * one conservative radius covers every orientation without a trig call. */
+    /* ★ THE BOX MUST BOUND THE PAINTED EDGE, NOT THE GEOMETRY. iq's ellipse
+     *   approximation UNDER-reports distance away from the axes, so ink exists a
+     *   little outside the true shape — and a box drawn to the geometry clips it,
+     *   with the clip line snapping by whole pixels as the bounds round. That reads
+     *   as a jitter of about nine square pixels a frame, which the continuity gate
+     *   caught immediately (ratio 2.8 against an ideal 8). The error grows with
+     *   eccentricity, so the margin does too. */
+    const big = Math.max(brx[i], bry[i]);
+    /* The margin is deliberately loose — 60% of the body's own radius on top of the
+     * blend band and the ramp. Tightening it saves nothing measurable (the whole
+     * rasteriser is under 2ms at 450×450) and costs exactly the artifact this box
+     * exists to avoid. */
+    const reach = (blen[i] > 0 ? blen[i] + Math.max(brx[i], btip[i]) : big)
+      + bk[i] * 3.42 + soft + big * 2.5 + 6;
+    x0[i] = bx[i] - reach;
+    x1[i] = bx[i] + reach;
+    y0[i] = by[i] - reach;
+    y1[i] = by[i] + reach;
+    if (x0[i] < ux0) ux0 = x0[i];
+    if (x1[i] > ux1) ux1 = x1[i];
+    if (y0[i] < uy0) uy0 = y0[i];
+    if (y1[i] > uy1) uy1 = y1[i];
+  }
+  const rowLo = Math.max(0, Math.floor(uy0));
+  const rowHi = Math.min(size - 1, Math.ceil(uy1));
+  const colLo = Math.max(0, Math.floor(ux0));
+  const colHi = Math.min(size - 1, Math.ceil(ux1));
+
+  /* Clear everything the mass cannot reach. */
   for (let py = 0; py < size; py++) {
-    const sy = py + 0.5;
+    const inRows = py >= rowLo && py <= rowHi;
     for (let px = 0; px < size; px++) {
+      if (inRows && px >= colLo && px <= colHi) continue;
+      out[(py * size + px) * 4 + 3] = 0;
+    }
+  }
+
+  const row = new Int32Array(n2);
+  for (let py = rowLo; py <= rowHi; py++) {
+    const sy = py + 0.5;
+    let rn = 0;
+    for (let i = 0; i < n2; i++) if (sy >= y0[i] && sy <= y1[i]) row[rn++] = i;
+    if (rn === 0) {
+      for (let px = colLo; px <= colHi; px++) out[(py * size + px) * 4 + 3] = 0;
+      continue;
+    }
+    for (let px = colLo; px <= colHi; px++) {
       const sx = px + 0.5;
       let d = Infinity;
-      for (let i = 0; i < n2; i++) {
+      for (let j = 0; j < rn; j++) {
+        const i = row[j];
+        if (sx < x0[i] || sx > x1[i]) continue;
         const ux = sx - bx[i];
         const uy = sy - by[i];
         const c = bc[i];
@@ -287,15 +366,15 @@ export function rasterise(
       /* The ramp is one device pixel wide by default — the exact coverage of a
        * straight edge crossing a pixel, to first order — and `soft` widens it. */
       let cov = 0.5 - d / soft;
+      const o = (py * size + px) * 4;
       if (cov > 0) {
         if (cov > 1) cov = 1;
-        const o = (py * size + px) * 4;
         out[o] = r;
         out[o + 1] = g;
         out[o + 2] = b;
         out[o + 3] = cov * alpha * 255;
       } else {
-        out[(py * size + px) * 4 + 3] = 0;
+        out[o + 3] = 0;
       }
     }
   }

@@ -59,34 +59,28 @@ export type LiquidStateName = "idle" | "reading" | "thinking" | "writing";
  *  difference between a landing and a shrink. */
 const GROUND = 0.72;
 /** Rest radius of one thinking dot. */
-const R_DOT = 0.162;
+const R_DOT = 0.098;
 /** Rest radius of the single body. Two dots of R_DOT have area 2πR², so one body of
  *  the same volume is R√2 = 0.247; a touch under that reads better at 18px, and the
  *  merge is a droplet coalescing, not a conservation law. */
 const R_ONE = 0.229;
 /** Half the centre-to-centre separation while thinking. */
-const HALF = 0.222;
+/** Spacing between adjacent dots. THREE of them now, so the pair that used to have
+ *  the box to itself has a neighbour in the middle and everything shrinks. */
+const HALF = 0.285;
 /** How high a dot jumps. At 0.152 the filmstrip read as a bob rather than a jump —
  *  about three pixels of travel at the size this ships at. The ceiling is the apex
  *  clearing the top of the canvas: GROUND − 2·R_DOT − JUMP. */
-const JUMP = 0.22;
+const JUMP = 0.20;
 /** Flight stretch at maximum vertical speed. Round at the apex, longest at launch and
  *  landing — and it is derived from the arc's own velocity, not authored per beat. */
 const STRETCH = 0.17;
 /** How flat a dot goes on impact. */
-const SPLAT = 0.80;
+const SPLAT = 0.84;
 /** How far the single body sweeps while reading. 0.108 was under two pixels at 18px
  *  and read as a circle pulsing in place rather than as anything scanning. */
-const SWEEP = 0.14;
-/** Where along the reading cycle the body reaches each end and slams into the turn.
- *  Named because the squash is placed by DISTANCE FROM A TURN, wrapped — authoring it
- *  as a branch on the cycle phase is what put a step at the boundary. */
-const TURN_AT = [0.44, 0.94] as const;
-const TURN_IN = 0.07;
-const TURN_RING = 0.19;
-const TURN_SQUASH = 0.84;
-/** How wide the reading body sits at rest, before any lean. */
-const READ_FLAT = 1.12;
+/** How far each scanned line runs, either side of centre. */
+const READ_SPAN = 0.30;
 
 /** Surface tension between two separate dots: NONE.
  *
@@ -140,17 +134,28 @@ const HANDOFF_R = 0.108;
  *    a smaller ellipse is just a smaller blob. `field.ts` grew a rounded cone for it —
  *    an exact SDF, so the nib is a real corner and the barrel still blends with the
  *    ink it is laying down. */
-const PEN_LEN = 0.33;
-const PEN_R = 0.066;
-const PEN_TIP = 0.009;
+const PEN_LEN = 0.36;
+const PEN_R = 0.062;
+const PEN_TIP = 0.008;
+/** ★ A PEN IS A BARREL AND A HEAD, not a taper. One cone from end to end reads as a
+ *  stick sharpened at one end — which is a pencil at best and, at 18px, a random
+ *  diagonal shape. A real pen has a barrel of CONSTANT width, a shoulder where it
+ *  steps in, and a short cone to the nib. Three numbers, one visible step, and the
+ *  silhouette stops being ambiguous. */
+const PEN_HEAD = 0.34;
+const PEN_NECK = 0.60;
 /** Held at 135°: barrel up and to the right, nib down and to the left. */
 const PEN_ROT = 2.36;
 /** How far the nib travels across the line, each way from centre. */
 const PEN_TRAVEL = 0.085;
 /** The line it leaves. */
-const INK_H = 0.026;
+const INK_H = 0.036;
 const INK_Y = GROUND - INK_H;
-const K_INK = 0.012;
+const K_INK = 0.007;
+/** The two line heights the reading scan alternates between — one above the other, so
+ *  the scan visibly moves down a page rather than re-reading one line forever. */
+const READ_LINE_HI = GROUND - 0.30;
+const READ_LINE_LO = INK_Y;
 
 /** The blend that joins the reaching lobe/** The blend that joins the reaching lobe to the writing body. Its own, because the
  *  lobe has to stay soft-edged at the same moment the merged pair is at k=0 — and it
@@ -190,12 +195,18 @@ export interface Pose {
   penRot: number;
   penR: number;
   penLen: number;
-  /** the line the pen leaves: centre offset from cx, half-length, and how present it
-   *  is (0 = no ink at all; it scales the stroke's THICKNESS, so the line thins away
-   *  rather than being switched off). */
+  /** the line: centre offset from cx, half-length, height, and how present it is
+   *  (0 = no line at all; it scales the stroke's THICKNESS, so the line thins away
+   *  rather than being switched off). Written by the pen, and swept by `reading`. */
   inkX: number;
   inkW: number;
+  inkY: number;
   inkA: number;
+  /** the middle dot. Zero everywhere except `thinking`. */
+  r2: number;
+  lift2: number;
+  sx2: number;
+  sy2: number;
   /** the orb's own layer, driven from the same clock as the canvas so the hand-over
    *  never has two timelines to keep in step */
   orbScale: number;
@@ -213,7 +224,8 @@ export interface Pose {
 const POSE_KEYS = [
   "cx", "half", "r0", "r1", "lift0", "lift1",
   "sx0", "sy0", "sx1", "sy1", "bx", "by", "br",
-  "penX", "penY", "penRot", "penR", "penLen", "inkX", "inkW", "inkA",
+  "penX", "penY", "penRot", "penR", "penLen", "inkX", "inkW", "inkY", "inkA",
+  "r2", "lift2", "sx2", "sy2",
   "orbScale", "orbBlur", "orbAlpha", "soft", "k", "alpha",
 ] as const;
 
@@ -222,7 +234,8 @@ function onePose(r: number, cx = 0.5): Pose {
     cx, half: 0, r0: r, r1: r, lift0: 0, lift1: 0,
     sx0: 1, sy0: 1, sx1: 1, sy1: 1, bx: 0, by: 0, br: 0,
     penX: 0, penY: INK_Y - INK_H * 0.25, penRot: PEN_ROT, penR: 0, penLen: PEN_LEN,
-    inkX: 0, inkW: 0, inkA: 0,
+    inkX: 0, inkW: 0, inkY: INK_Y, inkA: 0,
+    r2: 0, lift2: 0, sx2: 1, sy2: 1,
     orbScale: ORB_SMALL, orbBlur: ORB_BLUR, orbAlpha: 0,
     k: K_ONE, soft: 0, alpha: 1,
   };
@@ -259,6 +272,9 @@ export function fieldOf(pose: Pose): Field {
   const swell = Math.min(pose.br / (0.34 * R_ONE), 1);
   const penScale = Math.min(pose.penR / PEN_R, 1);
   const penLen = pose.penLen * penScale;
+  const headLen = penLen * PEN_HEAD;
+  const dirX = Math.cos(pose.penRot);
+  const dirY = Math.sin(pose.penRot);
   const flown = 1 - Math.min(Math.abs(pose.by) / 0.30, 1);
   /* ★★ AND TIES THE PAIR'S BLEND TO THEIR SEPARATION, which is the same invariant
    *    pointing the other way. `smin(a, a, k)` is `a − k` exactly: two COINCIDENT
@@ -292,6 +308,18 @@ export function fieldOf(pose: Pose): Field {
         k: pose.k * pair,
       },
       {
+        /* ★ THE THREE DOTS ARE BODIES 0, 1 AND 2, in that order and before anything
+         * else. Which index a body lands on is not an implementation detail once a
+         * probe has to name one: the middle dot used to be emitted last, so adding a
+         * second body to the pen silently moved it and the gate that checks the row
+         * reads as separate dots started measuring the pen's barrel instead. */
+        x: pose.cx,
+        y: GROUND - pose.r2 * pose.sy2 - pose.lift2,
+        rx: pose.r2 * pose.sx2,
+        ry: pose.r2 * pose.sy2,
+        k: pose.k * pair,
+      },
+      {
         x: pose.cx + pose.bx,
         y: GROUND - pose.r0 + pose.by,
         rx: pose.br,
@@ -311,7 +339,7 @@ export function fieldOf(pose: Pose): Field {
          *   exact at every length, and at zero length it is a dot, which is exactly
          *   what a pen that has just touched down should leave. */
         x: pose.cx + pose.inkX - pose.inkW,
-        y: INK_Y,
+        y: pose.inkY,
         rx: INK_H * pose.inkA,
         ry: INK_H * pose.inkA,
         tip: INK_H * pose.inkA,
@@ -328,14 +356,28 @@ export function fieldOf(pose: Pose): Field {
          *   in the middle of a continuous animation: a needle 0.34 long became a
          *   0.0001 dot between two frames every time a transition took the pen away.
          *   A pen that shrinks retracts into its own nib instead. */
-        x: pose.cx + pose.penX - Math.cos(pose.penRot) * penLen,
-        y: pose.penY - Math.sin(pose.penRot) * penLen,
-        rx: pose.penR,
-        ry: pose.penR,
+      /* THE PEN, IN TWO PARTS. The head is a short cone from the shoulder to the nib;
+       * the barrel is a capsule of constant width running back from the same shoulder.
+       * They meet at a step, and the step is the whole point — it is what makes the
+       * silhouette read as a pen rather than as a sharpened stick. */
+        x: pose.cx + pose.penX - dirX * headLen,
+        y: pose.penY - dirY * headLen,
+        rx: pose.penR * PEN_NECK,
+        ry: pose.penR * PEN_NECK,
         tip: PEN_TIP * penScale,
-        len: penLen,
+        len: headLen,
         rot: pose.penRot,
         k: K_INK,
+      },
+      {
+        x: pose.cx + pose.penX - dirX * headLen,
+        y: pose.penY - dirY * headLen,
+        rx: pose.penR,
+        ry: pose.penR,
+        tip: pose.penR,
+        len: penLen - headLen,
+        rot: pose.penRot + Math.PI,
+        k: K_INK * 0.5,
       },
     ],
     soft: pose.soft,
@@ -411,12 +453,15 @@ function dotBeat(phase: number, jumpScale: number): { lift: number; sx: number; 
 
 function thinkingPose(clock: number): Pose {
   const t = clock / P_THINK;
-  /* Each dot's jump varies a few percent per cycle — enough that the eye stops
-   * predicting it, not enough to look unsteady. */
+  /* ★ THREE DOTS, A THIRD OF A CYCLE APART. Two alternating reads as a see-saw; three
+   *   in sequence reads as a run, which is what a row of thinking dots is for. The
+   *   phase order is left, middle, right so the wave travels rather than bouncing. */
   const j0 = 0.94 + 0.12 * jitter(Math.floor(t), 1);
-  const j1 = 0.94 + 0.12 * jitter(Math.floor(t + 0.5), 2);
+  const j2 = 0.94 + 0.12 * jitter(Math.floor(t + 1 / 3), 2);
+  const j1 = 0.94 + 0.12 * jitter(Math.floor(t + 2 / 3), 3);
   const a = dotBeat(t, j0);
-  const b = dotBeat(t + 0.5, j1);
+  const c = dotBeat(t + 1 / 3, j2);
+  const b = dotBeat(t + 2 / 3, j1);
   /* Built off onePose rather than as a literal, so a pose parameter added later
    * cannot be silently missing here — an undefined `petal` is not <= 1e-4, so the
    * resting mark's ring would be built from NaN and every gate that reads the field
@@ -426,60 +471,58 @@ function thinkingPose(clock: number): Pose {
     half: HALF,
     lift0: a.lift, lift1: b.lift,
     sx0: a.sx, sy0: a.sy, sx1: b.sx, sy1: b.sy,
+    r2: R_DOT, lift2: c.lift, sx2: c.sx, sy2: c.sy,
     k: K_APART,
   };
 }
 
-/** Where the reading body is along its sweep, 0..1 → cx. Right on the first half, back
- *  on the second, with a beat of dwell at each end where it slams into the turn.
- *  Clock zero is the LEFT end, at rest, about to set off. */
-function sweepAt(f: number): number {
-  const g = f - Math.floor(f);
-  if (g < TURN_AT[0]) return mix(0.5 - SWEEP, 0.5 + SWEEP, IN_OUT_3(g / TURN_AT[0]));
-  if (g < 0.5) return 0.5 + SWEEP;
-  if (g < TURN_AT[1]) return mix(0.5 + SWEEP, 0.5 - SWEEP, IN_OUT_3((g - 0.5) / (TURN_AT[1] - 0.5)));
-  return 0.5 - SWEEP;
-}
-
-/** How much the body is squashed against the end of its run, at cycle phase `g`.
+/**
+ * READING — a line being scanned, then the next one.
  *
- *  ★ MEASURED AS A WRAPPED DISTANCE FROM EACH TURN, not as a branch on `g`. The first
- *    version of this was a branch, and a branch has to special-case the turn whose
- *    ring crosses the cycle boundary — which is exactly where it stepped by 0.12 in
- *    one frame. Distance-from-an-event has no boundary to get wrong. */
-function turnSquash(g: number): number {
-  let s = 1;
-  for (const c of TURN_AT) {
-    let d = g - c;
-    d -= Math.round(d); /* wrap to [-0.5, 0.5] */
-    if (d >= -TURN_IN && d < 0) s *= mix(1, TURN_SQUASH, IN_2((d + TURN_IN) / TURN_IN));
-    else if (d >= 0 && d < TURN_RING) s *= mix(TURN_SQUASH, 1, ELASTIC_TIGHT(d / TURN_RING));
-  }
-  return s;
-}
-
+ * ★ IT USED TO BE A LOZENGE SLIDING LEFT AND RIGHT, which at 18px is a blob moving a
+ *   couple of pixels, and which shares a silhouette with anything else round. What
+ *   reading actually looks like is a line of text being taken in and then the eye
+ *   dropping to the next one, so that is what it draws — the same capsule the pen
+ *   lays down, used as the line rather than as the ink.
+ *
+ *   grow    0.00 – 0.55   the bar's left end is pinned at the start of the line and
+ *                         its right end runs out along it, decelerating
+ *   gather  0.55 – 0.84   the left end catches up: the line collapses into a dot at
+ *                         the end it finished on. Accelerating, because this is the
+ *                         part nobody spends time on
+ *   drop    0.84 – 1.00   the dot falls to the start of the next line, and the two
+ *                         lines alternate, so the cycle is one line read
+ */
 function readingPose(clock: number): Pose {
   const f = clock / P_READ;
-  const cx = sweepAt(f);
+  const g = f - Math.floor(f);
+  /* Two line heights, alternating each cycle, so the scan visibly moves down a page
+   * rather than re-reading one line forever. */
+  const line = Math.floor(f) % 2 === 0 ? READ_LINE_HI : READ_LINE_LO;
+  const next = Math.floor(f + 1) % 2 === 0 ? READ_LINE_HI : READ_LINE_LO;
 
-  /* ★ THE STRETCH IS DERIVED FROM THE TRAVEL, not authored beside it. A central
-   *   difference on the sweep gives the velocity; the body leans into it. Authoring
-   *   the two separately is how a lean ends up pointing the wrong way for one frame
-   *   after someone retimes the sweep — and nothing would report that. */
-  const eps = 0.004;
-  const v = (sweepAt(f + eps) - sweepAt(f - eps)) / (2 * eps);
-  /* The peak slope of power4.inOut is 4 over its own window, so the fastest the sweep
-   * ever travels is exact rather than guessed — a guessed maximum clips the lean flat
-   * for part of every run and nothing says so. */
-  const vmax = (2 * SWEEP * 4) / TURN_AT[0];
-  const lean = Math.min(Math.abs(v) / vmax, 1);
+  const L = -READ_SPAN;
+  const R = READ_SPAN;
+  let lo = L;
+  let hi = L;
+  if (g < 0.55) hi = mix(L, R, IN_OUT_3(g / 0.55));
+  else if (g < 0.84) { hi = R; lo = mix(L, R, IN_2((g - 0.55) / 0.29)); }
+  else { hi = R; lo = R; }
 
-  /* ★ READING RESTS FLAT, and that is a legibility decision rather than a flourish.
-   *   A round body travelling and a round body reaching are the same silhouette at
-   *   18px, and `reading` and `writing` are the two states most often adjacent. A wide
-   *   lozenge that sweeps cannot be confused with a round body that extrudes. */
-  const sx = READ_FLAT * (1 + 0.16 * lean) * turnSquash(f - Math.floor(f));
-  return { ...onePose(R_ONE, cx), sx0: sx, sy0: 1 / sx, sx1: sx, sy1: 1 / sx };
+  const drop = window_(g, 0.84, 1.0, IN_OUT_3);
+  const cx = mix((lo + hi) / 2, L, drop);
+  const y = mix(line, next, drop);
+
+  const pose = onePose(0);
+  pose.inkX = cx;
+  pose.inkW = mix((hi - lo) / 2, 0, drop);
+  pose.inkY = y;
+  pose.inkA = 1;
+  /* The dead mass rides the bar, so a transition into or out of this state grows and
+   * shrinks where the bar actually is. */
+  pose.lift0 = GROUND - y;
+  pose.lift1 = pose.lift0;
+  return pose;
 }
 
 /**
@@ -668,6 +711,13 @@ function splitPose(from: Pose, to: Pose, p: number): Pose {
      * mass look like it deflated and then split, which is two events, not one. */
     r0: [0.30, 0.78, OUT_STRONG],
     r1: [0.30, 0.78, OUT_STRONG],
+    /* The middle dot does not have to be torn off anything — it IS what is left of the
+     * mass once the outer two have gone, so it simply resolves where the mass was. */
+    r2: [0.10, 0.62, OUT_STRONG],
+    lift2: [0.34, 0.86, OUT_2],
+    sx2: [0.30, 1.0, ELASTIC],
+    sy2: [0.30, 1.0, ELASTIC],
+    inkY: [0.0, 0.5, OUT_STRONG],
     lift1: [0.39, 1.0, OUT_2],
     lift0: [0.30, 0.72, OUT_2],
     cx: [0.0, 0.55, OUT_STRONG],
@@ -736,6 +786,11 @@ function mergePose(from: Pose, to: Pose, p: number): Pose {
     cx: [0.52, 1.0, OUT_STRONG],
     r0: [0.30, 0.80, OUT_STRONG],
     r1: [0.30, 0.80, OUT_STRONG],
+    r2: [0.24, 0.72, OUT_STRONG],
+    lift2: [0.0, 0.26, IN_2],
+    sx2: [0.20, 0.44, OUT_STRONG],
+    sy2: [0.20, 0.44, OUT_STRONG],
+    inkY: [0.4, 0.9, OUT_STRONG],
     sx0: [0.20, 0.44, OUT_STRONG],
     sy0: [0.20, 0.44, OUT_STRONG],
     sx1: [0.20, 0.44, OUT_STRONG],
@@ -1051,7 +1106,7 @@ export function staticPose(state: LiquidStateName): Pose {
 }
 
 export const GEOMETRY = {
-  GROUND, R_DOT, R_ONE, HALF, JUMP, SWEEP, K_APART, K_NECK, K_ONE, K_SWELL,
+  GROUND, R_DOT, R_ONE, HALF, JUMP, READ_SPAN, K_APART, K_NECK, K_ONE, K_SWELL,
   PEN_LEN, PEN_R, PEN_TIP, PEN_ROT, PEN_TRAVEL, INK_H, INK_Y, K_INK,
   ORB_SMALL, ORB_BLUR, HANDOFF_R,
   P_THINK, P_WRITE, P_READ, P_IDLE,
