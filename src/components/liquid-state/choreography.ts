@@ -66,22 +66,27 @@ const R_DOT = 0.162;
 const R_ONE = 0.229;
 /** Half the centre-to-centre separation while thinking. */
 const HALF = 0.222;
-/** How high a dot jumps. */
-const JUMP = 0.152;
+/** How high a dot jumps. At 0.152 the filmstrip read as a bob rather than a jump —
+ *  about three pixels of travel at the size this ships at. The ceiling is the apex
+ *  clearing the top of the canvas: GROUND − 2·R_DOT − JUMP. */
+const JUMP = 0.22;
 /** Flight stretch at maximum vertical speed. Round at the apex, longest at launch and
  *  landing — and it is derived from the arc's own velocity, not authored per beat. */
 const STRETCH = 0.17;
 /** How flat a dot goes on impact. */
 const SPLAT = 0.80;
-/** How far the single body sweeps while reading. */
-const SWEEP = 0.108;
+/** How far the single body sweeps while reading. 0.108 was under two pixels at 18px
+ *  and read as a circle pulsing in place rather than as anything scanning. */
+const SWEEP = 0.14;
 /** Where along the reading cycle the body reaches each end and slams into the turn.
  *  Named because the squash is placed by DISTANCE FROM A TURN, wrapped — authoring it
  *  as a branch on the cycle phase is what put a step at the boundary. */
 const TURN_AT = [0.44, 0.94] as const;
 const TURN_IN = 0.07;
 const TURN_RING = 0.19;
-const TURN_SQUASH = 0.88;
+const TURN_SQUASH = 0.84;
+/** How wide the reading body sits at rest, before any lean. */
+const READ_FLAT = 1.12;
 
 /** Surface tension between two separate dots: NONE.
  *
@@ -105,9 +110,12 @@ const K_NECK = 0.105;
  *  rather than the radius. At k=0 the blend is min() and two coincident circles are one
  *  circle. See field.ts on why every body carries its own k. */
 const K_ONE = 0;
-/** The blend that holds the travelling swell inside the writing body. Its own, because
- *  the swell has to stay soft-edged at the same moment the merged pair is at k=0. */
-const K_SWELL = 0.062;
+/** The blend that joins the reaching lobe to the writing body. Its own, because the
+ *  lobe has to stay soft-edged at the same moment the merged pair is at k=0 — and it
+ *  has to be SMALL: the band is 3.4×k, and at 0.062 that is 0.21 units, nearly the
+ *  width of the body itself, so the blend filled the waist and the reach read as the
+ *  body simply inflating. A waist is the whole point. */
+const K_SWELL = 0.038;
 
 /* ── the pose ───────────────────────────────────────────────────────────────────── */
 
@@ -171,8 +179,17 @@ export function fieldOf(pose: Pose): Field {
   const ry0 = pose.r0 * pose.sy0;
   const ry1 = pose.r1 * pose.sy1;
   /* Ties the swell's blend to its own radius: full blend at its working size, gone by
-   * the time it has shrunk away. */
+   * the time it has shrunk away.
+   *
+   * ★ AND THINS IT AS THE BODY LEAVES THE MASS. The third body does two jobs: it is
+   *   the lobe the writing state reaches out with (which never leaves, `by` = 0) and
+   *   it is the droplet the collision throws upward (which does). With a fixed blend
+   *   the droplet stayed welded to the mass by a band 3.4×k wide and read as a spike
+   *   growing out of the top rather than as a splash. Tying the blend to how far it
+   *   has risen gives it a neck that stretches, thins, snaps — and reforms on the way
+   *   back down. */
   const swell = Math.min(pose.br / (0.34 * R_ONE), 1);
+  const flown = 1 - Math.min(Math.abs(pose.by) / 0.30, 1);
   /* ★★ AND TIES THE PAIR'S BLEND TO THEIR SEPARATION, which is the same invariant
    *    pointing the other way. `smin(a, a, k)` is `a − k` exactly: two COINCIDENT
    *    bodies blended at k are one body INFLATED BY k. Authored k is meant to draw a
@@ -204,7 +221,7 @@ export function fieldOf(pose: Pose): Field {
         y: GROUND - pose.r0 + pose.by,
         rx: pose.br,
         ry: pose.br,
-        k: K_SWELL * swell * swell,
+        k: K_SWELL * swell * swell * flown,
       },
     ],
   };
@@ -335,39 +352,83 @@ function readingPose(clock: number): Pose {
   const vmax = (2 * SWEEP * 4) / TURN_AT[0];
   const lean = Math.min(Math.abs(v) / vmax, 1);
 
-  const sx = (1 + 0.20 * lean) * turnSquash(f - Math.floor(f));
+  /* ★ READING RESTS FLAT, and that is a legibility decision rather than a flourish.
+   *   A round body travelling and a round body reaching are the same silhouette at
+   *   18px, and `reading` and `writing` are the two states most often adjacent. A wide
+   *   lozenge that sweeps cannot be confused with a round body that extrudes. */
+  const sx = READ_FLAT * (1 + 0.16 * lean) * turnSquash(f - Math.floor(f));
   return { ...onePose(R_ONE, cx), sx0: sx, sy0: 1 / sx, sx1: sx, sy1: 1 / sx };
 }
 
-/** Writing: one body, and a swell travelling through it left to right — the shape of
- *  something being extruded. The swell is a real third body just under the surface, so
- *  the silhouette bulges where it passes and the bulge is a metaball neck, not a
- *  scale. It accelerates through the middle and the surface snaps back behind it. */
+/**
+ * WRITING — the body reaches out to the right and gathers itself back, over and over.
+ *
+ * ★ THE FIRST VERSION OF THIS WAS INVISIBLE, and it is worth saying why rather than
+ *   just replacing it. It was a swell riding *inside* the body, deforming the
+ *   silhouette from within. At 96px on a contact sheet that is a lovely, subtle thing.
+ *   At 18px it is a circle. Anything this state says has to be said in the OUTLINE,
+ *   because the outline is all there is at six pixels of radius.
+ *
+ * So the swell now carries the surface PAST the rim: the mass grows a reach on its
+ * right, the body leans after it, and then surface tension takes it home —
+ *
+ *   reach    0.06 – 0.46   the swell is born at the centre and carries out to 0.92R,
+ *                          DECELERATING (IN_OUT_3) — it is being extruded, not thrown
+ *   retract  0.46 – 0.74   back to nothing on IN_2, ACCELERATING, because a surface
+ *                          under tension comes home faster the further it has to go
+ *   recoil   0.68 – 1.00   the body overshoots inward and rings back on ELASTIC_TIGHT.
+ *                          The tight elastic, not the long one: this beat has to have
+ *                          finished before the next reach begins or the two blur
+ *
+ * Reach and recoil deliberately overlap by 60ms, so the body is already gathering
+ * while the last of the reach is still coming home. Nothing here is symmetric.
+ */
 function writingPose(clock: number): Pose {
   const f = clock / P_WRITE;
   const g = f - Math.floor(f);
-  const amp = 0.88 + 0.24 * jitter(Math.floor(f), 3);
+  const amp = 0.94 + 0.12 * jitter(Math.floor(f), 3);
 
-  const A = 0.08;
-  const B = 0.70;
+  const A = 0.06;
+  const OUT = 0.46;
+  const HOME = 0.74;
+  /* ★ FAR ENOUGH OUT TO BE A LOBE. At 0.92R with a 0.70R swell the two circles
+   *   overlapped so far that the union was an ellipse, and the state read as the body
+   *   inflating rather than reaching. A smaller swell carried further makes a
+   *   silhouette with a shoulder and a tip, which is a direction. */
+  const FAR = 1.22 * R_ONE * amp;
+  const SWELL_R = 0.50 * R_ONE;
+
   let bx = 0;
   let br = 0;
-  if (g >= A && g < B) {
-    const t = (g - A) / (B - A);
-    bx = mix(-0.58 * R_ONE, 0.78 * R_ONE, IN_OUT_3(t));
-    /* Born small at the left, biggest as it reaches the rim, then pulled back in fast:
-     * the swell has to DIE on an accelerating curve or the body deflates. */
-    br = 0.56 * R_ONE * amp * (t < 0.82 ? Math.sin(Math.PI * (t / 0.82) * 0.5) ** 0.7 : 1 - IN_2((t - 0.82) / 0.18));
+  let reach = 0;
+  if (g >= A && g < HOME) {
+    if (g < OUT) {
+      const t = (g - A) / (OUT - A);
+      reach = IN_OUT_3(t);
+      bx = FAR * reach;
+      /* Born quickly, so the reach has a body from the first frames rather than
+       * emerging as a point. */
+      br = SWELL_R * Math.min(t / 0.22, 1);
+    } else {
+      const t = (g - OUT) / (HOME - OUT);
+      reach = 1 - IN_2(t);
+      bx = FAR * reach;
+      br = SWELL_R * (1 - IN_1(t));
+    }
   }
 
-  /* One breath after each swell leaves — the body gathering itself for the next. */
-  const sy = g >= 0.70
-    ? mix(1, 1.055, window_(g, 0.70, 0.79, OUT_STRONG)) * (g >= 0.79 ? mix(1.055, 1, window_(g, 0.79, 0.98, ELASTIC_TIGHT)) / 1.055 : 1)
-    : 1;
+  /* The body leans after its own reach, and recoils when it lets go. */
+  const recoil = window_(g, HOME - 0.06, HOME + 0.02, IN_2) * (1 - window_(g, HOME + 0.02, 1.0, ELASTIC_TIGHT));
+  const sx = (1 + 0.06 * reach) * mix(1, 0.93, recoil);
+
+  /* ★ THE BODY GIVES UP MASS TO ITS OWN REACH. Partly it is what a volume of liquid
+   *   does, and partly it is the only way the lobe fits: at full extension the far
+   *   edge of the reach is 0.91 across a box that must not be touched at 1.0. */
+  const r = R_ONE * (1 - 0.09 * reach);
 
   return {
-    ...onePose(R_ONE),
-    sx0: 1 / sy, sy0: sy, sx1: 1 / sy, sy1: sy,
+    ...onePose(r),
+    sx0: sx, sy0: 1 / sx, sx1: sx, sy1: 1 / sx,
     bx, by: 0, br,
   };
 }
@@ -440,8 +501,10 @@ function blend(from: Pose, to: Pose, p: number, spec: Spec, fallback: [number, n
 function splitPose(from: Pose, to: Pose, p: number): Pose {
   const out = blend(from, to, p, {
     half: [0.22, 0.65, IN_2],
-    r0: [0.18, 0.70, OUT_STRONG],
-    r1: [0.18, 0.70, OUT_STRONG],
+    /* The halves get small BECAUSE they separate — front-loading the shrink made the
+     * mass look like it deflated and then split, which is two events, not one. */
+    r0: [0.30, 0.78, OUT_STRONG],
+    r1: [0.30, 0.78, OUT_STRONG],
     lift1: [0.39, 1.0, OUT_2],
     lift0: [0.30, 0.72, OUT_2],
     cx: [0.0, 0.55, OUT_STRONG],
@@ -459,14 +522,19 @@ function splitPose(from: Pose, to: Pose, p: number): Pose {
    * ring is travelling from wherever the previous state left the shape, and an
    * additive wind-up would fight it. */
   const gather = window_(p, 0.0, 0.22, OUT_STRONG) * (1 - window_(p, 0.22, 0.52, IN_1));
-  out.sx0 *= mix(1, 0.80, gather);
-  out.sy0 *= mix(1, 1.16, gather);
-  out.sx1 *= mix(1, 0.80, gather);
-  out.sy1 *= mix(1, 1.16, gather);
+  out.sx0 *= mix(1, 0.84, gather);
+  out.sy0 *= mix(1, 1.14, gather);
+  out.sx1 *= mix(1, 0.84, gather);
+  out.sy1 *= mix(1, 1.14, gather);
 
   /* Surface tension: up while the neck is being drawn, gone the moment it parts. */
+  /* ★ THE NECK HAS TO OUTLAST THE PARTING. The halves only clear each other's
+   *   surfaces about 60% of the way through the tear, so a tension that has already
+   *   collapsed by then means there was never a bridge to snap — the shapes simply
+   *   separated. Measured with the gate: at a collapse window of [0.34, 0.62] the
+   *   widest gap ever bridged was 0.00px. It holds to [0.44, 0.74] now. */
   out.k = mix(from.k, K_NECK, window_(p, 0, 0.30, OUT_STRONG));
-  out.k = mix(out.k, to.k, window_(p, 0.34, 0.62, IN_2));
+  out.k = mix(out.k, to.k, window_(p, 0.44, 0.74, IN_2));
   return out;
 }
 
@@ -514,13 +582,19 @@ function mergePose(from: Pose, to: Pose, p: number): Pose {
   out.sy1 *= mix(1, 1.22, hit);
 
   /* The droplet. Up hard, over, and down under the same parabola a dot jumps on, so
-   * the whole component obeys one gravity. */
-  const s = (p - 0.46) / (0.90 - 0.46);
+   * the whole component obeys one gravity.
+   *
+   * ★ IT HAS TO SURVIVE THE WHOLE ARC. The first envelope peaked at a third of the
+   *   way up and was gone by three quarters — so the droplet evaporated at the top of
+   *   its flight and never came home, which on the contact sheet read as a spike
+   *   growing out of the mass and then a speck of dust. It now holds its size until it
+   *   lands and is absorbed on the way in. */
+  const s = (p - 0.46) / (0.92 - 0.46);
   if (s > 0 && s < 1) {
     const fly = 4 * s * (1 - s);
-    out.br = 0.44 * R_DOT * Math.sin(Math.PI * Math.min(s * 1.35, 1));
-    out.by = -0.33 * fly;
-    out.bx = mix(0, 0.02, s);
+    out.br = 0.46 * R_DOT * (s < 0.16 ? IN_OUT_3(s / 0.16) : s > 0.80 ? 1 - IN_2((s - 0.80) / 0.20) : 1);
+    out.by = -0.36 * fly;
+    out.bx = mix(0, 0.03, s);
   }
 
   out.k = mix(from.k, K_NECK, window_(p, 0.06, 0.40, OUT_STRONG));
@@ -540,9 +614,21 @@ function reformPose(from: Pose, to: Pose, p: number): Pose {
     sy1: [0.10, 1.0, SETTLE],
     br: [0.0, 0.34, IN_1],
   }, [0.0, 0.8, OUT_STRONG]);
-  const breath = window_(p, 0.30, 0.52, OUT_STRONG) * (1 - window_(p, 0.52, 1.0, ELASTIC_TIGHT));
-  out.sy0 *= mix(1, 1.07, breath);
-  out.sx0 *= mix(1, 1 / 1.07, breath);
+  /* ★ A BODY THAT TRAVELS LEANS. The reform is a real journey — a third of the box —
+   *   and without the lean the contact sheet showed a circle in one place and the same
+   *   circle in another, which is a cut, not a move. The lean peaks mid-flight and is
+   *   gone before it arrives, so the landing is round. */
+  const lean = window_(p, 0.0, 0.34, OUT_STRONG) * (1 - window_(p, 0.34, 0.80, IN_1));
+  out.sx0 *= mix(1, 1.16, lean);
+  out.sy0 *= mix(1, 1 / 1.16, lean);
+  out.sx1 *= mix(1, 1.16, lean);
+  out.sy1 *= mix(1, 1 / 1.16, lean);
+
+  const breath = window_(p, 0.44, 0.62, OUT_STRONG) * (1 - window_(p, 0.62, 1.0, ELASTIC_TIGHT));
+  out.sy0 *= mix(1, 1.09, breath);
+  out.sx0 *= mix(1, 1 / 1.09, breath);
+  out.sy1 *= mix(1, 1.09, breath);
+  out.sx1 *= mix(1, 1 / 1.09, breath);
   return out;
 }
 
@@ -562,31 +648,39 @@ function reformPose(from: Pose, to: Pose, p: number): Pose {
  */
 function enterPose(to: Pose, p: number): Pose {
   const two = to.half > 1e-4;
-  const drop = window_(p, 0.0, 0.42, IN_2);
+  const drop = window_(p, 0.0, 0.42, IN_1);
   const out: Pose = { ...to };
 
-  out.lift0 = mix(0.28, to.lift0, drop);
+  out.lift0 = mix(0.20, to.lift0, drop);
   out.half = to.half * window_(p, 0.44, 0.88, IN_2);
   /* The half thrown up out of the splat arrives at the loop's apex with nothing left,
    * on a decelerating curve — same handshake the split makes. */
-  out.lift1 = two ? mix(0.28, to.lift1, window_(p, 0.44, 1.0, OUT_2)) : out.lift0;
-  out.r0 = mix(to.r0 * 0.56, to.r0, window_(p, 0.28, 0.86, OUT_STRONG));
+  out.lift1 = two ? mix(0.20, to.lift1, window_(p, 0.44, 1.0, OUT_2)) : out.lift0;
+  out.r0 = mix(to.r0 * 0.76, to.r0, window_(p, 0.20, 0.86, OUT_STRONG));
   out.r1 = out.r0 * (to.r1 / to.r0);
 
   const fall = drop * (1 - window_(p, 0.36, 0.42, IN_1));
   const splat = window_(p, 0.42, 0.50, IN_2) * (1 - window_(p, 0.50, 1.0, POP));
-  const sy = mix(1, 1.46, fall) * mix(1, 0.68, splat);
+  const sy = mix(1, 1.46, fall) * mix(1, 0.71, splat);
   out.sy0 = to.sy0 * sy;
   out.sx0 = to.sx0 / sy;
   out.sy1 = to.sy1 * sy;
   out.sx1 = to.sx1 / sy;
 
+  /* ★ IT LANDS IN THE MIDDLE AND FLOWS TO ITS MARK. A splat is the widest the mass
+   *   ever gets, and `reading` starts at the LEFT END of its sweep — dropping straight
+   *   onto that mark put the splat's left edge off the canvas. Falling at the centre
+   *   and travelling once it is one puddle is both the fix and the better read. */
+  out.cx = mix(0.5, to.cx, window_(p, 0.50, 1.0, OUT_STRONG));
   out.br = to.br * window_(p, 0.70, 1.0, OUT_STRONG);
   out.bx = to.bx;
   out.by = to.by;
   /* Tension high through the tear, then away — the same beat the split uses. */
   out.k = mix(K_NECK, to.k, window_(p, 0.5, 0.92, IN_2));
-  out.alpha = window_(p, 0, 0.12, OUT_STRONG);
+  /* ★ NO FADE. The first frame used to be empty and the second a two-pixel speck,
+   *   which reads as a flicker rather than as an arrival. The droplet is there, at
+   *   full opacity, from frame one — it is just small and high up and moving fast. */
+  out.alpha = 1;
   return out;
 }
 
