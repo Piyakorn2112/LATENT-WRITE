@@ -20,7 +20,7 @@
 import { deflateSync } from "node:zlib";
 import { writeFileSync } from "node:fs";
 import {
-  DURATION, GEOMETRY, fieldOf, kindFor, loopPose, poseAt,
+  DURATION, GEOMETRY, fieldOf, kindFor, loopPose, periodOf, poseAt,
   type LiquidStateName, type Motion, type Pose,
 } from "../src/components/liquid-state/choreography";
 import { rasterise } from "../src/components/liquid-state/field";
@@ -77,13 +77,13 @@ interface Row { label: string; frames: Pose[] }
 function motionOf(from: LiquidStateName, to: LiquidStateName, atClock = 0): Motion {
   return { from, to, kind: kindFor(from, to), fromPose: loopPose(from, atClock), elapsed: 0 };
 }
-const period = (s: LiquidStateName) =>
-  s === "thinking" ? GEOMETRY.P_THINK : s === "writing" ? GEOMETRY.P_WRITE : GEOMETRY.P_READ;
-
 const COLS = 14;
-function loopRow(s: LiquidStateName): Row {
-  const p = period(s);
-  return { label: `${s} loop (${p}ms)`, frames: Array.from({ length: COLS }, (_, i) => loopPose(s, (i / COLS) * p)) };
+function loopRow(s: LiquidStateName, span = 1): Row {
+  const p = periodOf(s) * span;
+  return {
+    label: `${s} loop (${Math.round(p)}ms of ${periodOf(s)}ms)`,
+    frames: Array.from({ length: COLS }, (_, i) => loopPose(s, (i / COLS) * p)),
+  };
 }
 function transitionRow(from: LiquidStateName, to: LiquidStateName, atClock = 0): Row {
   const m = motionOf(from, to, atClock);
@@ -112,14 +112,20 @@ function enterRow(to: LiquidStateName): Row {
 }
 
 const ROWS: Row[] = [
+  /* Idle turns once every nine seconds, so a full cycle across fourteen cells shows
+   * nothing but the reach-wave; a quarter turn is what actually reads. */
+  loopRow("idle", 0.28),
   loopRow("thinking"),
   loopRow("writing"),
   loopRow("reading"),
-  enterRow("thinking"),
+  transitionRow("idle", "thinking"),
+  transitionRow("idle", "writing"),
+  transitionRow("thinking", "idle"),
+  transitionRow("writing", "idle"),
   transitionRow("reading", "thinking"),
   transitionRow("thinking", "writing", GEOMETRY.P_THINK * 0.33),
   transitionRow("writing", "thinking"),
-  transitionRow("reading", "writing"),
+  enterRow("thinking"),
 ];
 
 /** Draw one pose into a cell of `cell` device px, scaled up by `zoom` with no smoothing. */

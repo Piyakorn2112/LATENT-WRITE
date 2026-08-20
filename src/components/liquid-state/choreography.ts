@@ -50,7 +50,7 @@ import {
 } from "./curves";
 import type { Field } from "./field";
 
-export type LiquidStateName = "reading" | "thinking" | "writing";
+export type LiquidStateName = "idle" | "reading" | "thinking" | "writing";
 
 /* ── geometry, in a unit box where 1 = the component's size ─────────────────────── */
 
@@ -110,6 +110,45 @@ const K_NECK = 0.105;
  *  rather than the radius. At k=0 the blend is min() and two coincident circles are one
  *  circle. See field.ts on why every body carries its own k. */
 const K_ONE = 0;
+/* ── the resting mark ───────────────────────────────────────────────────────────────
+ * ★★ THE APP'S OWN ORB, BUILT OUT OF THE SAME LIQUID. The toolbar's intelligence orb
+ *    is six flat petals in a ring, and until now the indicator had nothing to say when
+ *    the model was NOT working — it simply appeared. That meant the mark could only be
+ *    SWAPPED for the working shape, and a swap between two different renderers is a
+ *    cross-fade however it is dressed up.
+ *
+ *    Six petals is a metaball's natural subject. Rendering the resting mark in the same
+ *    field means the orb can LIQUEFY: the ring collapses inward, the petals feed a
+ *    single mass, and that mass tears into two dots or reaches out to write. Coming
+ *    back, it blooms. Nothing cross-fades, and the thing on screen is one object
+ *    throughout.
+ *
+ *    ★★ THE PROPORTIONS ARE THE ORB'S OWN, TAKEN FROM `orbPhysics.ts` RATHER THAN
+ *       GUESSED. Two versions were drawn by eye first and both read as an ASTERISK,
+ *       because a petal guessed at is long and thin and the orb's are neither. In the
+ *       shader's p-space (slot |p| ≤ 0.926) the measured layout is ring radius 0.556,
+ *       half-length 0.255, aspect 1.15 — so the shapes are very nearly CIRCLES, and
+ *       there is an EMPTY CENTRE of 0.278 where a hub would go. Scaled here so the
+ *       outer extent matches R_ONE, which is what makes the mark the same size as the
+ *       mass it becomes: ×0.2824.
+ *
+ *       Read the source before inventing the shape. */
+const RING_N = 6;
+const RING_R = 0.157;
+/** Petal half-length, along the radius. The inner ends stop at 0.085, which is the
+ *  orb's empty centre — this mark has a hole, not a hub. */
+const PETAL_LONG = 0.072;
+/** Petal half-width. Aspect 1.15, and under half the ring radius (2×0.063 against
+ *  0.157 of arc) so the six stay countable. */
+const PETAL_SHORT = 0.063;
+/** Petals barely blend: the rosette's lobes have to stay countable. */
+const K_PETAL = 0.006;
+/** How far a petal reaches on its turn, and how much it swells doing it. Both modest:
+ *  the orb's own note is that the six centres sit at ONE radius (measured std. dev.
+ *  0.4%), so the ring reads even and the life comes from size, not from travel. */
+const PETAL_REACH = 0.08;
+const PETAL_SWELL = 0.20;
+
 /** The blend that joins the reaching lobe to the writing body. Its own, because the
  *  lobe has to stay soft-edged at the same moment the merged pair is at k=0 — and it
  *  has to be SMALL: the band is 3.4×k, and at 0.062 that is 0.21 units, nearly the
@@ -142,6 +181,12 @@ export interface Pose {
   bx: number;
   by: number;
   br: number;
+  /** the resting mark: ring radius, petal scale (0 = no ring at all), the ring's
+   *  rotation, and where the reach-wave has got to around it */
+  ringR: number;
+  petal: number;
+  spin: number;
+  petalPhase: number;
   /** surface tension */
   k: number;
   /** whole-mass opacity, for the entrance and exit only */
@@ -150,13 +195,15 @@ export interface Pose {
 
 const POSE_KEYS = [
   "cx", "half", "r0", "r1", "lift0", "lift1",
-  "sx0", "sy0", "sx1", "sy1", "bx", "by", "br", "k", "alpha",
+  "sx0", "sy0", "sx1", "sy1", "bx", "by", "br",
+  "ringR", "petal", "spin", "petalPhase", "k", "alpha",
 ] as const;
 
 function onePose(r: number, cx = 0.5): Pose {
   return {
     cx, half: 0, r0: r, r1: r, lift0: 0, lift1: 0,
-    sx0: 1, sy0: 1, sx1: 1, sy1: 1, bx: 0, by: 0, br: 0, k: K_ONE, alpha: 1,
+    sx0: 1, sy0: 1, sx1: 1, sy1: 1, bx: 0, by: 0, br: 0,
+    ringR: 0, petal: 0, spin: 0, petalPhase: 0, k: K_ONE, alpha: 1,
   };
 }
 
@@ -223,8 +270,54 @@ export function fieldOf(pose: Pose): Field {
         ry: pose.br,
         k: K_SWELL * swell * swell * flown,
       },
+      ...ringBodies(pose),
     ],
   };
+}
+
+/** The resting mark's petals.
+ *
+ *  ★ THE REACH TRAVELS AROUND THE RING rather than pulsing in unison — petal i is a
+ *    sixth of a cycle behind petal i−1, which is the orb's own character (each petal
+ *    reaches out and swells, offset around the ring). Distributing it HERE, from one
+ *    scalar phase in the pose, keeps the pose small enough that every transition can
+ *    still blend it parameter by parameter.
+ *
+ *  ★ And k is tied to the petal scale, so a mark with no petals contributes nothing —
+ *    the same invariant the swell and the pair obey. */
+function ringBodies(pose: Pose): Field["bodies"] {
+  if (pose.petal <= 1e-4) return [];
+  const collapse = 1 - Math.min(pose.ringR / RING_R, 1);
+  /* ★ THE RING IS CENTRED WHERE A RESTING MASS IS CENTRED, and that is a constant, not
+   *   a function of the body. An earlier version derived it from the body's own centre
+   *   and floated the mark with `lift0` — which is fine while the mark has no body and
+   *   wrong the instant a transition grows one, because the lift and the radius then
+   *   both push it up and the mass sails off the top of the canvas (measured: 0.033
+   *   from the top edge, clipped, on three transitions). A full-size body resting on
+   *   the floor is centred at exactly GROUND − R_ONE, so the mark and the mass it
+   *   becomes share a centre by construction and nothing has to be corrected. */
+  const cy = GROUND - R_ONE;
+  const out: Field["bodies"] = [];
+  for (let i = 0; i < RING_N; i++) {
+    const reach = 0.5 - 0.5 * Math.cos(2 * Math.PI * (pose.petalPhase - i / RING_N));
+    const ang = pose.spin + (i * 2 * Math.PI) / RING_N;
+    const rr = pose.ringR * (1 + PETAL_REACH * reach);
+    out.push({
+      x: pose.cx + Math.cos(ang) * rr,
+      y: cy + Math.sin(ang) * rr,
+      rx: PETAL_LONG * pose.petal * (1 + PETAL_SWELL * reach),
+      ry: PETAL_SHORT * pose.petal * (1 + PETAL_SWELL * reach),
+      rot: ang,
+      /* ★ TENSION RISES AS THE RING CLOSES, derived rather than authored. At rest the
+       *   six are separate and barely aware of each other; the moment a transition
+       *   starts pulling them inward they have to become ONE mass, and deriving that
+       *   from how far the ring has collapsed means no transition has to remember to
+       *   ramp it — and it can never be left on at rest, where it would weld the mark
+       *   into a disc. */
+      k: (K_PETAL + K_NECK * collapse) * pose.petal,
+    });
+  }
+  return out;
 }
 
 /* ── deterministic jitter ───────────────────────────────────────────────────────────
@@ -243,6 +336,10 @@ function jitter(cycle: number, salt: number): number {
 const P_THINK = 820;
 const P_WRITE = 1150;
 const P_READ = 1560;
+/** One turn every nine seconds. Slow enough never to compete with a working state for
+ *  attention, fast enough that the mark is not a static logo. */
+const P_IDLE_SPIN = 9000;
+const P_IDLE_WAVE = 2400;
 
 /** One dot's own beat. φ = 0 is REST ON THE FLOOR, which is what every transition into
  *  `thinking` hands over to.
@@ -299,12 +396,16 @@ function thinkingPose(clock: number): Pose {
   const j1 = 0.94 + 0.12 * jitter(Math.floor(t + 0.5), 2);
   const a = dotBeat(t, j0);
   const b = dotBeat(t + 0.5, j1);
+  /* Built off onePose rather than as a literal, so a pose parameter added later
+   * cannot be silently missing here — an undefined `petal` is not <= 1e-4, so the
+   * resting mark's ring would be built from NaN and every gate that reads the field
+   * would report NaN, which compares false against everything. */
   return {
-    cx: 0.5, half: HALF, r0: R_DOT, r1: R_DOT,
+    ...onePose(R_DOT),
+    half: HALF,
     lift0: a.lift, lift1: b.lift,
     sx0: a.sx, sy0: a.sy, sx1: b.sx, sy1: b.sy,
-    bx: 0, by: 0, br: 0,
-    k: K_APART, alpha: 1,
+    k: K_APART,
   };
 }
 
@@ -433,7 +534,23 @@ function writingPose(clock: number): Pose {
   };
 }
 
+/** IDLE — the mark at rest. It turns slowly and a reach travels around it; nothing
+ *  else happens, because nothing else is happening. */
+function idlePose(clock: number): Pose {
+  /* No central body at all — the orb's centre is empty, and a radius of zero is inert
+   * by construction. The mark's position is the ring's, and the ring's centre is where
+   * the mass it becomes will rest. */
+  const pose = onePose(0);
+  pose.ringR = RING_R;
+  pose.petal = 1;
+  pose.spin = (clock / P_IDLE_SPIN) * 2 * Math.PI;
+  pose.petalPhase = clock / P_IDLE_WAVE;
+  pose.k = 0;
+  return pose;
+}
+
 export function loopPose(state: LiquidStateName, clock: number): Pose {
+  if (state === "idle") return idlePose(clock);
   if (state === "thinking") return thinkingPose(clock);
   if (state === "writing") return writingPose(clock);
   return readingPose(clock);
@@ -441,18 +558,24 @@ export function loopPose(state: LiquidStateName, clock: number): Pose {
 
 /** How many bodies a state rests on. The transition to play is decided by this and
  *  nothing else, so a new state gets the right choreography for free. */
-export function bodyCount(state: LiquidStateName): 1 | 2 {
+export function bodyCount(state: LiquidStateName): 1 | 2 | 6 {
+  if (state === "idle") return RING_N;
   return state === "thinking" ? 2 : 1;
 }
 
 /* ── transitions ────────────────────────────────────────────────────────────────── */
 
-export type TransitionKind = "split" | "merge" | "reform" | "enter" | "exit";
+export type TransitionKind = "split" | "merge" | "reform" | "gather" | "bloom" | "enter" | "exit";
 
 export const DURATION: Record<TransitionKind, number> = {
   split: 460,
   merge: 620,
   reform: 320,
+  /* The mark liquefying and reforming are the two longest beats in the component, and
+   * they have to be: six bodies must become one before anything else can happen, and a
+   * bloom that hurries reads as the petals being switched on rather than growing. */
+  gather: 620,
+  bloom: 660,
   enter: 400,
   exit: 260,
 };
@@ -460,6 +583,8 @@ export const DURATION: Record<TransitionKind, number> = {
 export function kindFor(from: LiquidStateName | null, to: LiquidStateName | null): TransitionKind {
   if (from === null) return "enter";
   if (to === null) return "exit";
+  if (from === "idle") return "gather";
+  if (to === "idle") return "bloom";
   const a = bodyCount(from);
   const b = bodyCount(to);
   if (a === 1 && b === 2) return "split";
@@ -702,6 +827,113 @@ function exitPose(from: Pose, p: number): Pose {
   return out;
 }
 
+/**
+ * THE MARK LIQUEFIES — idle becoming any working state.
+ *
+ *   fall in      0.00 – 0.40   the ring closes on IN_2, ACCELERATING inward. Surface
+ *                              tension climbs to K_NECK across the same window, so the
+ *                              petals merge into one mass as they arrive rather than
+ *                              sliding through one another
+ *   keep turning 0.00 – 0.52   the spin does not stop the instant the collapse starts;
+ *                              it carries a fraction of a turn further and settles. A
+ *                              rotation that halts on the first frame reads as a cut
+ *   consolidate  0.06 – 0.54   the central body grows as the petals feed it, and gives
+ *                              one squash as the last of them lands
+ *   become       0.46 – 1.00   only now does the mass do what the target asks — tear in
+ *                              two, or reach out. Six bodies have to be one before
+ *                              anything else can happen, which is why this is long
+ */
+function gatherPose(from: Pose, to: Pose, p: number): Pose {
+  const out = blend(from, to, p, {
+    ringR: [0.0, 0.40, IN_2],
+    petal: [0.10, 0.46, IN_1],
+    spin: [0.0, 0.52, OUT_STRONG],
+    petalPhase: [0.0, 0.40, OUT_STRONG],
+    r0: [0.06, 0.54, OUT_STRONG],
+    r1: [0.06, 0.54, OUT_STRONG],
+    half: [0.46, 0.88, IN_2],
+    lift0: [0.52, 0.92, OUT_2],
+    lift1: [0.56, 1.0, OUT_2],
+    cx: [0.30, 0.86, OUT_STRONG],
+    sx0: [0.44, 1.0, ELASTIC],
+    sy0: [0.44, 1.0, ELASTIC],
+    sx1: [0.48, 1.0, ELASTIC],
+    sy1: [0.48, 1.0, ELASTIC],
+    br: [0.72, 1.0, OUT_STRONG],
+    alpha: [0, 0.2, OUT_STRONG],
+  }, [0.15, 0.8, OUT_STRONG]);
+
+  /* Six things arriving at once squash what they land on. */
+  const land = window_(p, 0.30, 0.46, IN_2) * (1 - window_(p, 0.46, 1.0, ELASTIC));
+  out.sx0 *= mix(1, 1.14, land);
+  out.sy0 *= mix(1, 0.88, land);
+  out.sx1 *= mix(1, 1.14, land);
+  out.sy1 *= mix(1, 0.88, land);
+
+  out.k = mix(0, K_NECK, window_(p, 0.0, 0.34, OUT_STRONG));
+  out.k = mix(out.k, to.k, window_(p, 0.52, 0.84, IN_2));
+  return out;
+}
+
+/**
+ * THE MARK REFORMS — any working state becoming idle.
+ *
+ *   settle   0.00 – 0.30   whatever the working shape was becomes one round body: two
+ *                          dots fall together, a reach comes home
+ *   gather   0.16 – 0.34   it compresses. Exits are authored, and a bloom with no
+ *                          wind-up reads as the petals being switched on
+ *   bloom    0.28 – 1.00   petals grow out of the mass and the ring opens on the POP
+ *                          spring — the loudest curve in the family, for the one beat
+ *                          here that is a surface leaving its origin entirely
+ *   spin up  0.34 – 1.00   the turn starts before the ring has finished opening, so the
+ *                          mark is already alive by the time it is itself again
+ */
+function bloomPose(from: Pose, to: Pose, p: number): Pose {
+  const out = blend(from, to, p, {
+    half: [0.0, 0.30, IN_2],
+    lift0: [0.0, 0.24, IN_2],
+    lift1: [0.0, 0.24, IN_2],
+    br: [0.0, 0.26, IN_1],
+    bx: [0.0, 0.26, IN_1],
+    by: [0.0, 0.26, IN_1],
+    cx: [0.0, 0.44, OUT_STRONG],
+    /* ★ THE PETALS HAVE TO BE SEEN LEAVING THE MASS. Two failures, opposite ways
+     *   round, both visible only on the contact sheet:
+     *
+     *   · shrinking the body on the same window the petals grow left a frame where
+     *     neither was there — a two-pixel speck, mid-gesture;
+     *   · then growing them entirely INSIDE a body that had not yet receded hid them
+     *     until the ring passed its rim, so the bloom read as a blob, a blob, a blob,
+     *     and then suddenly a ring.
+     *
+     *   The mass recedes while the ring opens through it, so at every frame there is
+     *   either a body with petals emerging or a ring — and never a blank. */
+    r0: [0.24, 0.72, OUT_STRONG],
+    r1: [0.24, 0.72, OUT_STRONG],
+    ringR: [0.20, 1.0, POP],
+    petal: [0.18, 0.70, OUT_STRONG],
+    spin: [0.34, 1.0, OUT_STRONG],
+    petalPhase: [0.34, 1.0, OUT_STRONG],
+    sx0: [0.34, 1.0, ELASTIC],
+    sy0: [0.34, 1.0, ELASTIC],
+    sx1: [0.34, 1.0, ELASTIC],
+    sy1: [0.34, 1.0, ELASTIC],
+    alpha: [0, 0.2, OUT_STRONG],
+  }, [0.2, 0.8, OUT_STRONG]);
+
+  const wind = window_(p, 0.16, 0.34, OUT_STRONG) * (1 - window_(p, 0.34, 0.66, IN_1));
+  out.sx0 *= mix(1, 0.86, wind);
+  out.sy0 *= mix(1, 1.12, wind);
+  out.sx1 *= mix(1, 0.86, wind);
+  out.sy1 *= mix(1, 1.12, wind);
+
+  /* Tension stays high while the petals are still emerging from the mass, so they grow
+   * OUT of it instead of appearing beside it. */
+  out.k = mix(from.k, K_NECK, window_(p, 0.06, 0.32, OUT_STRONG));
+  out.k = mix(out.k, to.k, window_(p, 0.46, 0.9, IN_2));
+  return out;
+}
+
 /* ── the machine ────────────────────────────────────────────────────────────────── */
 
 export interface Motion {
@@ -725,6 +957,8 @@ export function poseAt(state: LiquidStateName, clock: number, motion: Motion | n
   if (motion.kind === "enter") return enterPose(loopPose(state, 0), p);
   if (motion.kind === "exit") return exitPose(motion.fromPose, p);
   const to = loopPose(state, 0);
+  if (motion.kind === "gather") return gatherPose(motion.fromPose, to, p);
+  if (motion.kind === "bloom") return bloomPose(motion.fromPose, to, p);
   if (motion.kind === "split") return splitPose(motion.fromPose, to, p);
   if (motion.kind === "merge") return mergePose(motion.fromPose, to, p);
   return reformPose(motion.fromPose, to, p);
@@ -734,10 +968,24 @@ export function poseAt(state: LiquidStateName, clock: number, motion: Motion | n
  *  Two dots still mean thinking and one body still means writing, so the indicator
  *  keeps SAYING something — it just stops performing. */
 export function staticPose(state: LiquidStateName): Pose {
+  if (state === "idle") return idlePose(0);
   if (state === "thinking") {
     return { ...onePose(R_DOT), half: HALF, k: K_APART };
   }
   return onePose(R_ONE);
 }
 
-export const GEOMETRY = { GROUND, R_DOT, R_ONE, HALF, JUMP, SWEEP, K_APART, K_NECK, K_ONE, K_SWELL, P_THINK, P_WRITE, P_READ };
+export const GEOMETRY = {
+  GROUND, R_DOT, R_ONE, HALF, JUMP, SWEEP, K_APART, K_NECK, K_ONE, K_SWELL,
+  RING_N, RING_R, PETAL_LONG, PETAL_SHORT, K_PETAL,
+  P_THINK, P_WRITE, P_READ, P_IDLE_SPIN, P_IDLE_WAVE,
+};
+
+/** The period of a state's loop — one place knows, so a harness sampling a full cycle
+ *  cannot drift from the animation it is sampling. */
+export function periodOf(state: LiquidStateName): number {
+  if (state === "thinking") return P_THINK;
+  if (state === "writing") return P_WRITE;
+  if (state === "reading") return P_READ;
+  return P_IDLE_SPIN;
+}

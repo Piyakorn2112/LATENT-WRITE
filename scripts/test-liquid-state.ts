@@ -29,12 +29,19 @@
  *   seen to fail is not known to be a gate.
  */
 import {
-  DURATION, GEOMETRY, fieldOf, kindFor, loopPose, poseAt, staticPose,
+  DURATION, GEOMETRY, fieldOf, kindFor, loopPose, periodOf, poseAt, staticPose,
   type LiquidStateName, type Motion, type Pose, type TransitionKind,
 } from "../src/components/liquid-state/choreography";
 import { rasterise, sdField } from "../src/components/liquid-state/field";
 
-const STATES: LiquidStateName[] = ["reading", "thinking", "writing"];
+const STATES: LiquidStateName[] = ["idle", "reading", "thinking", "writing"];
+
+/** How long to sample a loop for. The three working loops get a full cycle and a
+ *  little over; `idle` turns once every nine seconds, and sampling nine seconds at
+ *  half-millisecond steps is 18,000 frames of six rotated bodies for no new
+ *  information — the spin is linear, so anything it can hide it hides in the first
+ *  second too. Capped, and SAID, rather than quietly shortened. */
+const SAMPLE_MS = (s: LiquidStateName) => Math.min(periodOf(s) * 1.02, 2600);
 const PX = 54; /* 18 CSS px at 3× — the densest the component ever runs */
 
 let pass = 0;
@@ -78,7 +85,7 @@ for (const from of STATES) {
     /* From several points in the source loop, because the transition starts from the
      * pose that was on screen and must land regardless of which one that was. */
     for (const frac of [0, 0.17, 0.33, 0.5, 0.66, 0.83]) {
-      const clock = frac * (from === "thinking" ? GEOMETRY.P_THINK : from === "writing" ? GEOMETRY.P_WRITE : GEOMETRY.P_READ);
+      const clock = frac * periodOf(from);
       const m = motionFor(from, to, clock);
       m.elapsed = DURATION[m.kind];
       const got = poseAt(to, 0, m);
@@ -156,8 +163,7 @@ function continuityRatio(name: string, frame: (t: number) => Pose, t0: number, t
 }
 
 for (const s of STATES) {
-  const period = s === "thinking" ? GEOMETRY.P_THINK : s === "writing" ? GEOMETRY.P_WRITE : GEOMETRY.P_READ;
-  continuityRatio(`${s} loop`, (t) => loopPose(s, t), 0, period * 1.02);
+  continuityRatio(`${s} loop`, (t) => loopPose(s, t), 0, SAMPLE_MS(s));
 }
 for (const from of STATES) {
   for (const to of STATES) {
@@ -208,14 +214,18 @@ function borderInk(pose: Pose): number {
   return worst;
 }
 for (const s of STATES) {
-  const period = s === "thinking" ? GEOMETRY.P_THINK : s === "writing" ? GEOMETRY.P_WRITE : GEOMETRY.P_READ;
+  /* Containment gets the WHOLE cycle including idle's nine-second turn — a rotating
+   * body's widest reach depends on its angle, so a capped window here really could
+   * miss something. Coarser steps, full coverage. */
+  const period = periodOf(s);
+  const step = period > 4000 ? 20 : 8;
   let worst = 0;
   let at = 0;
-  for (let t = 0; t < period * 2; t += 8) {
+  for (let t = 0; t < period * 2; t += step) {
     const ink = borderInk(loopPose(s, t));
     if (ink > worst) { worst = ink; at = t; }
   }
-  check(`${s} loop stays inside`, worst === 0, `max border alpha ${worst} at ${at}ms`);
+  check(`${s} loop stays inside`, worst === 0, `max border alpha ${worst} at ${at}ms, sampled every ${step}ms over ${period * 2}ms`);
 }
 for (const from of STATES) {
   for (const to of STATES) {
@@ -224,8 +234,7 @@ for (const from of STATES) {
     let worst = 0;
     let at = 0;
     for (const frac of [0, 0.25, 0.5, 0.75]) {
-      const period = from === "thinking" ? GEOMETRY.P_THINK : from === "writing" ? GEOMETRY.P_WRITE : GEOMETRY.P_READ;
-      const m = motionFor(from, to, frac * period);
+      const m = motionFor(from, to, frac * periodOf(from));
       for (let e = 0; e <= DURATION[kind]; e += 8) {
         const ink = borderInk(poseAt(to, 0, { ...m, elapsed: e }));
         if (ink > worst) { worst = ink; at = e; }
@@ -354,6 +363,50 @@ console.log("\nthinking reads as TWO dots for its whole cycle");
     `narrowest ${narrowest.toFixed(2)} device px of ${PX} (≈${(narrowest / PX * 18 + 2 / PX * 18).toFixed(2)}px of daylight at 18px)`);
 }
 
+/* ── 5b. the resting mark reads as a rosette ────────────────────────────────────── */
+console.log("\nidle is a six-petal mark, not a disc");
+{
+  /* Sample a ring just inside the petal tips and count how many times the field
+   * crosses from outside to inside going round. Six lobes means six crossings; a disc
+   * means none, and a ring of separated dots would also give six but would fail the
+   * hub check below. The two together pin the shape. */
+  const countLobes = (t: number) => {
+    const f = fieldOf(loopPose("idle", t));
+    const cy = GEOMETRY.GROUND - GEOMETRY.R_ONE;
+    const probe = GEOMETRY.RING_R + GEOMETRY.PETAL_LONG * 0.72;
+    let crossings = 0;
+    let prev = sdField(f, 0.5 + probe, cy) < 0;
+    for (let i = 1; i <= 720; i++) {
+      const a = (i / 720) * 2 * Math.PI;
+      const inside = sdField(f, 0.5 + Math.cos(a) * probe, cy + Math.sin(a) * probe) < 0;
+      if (inside && !prev) crossings++;
+      prev = inside;
+    }
+    return crossings;
+  };
+  let worstT = 0;
+  let worstN = -1;
+  for (let t = 0; t < GEOMETRY.P_IDLE_WAVE * 2; t += 40) {
+    const n = countLobes(t);
+    if (worstN < 0 || n !== GEOMETRY.RING_N) { worstN = n; worstT = t; if (n !== GEOMETRY.RING_N) break; }
+  }
+  check("six lobes, at every point in the cycle", worstN === GEOMETRY.RING_N,
+    `counted ${worstN} at ${worstT}ms`);
+  /* ★ AND THE CENTRE IS EMPTY, which is the orb's own signature — its measured layout
+   * has a 0.278 hole where a hub would be. This is the assertion that stops a future
+   * tension change from quietly welding the six into a disc: the lobe count above
+   * would still read six from a ring probe, but the mark would have lost its middle. */
+  const centre = sdField(fieldOf(loopPose("idle", 0)), 0.5, GEOMETRY.GROUND - GEOMETRY.R_ONE);
+  check("and the centre is empty", centre > 0, `centre is ${(centre * 18).toFixed(2)}px outside`);
+  /* Negative control: with no petals the ring contributes nothing. Counted as ring
+   * bodies specifically — the hub is a body too, and asserting "no bodies at all"
+   * would be asserting the mark has no centre. */
+  const bare = { ...loopPose("idle", 0), petal: 0 };
+  const petalsOf = (pose: Pose) => fieldOf(pose).bodies.filter((b) => b.rot !== undefined && b.rx > 1e-3);
+  check("negative control — a mark with no petals has no petals", petalsOf(bare).length === 0,
+    `${petalsOf(bare).length} petals`);
+}
+
 /* ── 6. position does not overshoot, shape does ring ────────────────────────────── */
 console.log("\nposition and shape are on different curves");
 {
@@ -404,10 +457,15 @@ console.log("\nreduced motion keeps the meaning");
   const drawn = (pose: Pose) => fieldOf(pose).bodies.filter((b) => b.rx > 1e-3);
   const t = drawn(staticPose("thinking"));
   const w = drawn(staticPose("writing"));
+  const idle = drawn(staticPose("idle"));
   const tp = staticPose("thinking");
   check("thinking is two separated bodies at rest", t.length === 2 && tp.half > 0.1 && t.every((b) => Math.abs(b.rx - b.ry) < 1e-9));
   check("writing is one body at rest", w.length === 2 && staticPose("writing").half === 0);
-  check("the two are visibly different", Math.abs(t[0].rx - w[0].rx) > 0.02);
+  const idlePetals = fieldOf(staticPose("idle")).bodies.filter((b) => b.rot !== undefined && b.rx > 1e-3);
+  check("idle is six petals around an empty centre at rest",
+    idlePetals.length === GEOMETRY.RING_N && idle.length === GEOMETRY.RING_N,
+    `${idlePetals.length} petals, ${idle.length - idlePetals.length} other bodies drawn`);
+  check("the states are visibly different", Math.abs(t[0].rx - w[0].rx) > 0.02);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

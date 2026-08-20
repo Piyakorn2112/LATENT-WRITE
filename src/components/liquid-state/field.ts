@@ -72,6 +72,10 @@ export interface Body {
   /** blend radius used when folding THIS body into the ones before it. Unit box.
    *  0 = hard union, and for the first body it is unused. */
   k: number;
+  /** rotation of the body's own axes, radians. Only the resting mark's petals use it —
+   *  they point outward from a ring, and a radially elongated oval is the difference
+   *  between the app's rosette and a ring of dots. Omitted means zero. */
+  rot?: number;
 }
 
 /** A frame of the mass. */
@@ -121,13 +125,29 @@ export function sdEllipse(px: number, py: number, rx: number, ry: number): numbe
  *  inside. Exported so a probe can read exactly the geometry the painter paints —
  *  the picture and any measurement of it must come from one function, or they will
  *  eventually disagree and nothing will say so. */
+/** Distance to one body, in its own frame. */
+function sdBody(b: Body, x: number, y: number): number {
+  let dx = x - b.x;
+  let dy = y - b.y;
+  if (b.rot) {
+    const c = Math.cos(-b.rot);
+    const s = Math.sin(-b.rot);
+    const rx = dx * c - dy * s;
+    dy = dx * s + dy * c;
+    dx = rx;
+  }
+  return sdEllipse(dx, dy, b.rx, b.ry);
+}
+
 export function sdField(field: Field, x: number, y: number): number {
   const { bodies } = field;
-  if (bodies.length === 0) return Infinity;
-  let d = sdEllipse(x - bodies[0].x, y - bodies[0].y, bodies[0].rx, bodies[0].ry);
-  for (let i = 1; i < bodies.length; i++) {
-    const b = bodies[i];
-    d = sminCircular(d, sdEllipse(x - b.x, y - b.y, b.rx, b.ry), b.k);
+  let d = Infinity;
+  let first = true;
+  for (const b of bodies) {
+    if (b.rx <= 0 || b.ry <= 0) continue;
+    const di = sdBody(b, x, y);
+    d = first ? di : sminCircular(d, di, b.k);
+    first = false;
   }
   return d;
 }
@@ -164,12 +184,25 @@ export function rasterise(
   const brx = new Float64Array(n);
   const bry = new Float64Array(n);
   const bk = new Float64Array(n);
+  const bc = new Float64Array(n);
+  const bs = new Float64Array(n);
+  /* ★ BODIES WITH NO RADIUS ARE DROPPED HERE, ONCE, rather than evaluated and
+   *   discarded per pixel. They are already inert (sdEllipse returns Infinity), so
+   *   this changes no pixel — it just stops the resting mark's six petals costing
+   *   anything in the three states that do not have a ring. Verified by the gates,
+   *   which compare rendered alpha and would show any difference immediately. */
+  let n2 = 0;
   for (let i = 0; i < n; i++) {
-    bx[i] = bodies[i].x * size;
-    by[i] = bodies[i].y * size;
-    brx[i] = bodies[i].rx * size;
-    bry[i] = bodies[i].ry * size;
-    bk[i] = bodies[i].k * size;
+    const b = bodies[i];
+    if (b.rx <= 0 || b.ry <= 0) continue;
+    bx[n2] = b.x * size;
+    by[n2] = b.y * size;
+    brx[n2] = b.rx * size;
+    bry[n2] = b.ry * size;
+    bk[n2] = b.k * size;
+    bc[n2] = b.rot ? Math.cos(-b.rot) : 1;
+    bs[n2] = b.rot ? Math.sin(-b.rot) : 0;
+    n2++;
   }
 
   for (let py = 0; py < size; py++) {
@@ -177,8 +210,12 @@ export function rasterise(
     for (let px = 0; px < size; px++) {
       const sx = px + 0.5;
       let d = Infinity;
-      for (let i = 0; i < n; i++) {
-        const di = sdEllipse(sx - bx[i], sy - by[i], brx[i], bry[i]);
+      for (let i = 0; i < n2; i++) {
+        const ux = sx - bx[i];
+        const uy = sy - by[i];
+        const c = bc[i];
+        const sn = bs[i];
+        const di = sdEllipse(ux * c - uy * sn, ux * sn + uy * c, brx[i], bry[i]);
         d = i === 0 ? di : sminCircular(d, di, bk[i]);
       }
       let cov = 0.5 - d;
