@@ -111,21 +111,21 @@ function enterRow(to: LiquidStateName): Row {
   };
 }
 
+/* ★ THESE SHEETS SHOW THE CANVAS LAYER ONLY. The resting mark is the app's WebGL orb
+ *   on its own layer, so `idle` is blank here and the first third of every gather is
+ *   the canvas waiting to be handed the picture. To see the hand-over itself, use the
+ *   dev harness or verify:liquid-state — a still of half a cross-fade is not a thing
+ *   anyone can judge anyway. */
 const ROWS: Row[] = [
-  /* Idle turns once every nine seconds, so a full cycle across fourteen cells shows
-   * nothing but the reach-wave; a quarter turn is what actually reads. */
-  loopRow("idle", 0.28),
-  loopRow("thinking"),
   loopRow("writing"),
+  loopRow("thinking"),
   loopRow("reading"),
-  transitionRow("idle", "thinking"),
   transitionRow("idle", "writing"),
-  transitionRow("thinking", "idle"),
+  transitionRow("idle", "thinking"),
   transitionRow("writing", "idle"),
-  transitionRow("reading", "thinking"),
   transitionRow("thinking", "writing", GEOMETRY.P_THINK * 0.33),
   transitionRow("writing", "thinking"),
-  enterRow("thinking"),
+  transitionRow("reading", "thinking"),
 ];
 
 /** Draw one pose into a cell of `cell` device px, scaled up by `zoom` with no smoothing. */

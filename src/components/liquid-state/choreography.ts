@@ -111,45 +111,48 @@ const K_NECK = 0.105;
  *  circle. See field.ts on why every body carries its own k. */
 const K_ONE = 0;
 /* ── the resting mark ───────────────────────────────────────────────────────────────
- * ★★ THE APP'S OWN ORB, BUILT OUT OF THE SAME LIQUID. The toolbar's intelligence orb
- *    is six flat petals in a ring, and until now the indicator had nothing to say when
- *    the model was NOT working — it simply appeared. That meant the mark could only be
- *    SWAPPED for the working shape, and a swap between two different renderers is a
- *    cross-fade however it is dressed up.
+ * ★★ IDLE IS THE APP'S ACTUAL ORB — the WebGL `OrbEngine`, not a drawing of it.
  *
- *    Six petals is a metaball's natural subject. Rendering the resting mark in the same
- *    field means the orb can LIQUEFY: the ring collapses inward, the petals feed a
- *    single mass, and that mass tears into two dots or reaches out to write. Coming
- *    back, it blooms. Nothing cross-fades, and the thing on screen is one object
- *    throughout.
+ *    An earlier version rebuilt the orb as six metaball petals so the mark could morph
+ *    natively. The geometry was right (taken from `orbPhysics.ts`) and it still looked
+ *    wrong: the orb is a lens with a per-petal palette and per-channel dispersion, and
+ *    six flat blobs of one colour is not that. A component whose whole job is to BE the
+ *    app's mark at rest cannot ship an approximation of it.
  *
- *    ★★ THE PROPORTIONS ARE THE ORB'S OWN, TAKEN FROM `orbPhysics.ts` RATHER THAN
- *       GUESSED. Two versions were drawn by eye first and both read as an ASTERISK,
- *       because a petal guessed at is long and thin and the orb's are neither. In the
- *       shader's p-space (slot |p| ≤ 0.926) the measured layout is ring radius 0.556,
- *       half-length 0.255, aspect 1.15 — so the shapes are very nearly CIRCLES, and
- *       there is an EMPTY CENTRE of 0.278 where a hub would go. Scaled here so the
- *       outer extent matches R_ONE, which is what makes the mark the same size as the
- *       mass it becomes: ×0.2824.
+ *    So the orb renders itself, and the two pictures hand over. The hand-over is the
+ *    craft: the orb SHRINKS AND BLURS INTO A DROPLET first, and only once it is a small
+ *    soft blob — a shape the metaball can match exactly — does the canvas take it. Two
+ *    pictures that are the same soft blob at the same instant swap without a seam, and
+ *    a couple of pixels of blur is what makes them the same. That is the one place
+ *    blur is used here, and it is used because it is the only thing that works.
  *
- *       Read the source before inventing the shape. */
-const RING_N = 6;
-const RING_R = 0.157;
-/** Petal half-length, along the radius. The inner ends stop at 0.085, which is the
- *  orb's empty centre — this mark has a hole, not a hub. */
-const PETAL_LONG = 0.072;
-/** Petal half-width. Aspect 1.15, and under half the ring radius (2×0.063 against
- *  0.157 of arc) so the six stay countable. */
-const PETAL_SHORT = 0.063;
-/** Petals barely blend: the rosette's lobes have to stay countable. */
-const K_PETAL = 0.006;
-/** How far a petal reaches on its turn, and how much it swells doing it. Both modest:
- *  the orb's own note is that the six centres sit at ONE radius (measured std. dev.
- *  0.4%), so the ring reads even and the life comes from size, not from travel. */
-const PETAL_REACH = 0.08;
-const PETAL_SWELL = 0.20;
+ *    The orb's own layer is driven from these pose channels, on the same clock as
+ *    everything else, so there is no second timeline to keep in step. */
+/** What the orb shrinks to before the canvas takes over, and how soft both go. */
+const ORB_SMALL = 0.46;
+const ORB_BLUR = 2.7;
+/** The blob the canvas picks up — sized to read as the shrunken, blurred orb. */
+const HANDOFF_R = 0.108;
 
-/** The blend that joins the reaching lobe to the writing body. Its own, because the
+/* ── the pen ────────────────────────────────────────────────────────────────────────
+ * ★★ WRITING IS A PEN, and it needs a shape the rest of this file cannot make. A nib
+ *    is a POINT, and no union of ellipses produces one: every blend rounds it off and
+ *    a smaller ellipse is just a smaller blob. `field.ts` grew a rounded cone for it —
+ *    an exact SDF, so the nib is a real corner and the barrel still blends with the
+ *    ink it is laying down. */
+const PEN_LEN = 0.33;
+const PEN_R = 0.066;
+const PEN_TIP = 0.009;
+/** Held at 135°: barrel up and to the right, nib down and to the left. */
+const PEN_ROT = 2.36;
+/** How far the nib travels across the line, each way from centre. */
+const PEN_TRAVEL = 0.085;
+/** The line it leaves. */
+const INK_H = 0.026;
+const INK_Y = GROUND - INK_H;
+const K_INK = 0.012;
+
+/** The blend that joins the reaching lobe/** The blend that joins the reaching lobe to the writing body. Its own, because the
  *  lobe has to stay soft-edged at the same moment the merged pair is at k=0 — and it
  *  has to be SMALL: the band is 3.4×k, and at 0.062 that is 0.21 units, nearly the
  *  width of the body itself, so the blend filled the waist and the reach read as the
@@ -181,29 +184,47 @@ export interface Pose {
   bx: number;
   by: number;
   br: number;
-  /** the resting mark: ring radius, petal scale (0 = no ring at all), the ring's
-   *  rotation, and where the reach-wave has got to around it */
-  ringR: number;
-  petal: number;
-  spin: number;
-  petalPhase: number;
+  /** the pen: nib position, angle, barrel radius and length. penR = 0 means no pen. */
+  penX: number;
+  penY: number;
+  penRot: number;
+  penR: number;
+  penLen: number;
+  /** the line the pen leaves: centre offset from cx, half-length, and how present it
+   *  is (0 = no ink at all; it scales the stroke's THICKNESS, so the line thins away
+   *  rather than being switched off). */
+  inkX: number;
+  inkW: number;
+  inkA: number;
+  /** the orb's own layer, driven from the same clock as the canvas so the hand-over
+   *  never has two timelines to keep in step */
+  orbScale: number;
+  orbBlur: number;
+  orbAlpha: number;
   /** surface tension */
   k: number;
-  /** whole-mass opacity, for the entrance and exit only */
+  /** how far past one device pixel the edge ramp runs. Non-zero only across the
+   *  hand-over, where it is what makes the two pictures the same picture. */
+  soft: number;
+  /** whole-mass opacity */
   alpha: number;
 }
 
 const POSE_KEYS = [
   "cx", "half", "r0", "r1", "lift0", "lift1",
   "sx0", "sy0", "sx1", "sy1", "bx", "by", "br",
-  "ringR", "petal", "spin", "petalPhase", "k", "alpha",
+  "penX", "penY", "penRot", "penR", "penLen", "inkX", "inkW", "inkA",
+  "orbScale", "orbBlur", "orbAlpha", "soft", "k", "alpha",
 ] as const;
 
 function onePose(r: number, cx = 0.5): Pose {
   return {
     cx, half: 0, r0: r, r1: r, lift0: 0, lift1: 0,
     sx0: 1, sy0: 1, sx1: 1, sy1: 1, bx: 0, by: 0, br: 0,
-    ringR: 0, petal: 0, spin: 0, petalPhase: 0, k: K_ONE, alpha: 1,
+    penX: 0, penY: INK_Y - INK_H * 0.25, penRot: PEN_ROT, penR: 0, penLen: PEN_LEN,
+    inkX: 0, inkW: 0, inkA: 0,
+    orbScale: ORB_SMALL, orbBlur: ORB_BLUR, orbAlpha: 0,
+    k: K_ONE, soft: 0, alpha: 1,
   };
 }
 
@@ -236,17 +257,24 @@ export function fieldOf(pose: Pose): Field {
    *   has risen gives it a neck that stretches, thins, snaps — and reforms on the way
    *   back down. */
   const swell = Math.min(pose.br / (0.34 * R_ONE), 1);
+  const penScale = Math.min(pose.penR / PEN_R, 1);
+  const penLen = pose.penLen * penScale;
   const flown = 1 - Math.min(Math.abs(pose.by) / 0.30, 1);
   /* ★★ AND TIES THE PAIR'S BLEND TO THEIR SEPARATION, which is the same invariant
    *    pointing the other way. `smin(a, a, k)` is `a − k` exactly: two COINCIDENT
-   *    bodies blended at k are one body INFLATED BY k. Authored k is meant to draw a
-   *    neck across a gap, so at zero gap it is drawing nothing and must be zero — and
-   *    if it is not, the merged blob is silently a different size than R_ONE says.
-   *    Measured before this existed: the entrance into `reading` held k at K_NECK over
-   *    a coincident pair and painted a body 5.7 device pixels too wide, off the left of
-   *    the canvas. Enforcing it here rather than at each author site means no
-   *    transition can get it wrong, and none has to remember. */
-  const pair = Math.min(pose.half / (0.5 * pose.r0), 1);
+   *    bodies blended at k are one body INFLATED BY k, so authored k must vanish as
+   *    the gap does or the merged blob is silently the wrong size (measured before
+   *    this existed: 5.7 device pixels too wide, off the left of the canvas).
+   *
+   *    ★★ AND THE SCALE IT IS MEASURED AGAINST IS A CONSTANT, not the bodies' own
+   *       radius. The first version divided the separation by `0.5 · r0` — a ratio of
+   *       two quantities that BOTH go to zero at a merge, so its derivative blows up
+   *       exactly where it matters: the blend radius moved 34% in half a millisecond
+   *       while every pose parameter was smooth to five decimals. Against K_NECK — the
+   *       widest band anything here ever asks for — the taper is well behaved
+   *       everywhere, and smoothstepped so it has no corner at either end. */
+  const gap = Math.min(pose.half / K_NECK, 1);
+  const pair = gap * gap * (3 - 2 * gap);
   return {
     bodies: [
       {
@@ -270,54 +298,48 @@ export function fieldOf(pose: Pose): Field {
         ry: pose.br,
         k: K_SWELL * swell * swell * flown,
       },
-      ...ringBodies(pose),
+      /* The ink first, so the pen blends INTO the line it is drawing rather than the
+       * other way round — the fold order is what decides which shape the neck belongs
+       * to, and a nib growing a skirt where it meets its own stroke is the artifact
+       * that order prevents. */
+      {
+        /* ★ A CAPSULE, NOT AN ELLIPSE. A stroke of ink has round ends, and more to the
+         *   point an ellipse of half-width 0.0001 and half-height 0.026 is 217:1, far
+         *   past where iq's ellipse approximation holds — it reported near-zero
+         *   distance the length of the column and painted a line from the top of the
+         *   canvas to the bottom. A capsule is a cone with equal radii, its SDF is
+         *   exact at every length, and at zero length it is a dot, which is exactly
+         *   what a pen that has just touched down should leave. */
+        x: pose.cx + pose.inkX - pose.inkW,
+        y: INK_Y,
+        rx: INK_H * pose.inkA,
+        ry: INK_H * pose.inkA,
+        tip: INK_H * pose.inkA,
+        len: pose.inkW * 2,
+        k: K_INK,
+      },
+      {
+        /* A cone runs from its origin along its own +x, so the body sits at the BARREL
+         * and the nib is what the choreography actually positions.
+         *
+         * ★ THE PEN'S LENGTH IS TIED TO ITS RADIUS, and both the body's `len` and the
+         *   barrel offset use the SAME derived value. An earlier version switched the
+         *   cone off with `len: penR > 1e-4 ? penLen : 0`, which is a discrete branch
+         *   in the middle of a continuous animation: a needle 0.34 long became a
+         *   0.0001 dot between two frames every time a transition took the pen away.
+         *   A pen that shrinks retracts into its own nib instead. */
+        x: pose.cx + pose.penX - Math.cos(pose.penRot) * penLen,
+        y: pose.penY - Math.sin(pose.penRot) * penLen,
+        rx: pose.penR,
+        ry: pose.penR,
+        tip: PEN_TIP * penScale,
+        len: penLen,
+        rot: pose.penRot,
+        k: K_INK,
+      },
     ],
+    soft: pose.soft,
   };
-}
-
-/** The resting mark's petals.
- *
- *  ★ THE REACH TRAVELS AROUND THE RING rather than pulsing in unison — petal i is a
- *    sixth of a cycle behind petal i−1, which is the orb's own character (each petal
- *    reaches out and swells, offset around the ring). Distributing it HERE, from one
- *    scalar phase in the pose, keeps the pose small enough that every transition can
- *    still blend it parameter by parameter.
- *
- *  ★ And k is tied to the petal scale, so a mark with no petals contributes nothing —
- *    the same invariant the swell and the pair obey. */
-function ringBodies(pose: Pose): Field["bodies"] {
-  if (pose.petal <= 1e-4) return [];
-  const collapse = 1 - Math.min(pose.ringR / RING_R, 1);
-  /* ★ THE RING IS CENTRED WHERE A RESTING MASS IS CENTRED, and that is a constant, not
-   *   a function of the body. An earlier version derived it from the body's own centre
-   *   and floated the mark with `lift0` — which is fine while the mark has no body and
-   *   wrong the instant a transition grows one, because the lift and the radius then
-   *   both push it up and the mass sails off the top of the canvas (measured: 0.033
-   *   from the top edge, clipped, on three transitions). A full-size body resting on
-   *   the floor is centred at exactly GROUND − R_ONE, so the mark and the mass it
-   *   becomes share a centre by construction and nothing has to be corrected. */
-  const cy = GROUND - R_ONE;
-  const out: Field["bodies"] = [];
-  for (let i = 0; i < RING_N; i++) {
-    const reach = 0.5 - 0.5 * Math.cos(2 * Math.PI * (pose.petalPhase - i / RING_N));
-    const ang = pose.spin + (i * 2 * Math.PI) / RING_N;
-    const rr = pose.ringR * (1 + PETAL_REACH * reach);
-    out.push({
-      x: pose.cx + Math.cos(ang) * rr,
-      y: cy + Math.sin(ang) * rr,
-      rx: PETAL_LONG * pose.petal * (1 + PETAL_SWELL * reach),
-      ry: PETAL_SHORT * pose.petal * (1 + PETAL_SWELL * reach),
-      rot: ang,
-      /* ★ TENSION RISES AS THE RING CLOSES, derived rather than authored. At rest the
-       *   six are separate and barely aware of each other; the moment a transition
-       *   starts pulling them inward they have to become ONE mass, and deriving that
-       *   from how far the ring has collapsed means no transition has to remember to
-       *   ramp it — and it can never be left on at rest, where it would weld the mark
-       *   into a disc. */
-      k: (K_PETAL + K_NECK * collapse) * pose.petal,
-    });
-  }
-  return out;
 }
 
 /* ── deterministic jitter ───────────────────────────────────────────────────────────
@@ -336,10 +358,9 @@ function jitter(cycle: number, salt: number): number {
 const P_THINK = 820;
 const P_WRITE = 1150;
 const P_READ = 1560;
-/** One turn every nine seconds. Slow enough never to compete with a working state for
- *  attention, fast enough that the mark is not a static logo. */
-const P_IDLE_SPIN = 9000;
-const P_IDLE_WAVE = 2400;
+/** Idle has no loop of its own — the orb animates itself. The number is only what a
+ *  harness sweeps when it wants "a cycle of idle". */
+const P_IDLE = 1000;
 
 /** One dot's own beat. φ = 0 is REST ON THE FLOOR, which is what every transition into
  *  `thinking` hands over to.
@@ -462,95 +483,113 @@ function readingPose(clock: number): Pose {
 }
 
 /**
- * WRITING — the body reaches out to the right and gathers itself back, over and over.
+ * WRITING — a pen, drawing.
  *
- * ★ THE FIRST VERSION OF THIS WAS INVISIBLE, and it is worth saying why rather than
- *   just replacing it. It was a swell riding *inside* the body, deforming the
- *   silhouette from within. At 96px on a contact sheet that is a lovely, subtle thing.
- *   At 18px it is a circle. Anything this state says has to be said in the OUTLINE,
- *   because the outline is all there is at six pixels of radius.
+ *   stroke   0.00 – 0.70   the nib travels left to right along the line, bobbing twice
+ *                          the way a hand does, and the ink grows behind it. The travel
+ *                          is power4.inOut, so the pen is quickest through the middle
+ *                          of the stroke and settles at each end — nobody writes at a
+ *                          constant speed
+ *   lift     0.70 – 0.86   the nib comes off the paper and the pen tips back; the ink
+ *                          it has laid stops growing and starts to go
+ *   return   0.80 – 1.00   back to the left, above the line, faster than it wrote —
+ *                          the carriage return, and the beat that makes the loop read
+ *                          as one stroke repeated rather than a shape sliding about
  *
- * So the swell now carries the surface PAST the rim: the mass grows a reach on its
- * right, the body leans after it, and then surface tension takes it home —
- *
- *   reach    0.06 – 0.46   the swell is born at the centre and carries out to 0.92R,
- *                          DECELERATING (IN_OUT_3) — it is being extruded, not thrown
- *   retract  0.46 – 0.74   back to nothing on IN_2, ACCELERATING, because a surface
- *                          under tension comes home faster the further it has to go
- *   recoil   0.68 – 1.00   the body overshoots inward and rings back on ELASTIC_TIGHT.
- *                          The tight elastic, not the long one: this beat has to have
- *                          finished before the next reach begins or the two blur
- *
- * Reach and recoil deliberately overlap by 60ms, so the body is already gathering
- * while the last of the reach is still coming home. Nothing here is symmetric.
+ * The pen is held at a constant 135° with a small wobble; a nib whose angle chases its
+ * own travel reads as a compass needle, not a hand.
  */
 function writingPose(clock: number): Pose {
   const f = clock / P_WRITE;
   const g = f - Math.floor(f);
-  const amp = 0.94 + 0.12 * jitter(Math.floor(f), 3);
+  const amp = 0.92 + 0.16 * jitter(Math.floor(f), 3);
 
-  const A = 0.06;
-  const OUT = 0.46;
-  const HOME = 0.74;
-  /* ★ FAR ENOUGH OUT TO BE A LOBE. At 0.92R with a 0.70R swell the two circles
-   *   overlapped so far that the union was an ellipse, and the state read as the body
-   *   inflating rather than reaching. A smaller swell carried further makes a
-   *   silhouette with a shoulder and a tip, which is a direction. */
-  const FAR = 1.22 * R_ONE * amp;
-  const SWELL_R = 0.50 * R_ONE;
+  const END = 0.70;
+  const LIFT = 0.86;
 
-  let bx = 0;
-  let br = 0;
-  let reach = 0;
-  if (g >= A && g < HOME) {
-    if (g < OUT) {
-      const t = (g - A) / (OUT - A);
-      reach = IN_OUT_3(t);
-      bx = FAR * reach;
-      /* Born quickly, so the reach has a body from the first frames rather than
-       * emerging as a point. */
-      br = SWELL_R * Math.min(t / 0.22, 1);
-    } else {
-      const t = (g - OUT) / (HOME - OUT);
-      reach = 1 - IN_2(t);
-      bx = FAR * reach;
-      br = SWELL_R * (1 - IN_1(t));
-    }
+  let nib: number;
+  let lift = 0;
+  if (g < END) {
+    nib = mix(-PEN_TRAVEL, PEN_TRAVEL * amp, IN_OUT_3(g / END));
+  } else if (g < LIFT) {
+    nib = PEN_TRAVEL * amp;
+    lift = window_(g, END, LIFT, OUT_2);
+  } else {
+    /* ★ THE RETURN'S WINDOW STARTS WHERE THE BRANCH DOES. It used to open at 0.80
+     *   while the branch is only reached at 0.86, so the first frame of the return was
+     *   already 30% along the curve and the nib jumped 0.011 — the continuity gate
+     *   read 1.16 against an ideal 8. A window that begins before its own branch is
+     *   the same bug as a beat that does not meet. */
+    nib = mix(PEN_TRAVEL * amp, -PEN_TRAVEL, window_(g, LIFT, 1.0, IN_OUT_3));
+    /* ★ THE NIB COMES DOWN ON AN ACCELERATING CURVE, not a decelerating one. Partly
+     *   because that is what lowering a hand does, and partly because OUT_STRONG's
+     *   start is close to vertical: the descent moved as far in the first four
+     *   milliseconds as in the next forty, which the continuity gate reads as a
+     *   near-step (ratio 2.35 against an ideal 8). A sub-frame event at 60Hz is detail
+     *   nobody can see and everybody pays for. */
+    lift = 1 - window_(g, 0.90, 1.0, IN_1);
   }
 
-  /* The body leans after its own reach, and recoils when it lets go. */
-  const recoil = window_(g, HOME - 0.06, HOME + 0.02, IN_2) * (1 - window_(g, HOME + 0.02, 1.0, ELASTIC_TIGHT));
-  const sx = (1 + 0.06 * reach) * mix(1, 0.93, recoil);
+  /* Two humps across the stroke, the size of a letter's ascender. */
+  const bob = g < END ? Math.sin(2 * Math.PI * 2 * (g / END)) * 0.014 : 0;
 
-  /* ★ THE BODY GIVES UP MASS TO ITS OWN REACH. Partly it is what a volume of liquid
-   *   does, and partly it is the only way the lobe fits: at full extension the far
-   *   edge of the reach is 0.91 across a box that must not be touched at 1.0. */
-  const r = R_ONE * (1 - 0.09 * reach);
+  const pose = onePose(0);
+  pose.penR = PEN_R;
+  pose.penLen = PEN_LEN;
+  pose.penX = nib;
+  pose.penY = INK_Y - INK_H * 0.25 - bob - lift * 0.075;
+  /* The wobble is on the ANGLE and it is tiny: a hand rocks, it does not steer. */
+  pose.penRot = PEN_ROT + Math.sin(2 * Math.PI * (g * 2 + 0.2)) * 0.045;
 
-  return {
-    ...onePose(r),
-    sx0: sx, sy0: 1 / sx, sx1: sx, sy1: 1 / sx,
-    bx, by: 0, br,
-  };
+  /* The ink runs from where the stroke started to wherever the nib got to, and fades
+   * once the pen has left it.
+   *
+   * ★ ITS LENGTH IS HELD AFTER THE STROKE ENDS AND ONLY ITS OPACITY GOES. Recomputing
+   *   the half-length as zero the moment the pen lifted collapsed a line 0.115 wide to
+   *   nothing between two frames — the continuity gate read a ratio of 1.39 against an
+   *   ideal 8, which is the signature of a step rather than a fast curve. A line does
+   *   not un-draw itself from both ends. */
+  const drawnTo = g < END ? nib : PEN_TRAVEL * amp;
+  const half = (drawnTo + PEN_TRAVEL) / 2;
+  /* ★ THE LINE IS TOUCHED DOWN, NOT SWITCHED ON. Without the touch-down ramp `inkA`
+   *   went from 0 at the end of one cycle to 1 at the start of the next, and since the
+   *   stroke has no length yet at that moment it appeared as a full-thickness DOT in
+   *   one frame, every cycle. A nib arrives on the paper; it does not blink on. */
+  const touch = Math.min(g / 0.05, 1);
+  const fade = touch * (g < END ? 1 : 1 - window_(g, END, 0.98, IN_1));
+  pose.inkX = -PEN_TRAVEL + half;
+  pose.inkW = Math.max(half, 0);
+  pose.inkA = Math.max(fade, 0);
+
+  /* ★ THE DEAD BODY IS PARKED AT THE NIB. Writing has no mass of its own — `r0` is
+   *   zero and the main body is not drawn — but every transition INTO this state
+   *   shrinks a real mass down to it, and every transition out grows one back. Where
+   *   that mass converges decides whether the pen grows out of it or beside it: parked
+   *   at the centre, the merge showed a round blob with a stub of pen sprouting off to
+   *   one side. Parked at the nib, the pen extends from exactly where the mass went. */
+  pose.lift0 = GROUND - pose.penY;
+  pose.lift1 = pose.lift0;
+  return pose;
 }
 
-/** IDLE — the mark at rest. It turns slowly and a reach travels around it; nothing
- *  else happens, because nothing else is happening. */
-function idlePose(clock: number): Pose {
-  /* No central body at all — the orb's centre is empty, and a radius of zero is inert
-   * by construction. The mark's position is the ring's, and the ring's centre is where
-   * the mass it becomes will rest. */
-  const pose = onePose(0);
-  pose.ringR = RING_R;
-  pose.petal = 1;
-  pose.spin = (clock / P_IDLE_SPIN) * 2 * Math.PI;
-  pose.petalPhase = clock / P_IDLE_WAVE;
+/** IDLE — the orb has the picture and the canvas has nothing. The blob the canvas
+ *  parks at is the shape it will pick the hand-over up from, so it is defined here
+ *  even though it is invisible: a transition blends from a pose, not from nothing. */
+function idlePose(): Pose {
+  const pose = onePose(HANDOFF_R);
+  pose.lift0 = R_ONE - HANDOFF_R;
+  pose.lift1 = pose.lift0;
+  pose.orbScale = 1;
+  pose.orbBlur = 0;
+  pose.orbAlpha = 1;
+  pose.soft = ORB_BLUR;
+  pose.alpha = 0;
   pose.k = 0;
   return pose;
 }
 
 export function loopPose(state: LiquidStateName, clock: number): Pose {
-  if (state === "idle") return idlePose(clock);
+  if (state === "idle") return idlePose();
   if (state === "thinking") return thinkingPose(clock);
   if (state === "writing") return writingPose(clock);
   return readingPose(clock);
@@ -558,8 +597,7 @@ export function loopPose(state: LiquidStateName, clock: number): Pose {
 
 /** How many bodies a state rests on. The transition to play is decided by this and
  *  nothing else, so a new state gets the right choreography for free. */
-export function bodyCount(state: LiquidStateName): 1 | 2 | 6 {
-  if (state === "idle") return RING_N;
+export function bodyCount(state: LiquidStateName): 1 | 2 {
   return state === "thinking" ? 2 : 1;
 }
 
@@ -641,6 +679,14 @@ function splitPose(from: Pose, to: Pose, p: number): Pose {
     bx: [0.0, 0.22, IN_2],
     by: [0.0, 0.22, IN_2],
     alpha: [0, 0.2, OUT_STRONG],
+    /* A pen retracts into its own nib first, and the mass grows from there. Both
+     * happen before the tear, so the shape is one body again by the time it parts. */
+    penR: [0.0, 0.30, IN_1],
+    penLen: [0.0, 0.30, IN_1],
+    inkA: [0.0, 0.20, IN_1],
+    inkW: [0.0, 0.26, IN_1],
+    penX: [0.06, 0.40, OUT_STRONG],
+    penY: [0.06, 0.40, OUT_STRONG],
   }, [0.1, 0.8, OUT_STRONG]);
 
   /* The gather, as a multiplier on top of the ring. It has to be multiplicative: the
@@ -698,6 +744,14 @@ function mergePose(from: Pose, to: Pose, p: number): Pose {
     bx: [0.90, 1.0, OUT_STRONG],
     by: [0.90, 1.0, OUT_STRONG],
     alpha: [0, 0.2, OUT_STRONG],
+    /* If the target is a pen, it grows LAST and out of where the mass ended up — the
+     * radii above have already carried the mass to the nib by then. */
+    penX: [0.52, 0.88, OUT_STRONG],
+    penY: [0.52, 0.88, OUT_STRONG],
+    penR: [0.62, 1.0, OUT_STRONG],
+    penLen: [0.62, 1.0, OUT_STRONG],
+    inkA: [0.80, 1.0, OUT_STRONG],
+    inkW: [0.80, 1.0, OUT_STRONG],
   }, [0.15, 0.8, OUT_STRONG]);
 
   const hit = window_(p, 0.44, 0.56, IN_2) * (1 - window_(p, 0.56, 1.0, ELASTIC));
@@ -845,12 +899,24 @@ function exitPose(from: Pose, p: number): Pose {
  */
 function gatherPose(from: Pose, to: Pose, p: number): Pose {
   const out = blend(from, to, p, {
-    ringR: [0.0, 0.40, IN_2],
-    petal: [0.10, 0.46, IN_1],
-    spin: [0.0, 0.52, OUT_STRONG],
-    petalPhase: [0.0, 0.40, OUT_STRONG],
-    r0: [0.06, 0.54, OUT_STRONG],
-    r1: [0.06, 0.54, OUT_STRONG],
+    /* The orb draws its own exit: it falls in on IN_2 and softens as it goes, so by
+     * the time it hands over it is a small blurred droplet and nothing else. */
+    orbScale: [0.0, 0.34, IN_2],
+    orbBlur: [0.0, 0.34, IN_2],
+    /* ★ THE CANVAS IS REVEALED INSTANTLY UNDER THE ORB and only the orb fades. Two
+     *   layers cross-fading at 50% cover 75% of the pixel, so a symmetric dissolve
+     *   DIPS — the mark would go momentarily translucent every time it started work.
+     *   Reveal below, fade above. */
+    alpha: [0.26, 0.30, OUT_STRONG],
+    orbAlpha: [0.30, 0.40, OUT_STRONG],
+    soft: [0.36, 0.62, OUT_STRONG],
+    r0: [0.30, 0.62, OUT_STRONG],
+    r1: [0.30, 0.62, OUT_STRONG],
+    penR: [0.52, 0.92, OUT_STRONG],
+    penLen: [0.52, 0.92, OUT_STRONG],
+    penX: [0.46, 0.90, OUT_STRONG],
+    penY: [0.46, 0.90, OUT_STRONG],
+    inkW: [0.72, 1.0, OUT_STRONG],
     half: [0.46, 0.88, IN_2],
     lift0: [0.52, 0.92, OUT_2],
     lift1: [0.56, 1.0, OUT_2],
@@ -860,17 +926,16 @@ function gatherPose(from: Pose, to: Pose, p: number): Pose {
     sx1: [0.48, 1.0, ELASTIC],
     sy1: [0.48, 1.0, ELASTIC],
     br: [0.72, 1.0, OUT_STRONG],
-    alpha: [0, 0.2, OUT_STRONG],
   }, [0.15, 0.8, OUT_STRONG]);
 
-  /* Six things arriving at once squash what they land on. */
-  const land = window_(p, 0.30, 0.46, IN_2) * (1 - window_(p, 0.46, 1.0, ELASTIC));
+  /* The droplet landing squashes what it lands on. */
+  const land = window_(p, 0.34, 0.50, IN_2) * (1 - window_(p, 0.50, 1.0, ELASTIC));
   out.sx0 *= mix(1, 1.14, land);
   out.sy0 *= mix(1, 0.88, land);
   out.sx1 *= mix(1, 1.14, land);
   out.sy1 *= mix(1, 0.88, land);
 
-  out.k = mix(0, K_NECK, window_(p, 0.0, 0.34, OUT_STRONG));
+  out.k = mix(0, K_NECK, window_(p, 0.30, 0.46, OUT_STRONG));
   out.k = mix(out.k, to.k, window_(p, 0.52, 0.84, IN_2));
   return out;
 }
@@ -908,17 +973,25 @@ function bloomPose(from: Pose, to: Pose, p: number): Pose {
      *
      *   The mass recedes while the ring opens through it, so at every frame there is
      *   either a body with petals emerging or a ring — and never a blank. */
-    r0: [0.24, 0.72, OUT_STRONG],
-    r1: [0.24, 0.72, OUT_STRONG],
-    ringR: [0.20, 1.0, POP],
-    petal: [0.18, 0.70, OUT_STRONG],
-    spin: [0.34, 1.0, OUT_STRONG],
-    petalPhase: [0.34, 1.0, OUT_STRONG],
+    r0: [0.24, 0.62, OUT_STRONG],
+    r1: [0.24, 0.62, OUT_STRONG],
+    penR: [0.0, 0.34, IN_1],
+    penLen: [0.0, 0.34, IN_1],
+    penX: [0.0, 0.34, IN_1],
+    penY: [0.0, 0.34, IN_1],
+    inkW: [0.0, 0.24, IN_1],
+    soft: [0.30, 0.58, OUT_STRONG],
+    /* The mirror of the gather: the orb comes back over the droplet on the POP spring
+     * — the loudest curve in the family, for the one beat that is a surface arriving
+     * from nowhere — and the canvas underneath goes only after it is covered. */
+    orbAlpha: [0.56, 0.64, OUT_STRONG],
+    orbScale: [0.56, 1.0, POP],
+    orbBlur: [0.56, 0.88, OUT_STRONG],
+    alpha: [0.66, 0.74, OUT_STRONG],
     sx0: [0.34, 1.0, ELASTIC],
     sy0: [0.34, 1.0, ELASTIC],
     sx1: [0.34, 1.0, ELASTIC],
     sy1: [0.34, 1.0, ELASTIC],
-    alpha: [0, 0.2, OUT_STRONG],
   }, [0.2, 0.8, OUT_STRONG]);
 
   const wind = window_(p, 0.16, 0.34, OUT_STRONG) * (1 - window_(p, 0.34, 0.66, IN_1));
@@ -927,8 +1000,6 @@ function bloomPose(from: Pose, to: Pose, p: number): Pose {
   out.sx1 *= mix(1, 0.86, wind);
   out.sy1 *= mix(1, 1.12, wind);
 
-  /* Tension stays high while the petals are still emerging from the mass, so they grow
-   * OUT of it instead of appearing beside it. */
   out.k = mix(from.k, K_NECK, window_(p, 0.06, 0.32, OUT_STRONG));
   out.k = mix(out.k, to.k, window_(p, 0.46, 0.9, IN_2));
   return out;
@@ -968,17 +1039,22 @@ export function poseAt(state: LiquidStateName, clock: number, motion: Motion | n
  *  Two dots still mean thinking and one body still means writing, so the indicator
  *  keeps SAYING something — it just stops performing. */
 export function staticPose(state: LiquidStateName): Pose {
-  if (state === "idle") return idlePose(0);
-  if (state === "thinking") {
-    return { ...onePose(R_DOT), half: HALF, k: K_APART };
-  }
-  return onePose(R_ONE);
+  if (state === "idle") return idlePose();
+  if (state === "thinking") return { ...onePose(R_DOT), half: HALF, k: K_APART };
+  /* ★ A STILL FRAME STILL HAS TO SAY WHICH STATE IT IS. Writing's rest pose is the pen
+   *   MID-STROKE with its line already part-drawn — a pen at the start of its travel
+   *   with no ink is just a diagonal shape, and a reduced-motion viewer would have no
+   *   way to tell it from anything else. Reading rests at one end of its sweep, where
+   *   the lozenge is at its flattest. */
+  if (state === "writing") return writingPose(P_WRITE * 0.45);
+  return readingPose(0);
 }
 
 export const GEOMETRY = {
   GROUND, R_DOT, R_ONE, HALF, JUMP, SWEEP, K_APART, K_NECK, K_ONE, K_SWELL,
-  RING_N, RING_R, PETAL_LONG, PETAL_SHORT, K_PETAL,
-  P_THINK, P_WRITE, P_READ, P_IDLE_SPIN, P_IDLE_WAVE,
+  PEN_LEN, PEN_R, PEN_TIP, PEN_ROT, PEN_TRAVEL, INK_H, INK_Y, K_INK,
+  ORB_SMALL, ORB_BLUR, HANDOFF_R,
+  P_THINK, P_WRITE, P_READ, P_IDLE,
 };
 
 /** The period of a state's loop — one place knows, so a harness sampling a full cycle
@@ -987,5 +1063,5 @@ export function periodOf(state: LiquidStateName): number {
   if (state === "thinking") return P_THINK;
   if (state === "writing") return P_WRITE;
   if (state === "reading") return P_READ;
-  return P_IDLE_SPIN;
+  return P_IDLE;
 }

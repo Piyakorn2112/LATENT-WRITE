@@ -15471,8 +15471,27 @@ body.electron-window-unfocused .wc-panel::after {
    devicePixelRatio, so there is nothing here to fall out of step with the token.
    `display: block` because a canvas is inline by default and the baseline gap under
    an inline replaced element pushes an 18px square off centre in an 18px box. */
-.liquid-state {
+.liquid-state-host {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.liquid-state,
+.liquid-state-orb {
+  position: absolute;
+  inset: 0;
   display: block;
+  /* Both layers are driven imperatively from the same pose, so neither may carry a CSS
+     transition: a transition on opacity or transform would fight the frame-by-frame
+     writes and put the two layers on different clocks — which is the one thing the
+     hand-over cannot survive. */
+  transition: none;
+}
+
+.liquid-state-orb {
+  transform-origin: 50% 50%;
+  will-change: transform, filter, opacity;
 }
 
 .max-ask-answer { padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 8px; }

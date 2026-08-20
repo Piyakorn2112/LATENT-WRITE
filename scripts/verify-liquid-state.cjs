@@ -64,7 +64,7 @@ createRoot(document.getElementById("root")!).render(<Harness />);
 /** Sample a live canvas into a strip, so the eyeball sheet is the REAL painted
  *  buffer rather than a re-render of the same maths in node. */
 (window as any).__strip = (sel: string, ms: number, n: number) => new Promise((res) => {
-  const src = document.querySelector(sel + " canvas") as HTMLCanvasElement;
+  const src = document.querySelector(sel + " canvas.liquid-state") as HTMLCanvasElement;
   const w = src.width;
   const strip = document.createElement("canvas");
   strip.width = (w + 4) * n; strip.height = w + 8;
@@ -86,7 +86,7 @@ createRoot(document.getElementById("root")!).render(<Harness />);
 /** Ink and mean colour of a canvas — everything the gates need, read off the buffer
  *  the component painted rather than off a screenshot of it. */
 (window as any).__read = (sel: string) => {
-  const c = document.querySelector(sel + " canvas") as HTMLCanvasElement;
+  const c = document.querySelector(sel + " canvas.liquid-state") as HTMLCanvasElement;
   const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
   let ink = 0, r = 0, g = 0, b = 0, n = 0, maxA = 0, mx = 0, my = 0;
   for (let i = 0; i < d.length; i += 4) {
@@ -109,6 +109,12 @@ fs.writeFileSync(path.join(WORK, 'page.html'), `<!doctype html>
 <style>
   :root { --control-value-fill: ${APP_TINT}; }
   body { margin: 0; background: #f4f4f3; font: 12px system-ui; }
+  /* The component's own layout, which lives in the app's styles.css and has to be
+     restated here — the two layers must be stacked or the orb sits beside the canvas
+     and every measurement is of the wrong thing. */
+  .liquid-state-host { position: relative; display: inline-block; flex-shrink: 0; }
+  .liquid-state, .liquid-state-orb { position: absolute; inset: 0; display: block; transition: none; }
+  .liquid-state-orb { transform-origin: 50% 50%; }
 </style>
 <div id="root"></div>
 <!-- ★ IIFE AND A CLASSIC SCRIPT TAG, NOT A MODULE. Chromium refuses to load an ES
@@ -152,6 +158,11 @@ app.whenReady().then(async () => {
   if (!mounted) { console.log('  FAIL the harness page never mounted'); clearTimeout(bail); app.exit(1); return; }
 
   console.log('\nit paints at all');
+  /* Everything below drives working states, where the orb layer is unmounted and the
+   * canvas owns the picture; the hand-over itself is gated in the headless suite,
+   * which can read both layers' opacities. */
+  await js('window.__set("thinking")');
+  await sleep(1200);
   const a18 = await js('window.__read("#app18")');
   check('the 18px canvas has ink', a18.ink > 4, `${a18.ink.toFixed(1)} px² of coverage, peak alpha ${a18.maxA}`);
   check('the backing store is at device density',
@@ -195,10 +206,15 @@ app.whenReady().then(async () => {
   const during = await js('window.__read("#app96")');
   await sleep(900);
   const after = await js('window.__read("#app96")');
-  /* Mid-merge the mass is one wide capsule with a droplet in the air: more ink than
-   * two dots and more than the settled body. A cut would land straight on `after`. */
+  /* ★ THE TEST IS "DIFFERENT FROM BOTH ENDS", NOT "BIGGER THAN BOTH". It used to
+   *   assert more ink than either endpoint, which was true while writing was a round
+   *   body and false the moment it became a pen — mid-merge the mass has shrunk to the
+   *   nib and the pen has not grown yet, so the in-between frame is the SMALLEST of
+   *   the three. What actually distinguishes a transition from a cut is that the
+   *   middle is neither end, and a cut lands straight on `after`. */
+  const apart = (a, b) => Math.abs(a - b) / Math.max(a, b);
   check('mid-transition is a shape neither end has',
-    during.ink > before.ink * 1.15 && during.ink > after.ink * 1.05,
+    apart(during.ink, before.ink) > 0.2 && apart(during.ink, after.ink) > 0.2,
     `ink ${before.ink.toFixed(1)} → ${during.ink.toFixed(1)} → ${after.ink.toFixed(1)}`);
   check('and it settles on the target state', Math.abs(after.ink - before.ink) > 1,
     `settled ink ${after.ink.toFixed(1)}`);

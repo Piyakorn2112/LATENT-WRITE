@@ -9,18 +9,35 @@
  *
  * So this indicator says that instead:
  *
+ *     idle       the app's own orb, unchanged — the real WebGL OrbEngine
  *     reading    one body sweeping the box, leaning into its own travel
  *     thinking   two dots taking turns jumping
- *     writing    one body with a swell travelling through it
+ *     writing    a pen, drawing a line
  *
  * and the changes BETWEEN them are the crafted part: a tear that accelerates as the
  * neck snaps, a collision that squashes and throws a droplet. See choreography.ts.
  *
  * ── ENGINEERING NOTES ──────────────────────────────────────────────────────────────
  *
- * ★ CANVAS, PER PIXEL, IN FLOAT. Not an SVG goo filter. field.ts explains why at
- *   length; the short version is that a blur wide enough to merge two 6px dots is
- *   wider than the dots, and the owner's word for what this must not be was "blur".
+ * ★★ TWO LAYERS, AND THE HAND-OVER BETWEEN THEM IS THE CRAFT. The resting mark is the
+ *    app's actual orb — a WebGL engine with a lens, a per-petal palette and per-channel
+ *    dispersion — and no metaball is going to be that. So the orb keeps its own layer,
+ *    and when work starts it SHRINKS AND BLURS INTO A DROPLET first. Only once it is a
+ *    small soft blob, a shape the canvas can match exactly, does the canvas take over.
+ *
+ *    Both layers are driven from the SAME pose, on the same clock, so there is no
+ *    second timeline to keep in step — `orbScale`, `orbBlur` and `orbAlpha` are pose
+ *    channels like any other and are blended by the same windows.
+ *
+ *    ★ THE CANVAS IS REVEALED UNDER THE ORB AND ONLY THE ORB FADES. Two layers
+ *      cross-fading at 50% cover 1 − 0.25 = 75% of the pixel, so a symmetric dissolve
+ *      makes the mark visibly translucent for a moment every time work starts. Gated.
+ *
+ * ★ CANVAS, PER PIXEL, IN FLOAT for the working states. Not an SVG goo filter: a blur
+ *   wide enough to merge two 6px dots is wider than the dots, and a thresholded blur's
+ *   rim width is a function of its σ, so the outline inflates the moment anything
+ *   moves. Blur is used in exactly one place here — the hand-over — because there it
+ *   is the only thing that works.
  *
  * ★ THE POSE IS A PURE FUNCTION OF A CLOCK, so the component holds almost no state:
  *   a clock, an optional transition, and the last pose it painted. Everything that
@@ -40,7 +57,8 @@
  * ★ REDUCED MOTION KEEPS THE MEANING. One still frame per state — two dots, or one
  *   body. The indicator stops performing; it does not stop speaking.
  */
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { OrbEngine } from "../orb/OrbEngine";
 import { rasterise } from "./field";
 import {
   DURATION, fieldOf, kindFor, loopPose, poseAt, staticPose,
@@ -90,6 +108,12 @@ const FALLBACK = { rgb: [59, 130, 246] as [number, number, number], a: 0.88 };
 
 export function LiquidState({ state, size = 18, tint = "--control-value-fill", className, style }: Props) {
   const hostRef = useRef<HTMLCanvasElement>(null);
+  const orbRef = useRef<HTMLSpanElement>(null);
+  /* The orb is a WebGL context, so it is mounted only while it has something to show —
+   * three indicators each holding a context for a layer at zero opacity is three
+   * contexts wasted, and browsers cap how many a page may have. */
+  const [orbOn, setOrbOn] = useState(state === "idle");
+  const orbOnRef = useRef(orbOn);
   /* The prop is read inside the loop rather than closed over, so a state change does
    * not tear down and rebuild the rAF loop — which would reset the clock and drop the
    * pose the transition has to start from. */
@@ -131,8 +155,25 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
 
     const paint = (pose: Pose) => {
       painted = pose;
-      rasterise(buf, px, fieldOf(pose), resolved.rgb, resolved.a * pose.alpha);
-      ctx.putImageData(image, 0, 0);
+      /* Nothing to paint while the orb owns the mark, and nothing to read either — the
+       * canvas is transparent, so the whole field evaluation is skipped. */
+      if (pose.alpha > 0.002) {
+        rasterise(buf, px, fieldOf(pose), resolved.rgb, resolved.a * pose.alpha);
+        ctx.putImageData(image, 0, 0);
+      }
+      canvas.style.opacity = pose.alpha > 0.002 ? "1" : "0";
+
+      const orb = orbRef.current;
+      if (orb) {
+        orb.style.transform = `scale(${pose.orbScale.toFixed(4)})`;
+        orb.style.filter = pose.orbBlur > 0.01 ? `blur(${pose.orbBlur.toFixed(2)}px)` : "none";
+        orb.style.opacity = pose.orbAlpha.toFixed(3);
+      }
+      const need = pose.orbAlpha > 0.002;
+      if (need !== orbOnRef.current) {
+        orbOnRef.current = need;
+        setOrbOn(need);
+      }
     };
 
     const paused = () => document.hidden || document.body.classList.contains(PAUSED_BODY_CLASS);
@@ -198,11 +239,17 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
   }, [size, tint]);
 
   return (
-    <canvas
-      ref={hostRef}
-      className={className ? `liquid-state ${className}` : "liquid-state"}
+    <span
+      className={className ? `liquid-state-host ${className}` : "liquid-state-host"}
       style={{ width: size, height: size, ...style }}
       aria-hidden="true"
-    />
+    >
+      <canvas ref={hostRef} className="liquid-state" style={{ width: size, height: size }} />
+      {orbOn && (
+        <span ref={orbRef} className="liquid-state-orb">
+          <OrbEngine mode="default" size={size} tint={tint} />
+        </span>
+      )}
+    </span>
   );
 }

@@ -133,7 +133,11 @@ const inkB = new Uint8ClampedArray(CPX * CPX * 4);
 const BLACK: [number, number, number] = [0, 0, 0];
 
 function inkOf(target: Uint8ClampedArray, pose: Pose) {
-  rasterise(target, CPX, fieldOf(pose), BLACK, 1);
+  /* ★ THE POSE'S OWN OPACITY IS PART OF THE PICTURE. Rasterising at a flat alpha of 1
+   *   measures a canvas nobody is looking at — while the orb owns the mark the canvas
+   *   is fully transparent, and a gate that ignores that is asserting continuity of an
+   *   invisible layer. */
+  rasterise(target, CPX, fieldOf(pose), BLACK, pose.alpha);
 }
 function alphaDiff(a: Uint8ClampedArray, b: Uint8ClampedArray): number {
   let sum = 0;
@@ -267,7 +271,9 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
   for (let e = 0; e <= DURATION.merge; e += 2) {
     const pose = poseAt("writing", 0, { ...m, elapsed: e });
     if (pose.half <= 1e-4) continue;
-    const f = fieldOf(pose);
+    /* The two dots ALONE. A pen or a line of ink lying across the gap would be a
+     * bridge by overlap, and this gate exists to prove the BLEND makes one. */
+    const f = { bodies: fieldOf(pose).bodies.slice(0, 2) };
     const [a, b] = f.bodies;
     const gap = Math.abs(b.x - a.x) - (a.rx + b.rx);
     if (gap <= 0) continue;
@@ -285,7 +291,9 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
   for (let e = 0; e <= DURATION.split; e += 2) {
     const pose = poseAt("thinking", 0, { ...m, elapsed: e });
     if (pose.half <= 1e-4) continue;
-    const f = fieldOf(pose);
+    /* The two dots ALONE. A pen or a line of ink lying across the gap would be a
+     * bridge by overlap, and this gate exists to prove the BLEND makes one. */
+    const f = { bodies: fieldOf(pose).bodies.slice(0, 2) };
     const [a, b] = f.bodies;
     const gap = Math.abs(b.x - a.x) - (a.rx + b.rx);
     if (gap <= 0) continue;
@@ -295,19 +303,21 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
   check("split holds a neck after the halves part", best.gap > 0.004,
     `widest held gap ${(best.gap * 18).toFixed(2)}px of 18 at ${best.at}ms`);
 }
-/* Negative control: with no surface tension there is no neck at any frame. */
+/* Negative control: with no surface tension anywhere there is no neck at any frame.
+ * Every body's blend is zeroed, not just the pair's — the pen and the ink carry their
+ * own now, and a control that leaves one of them on is testing the wrong thing. */
 {
   const m = motionFor("thinking", "writing", 0);
   let bridged = false;
   for (let e = 0; e <= DURATION.merge; e += 2) {
-    const pose = { ...poseAt("writing", 0, { ...m, elapsed: e }), k: 0 };
+    const pose = poseAt("writing", 0, { ...m, elapsed: e });
     if (pose.half <= 1e-4) continue;
-    const f = fieldOf(pose);
+    const f = { bodies: fieldOf(pose).bodies.slice(0, 2).map((b) => ({ ...b, k: 0 })) };
     const [a, b] = f.bodies;
     if (Math.abs(b.x - a.x) - (a.rx + b.rx) <= 0) continue;
     if (sdField(f, (a.x + b.x) / 2, (a.y + b.y) / 2) < 0) bridged = true;
   }
-  check("negative control — k=0 bridges nothing", !bridged);
+  check("negative control — no blend anywhere bridges nothing", !bridged);
 }
 
 /* ── 5. two dots stay two ───────────────────────────────────────────────────────── */
@@ -363,48 +373,123 @@ console.log("\nthinking reads as TWO dots for its whole cycle");
     `narrowest ${narrowest.toFixed(2)} device px of ${PX} (≈${(narrowest / PX * 18 + 2 / PX * 18).toFixed(2)}px of daylight at 18px)`);
 }
 
-/* ── 5b. the resting mark reads as a rosette ────────────────────────────────────── */
-console.log("\nidle is a six-petal mark, not a disc");
+/* ── 5b. the hand-over between the orb and the canvas ──────────────────────────── */
+console.log("\nidle is the app's orb, and the hand-over does not dip");
 {
-  /* Sample a ring just inside the petal tips and count how many times the field
-   * crosses from outside to inside going round. Six lobes means six crossings; a disc
-   * means none, and a ring of separated dots would also give six but would fail the
-   * hub check below. The two together pin the shape. */
-  const countLobes = (t: number) => {
-    const f = fieldOf(loopPose("idle", t));
-    const cy = GEOMETRY.GROUND - GEOMETRY.R_ONE;
-    const probe = GEOMETRY.RING_R + GEOMETRY.PETAL_LONG * 0.72;
-    let crossings = 0;
-    let prev = sdField(f, 0.5 + probe, cy) < 0;
-    for (let i = 1; i <= 720; i++) {
-      const a = (i / 720) * 2 * Math.PI;
-      const inside = sdField(f, 0.5 + Math.cos(a) * probe, cy + Math.sin(a) * probe) < 0;
-      if (inside && !prev) crossings++;
-      prev = inside;
+  const idle = staticPose("idle");
+  check("at rest the canvas is empty and the orb has the picture",
+    idle.alpha === 0 && idle.orbAlpha === 1 && idle.orbScale === 1 && idle.orbBlur === 0);
+
+  /* ★★ THE ANTI-DIP GATE. Two stacked layers cross-faded at 50% cover 1 − 0.25 = 75%
+   *    of the pixel, so a symmetric dissolve makes the mark visibly translucent for a
+   *    moment every single time the model starts or stops work. The composite coverage
+   *    of the two layers must never fall below what either alone would give. */
+  const composite = (p: Pose) => 1 - (1 - p.alpha) * (1 - p.orbAlpha);
+  for (const [from, to, kind] of [["idle", "thinking", "gather"], ["writing", "idle", "bloom"]] as const) {
+    const m = motionFor(from as LiquidStateName, to as LiquidStateName, 0);
+    let worst = { c: 1, at: 0 };
+    for (let e = 0; e <= DURATION[kind]; e += 1) {
+      const c = composite(poseAt(to as LiquidStateName, 0, { ...m, elapsed: e }));
+      if (c < worst.c) worst = { c, at: e };
     }
-    return crossings;
-  };
-  let worstT = 0;
-  let worstN = -1;
-  for (let t = 0; t < GEOMETRY.P_IDLE_WAVE * 2; t += 40) {
-    const n = countLobes(t);
-    if (worstN < 0 || n !== GEOMETRY.RING_N) { worstN = n; worstT = t; if (n !== GEOMETRY.RING_N) break; }
+    check(`${from} → ${to} never goes translucent`, worst.c > 0.999,
+      `lowest composite coverage ${worst.c.toFixed(4)} at ${worst.at}ms`);
   }
-  check("six lobes, at every point in the cycle", worstN === GEOMETRY.RING_N,
-    `counted ${worstN} at ${worstT}ms`);
-  /* ★ AND THE CENTRE IS EMPTY, which is the orb's own signature — its measured layout
-   * has a 0.278 hole where a hub would be. This is the assertion that stops a future
-   * tension change from quietly welding the six into a disc: the lobe count above
-   * would still read six from a ring probe, but the mark would have lost its middle. */
-  const centre = sdField(fieldOf(loopPose("idle", 0)), 0.5, GEOMETRY.GROUND - GEOMETRY.R_ONE);
-  check("and the centre is empty", centre > 0, `centre is ${(centre * 18).toFixed(2)}px outside`);
-  /* Negative control: with no petals the ring contributes nothing. Counted as ring
-   * bodies specifically — the hub is a body too, and asserting "no bodies at all"
-   * would be asserting the mark has no centre. */
-  const bare = { ...loopPose("idle", 0), petal: 0 };
-  const petalsOf = (pose: Pose) => fieldOf(pose).bodies.filter((b) => b.rot !== undefined && b.rx > 1e-3);
-  check("negative control — a mark with no petals has no petals", petalsOf(bare).length === 0,
-    `${petalsOf(bare).length} petals`);
+  /* And the control: a symmetric cross-fade, which is what this is not. */
+  let dip = 1;
+  for (let i = 0; i <= 100; i++) {
+    const a = i / 100;
+    dip = Math.min(dip, 1 - (1 - a) * (1 - (1 - a)));
+  }
+  check("negative control — a symmetric cross-fade does dip", dip < 0.999,
+    `symmetric dissolve bottoms out at ${dip.toFixed(3)}`);
+}
+
+/* ── 5c. writing is a pen ───────────────────────────────────────────────────────── */
+console.log("\nwriting is a pen with a real nib, drawing a real line");
+{
+  const pose = loopPose("writing", GEOMETRY.P_WRITE * 0.4);
+  /* The ink is a capsule and the pen is a cone — both have a length, and only one of
+   * them tapers. Picking "the body with a length" finds whichever comes first, which
+   * is the ink, and the gate then cheerfully reports that a stroke of ink is not
+   * pointy. Name the shape by the property that distinguishes it. */
+  const pen = fieldOf(pose).bodies.find((b) => b.len !== undefined && b.len > 0.1 && (b.tip ?? b.rx) < b.rx * 0.5);
+  check("the pen is a cone, not a stack of blobs", !!pen && pen.len! > 0.2, `len ${pen?.len?.toFixed(3)}`);
+  check("and it tapers to a point", !!pen && pen.tip! < pen.rx * 0.25,
+    `tip ${pen?.tip?.toFixed(4)} against a barrel of ${pen?.rx.toFixed(4)}`);
+
+  /* ★ MEASURED OFF THE FIELD, not off the parameters. A cone can be authored with a
+   *   tiny tip and still be painted blunt — the blend with the ink it is touching can
+   *   fill the nib in completely, which is exactly the artifact the fold order is
+   *   arranged to avoid. So: walk the pen's axis and bisect for the half-width. */
+  const f = fieldOf(pose);
+  const ax = Math.cos(pose.penRot);
+  const ay = Math.sin(pose.penRot);
+  const nx = -ay;
+  const ny = ax;
+  const barrelX = pose.cx + pose.penX - ax * pose.penLen;
+  const barrelY = pose.penY - ay * pose.penLen;
+  const halfWidth = (u: number) => {
+    const px = barrelX + ax * pose.penLen * u;
+    const py = barrelY + ay * pose.penLen * u;
+    if (sdField(f, px, py) > 0) return 0;
+    let lo = 0;
+    let hi = 0.2;
+    for (let i = 0; i < 30; i++) {
+      const mid = (lo + hi) / 2;
+      if (sdField(f, px + nx * mid, py + ny * mid) < 0) lo = mid; else hi = mid;
+    }
+    return lo;
+  };
+  const w = [0.15, 0.35, 0.55, 0.75, 0.95].map(halfWidth);
+  let falls = true;
+  for (let i = 1; i < w.length; i++) if (w[i] > w[i - 1] + 1e-4) falls = false;
+  check("the painted silhouette narrows all the way to the nib", falls,
+    w.map((v) => (v * 18).toFixed(2)).join("px → ") + "px at 18");
+  check("and the nib is a point, not a blob", w[w.length - 1] * 18 < 0.4,
+    `${(w[w.length - 1] * 18).toFixed(3)}px of half-width at 18`);
+
+  /* The line it leaves has to actually grow while the pen is on the paper. */
+  const widths = [0.1, 0.25, 0.4, 0.55, 0.68].map((g) => loopPose("writing", GEOMETRY.P_WRITE * g).inkW);
+  let grows = true;
+  for (let i = 1; i < widths.length; i++) if (widths[i] <= widths[i - 1]) grows = false;
+  check("the ink grows behind the nib through the stroke", grows,
+    widths.map((v) => (v * 2 * 18).toFixed(1)).join("px → ") + "px long at 18");
+  check("and is gone by the end of the cycle", loopPose("writing", GEOMETRY.P_WRITE * 0.995).inkA < 0.02);
+}
+
+/* ── 5d. nothing is drawn past what the distance function can do ────────────────── */
+console.log("\nno body is more eccentric than the ellipse approximation holds for");
+{
+  /* iq's ellipse approximation under-reports distance badly past roughly 10:1. At
+   * 217:1 — a zero-length ink stroke drawn as an ellipse — it reported near-zero the
+   * length of the canvas and painted a line from top to bottom. Nothing about that
+   * failure looks like a bad distance function, so it is gated by construction. */
+  let worst = { r: 1, where: "" };
+  const consider = (pose: Pose, where: string) => {
+    for (const b of fieldOf(pose).bodies) {
+      if (b.len !== undefined && b.len > 0) continue; /* capsules and cones are exact */
+      if (b.rx <= 0 || b.ry <= 0) continue;
+      const r = Math.max(b.rx / b.ry, b.ry / b.rx);
+      if (r > worst.r) worst = { r, where };
+    }
+  };
+  for (const st of STATES) {
+    for (let t = 0; t < periodOf(st); t += 8) consider(loopPose(st, t), `${st} loop @${t}ms`);
+  }
+  for (const from of STATES) {
+    for (const to of STATES) {
+      if (from === to) continue;
+      const kind = kindFor(from, to);
+      for (const frac of [0, 0.33, 0.66]) {
+        const m = motionFor(from, to, frac * periodOf(from));
+        for (let e = 0; e <= DURATION[kind]; e += 4) {
+          consider(poseAt(to, 0, { ...m, elapsed: e }), `${from}→${to} @${e}ms`);
+        }
+      }
+    }
+  }
+  check("every ellipse stays under 10:1", worst.r < 10, `worst ${worst.r.toFixed(2)}:1 at ${worst.where}`);
 }
 
 /* ── 6. position does not overshoot, shape does ring ────────────────────────────── */
@@ -432,22 +517,22 @@ console.log("\nposition and shape are on different curves");
 /* ── 7. the painted size is the authored size ───────────────────────────────────── */
 console.log("\nthe painter and the author agree");
 {
-  /* Measure the merged body off the rendered alpha and compare with the number
+  /* Measure a thinking dot off the rendered alpha and compare with the number
    * choreography.ts thinks it authored. This is the one place the two halves of the
    * component — geometry and raster — are forced to share a zero. */
-  const pose = loopPose("writing", 0);
+  const pose = loopPose("thinking", 0);
   buf.fill(0);
   rasterise(buf, PX, fieldOf(pose), [0, 0, 0], 1);
-  const row = Math.round((GEOMETRY.GROUND - GEOMETRY.R_ONE) * PX);
+  const row = Math.round((GEOMETRY.GROUND - GEOMETRY.R_DOT) * PX);
   let lo = -1;
   let hi = -1;
-  for (let x = 0; x < PX; x++) {
+  for (let x = 0; x < PX / 2; x++) {
     const a = buf[(row * PX + x) * 4 + 3];
     if (a > 127) { if (lo < 0) lo = x; hi = x; }
   }
   const measured = (hi - lo + 1) / PX;
-  const authored = 2 * GEOMETRY.R_ONE;
-  check("writing body's painted width matches its radius", Math.abs(measured - authored) * PX < 1.2,
+  const authored = 2 * GEOMETRY.R_DOT;
+  check("a resting dot's painted width matches its radius", Math.abs(measured - authored) * PX < 1.2,
     `painted ${(measured * PX).toFixed(2)}px vs authored ${(authored * PX).toFixed(2)}px of ${PX}`);
 }
 
@@ -457,15 +542,10 @@ console.log("\nreduced motion keeps the meaning");
   const drawn = (pose: Pose) => fieldOf(pose).bodies.filter((b) => b.rx > 1e-3);
   const t = drawn(staticPose("thinking"));
   const w = drawn(staticPose("writing"));
-  const idle = drawn(staticPose("idle"));
   const tp = staticPose("thinking");
   check("thinking is two separated bodies at rest", t.length === 2 && tp.half > 0.1 && t.every((b) => Math.abs(b.rx - b.ry) < 1e-9));
-  check("writing is one body at rest", w.length === 2 && staticPose("writing").half === 0);
-  const idlePetals = fieldOf(staticPose("idle")).bodies.filter((b) => b.rot !== undefined && b.rx > 1e-3);
-  check("idle is six petals around an empty centre at rest",
-    idlePetals.length === GEOMETRY.RING_N && idle.length === GEOMETRY.RING_N,
-    `${idlePetals.length} petals, ${idle.length - idlePetals.length} other bodies drawn`);
-  check("the states are visibly different", Math.abs(t[0].rx - w[0].rx) > 0.02);
+  check("writing rests as a pen", w.length >= 1 && staticPose("writing").half === 0);
+  check("the states are visibly different", w.some((b) => b.len !== undefined && b.len > 0.1));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

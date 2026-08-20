@@ -63,12 +63,18 @@
  *    point that lies inside the mass is a no-op); a zero-radius body with k>0 is a
  *    dimple in the surface. `choreography.fieldOf` ties the two together. */
 export interface Body {
-  /** centre, unit box */
+  /** centre, unit box. For a cone this is the wide end. */
   x: number;
   y: number;
-  /** radii, unit box */
+  /** radii, unit box. For a cone, `rx` is the wide-end radius. */
   rx: number;
   ry: number;
+  /** A ROUNDED CONE instead of an ellipse: a body that tapers from `rx` at its centre
+   *  to `tip` at distance `len` along its own +x axis. Exact SDF, so it blends with
+   *  everything else — and it is the one shape a pen needs, because a nib is a point
+   *  and no arrangement of ellipses ever makes one. */
+  tip?: number;
+  len?: number;
   /** blend radius used when folding THIS body into the ones before it. Unit box.
    *  0 = hard union, and for the first body it is unused. */
   k: number;
@@ -78,9 +84,16 @@ export interface Body {
   rot?: number;
 }
 
-/** A frame of the mass. */
+/** A frame of the mass.
+ *
+ *  `soft` widens the coverage ramp beyond the one-device-pixel default. Zero is the
+ *  crisp edge everything rests at; a couple of pixels of softness is used only where
+ *  it earns its place — through the hand-off between the WebGL orb and this canvas,
+ *  where both pictures are a small blurred blob at the same instant and the swap
+ *  therefore has nothing to give it away. It is a tool for one moment, not a look. */
 export interface Field {
   bodies: Body[];
+  soft?: number;
 }
 
 /** iq's circular smooth-minimum, normalised so `k` IS the blend band's half-width in
@@ -98,6 +111,15 @@ export function sminCircular(a: number, b: number, k: number): number {
  *  fraction of a pixel of true distance at the eccentricities a squash produces —
  *  which is what lets a squashed body take part in the blend without the neck changing
  *  width as it deforms.
+ *
+ *  ★★ IT HOLDS ONLY FOR MODERATE ECCENTRICITY. It is an approximation, and past
+ *     roughly 10:1 it under-reports distance badly — at 217:1 (a zero-length ink
+ *     stroke drawn as an ellipse) it returned near-zero the whole length of the
+ *     column and painted a line from the top of the canvas to the bottom. Anything
+ *     that needs to be very long and thin is a CAPSULE, which is a cone with equal
+ *     radii and exact at any length. A gate walks every pose of every state and
+ *     refuses a body past the limit, because nothing about the failure looks like a
+ *     bad distance function.
  *
  *  ★★ THE ZERO-RADIUS GUARD LIVES HERE, IN THE ONE FUNCTION BOTH HALVES CALL. It was
  *     originally a clamp inside the rasteriser's setup loop, so the painter was safe
@@ -125,6 +147,28 @@ export function sdEllipse(px: number, py: number, rx: number, ry: number): numbe
  *  inside. Exported so a probe can read exactly the geometry the painter paints —
  *  the picture and any measurement of it must come from one function, or they will
  *  eventually disagree and nothing will say so. */
+/**
+ * iq's rounded cone: the exact distance to the convex hull of two circles, radius `r1`
+ * at the origin and `r2` at (`h`, 0). Three regions — the near cap, the far cap, and
+ * the straight flank between their common tangents.
+ *
+ * ★ THIS IS WHAT DRAWS THE NIB. A pen tapers to a point, and a point is precisely what
+ *   a union of ellipses cannot produce: every blend rounds it off, and a smaller and
+ *   smaller ellipse just becomes a smaller and smaller blob. A cone with `r2` near
+ *   zero has a real corner at its tip, and because the function is an exact distance
+ *   it still blends with the rest of the mass through the same smooth-minimum.
+ */
+export function sdRoundCone(px: number, py: number, r1: number, r2: number, h: number): number {
+  const qx = Math.abs(py);
+  const qy = px;
+  const b = (r1 - r2) / h;
+  const a = Math.sqrt(Math.max(1 - b * b, 0));
+  const k = qx * -b + qy * a;
+  if (k < 0) return Math.hypot(qx, qy) - r1;
+  if (k > a * h) return Math.hypot(qx, qy - h) - r2;
+  return qx * a + qy * b - r1;
+}
+
 /** Distance to one body, in its own frame. */
 function sdBody(b: Body, x: number, y: number): number {
   let dx = x - b.x;
@@ -136,18 +180,30 @@ function sdBody(b: Body, x: number, y: number): number {
     dy = dx * s + dy * c;
     dx = rx;
   }
+  if (b.len !== undefined && b.len > 0) return sdRoundCone(dx, dy, b.rx, b.tip ?? 0, b.len);
   return sdEllipse(dx, dy, b.rx, b.ry);
 }
 
+/**
+ * ★★ EVERY BODY FOLDS WITH ITS OWN BLEND, INCLUDING THE FIRST. The obvious way to
+ *    write this is to seed `d` with body zero and smooth-min the rest onto it — and
+ *    that makes the FIRST SURVIVING BODY special, which is a discrete choice inside a
+ *    continuous animation. When a radius crosses zero the base identity moves to the
+ *    next body, and the blend that was being ignored suddenly starts applying: the
+ *    picture stepped by ~35 square pixels in one frame on four transitions, with every
+ *    pose parameter demonstrably smooth to five decimal places. That is the tell —
+ *    smooth inputs, stepping output, means the bug is in how they are combined.
+ *
+ *    Seeding with Infinity removes the special case: `smin(∞, x, k)` is exactly `x`
+ *    for any k (the blend band is finite, so the two are never within it), so the
+ *    first body folds by the same rule as every other one and no body's blend ever
+ *    switches on.
+ */
 export function sdField(field: Field, x: number, y: number): number {
-  const { bodies } = field;
   let d = Infinity;
-  let first = true;
-  for (const b of bodies) {
-    if (b.rx <= 0 || b.ry <= 0) continue;
-    const di = sdBody(b, x, y);
-    d = first ? di : sminCircular(d, di, b.k);
-    first = false;
+  for (const b of field.bodies) {
+    if (b.rx <= 0 || (b.len === undefined && b.ry <= 0)) continue;
+    d = sminCircular(d, sdBody(b, x, y), b.k);
   }
   return d;
 }
@@ -177,6 +233,7 @@ export function rasterise(
   const g = rgb[1];
   const b = rgb[2];
   const { bodies } = field;
+  const soft = 1 + Math.max(field.soft ?? 0, 0);
   const n = bodies.length;
   // Unit box → device pixels, once.
   const bx = new Float64Array(n);
@@ -192,9 +249,13 @@ export function rasterise(
    *   anything in the three states that do not have a ring. Verified by the gates,
    *   which compare rendered alpha and would show any difference immediately. */
   let n2 = 0;
+  const blen = new Float64Array(n);
+  const btip = new Float64Array(n);
   for (let i = 0; i < n; i++) {
     const b = bodies[i];
-    if (b.rx <= 0 || b.ry <= 0) continue;
+    if (b.rx <= 0 || (b.len === undefined && b.ry <= 0)) continue;
+    blen[n2] = (b.len ?? 0) * size;
+    btip[n2] = (b.tip ?? 0) * size;
     bx[n2] = b.x * size;
     by[n2] = b.y * size;
     brx[n2] = b.rx * size;
@@ -215,10 +276,17 @@ export function rasterise(
         const uy = sy - by[i];
         const c = bc[i];
         const sn = bs[i];
-        const di = sdEllipse(ux * c - uy * sn, ux * sn + uy * c, brx[i], bry[i]);
-        d = i === 0 ? di : sminCircular(d, di, bk[i]);
+        const lx = ux * c - uy * sn;
+        const ly = ux * sn + uy * c;
+        const di = blen[i] > 0
+          ? sdRoundCone(lx, ly, brx[i], btip[i], blen[i])
+          : sdEllipse(lx, ly, brx[i], bry[i]);
+        /* No special case for the first body — see sdField. */
+        d = sminCircular(d, di, bk[i]);
       }
-      let cov = 0.5 - d;
+      /* The ramp is one device pixel wide by default — the exact coverage of a
+       * straight edge crossing a pixel, to first order — and `soft` widens it. */
+      let cov = 0.5 - d / soft;
       if (cov > 0) {
         if (cov > 1) cov = 1;
         const o = (py * size + px) * 4;
