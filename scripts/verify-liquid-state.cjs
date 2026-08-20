@@ -43,7 +43,8 @@ const APP_TINT = 'rgba(59, 130, 246, 0.88)';
 fs.writeFileSync(path.join(WORK, 'entry.tsx'), `
 import { createRoot } from "react-dom/client";
 import { useState, useEffect } from "react";
-import { LiquidState, type LiquidStateName } from ${JSON.stringify(path.join(ROOT, 'src/components/liquid-state/LiquidState'))};
+import { LiquidState, ORB_HOLD_MS, type LiquidStateName } from ${JSON.stringify(path.join(ROOT, 'src/components/liquid-state/LiquidState'))};
+(window as any).__hold = ORB_HOLD_MS;
 
 function Harness() {
   const [s, setS] = useState<LiquidStateName>("thinking");
@@ -278,6 +279,44 @@ app.whenReady().then(async () => {
     `ink ${before.ink.toFixed(1)} → ${during.ink.toFixed(1)} → ${after.ink.toFixed(1)}`);
   check('and it settles on the target state', Math.abs(after.ink - before.ink) > 1,
     `settled ink ${after.ink.toFixed(1)}`);
+
+  console.log('\nthe orb is held before it liquefies');
+  /* ★★ MEASURED AS TIME-TO-FIRST-PAINT ON THE CANVAS. The hold is invisible to the
+   *    headless suite — it lives in the component's loop, not in the choreography — and
+   *    "the orb shows for a beat first" is exactly the kind of intention that quietly
+   *    stops happening when someone reorders two branches. While the orb has the mark
+   *    the canvas is fully transparent, so the first frame with any ink in it IS the
+   *    moment the hand-over began. */
+  {
+    const hold = await js('window.__hold');
+    await js('window.__set("idle")');
+    await sleep(1200);
+    const t0 = Date.now();
+    await js('window.__set("thinking")');
+    let firstInk = -1;
+    for (let i = 0; i < 60; i++) {
+      const r = await js('window.__read("#app96")');
+      if (r.ink > 1) { firstInk = Date.now() - t0; break; }
+      await sleep(25);
+    }
+    check('the canvas stays empty while the orb is held', firstInk > hold * 0.75,
+      `first canvas ink at ${firstInk}ms against a ${hold}ms hold`);
+    /* And the control: a second change, once a working shape is up, must NOT wait. */
+    const t1 = Date.now();
+    await js('window.__set("writing")');
+    let moved = -1;
+    for (let i = 0; i < 40; i++) {
+      const r = await js('window.__read("#app96")');
+      if (Math.abs(r.cx - 96) > 0.5) { moved = Date.now() - t1; break; }
+      await sleep(20);
+    }
+    check('negative control — a change between working shapes does not wait', moved >= 0 && moved < hold * 0.6,
+      `moved after ${moved}ms`);
+    /* Leave it settled and animating, so the checks after this measure a running loop
+     * rather than the tail of whatever this one left behind. */
+    await js('window.__set("thinking")');
+    await sleep(1000);
+  }
 
   console.log('\nit stops when nobody is looking');
   await js('document.body.classList.add("electron-window-unfocused-orb-paused")');

@@ -89,8 +89,12 @@ const PAUSED_BODY_CLASS = "electron-window-unfocused-orb-paused";
  *  know is starting" and short enough that nobody waits for it.
  *
  *  It delays only the FIRST move away from the orb; state changes between working
- *  shapes are immediate, because by then the writer is watching something. */
-const ORB_HOLD_MS = 520;
+ *  shapes are immediate, because by then the writer is watching something.
+ *
+ *  ★ EXPORTED, because a constant that only exists inside a closure is a constant no
+ *    gate can check. `verify:liquid-state` switches the state and measures when the
+ *    canvas first paints — the orb has to still have the picture well past this. */
+export const ORB_HOLD_MS = 760;
 
 /** How long the orb's layer is kept alive after it stops being visible. */
 const ORB_KEEP_MS = 700;
@@ -180,17 +184,29 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
     let painted: Pose = loopPose("idle", 0);
     let holdLeft = ORB_HOLD_MS;
     let orbIdleFor = 0;
+    let wasVisible = false;
     let reducedDrawn: LiquidStateName | null = null;
 
     const paint = (pose: Pose, dt: number) => {
       painted = pose;
       /* Nothing to paint while the orb owns the mark, and nothing to read either — the
        * canvas is transparent, so the whole field evaluation is skipped. */
-      if (pose.alpha > 0.002) {
+      const visible = pose.alpha > 0.002;
+      if (visible) {
         rasterise(buf, px, fieldOf(pose), resolved.rgb, resolved.a * pose.alpha);
         ctx.putImageData(image, 0, 0);
+        wasVisible = true;
+      } else if (wasVisible) {
+        /* ★ CLEARED, NOT JUST HIDDEN. Hiding it with opacity alone leaves the last
+         *   frame sitting in the backing store — invisible on screen and still there
+         *   to anything that reads the buffer, which is every probe this component
+         *   has. A gate measuring "the canvas is empty while the orb is held" read
+         *   ink at 1ms and was reading a frame from before the hold began. A buffer
+         *   that disagrees with the screen is a trap laid for the next measurement. */
+        ctx.clearRect(0, 0, px, px);
+        wasVisible = false;
       }
-      canvas.style.opacity = pose.alpha > 0.002 ? "1" : "0";
+      canvas.style.opacity = visible ? "1" : "0";
 
       const orb = orbRef.current;
       if (orb) {
