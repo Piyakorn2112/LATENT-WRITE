@@ -1,0 +1,163 @@
+/* field — the metaball, solved analytically per pixel.
+ *
+ * ★★ WHY NOT THE USUAL GOO (blur → alpha threshold). That trick is how nearly every
+ *    gooey control on the web is built, and it is wrong at this size for reasons that
+ *    are not matters of taste:
+ *
+ *    · A blur that is wide enough to bridge two bodies is wider than the bodies. The
+ *      kit measured this on a 26×16 knob: at the σ needed to merge, the blur rounds a
+ *      pill with 10px of straight middle into an oval no matter how exactly the
+ *      geometry is animated. This indicator is 18px. Every shape in it would be soft.
+ *    · The rim of a thresholded blur is the sliver between two iso-alpha contours, so
+ *      its WIDTH IN PIXELS is a function of σ. Change σ mid-animation and the outline
+ *      visibly fattens — which is exactly the "gooey button inflates when it moves"
+ *      artifact.
+ *    · It is a filter on a rasterised layer, so it is authored at the layout size and
+ *      magnified by any transform, and it quantises to 8 bits.
+ *
+ *    The app already learned the general form of this the hard way on its glass
+ *    engine: when a small element's effect keeps producing new artifacts, stop tuning
+ *    the map and PAINT IT — evaluate the same maths analytically, per pixel, in float,
+ *    at real display density. That is what this file does. 18px at 3× is 54×54 = 2916
+ *    pixels; a metaball field over three bodies costs about six thousand square roots
+ *    a frame, which is nothing, and in exchange every edge is exact at every DPR and
+ *    nothing anywhere is blurred.
+ *
+ * ★ THE BLEND IS iq's CIRCULAR SMOOTH-MINIMUM, and the variant is a real choice.
+ *   The circular smin is the one whose blend profile is a true circular arc — which is
+ *   what surface tension actually draws where two droplets meet, and the reason the
+ *   neck here reads as liquid rather than as two shapes fading into each other. It is
+ *   also RIGID: outside the blend band it is exactly min(), so two dots 3px apart are
+ *   two perfect circles, undeformed, until they are within `k` of each other. A blur
+ *   deforms them the whole time.
+ *
+ *   Its known cost is that it is not associative — smin(a, smin(b, c)) differs from
+ *   smin(smin(a, b), c). With at most three bodies, at most two of which are ever
+ *   close, that is invisible; the fold order is fixed here so it is at least
+ *   deterministic, and the number of bodies is capped where it stays true.
+ *
+ * ★ SIGN AND UNITS. Distances are in DEVICE PIXELS throughout the rasteriser, which is
+ *   what makes the antialias ramp exactly one device pixel wide with no magic numbers:
+ *   coverage = clamp(0.5 - d, 0, 1). Authoring happens in a unit box (0..1 across the
+ *   component) and is scaled on the way in — so the same choreography is correct at
+ *   18px in a popover and at 140px in the dev harness.
+ */
+
+/** One body of the mass: an axis-aligned ellipse, because a squash is a scale and a
+ *  scaled circle is an ellipse. Radii, not scales, so the field never has to know what
+ *  a body's rest size was. */
+export interface Body {
+  /** centre, unit box */
+  x: number;
+  y: number;
+  /** radii, unit box */
+  rx: number;
+  ry: number;
+}
+
+/** A frame of the mass: the bodies, and the surface tension holding them together. */
+export interface Field {
+  bodies: Body[];
+  /** blend radius in unit-box units. 0 = hard union (no neck at all). */
+  k: number;
+}
+
+/** iq's circular smooth-minimum, normalised so `k` IS the blend band's half-width in
+ *  the same units as `a` and `b`. The normalisation is not decoration: without it the
+ *  same k draws a different neck for every variant, and the constant in the
+ *  choreography stops meaning anything. */
+export function sminCircular(a: number, b: number, k: number): number {
+  if (k <= 0) return Math.min(a, b);
+  const kk = k * (1 / (1 - Math.SQRT1_2));
+  const h = Math.max(kk - Math.abs(a - b), 0) / kk;
+  return Math.min(a, b) - kk * 0.5 * (1 + h - Math.sqrt(1 - h * (h - 2)));
+}
+
+/** iq's ellipse distance approximation. Exact for a circle (rx === ry), and within a
+ *  fraction of a pixel of true distance at the eccentricities a squash produces —
+ *  which is what lets a squashed body take part in the blend without the neck
+ *  changing width as it deforms. */
+export function sdEllipse(px: number, py: number, rx: number, ry: number): number {
+  const k1 = Math.hypot(px / rx, py / ry);
+  if (k1 === 0) return -Math.min(rx, ry);
+  const k2 = Math.hypot(px / (rx * rx), py / (ry * ry));
+  return (k1 * (k1 - 1)) / k2;
+}
+
+/** Signed distance to the whole mass, at a point in unit-box coordinates. Negative
+ *  inside. Exported so a probe can read exactly the geometry the painter paints —
+ *  the picture and any measurement of it must come from one function, or they will
+ *  eventually disagree and nothing will say so. */
+export function sdField(field: Field, x: number, y: number): number {
+  const { bodies, k } = field;
+  if (bodies.length === 0) return Infinity;
+  let d = sdEllipse(x - bodies[0].x, y - bodies[0].y, bodies[0].rx, bodies[0].ry);
+  for (let i = 1; i < bodies.length; i++) {
+    const b = bodies[i];
+    d = sminCircular(d, sdEllipse(x - b.x, y - b.y, b.rx, b.ry), k);
+  }
+  return d;
+}
+
+/**
+ * Rasterise the mass into an RGBA buffer.
+ *
+ * `rgb` is written flat across the whole shape and only the ALPHA varies, which is
+ * what keeps an antialiased edge from darkening into a fake outline: a constant colour
+ * under a coverage ramp premultiplies correctly, a colour that also ramps does not.
+ * (The app's orb engine composites premultiplied for the same reason.)
+ *
+ * The ramp itself is `0.5 - d` with d in device pixels — the exact coverage of a
+ * straight edge crossing a pixel, to first order. Inside the blend band the smin's
+ * gradient dips a little below 1, so the neck's ramp is up to ~1.4px rather than 1px;
+ * that is a hair softer exactly where the surface is genuinely curving fastest, and it
+ * is the only softness anywhere in this file.
+ */
+export function rasterise(
+  out: Uint8ClampedArray,
+  size: number,
+  field: Field,
+  rgb: readonly [number, number, number],
+  alpha: number,
+): void {
+  const r = rgb[0];
+  const g = rgb[1];
+  const b = rgb[2];
+  const { bodies, k } = field;
+  const n = bodies.length;
+  // Unit box → device pixels, once.
+  const bx = new Float64Array(n);
+  const by = new Float64Array(n);
+  const brx = new Float64Array(n);
+  const bry = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    bx[i] = bodies[i].x * size;
+    by[i] = bodies[i].y * size;
+    brx[i] = Math.max(bodies[i].rx * size, 1e-4);
+    bry[i] = Math.max(bodies[i].ry * size, 1e-4);
+  }
+  const kPx = k * size;
+
+  for (let py = 0; py < size; py++) {
+    const sy = py + 0.5;
+    for (let px = 0; px < size; px++) {
+      const sx = px + 0.5;
+      let d = Infinity;
+      for (let i = 0; i < n; i++) {
+        const di = sdEllipse(sx - bx[i], sy - by[i], brx[i], bry[i]);
+        d = i === 0 ? di : sminCircular(d, di, kPx);
+      }
+      let cov = 0.5 - d;
+      if (cov > 0) {
+        if (cov > 1) cov = 1;
+        const o = (py * size + px) * 4;
+        out[o] = r;
+        out[o + 1] = g;
+        out[o + 2] = b;
+        out[o + 3] = cov * alpha * 255;
+      } else {
+        out[(py * size + px) * 4 + 3] = 0;
+      }
+    }
+  }
+}
