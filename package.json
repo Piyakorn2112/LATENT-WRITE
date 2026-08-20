@@ -28,6 +28,7 @@
     "test:orb-physics": "tsx scripts/orb-physics-probe.ts",
     "test:liquid-state": "tsx scripts/test-liquid-state.ts",
     "film:liquid-state": "tsx scripts/liquid-state-filmstrip.ts",
+    "verify:liquid-state": "electron scripts/verify-liquid-state.cjs",
     "export:orb": "tsx scripts/export-orb-svg.ts",
     "audit:ood": "tsx scripts/ood-language-audit.ts",
     "test:glass-exact": "tsx scripts/test-liquid-glass-exact.ts",

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { OrbEngine } from "./orb/OrbEngine";
+import { LiquidState, type LiquidStateName } from "./liquid-state/LiquidState";
 import { ThinkingLabel } from "./ThinkingLabel";
 import { assistantRunJSON, cancelWhere, type AssistantJSONRequest } from "../lib/assistant-client";
 import {
@@ -72,7 +72,10 @@ const RUNG_LABEL: Record<string, string> = {
 
 type Phase =
   | { name: "menu" }
-  | { name: "asking"; label: string }
+  /* `work` is what the INDICATOR says; `label` is what the words say. They are
+   * deliberately separate: the harness narrates five phases and the indicator has
+   * three shapes, and collapsing five into three is a translation, not a rename. */
+  | { name: "asking"; label: string; work: LiquidStateName }
   | { name: "done"; result: MaxAskResult }
   | { name: "failed"; reason?: string };
 
@@ -157,7 +160,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
   const ask = (kind: AskKind, q?: string) => {
     const input = build(kind, q);
     if (!input) { setPhase({ name: "failed", reason: "no-input" }); return; }
-    setPhase({ name: "asking", label: "Reading passage…" });
+    setPhase({ name: "asking", label: "Reading passage…", work: "reading" });
     void runMaxAsk(input, {
       run: maxRunner,
       selfReview: true,
@@ -176,6 +179,12 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
             : p === "widening" ? "Reading more of the story…"
             : p === "refining" ? "Correcting answer…"
             : "Reviewing answer…",
+          /* Gathering evidence sweeps; reasoning and re-checking jump; producing a
+           * corrected answer reaches. `reviewing` is thinking rather than writing
+           * because at that point the answer exists and is being weighed. */
+          work: p === "asking" || p === "widening" ? "reading"
+            : p === "refining" ? "writing"
+            : "thinking",
         });
       },
     }).then((result) => {
@@ -232,15 +241,16 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
 
       {phase.name === "asking" && (
         <div className="max-ask-wait">
-          {/* THE app orb — the six-oval sheet-glass OrbEngine from the
-              toolbar's intel button, not a gradient stand-in — tinted to
-              SYSTEM BLUE via --control-value-fill, the token the toggle's
-              on-state uses, so the colour AND its light/dark handling are
-              inherited from the one place that defines them. `analyzing`
-              gives it the working motion. */}
+          {/* ★ THE INDICATOR SAYS WHICH OF THREE THINGS THE MODEL IS DOING, and
+              the label beside it says the same thing in words. This used to be the
+              toolbar's own six-oval OrbEngine, tinted blue and spinning — the app's
+              IDENTITY doing duty as a spinner, saying only "working" while the
+              label right next to it already said more than that.
+              Colour still comes from --control-value-fill, the token the toggle's
+              on-state uses, so the tint and its light/dark handling are inherited
+              from the one place that defines them. */}
           <span className="max-ask-orb" aria-hidden="true">
-            <OrbEngine mode="default" analyzing size={18} flowScale={0.8}
-              aberration={0.45} tint="--control-value-fill" />
+            <LiquidState state={phase.work} size={18} />
           </span>
           {phase.label === THINKING_LABEL ? <ThinkingLabel /> : phase.label}
         </div>

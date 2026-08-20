@@ -25,7 +25,7 @@ import { assistantMode } from "../lib/preferences";
 import { parseNovel } from "../lib/parser";
 import { loadPrefs } from "../lib/preferences";
 import { assistantAvailable, assistantRunJSON, cancelWhere } from "../lib/assistant-client";
-import { OrbEngine } from "./orb/OrbEngine";
+import { LiquidState } from "./liquid-state/LiquidState";
 import { ThinkingLabel } from "./ThinkingLabel";
 import {
   DOSSIER_TASK,
@@ -1810,9 +1810,14 @@ function DossierCard({
       {busy && (
         <div className="world-dossier-wait">
           {/* The rewrite tool's own indicator, verbatim — same component, same
-              tint, so the app has ONE way of saying "the model is working". */}
+              tint, so the app has ONE way of saying "the model is working". This is
+              the surface that distinguishes all three states, and the label below
+              already names them; the shape just says it faster. */}
           <span className="max-ask-orb">
-            <OrbEngine mode="default" analyzing size={18} flowScale={0.8} aberration={0.45} tint="--control-value-fill" />
+            <LiquidState
+              state={state.phase === "reading" ? "reading" : state.thinking ? "thinking" : "writing"}
+              size={18}
+            />
           </span>
           <span className="world-dossier-wait-label">
             {state.phase === "reading"

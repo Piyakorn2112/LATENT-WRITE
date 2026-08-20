@@ -14949,8 +14949,8 @@ body.electron-window-unfocused .wc-panel::after {
 /* ── Character dossier card ────────────────────────────────────────────────
    Sits under the Description field and borrows the alias-suggest family:
    flat rows, quiet borders, buttons that do the writing only when clicked.
-   The wait row reuses .max-ask-orb VERBATIM — the app has one way of saying
-   "the model is working", and it is the rewrite tool's blue orb. */
+   The wait row reuses .max-ask-orb VERBATIM — the app has one way of saying what
+   the model is doing, and it is the liquid state indicator. */
 .world-dossier-offer {
   display: flex;
   margin-top: 2px;
@@ -15445,9 +15445,16 @@ body.electron-window-unfocused .wc-panel::after {
 }
 
 /* Hosts the OrbEngine (the toolbar's six-oval sheet-glass orb) at loader
-   scale. Layout only — the orb draws itself, tinted via --control-value-fill
-   inside the engine; a gradient imitation lived here briefly and looked like
-   what it was. The enter fade is the one thing the host adds. */
+   scale. Layout only — the indicator draws itself, tinted via
+   --control-value-fill inside the component; a gradient imitation lived here
+   briefly and looked like what it was.
+
+   ★ AND NO ENTRANCE HERE. There used to be a 0.4s scale-from-0.5 fade on this
+   span, which was right when the child was an orb that only ever spun. The
+   liquid indicator authors its own arrival — a droplet falls in from above and
+   splats — and the two ran at once: the whole box scaling up while the droplet
+   fell inside it, one generic pop stacked on one authored gesture. A component
+   that has an entrance does not want a second one from its host. */
 .max-ask-orb {
   position: relative;
   width: 18px;
@@ -15456,12 +15463,16 @@ body.electron-window-unfocused .wc-panel::after {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  animation: max-ask-orb-enter 0.4s cubic-bezier(0.34, 1.2, 0.64, 1) forwards;
 }
 
-@keyframes max-ask-orb-enter {
-  0%   { opacity: 0; transform: scale(0.5); }
-  100% { opacity: 1; transform: scale(1); }
+/* The liquid state indicator's canvas.
+   It carries no colour and no density of its own: the component resolves the tint
+   from --control-value-fill on this element and the backing store from
+   devicePixelRatio, so there is nothing here to fall out of step with the token.
+   `display: block` because a canvas is inline by default and the baseline gap under
+   an inline replaced element pushes an 18px square off centre in an 18px box. */
+.liquid-state {
+  display: block;
 }
 
 .max-ask-answer { padding: 4px 8px 6px; display: flex; flex-direction: column; gap: 8px; }
@@ -15504,7 +15515,9 @@ body.electron-window-unfocused .wc-panel::after {
 @media (prefers-reduced-motion: reduce) {
   .max-ask-word { animation: none; opacity: 1; transform: none; }
   .max-ask { transition: none; }
-  .max-ask-orb { animation: none; opacity: 0.9; }
+  /* The indicator handles reduced motion itself — one still frame per state, so
+     two dots still mean reasoning and one body still means writing. Nothing for
+     the host to switch off. */
 }
 
 /* The refined indicator: the quietest voice in the popover — a fact, not an

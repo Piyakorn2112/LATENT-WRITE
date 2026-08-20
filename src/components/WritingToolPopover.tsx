@@ -8,7 +8,7 @@
  * request.
  */
 import { useEffect, useRef, useState } from "react";
-import { OrbEngine } from "./orb/OrbEngine";
+import { LiquidState } from "./liquid-state/LiquidState";
 import { ThinkingLabel } from "./ThinkingLabel";
 import type { WritingOp, WritingToolOutcome } from "../lib/writing-tool";
 import { CUSTOM_SYSTEM, WRITING_TASK } from "../lib/writing-tool";
@@ -192,8 +192,10 @@ export function WritingToolPopover(props: WritingToolPopoverProps) {
 
         {phase === "running" && (
           <div className="max-ask-wait">
+            {/* Two states here, not three: this tool reasons and then rewrites, and
+                it never reads the manuscript. The indicator says which. */}
             <span className="max-ask-orb">
-              <OrbEngine mode="default" analyzing size={18} flowScale={0.8} aberration={0.45} tint="--control-value-fill" />
+              <LiquidState state={thinking ? "thinking" : "writing"} size={18} />
             </span>
             <span>
               {thinking ? <ThinkingLabel /> : OP_LABEL[lastOp]}
