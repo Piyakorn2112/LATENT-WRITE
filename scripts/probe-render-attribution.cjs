@@ -73,6 +73,62 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const js = (w, src) => w.webContents.executeJavaScript(src, true);
 
 /**
+ * ★★ THE LONG FRAMES LAND AT THE SAME TIMESTAMPS ACROSS RUNS (~8.3s, ~12.0s
+ *    into the window, in both the 512 and 128 micro-batch arms). Identical
+ *    timings are a discrete EVENT, not contention — contention smears. So the
+ *    engines are watched on the same clock as the frames, and each long frame
+ *    is printed with whatever changed near it. Guessing which subsystem it is
+ *    has now cost three refuted hypotheses; this asks instead.
+ */
+/**
+ * ★ THE ABLATION. The engine timeline pairs the residual long frames with the
+ *   IN-PROCESS HOST being busy (loading at 0.15s, busy 2.1s → 9.2s, frames at
+ *   8.3-12.2s) while the sidecar sat idle because the chip tick was gated. So
+ *   the remaining cost is the OTHER background consumers — the review sweeps,
+ *   adjudication, the referent pass — none of which pass a tier, all of which
+ *   therefore land on the in-process host. Refusing them at the IPC boundary
+ *   tests that directly; `busy` is the app's own word for "the runtime is
+ *   occupied", so callers stay on their normal retry paths.
+ */
+const HOST_TASKS = ['scene-review', 'chekhov-review', 'presence-review',
+  'continuity-adjudication', 'entity-review', 'alias-referent', 'attribution-review'];
+let DROPPED = new Set();
+const RAN = new Map();
+function installDrop() {
+  const { ipcMain } = require('electron');
+  ipcMain.removeHandler('assistant:run');
+  ipcMain.handle('assistant:run', async (_e, opts) => {
+    const o = opts || {};
+    const task = o.task || 'unknown';
+    RAN.set(task, (RAN.get(task) || 0) + 1);
+    if (DROPPED.has(task)) return { ok: false, error: 'busy', requestId: o.requestId || 'dropped' };
+    return assistant.run(o);
+  });
+}
+
+const EVENTS = [];
+let CLOCK0 = 0;
+const evAt = () => +((Date.now() - CLOCK0) / 1000).toFixed(2);
+function watchEngines(stopFlag) {
+  let lastHost = '';
+  let lastSidecar = '';
+  return (async () => {
+    while (!stopFlag.done) {
+      try {
+        const hostPid = assistant.__hostPid() || null;
+        const st = await assistant.assistantStatus({ tier: 'max' });
+        const hostKey = `${hostPid || '-'}|${st.state}`;
+        if (hostKey !== lastHost) { EVENTS.push({ t: evAt(), what: `host ${hostKey}` }); lastHost = hostKey; }
+        const sc = assistant.sidecar.status();
+        const scKey = `${sc.alive ? 'alive' : 'down'}|inflight=${sc.inflight}`;
+        if (scKey !== lastSidecar) { EVENTS.push({ t: evAt(), what: `sidecar ${scKey}` }); lastSidecar = scKey; }
+      } catch { /* status can throw during a reload */ }
+      await sleep(150);
+    }
+  })();
+}
+
+/**
  * ★★ THE GATE MUST NOT PASS BY DOING NOTHING. Deferring background work while
  *    the screen is in use trivially restores the frame rate — a tick that
  *    never runs costs nothing — so every arm reports how many chapters it
@@ -207,7 +263,9 @@ async function setPrefs(w, a) {
   })()`);
 }
 
-async function arm(label, prefs) {
+async function arm(label, prefs, drop = []) {
+  DROPPED = new Set(drop);
+  RAN.clear();
   await assistant.unload().catch(() => {});
   await sleep(1500);
   let w = await win();
@@ -231,8 +289,17 @@ async function arm(label, prefs) {
     }
   }
   const before = stale();
+  EVENTS.length = 0;
+  CLOCK0 = Date.now();
+  const watchStop = { done: false };
+  const watching = watchEngines(watchStop);
   const r = await js(w, TRACE(SECONDS));
+  watchStop.done = true;
+  await watching;
   const after = stale();
+  r.events = EVENTS.slice();
+  r.ran = Object.fromEntries(RAN);
+  r.dropped = drop;
   const converged = before && after ? (before.chips - after.chips) + (before.sums - after.sums) : null;
   r.converged = converged;
   r.before = before;
@@ -245,9 +312,14 @@ async function arm(label, prefs) {
     `script ${String(t.scriptMs).padStart(5)}ms · rAF ${String(t.renderCbMs).padStart(5)}ms · style+layout+paint ${String(t.styleLayoutMs).padStart(6)}ms │ ` +
     `svg ${r.svgNodes} nodes, ${r.svgMutationBatches} rewrites │ converged ${r.converged === null ? '?' : r.converged} units`,
   );
-  for (const f of r.worstFrames.slice(0, 4)) {
-    console.log(`             ${String(f.dur).padStart(4)}ms @${f.t}  script ${String(f.scriptMs).padStart(4)}ms  rAF ${String(f.renderCbMs ?? '-').padStart(4)}ms  style+layout ${String(f.styleLayoutMs ?? '-').padStart(4)}ms   ${f.top.join(' ')}`);
+  for (const f of r.worstFrames.slice(0, 5)) {
+    // The frame's own clock starts with the trace; EVENTS share it closely
+    // enough (both stamped in the same second) to pair within a window.
+    const near = EVENTS.filter((e) => Math.abs(e.t - f.t / 1000) <= 1.5).map((e) => e.what);
+    console.log(`             ${String(f.dur).padStart(4)}ms @${(f.t / 1000).toFixed(1)}s  script ${String(f.scriptMs).padStart(4)}ms  rAF ${String(f.renderCbMs ?? '-').padStart(4)}ms  style+layout ${String(f.styleLayoutMs ?? '-').padStart(4)}ms   ${near.length ? '← ' + near.join(' · ') : '(nothing near)'}`);
   }
+  console.log(`             tasks asked: ${JSON.stringify(r.ran)}${drop.length ? `   (refused: ${drop.join(', ')})` : ''}`);
+  if (EVENTS.length) console.log(`             engine timeline: ${EVENTS.map((e) => `${e.t}s ${e.what}`).join('  ')}`);
   return { label, ...r };
 }
 
@@ -264,8 +336,10 @@ app.whenReady().then(async () => {
   console.log(`${'═'.repeat(190)}\n`);
 
   const rows = [];
+  installDrop();
   rows.push(await arm('idle', { enabled: false, mode: 'off' }));
   rows.push(await arm('tick on', { enabled: true, mode: 'max', tier: 'max' }));
+  rows.push(await arm('no host LM', { enabled: true, mode: 'max', tier: 'max' }, HOST_TASKS));
   rows.push(await arm('idle again', { enabled: false, mode: 'off' }));
 
   // ── the quiet phase ───────────────────────────────────────────────────────
