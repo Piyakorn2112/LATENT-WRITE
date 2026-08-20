@@ -253,7 +253,12 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
       <canvas ref={hostRef} className="liquid-state" style={{ width: size, height: size }} />
       {orbOn && (
         <span ref={orbRef} className="liquid-state-orb">
-          <OrbEngine mode="default" size={size} tint={tint} />
+          {/* ★ THE SAME PROPS THE WAIT ROWS PASS, not merely the same component.
+              `analyzing` is the working motion, and flowScale/aberration are what make
+              the app's blue orb look like the app's blue orb rather than like the
+              toolbar's. Copied from MaxAskPopover / WritingToolPopover / WorldDataView,
+              which all pass this exact set. */}
+          <OrbEngine mode="default" analyzing size={size} flowScale={0.8} aberration={0.45} tint={tint} />
         </span>
       )}
     </span>

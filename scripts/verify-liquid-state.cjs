@@ -56,6 +56,12 @@ function Harness() {
       <span id="app18"><LiquidState state={s} size={18} /></span>
       <span id="app40"><LiquidState state={s} size={40} /></span>
       <span id="app96"><LiquidState state={s} size={96} /></span>
+      {/* Two idle marks, so the ORB layer's colour can be read off the screen: one on
+          the app's token and one on a colour nothing in the app uses. */}
+      <span id="orbapp"><LiquidState state="idle" size={64} /></span>
+      <span id="orbprobe" style={{ ["--control-value-fill" as any]: "rgb(${PROBE_RGB.join(',')})" }}>
+        <LiquidState state="idle" size={64} />
+      </span>
     </div>
   );
 }
@@ -116,6 +122,7 @@ fs.writeFileSync(path.join(WORK, 'page.html'), `<!doctype html>
   .liquid-state, .liquid-state-orb { position: absolute; inset: 0; display: block; transition: none; }
   .liquid-state-orb { transform-origin: 50% 50%; }
 </style>
+<style>/*ORBCSS*/</style>
 <div id="root"></div>
 <!-- ★ IIFE AND A CLASSIC SCRIPT TAG, NOT A MODULE. Chromium refuses to load an ES
      module over file:// (CORS applies to module scripts and file:// has no origin),
@@ -130,6 +137,16 @@ execFileSync(path.join(ROOT, 'node_modules/esbuild/bin/esbuild'), [
   `--outfile=${path.join(WORK, 'bundle.js')}`,
 ], { cwd: ROOT, stdio: ['ignore', 'ignore', 'inherit'] });
 
+/* ★ THE ORB ENGINE SHIPS ITS OWN STYLESHEET, which esbuild emits as a separate file.
+ *   Leaving it out is not a cosmetic loss — the orb's canvas has no layout of its own
+ *   without those rules, so it sits in the wrong place and every measurement of it is
+ *   of the wrong pixels. */
+const orbCss = fs.existsSync(path.join(WORK, 'bundle.css'))
+  ? fs.readFileSync(path.join(WORK, 'bundle.css'), 'utf8')
+  : '';
+fs.writeFileSync(path.join(WORK, 'page.html'),
+  fs.readFileSync(path.join(WORK, 'page.html'), 'utf8').replace('/*ORBCSS*/', orbCss));
+
 let pass = 0;
 let fail = 0;
 const check = (name, ok, detail = '') => {
@@ -143,7 +160,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 process.on('unhandledRejection', (e) => { console.log('  UNHANDLED', e && e.stack || e); app.exit(1); });
 process.on('uncaughtException', (e) => { console.log('  UNCAUGHT', e && e.stack || e); app.exit(1); });
 
-app.disableHardwareAcceleration();
+/* ★ NO disableHardwareAcceleration() HERE. It was added to make the canvas timings
+ *   deterministic, and it also switches WebGL off — which means the orb layer renders
+ *   NOTHING, silently, and every gate that reads its pixels finds an empty rectangle.
+ *   A harness that disables the thing under test is not measuring it. */
 app.whenReady().then(async () => {
   console.log('electron ready');
   const win = new BrowserWindow({ width: 640, height: 200, show: false, webPreferences: { offscreen: false } });
@@ -178,6 +198,46 @@ app.whenReady().then(async () => {
     `painted rgb(${probe.rgb}) vs token rgb(${PROBE_RGB})`);
   check('and the unscoped instance paints the app blue', near(a18.rgb, [59, 130, 246]),
     `painted rgb(${a18.rgb})`);
+
+  console.log('\nthe ORB layer is the app\'s blue orb, not its own palette');
+  /* ★★ READ OFF THE SCREEN, NOT OFF THE CANVAS. The orb is WebGL, so getImageData
+   *    cannot see it; capturePage can, and what it captures is what a person sees.
+   *
+   *    ★ AND THE MAGENTA IS THE WHOLE GATE. The orb falls back to its OWN palette
+   *      whenever the tint property fails to resolve — a bright multi-tone blue that
+   *      looks entirely plausible next to a blue app. That is exactly what shipped:
+   *      the specimen page never defined --control-value-fill, getPropertyValue
+   *      returned an empty string, and nothing anywhere reported a problem. A colour
+   *      nothing else uses is the only way to tell "tinted" from "happens to be blue". */
+  const orbColour = async (sel) => {
+    const r = await js(`(() => { const b = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();
+      return { x: Math.round(b.x), y: Math.round(b.y), width: Math.round(b.width), height: Math.round(b.height) }; })()`);
+    const img = await win.webContents.capturePage(r);
+    const bmp = img.toBitmap();
+    const size = img.getSize();
+    let rr = 0, gg = 0, bb = 0, n = 0;
+    for (let i = 0; i < bmp.length; i += 4) {
+      const b0 = bmp[i], g0 = bmp[i + 1], r0 = bmp[i + 2];
+      /* Anything meaningfully away from the page's near-white ground is ink. */
+      if (244 - r0 > 26 || 244 - g0 > 26 || 243 - b0 > 26) { rr += r0; gg += g0; bb += b0; n++; }
+    }
+    return { rgb: n ? [Math.round(rr / n), Math.round(gg / n), Math.round(bb / n)] : null, n, size };
+  };
+  const orbP = await orbColour('#orbprobe');
+  const orbA = await orbColour('#orbapp');
+  check('the orb layer paints something at all', orbP.n > 60 && orbA.n > 60,
+    `${orbP.n} and ${orbA.n} ink pixels in ${orbP.size.width}×${orbP.size.height}`);
+  /* The orb varies each petal's value around the tint, so the MEAN is the tint but no
+   * single pixel is; a generous tolerance is correct here and the control is what
+   * makes it strict. */
+  const nearish = (c, t, tol) => c && c.every((v, i) => Math.abs(v - t[i]) <= tol);
+  check('a scoped token colours the orb, not its own palette', nearish(orbP.rgb, PROBE_RGB, 60),
+    `painted rgb(${orbP.rgb}) against token rgb(${PROBE_RGB})`);
+  check('and the unscoped orb is the app blue', nearish(orbA.rgb, [59, 130, 246], 60),
+    `painted rgb(${orbA.rgb})`);
+  check('negative control — the two orbs are not the same colour',
+    orbP.rgb && orbA.rgb && Math.abs(orbP.rgb[0] - orbA.rgb[0]) > 60,
+    `probe R ${orbP.rgb?.[0]} against app R ${orbA.rgb?.[0]}`);
 
   console.log('\nit is actually animating, and a squash conserves area');
   /* ★ INK IS THE WRONG OBSERVABLE FOR "IS IT MOVING", and finding that out was worth
