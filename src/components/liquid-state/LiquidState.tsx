@@ -92,6 +92,9 @@ const PAUSED_BODY_CLASS = "electron-window-unfocused-orb-paused";
  *  shapes are immediate, because by then the writer is watching something. */
 const ORB_HOLD_MS = 520;
 
+/** How long the orb's layer is kept alive after it stops being visible. */
+const ORB_KEEP_MS = 700;
+
 /** `rgb()/rgba()/#hex` → 0..255 rgb plus alpha. Null on anything else; the caller
  *  falls back rather than guessing at a colour. */
 function parseCssColor(raw: string): { rgb: [number, number, number]; a: number } | null {
@@ -176,9 +179,10 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
       : null;
     let painted: Pose = loopPose("idle", 0);
     let holdLeft = ORB_HOLD_MS;
+    let orbIdleFor = 0;
     let reducedDrawn: LiquidStateName | null = null;
 
-    const paint = (pose: Pose) => {
+    const paint = (pose: Pose, dt: number) => {
       painted = pose;
       /* Nothing to paint while the orb owns the mark, and nothing to read either — the
        * canvas is transparent, so the whole field evaluation is skipped. */
@@ -194,10 +198,19 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
         orb.style.filter = pose.ob > 0.01 ? `blur(${pose.ob.toFixed(2)}px)` : "none";
         orb.style.opacity = pose.oa.toFixed(3);
       }
+      /* ★★ THE ORB LAYER IS STICKY ON THE WAY OUT. Unmounting it destroys a WebGL
+       *    context and remounting builds a new one — tens of milliseconds, and exactly
+       *    the sort of hitch that lands in the middle of a reveal. Its opacity dips
+       *    below the threshold for a frame or two at the start of an arrival and at
+       *    every hand-over, so a bare `oa > 0` test churns the context on both. Mount
+       *    immediately when it is wanted; wait out a grace period before letting go. */
       const need = pose.oa > 0.002;
-      if (need !== orbOnRef.current) {
-        orbOnRef.current = need;
-        setOrbOn(need);
+      if (need) {
+        orbIdleFor = 0;
+        if (!orbOnRef.current) { orbOnRef.current = true; setOrbOn(true); }
+      } else if (orbOnRef.current) {
+        orbIdleFor += dt;
+        if (orbIdleFor > ORB_KEEP_MS) { orbOnRef.current = false; setOrbOn(false); }
       }
     };
 
@@ -211,7 +224,7 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
         /* One frame per state change, and nothing between. */
         if (reducedDrawn !== stateRef.current) {
           reducedDrawn = stateRef.current;
-          paint(staticPose(reducedDrawn));
+          paint(staticPose(reducedDrawn), 16);
         }
         last = now;
         return;
@@ -252,7 +265,7 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
         clock += dt;
       }
 
-      paint(poseAt(current, clock, motion));
+      paint(poseAt(current, clock, motion), dt);
     };
 
     const onVisibility = () => { last = 0; };

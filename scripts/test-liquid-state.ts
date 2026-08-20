@@ -466,6 +466,26 @@ console.log("\nidle is the app's orb, and the hand-over does not dip");
   for (let i = 0; i <= 100; i++) { const a = i / 100; dip = Math.min(dip, 1 - (1 - a) * a); }
   check("negative control — a symmetric cross-fade does dip", dip < 0.999,
     `symmetric dissolve bottoms out at ${dip.toFixed(3)}`);
+
+  /* ★★ AND THE MARK ARRIVES AS THE ORB, which is the gate for a bug that showed in one
+   *    surface and not the other. Mounting at a working state runs no entrance; mounting
+   *    at `idle` — which the ask popover does, because gathering evidence has no shape —
+   *    ran the droplet entrance, and that forced the CANVAS visible and the ORB hidden
+   *    for its whole duration. Two different arrivals for the same mark. */
+  const enter: Motion = { from: null, to: "idle", kind: "enter", fromPose: loopPose("idle", 0), elapsed: 0 };
+  let canvasInk = 0;
+  let orbLow = 1;
+  for (let e = 0; e <= DURATION.enter; e += 4) {
+    const pose = poseAt("idle", 0, { ...enter, elapsed: e });
+    canvasInk = Math.max(canvasInk, pose.alpha);
+    if (e > DURATION.enter * 0.15) orbLow = Math.min(orbLow, pose.oa);
+  }
+  check("arriving at idle never paints the canvas", canvasInk === 0, `peak canvas alpha ${canvasInk}`);
+  check("and the orb is up within a couple of frames", orbLow > 0.98,
+    `lowest orb opacity after 15% of the entrance: ${orbLow.toFixed(3)}`);
+  const grew = poseAt("idle", 0, { ...enter, elapsed: 0 }).os < poseAt("idle", 0, { ...enter, elapsed: DURATION.enter }).os;
+  check("and it pops in rather than cutting in", grew,
+    `scale ${poseAt("idle", 0, { ...enter, elapsed: 0 }).os.toFixed(2)} → 1`);
 }
 
 /* ── 8. nothing past what the distance function can do ──────────────────────────── */

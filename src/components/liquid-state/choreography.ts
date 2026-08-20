@@ -110,8 +110,12 @@ const SPLAT = 0.92;
  *  so it carries far less ink than three fat dots across the same box and reads
  *  smaller at a glance even when its bounding box says otherwise. Visual weight is what
  *  balances, not extent. */
-const PEN_LEN = 0.55;
-const PEN_R = 0.09;
+/* ★ THE CEILING IS THE LIFT, NOT THE REST POSE. The pen's vertical reach is
+ *  len × sin(120°) plus the butt's radius, measured from the nib — and the nib is at
+ *  its highest during the lift at the end of each stroke, which is where the barrel
+ *  goes through the top of the canvas. Shortening the lift buys length. */
+const PEN_LEN = 0.59;
+const PEN_R = 0.098;
 const PEN_TIP = 0.006;
 const PEN_HEAD = 0.34;
 const PEN_NECK = 0.6;
@@ -135,7 +139,7 @@ const PEN_TRAVEL = 0.07;
  *  edge. Centring the SHAPE means starting the nib left of the middle. */
 const PEN_CX = 0.4;
 /** The line the pen leaves. */
-const INK_R = 0.052;
+const INK_R = 0.056;
 const INK_Y = GROUND - INK_R;
 
 /** What the orb shrinks to before the canvas takes over, and how soft both go. */
@@ -483,7 +487,7 @@ function writingPose(clock: number): Pose {
   pose.pr = PEN_R;
   pose.plen = PEN_LEN;
   pose.px = PEN_CX + nib;
-  pose.py = INK_Y - INK_R * 0.25 - bob - lift * 0.05;
+  pose.py = INK_Y - INK_R * 0.25 - bob - lift * 0.03;
   pose.prot = PEN_ROT + Math.sin(2 * Math.PI * (g * 2 + 0.2)) * 0.045;
 
   /* The line runs from where the stroke started to wherever the nib got to, and thins
@@ -787,10 +791,35 @@ function handoffPose(from: Pose, to: Pose, p: number): Pose {
 }
 
 /**
- * THE ARRIVAL — a droplet falls in from above and splats. It never fades in: a liquid
- * indicator that dissolves into existence has already told you it is a picture.
+ * THE ARRIVAL.
+ *
+ * ★★ IF THE MARK IS ARRIVING AS THE ORB, THE ORB IS WHAT ARRIVES. This branch is the
+ *    whole fix for a bug that was visible in one surface and not the other, which is
+ *    the shape of report worth trusting: the ask popover mounts the indicator at
+ *    `idle` (its first phase is gathering evidence, which has no shape of its own),
+ *    while the writing tool mounts straight into `writing`. Mounting at a working
+ *    state runs no entrance at all — the pose is simply the orb, and it looked right.
+ *    Mounting at `idle` ran this function, which ended with `alpha = 1; oa = 0`: it
+ *    forced the CANVAS visible and the ORB hidden for the whole 400ms, so the first
+ *    reveal was a droplet falling on an empty canvas and the orb then snapping in at
+ *    the end. Two different arrivals for the same mark, and only one of them wrong.
+ *
+ *    An orb arriving is an orb: it comes up on the pop spring from a smaller scale,
+ *    with a little blur that settles — the same soft-blob vocabulary the hand-over
+ *    uses — and the canvas stays empty behind it.
  */
 function enterPose(to: Pose, p: number): Pose {
+  if (to.oa > 0) {
+    const out: Pose = { ...to };
+    out.os = to.os * mix(0.58, 1, window_(p, 0, 1, POP));
+    out.ob = mix(2.2, to.ob, window_(p, 0, 0.55, IN_OUT_3));
+    /* Opacity is up within a couple of frames rather than crossfading, because the orb
+     * is a lens: fading one in reads as it going out of focus, not as it appearing.
+     * It also keeps the WebGL layer mounted from the first frame — see LiquidState. */
+    out.oa = to.oa * window_(p, 0, 0.08, OUT_STRONG);
+    out.alpha = 0;
+    return out;
+  }
   const drop = window_(p, 0, 0.42, IN_1);
   const out: Pose = { ...to };
   const fall = drop * (1 - window_(p, 0.36, 0.42, IN_1));
