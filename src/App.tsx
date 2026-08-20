@@ -120,6 +120,7 @@ import { CHEKHOV_TASK } from "./lib/chekhov-review";
 import { PRESENCE_TASK } from "./lib/presence-review";
 import { findChekhovCandidates } from "./lib/continuity";
 import { chipKeyFor, runChipPick, CHIP_TASK } from "./lib/chip-picker";
+import { startActivityTracking, isQuiet, msSinceActivity } from "./lib/ui-activity";
 import { summaryKeyFor, runChapterSummary, SUMMARY_TASK } from "./lib/chapter-summary";
 import { assistantMode } from "./lib/preferences";
 import {
@@ -1445,11 +1446,46 @@ export default function App() {
       return 350;
     };
 
+    // ★★ CONVERGENCE WAITS FOR A STILL SCREEN. Measured on the full-screen
+    //    timeline (probe-render-attribution.cjs): with this tick running the
+    //    app delivers 116.1 fps against 120.0 idle either side of it, and 69
+    //    frames in forty seconds land over 25ms where an idle window has none.
+    //    The decoding is not what costs that — the same request bytes driven
+    //    at the same concurrency straight at the engine, with the app
+    //    scrolling beside it, cost nothing at all (120.5 fps, GPU at 98%). It
+    //    is the tick living in the writer's renderer at the writer's moment.
+    //
+    //    So it stops taking that moment. Nothing here has a deadline: a
+    //    chapter that is not summarised this second is summarised the next
+    //    time the screen is still, and the work is keyed so nothing is lost.
+    //    Interactive work is untouched by this — an ask, a rewrite or a
+    //    dossier field is exactly the case where the writer IS waiting, and
+    //    those run in the other lane.
+    //
+    // ★  A STARVATION CEILING, because a writer who types for ten minutes
+    //    without a 600ms gap would otherwise never see a chip. After
+    //    QUIET_CEILING_MS of continuous deferral one unit goes through
+    //    regardless; the loop then re-arms and defers again.
+    const QUIET_MS = 600;
+    const QUIET_CEILING_MS = 30_000;
+    let deferringSince = 0;
+
     const tick = async () => {
       if (!alive || chipBusyRef.current) return;
       if (document.hidden) {
         document.addEventListener("visibilitychange", onVisible, { once: true });
         return;
+      }
+      if (!isQuiet(QUIET_MS)) {
+        if (deferringSince === 0) deferringSince = Date.now();
+        if (Date.now() - deferringSince < QUIET_CEILING_MS) {
+          // Re-check a little after the quiet period would elapse, rather than
+          // spinning: the writer stopping is not an event this can listen for.
+          arm(Math.max(120, QUIET_MS - msSinceActivity() + 60));
+          return;
+        }
+      } else {
+        deferringSince = 0;
       }
       // ★ MAX MODE UPGRADES THE WHOLE TICK: chips and summaries run on the 4B,
       //   chips may carry a grounded second line, and the cache keys carry the
@@ -1501,9 +1537,11 @@ export default function App() {
     const onVisible = () => { if (!document.hidden && alive) void tick(); };
     chipKickRef.current = () => arm(1200);
 
+    const stopActivity = startActivityTracking();
     arm(4000);
     return () => {
       alive = false;
+      stopActivity();
       chipKickRef.current = () => {};
       if (timer !== null) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisible);
