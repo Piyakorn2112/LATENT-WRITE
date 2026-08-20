@@ -412,10 +412,32 @@ things the model is doing.
 
 | state | shape | when |
 |---|---|---|
-| `idle` | the app's actual blue orb, on its own layer | at rest, and what every instance mounts as |
-| `reading` | three lines of a paragraph, drawn by a wave running down them | evidence is being gathered — "Reading chapter 3 of 12…" |
+| `idle` | the app's actual blue orb, on its own layer | at rest, while evidence is gathered, and what every instance mounts as |
 | `thinking` | three dots as a travelling wave | the reasoning pass — the rotating `ThinkingLabel` |
 | `writing` | a pen — nib, collar, tapered barrel — drawing a line | tokens are being produced — "Writing the card…" |
+
+**There is no shape for reading, and that is a decision.** It had one — three
+lines of a paragraph — and it was the best-drawn of the three. But gathering
+evidence is the phase where the app has not started thinking yet, and the
+honest thing to show while nothing is happening is the mark itself. It also
+spent the size budget every other shape shares, and made the indicator say
+three things where the writer needs two: it is working, and then what it is
+doing. Call sites map their reading phase to `idle`.
+
+**The orb is always seen before it liquefies** (`ORB_HOLD_MS`). A request can
+report that it is thinking within a frame of the popover opening, and without
+a floor the mark would be gone before anyone registered it was there — the
+hand-over would exist in the code and not on the screen. The hold delays only
+the first move away from the orb.
+
+**The three marks are sized against the orb, not the box.** The orb's own
+layout reaches 0.93 of the canvas. Measured diagonals: thinking 0.97, writing
+0.85, orb 0.88 — and writing is deliberately the largest of the working
+shapes, because one thin diagonal carries far less ink than three fat dots
+across the same box and reads smaller at a glance. **The ceiling is not the
+canvas, it is the neck**: while a transition's tension is up, `smin(a, a, k)`
+inflates the whole mass by `k` in every direction, so the budget is
+(shape + squash + anticipation + k) under half the box.
 
 **`idle` is the real `OrbEngine`**, with the same props the wait rows pass
 (`analyzing`, `flowScale={0.8}`, `aberration={0.45}`, the tint). An earlier

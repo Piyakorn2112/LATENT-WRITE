@@ -29,8 +29,8 @@ import {
 } from "../src/components/liquid-state/choreography";
 import { rasterise, sdField } from "../src/components/liquid-state/field";
 
-const STATES: LiquidStateName[] = ["idle", "reading", "thinking", "writing"];
-const WORKING: LiquidStateName[] = ["reading", "thinking", "writing"];
+const STATES: LiquidStateName[] = ["idle", "thinking", "writing"];
+const WORKING: LiquidStateName[] = ["thinking", "writing"];
 const PX = 54; /* 18 CSS px at 3× — the densest the component ever runs */
 
 let pass = 0;
@@ -325,8 +325,11 @@ console.log("\nthe neck — a bridge across a gap, which overlap cannot fake");
 {
   let best = { gap: 0, at: 0, pair: "" };
   let leaked = "";
-  for (const from of WORKING) {
-    for (const to of WORKING) {
+  /* Every pair, including the hand-overs. Two working states is a thin set to draw a
+   * conclusion from, and the mass converges just as hard leaving the orb as it does
+   * between shapes. */
+  for (const from of STATES) {
+    for (const to of STATES) {
       if (from === to) continue;
       const r = bridgeScan(from, to);
       if (r.widest.gap > best.gap) best = { ...r.widest, pair: `${from} → ${to}` };
@@ -376,39 +379,6 @@ console.log("\nthinking reads as THREE dots for its whole cycle");
     `narrowest daylight ${(narrowest + 3).toFixed(2)} device px of ${PX} (${((narrowest + 3) / PX * 18).toFixed(2)}px at 18)`);
 }
 
-console.log("\nreading reads as three lines of a paragraph");
-{
-  const pose = staticPose("reading");
-  const lines = fieldOf(pose).bodies.slice(0, 3);
-  check("three separate lines", lines.every((b) => b.len > 0.2),
-    lines.map((b) => (b.len * 18).toFixed(1)).join("px, ") + "px long at 18");
-  check("stacked, not overlapping", lines.every((b, i) =>
-    i === 0 || b.y - lines[i - 1].y > (b.r + lines[i - 1].r) * 1.4),
-    lines.map((b) => b.y.toFixed(2)).join(" / "));
-  check("left-aligned like a paragraph", lines.every((b) => Math.abs(b.x - lines[0].x) < 1e-6),
-    `left edges at ${lines.map((b) => b.x.toFixed(3)).join(", ")}`);
-  check("ragged on the right", new Set(lines.map((b) => Math.round(b.len * 100))).size === 3,
-    lines.map((b) => b.len.toFixed(2)).join(", "));
-  /* The wave has to actually run DOWN the page, not pulse in unison. */
-  /* ★ THE RISE, NOT THE PEAK. Each line holds at full length for nearly half a cycle,
-   *   so "when is it longest" is a plateau and argmax picks whichever sample came
-   *   first — which reported the third line peaking at 0ms and the wave running
-   *   backwards. When it CROSSES half, going up, is a single well-defined moment. */
-  const rise = (i: number) => {
-    for (let t = 0; t < GEOMETRY.P_READ; t += 5) {
-      const w = fieldOf(loopPose("reading", t)).bodies[i].len / GEOMETRY.LINE_LEN[i];
-      const prev = fieldOf(loopPose("reading", t - 5)).bodies[i].len / GEOMETRY.LINE_LEN[i];
-      if (w >= 0.5 && prev < 0.5) return t;
-    }
-    return -1;
-  };
-  const rises = [0, 1, 2].map(rise);
-  const step = GEOMETRY.P_READ * 0.26;
-  const spacing = [rises[1] - rises[0], rises[2] - rises[1]].map((d) => (d + GEOMETRY.P_READ) % GEOMETRY.P_READ);
-  check("and the wave runs down the page", spacing.every((d) => Math.abs(d - step) < 30),
-    `lines cross half at ${rises.join("ms, ")}ms — spacing ${spacing.map((d) => d.toFixed(0)).join(", ")}ms against ${step.toFixed(0)}ms`);
-}
-
 console.log("\nwriting is a pen with a real nib, drawing a real line");
 {
   const pose = loopPose("writing", GEOMETRY.P_WRITE * 0.4);
@@ -425,14 +395,20 @@ console.log("\nwriting is a pen with a real nib, drawing a real line");
   /* ★ MEASURED OFF THE FIELD, not off the parameters. A cone can be authored with a
    *   tiny tip and painted blunt — the blend with the line it is touching can fill the
    *   nib in completely. So: walk the pen's axis and bisect for the half-width. */
-  const f = fieldOf(pose);
-  const ax = Math.cos(pose.prot);
-  const ay = Math.sin(pose.prot);
-  const barrelX = pose.px - ax * pose.plen;
-  const barrelY = pose.py - ay * pose.plen;
+  /* ★ THE NIB IS MEASURED WHILE THE PEN IS LIFTED. On the paper the tip sits inside
+   *   the line it is drawing — correctly, that is what touching down looks like — so a
+   *   bisection across the axis near the nib measures the STROKE and reports a point as
+   *   a blob. The shape of the nib is a question about the pen, and the only frames
+   *   where the pen is alone are the ones where it is off the page. */
+  const lifted = loopPose("writing", GEOMETRY.P_WRITE * 0.8);
+  const f = fieldOf(lifted);
+  const ax = Math.cos(lifted.prot);
+  const ay = Math.sin(lifted.prot);
+  const barrelX = lifted.px - ax * lifted.plen;
+  const barrelY = lifted.py - ay * lifted.plen;
   const halfWidth = (u: number) => {
-    const qx = barrelX + ax * pose.plen * u;
-    const qy = barrelY + ay * pose.plen * u;
+    const qx = barrelX + ax * lifted.plen * u;
+    const qy = barrelY + ay * lifted.plen * u;
     if (sdField(f, qx, qy) > 0) return 0;
     let lo = 0;
     let hi = 0.2;
@@ -455,7 +431,9 @@ console.log("\nwriting is a pen with a real nib, drawing a real line");
   const shaft = halfWidth(0.42);
   check("and the collar stands proud of the barrel", collar > shaft * 1.06,
     `collar ${(collar * 18).toFixed(2)}px against barrel ${(shaft * 18).toFixed(2)}px at 18`);
-  const tipW = halfWidth(0.98);
+  /* Sampled at 0.995: a longer pen puts 0.98 of its axis several pixels short of the
+   * tip, where the cone still has real width. The point is the last half percent. */
+  const tipW = halfWidth(0.995);
   check("and the nib is a point, not a blob", tipW * 18 < 0.55,
     `${(tipW * 18).toFixed(3)}px of half-width at 18`);
   const lens = [0.1, 0.25, 0.4, 0.55, 0.68].map((g) => loopPose("writing", GEOMETRY.P_WRITE * g).al);
@@ -541,7 +519,6 @@ console.log("\nreduced motion keeps the meaning");
   const drawn = (s: LiquidStateName) => fieldOf(staticPose(s)).bodies.filter((b) => b.r > 1e-3);
   check("thinking rests as three separated dots",
     drawn("thinking").length === 3 && drawn("thinking").every((b) => b.len === 0));
-  check("reading rests as three lines", drawn("reading").filter((b) => b.len > 0.2).length === 3);
   check("writing rests as a pen mid-stroke",
     drawn("writing").some((b) => (b.tip ?? b.r) < b.r * 0.5) && staticPose("writing").ar > 0.01);
   check("idle rests as the orb alone", drawn("idle").length === 1 && staticPose("idle").alpha === 0);

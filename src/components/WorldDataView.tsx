@@ -1815,7 +1815,8 @@ function DossierCard({
               already names them; the shape just says it faster. */}
           <span className="max-ask-orb">
             <LiquidState
-              state={state.phase === "reading" ? "reading" : state.thinking ? "thinking" : "writing"}
+              /* Reading the manuscript shows the mark itself — see LiquidState. */
+              state={state.phase === "reading" ? "idle" : state.thinking ? "thinking" : "writing"}
               size={18}
             />
           </span>

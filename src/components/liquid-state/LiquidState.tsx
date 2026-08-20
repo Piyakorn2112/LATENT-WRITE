@@ -82,6 +82,16 @@ interface Props {
 
 const PAUSED_BODY_CLASS = "electron-window-unfocused-orb-paused";
 
+/** ★★ THE ORB IS ALWAYS SEEN BEFORE IT LIQUEFIES. A request can report that it is
+ *  thinking within a frame of the popover opening, and without a floor the mark would
+ *  be gone before anyone registered it was there — the hand-over would exist in the
+ *  code and not on the screen. Half a second is long enough to read as "the thing you
+ *  know is starting" and short enough that nobody waits for it.
+ *
+ *  It delays only the FIRST move away from the orb; state changes between working
+ *  shapes are immediate, because by then the writer is watching something. */
+const ORB_HOLD_MS = 520;
+
 /** `rgb()/rgba()/#hex` → 0..255 rgb plus alpha. Null on anything else; the caller
  *  falls back rather than guessing at a colour. */
 function parseCssColor(raw: string): { rgb: [number, number, number]; a: number } | null {
@@ -165,6 +175,7 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
       ? { from: null, to: "idle", kind: "enter", fromPose: loopPose("idle", 0), elapsed: 0 }
       : null;
     let painted: Pose = loopPose("idle", 0);
+    let holdLeft = ORB_HOLD_MS;
     let reducedDrawn: LiquidStateName | null = null;
 
     const paint = (pose: Pose) => {
@@ -213,10 +224,15 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
       last = now;
 
       if (stateRef.current !== current) {
-        const kind = kindFor(current, stateRef.current);
-        motion = { from: current, to: stateRef.current, kind, fromPose: painted, elapsed: 0 };
-        current = stateRef.current;
-        clock = 0;
+        if (current === "idle" && holdLeft > 0) {
+          holdLeft -= dt;
+        } else {
+          const kind = kindFor(current, stateRef.current);
+          motion = { from: current, to: stateRef.current, kind, fromPose: painted, elapsed: 0 };
+          current = stateRef.current;
+          clock = 0;
+          holdLeft = ORB_HOLD_MS;
+        }
       }
 
       if (motion) {

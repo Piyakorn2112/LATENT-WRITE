@@ -160,7 +160,7 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
   const ask = (kind: AskKind, q?: string) => {
     const input = build(kind, q);
     if (!input) { setPhase({ name: "failed", reason: "no-input" }); return; }
-    setPhase({ name: "asking", label: "Reading passage…", work: "reading" });
+    setPhase({ name: "asking", label: "Reading passage…", work: "idle" });
     void runMaxAsk(input, {
       run: maxRunner,
       selfReview: true,
@@ -179,10 +179,15 @@ export function MaxAskPopover({ x, y, paragraphPreview, build, onClose }: Props)
             : p === "widening" ? "Reading more of the story…"
             : p === "refining" ? "Correcting answer…"
             : "Reviewing answer…",
-          /* Gathering evidence sweeps; reasoning and re-checking jump; producing a
-           * corrected answer reaches. `reviewing` is thinking rather than writing
-           * because at that point the answer exists and is being weighed. */
-          work: p === "asking" || p === "widening" ? "reading"
+          /* ★ GATHERING EVIDENCE SHOWS THE MARK ITSELF. There is no shape for it and
+           *   that is deliberate: at this point the app has not started thinking yet,
+           *   and the honest thing to show while nothing is happening is the orb. The
+           *   indicator then has two things to say rather than three — it is working,
+           *   and then what it is doing.
+           *
+           *   `reviewing` is thinking rather than writing, because at that point the
+           *   answer exists and is being weighed. */
+          work: p === "asking" || p === "widening" ? "idle"
             : p === "refining" ? "writing"
             : "thinking",
         });

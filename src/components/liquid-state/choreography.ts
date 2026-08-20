@@ -12,9 +12,16 @@
  * ── THE STATES ─────────────────────────────────────────────────────────────────────
  *
  *   idle      the app's own blue orb, on its own layer. The canvas has nothing.
- *   reading   three lines of a paragraph, drawn in turn by a wave running down them
- *   thinking  three dots taking turns jumping
- *   writing   a pen — barrel, shoulder, head — drawing a line
+ *   thinking  three dots as a travelling wave
+ *   writing   a pen — nib, collar, tapered barrel — drawing a line
+ *
+ * ★★ THERE IS NO `reading` SHAPE, AND THAT IS A DECISION RATHER THAN AN OMISSION. It
+ *    had one — three lines of a paragraph — and it was the best-drawn of the three. But
+ *    gathering evidence is the phase where the app has not started thinking yet, and
+ *    the honest thing to show while nothing is happening is the mark itself. Spending a
+ *    distinct shape on it also spent the size budget every other shape shares, and made
+ *    the indicator say three things where the writer only needs to know two: it is
+ *    working, and then what it is doing.
  *
  * ── THE TRANSITIONS, REBUILT ───────────────────────────────────────────────────────
  *
@@ -60,7 +67,7 @@ import {
 } from "./curves";
 import type { Field } from "./field";
 
-export type LiquidStateName = "idle" | "reading" | "thinking" | "writing";
+export type LiquidStateName = "idle" | "thinking" | "writing";
 
 /* ── geometry, in a unit box where 1 = the component's size ─────────────────────── */
 
@@ -80,35 +87,32 @@ const GROUND = 0.72;
  *      spending some of that back: K_NECK came down with them, and the containment gate
  *      is what decides whether the sums are right. */
 /** Rest radius of one thinking dot, and the spacing between adjacent dots. */
-const R_DOT = 0.108;
-const DOT_GAP = 0.295;
+const R_DOT = 0.118;
+const DOT_GAP = 0.302;
+/** The radius at which a body counts as fully present, for the blend. Small — it only
+ *  has to be past "a speck". */
+const PRESENCE_R = 0.05;
 /** How high a dot jumps, and how much it stretches at full speed. */
-const JUMP = 0.215;
+const JUMP = 0.235;
 /** How far apart in the cycle adjacent dots are. See thinkingPose. */
 const DOT_WAVE = 0.17;
 const STRETCH = 0.17;
 /** How flat a dot goes on impact. */
-const SPLAT = 0.87;
-
-/** The three lines of the paragraph: where they sit, how long each is, how thick. */
-const LINE_Y = [0.27, 0.5, 0.73] as const;
-/** ★ THE PARAGRAPH IS SIZED AGAINST THE NECK, not against the box. `smin(a, a, k)` is
- *  `a − k`, so while a transition's tension is up the whole mass is INFLATED by k in
- *  every direction — which is invisible on three dots near the centre and took the
- *  longest line clean off the left edge. Lines, tension and wind-up are one budget. */
-const LINE_LEN = [0.58, 0.68, 0.43] as const;
-const LINE_LEFT = 0.145;
-/** ★ THE LINES CARRY THE SAME WEIGHT AS THE DOTS. At 0.032 they were 1.1px at the
- *  shipping size against a 3.5px dot, so `reading` read as a lighter, thinner thing
- *  than the state either side of it — and weight is the first thing the eye compares
- *  between two marks that share a slot. */
-const LINE_R = 0.055;
+/** ★ A GENTLER SPLAT NOW THE DOTS ARE BIGGER. The squash is authored as a fraction, so
+ *  the same 0.84 that flattened a small dot by half a pixel flattens a large one into
+ *  its neighbour: the corridor between adjacent dots is what a splat spends, and there
+ *  is less of it to spend once the dots have grown into it. */
+const SPLAT = 0.92;
 
 /** The pen. A barrel of constant width, a shoulder where it steps in, and a short cone
  *  to the nib — a nib is a POINT, and no union of ellipses makes one. */
-const PEN_LEN = 0.46;
-const PEN_R = 0.074;
-const PEN_TIP = 0.008;
+/* ★ THE PEN IS BIGGER THAN THE OTHER TWO ON PURPOSE. It is one thin diagonal stroke,
+ *  so it carries far less ink than three fat dots across the same box and reads
+ *  smaller at a glance even when its bounding box says otherwise. Visual weight is what
+ *  balances, not extent. */
+const PEN_LEN = 0.55;
+const PEN_R = 0.09;
+const PEN_TIP = 0.006;
 const PEN_HEAD = 0.34;
 const PEN_NECK = 0.6;
 /** ★ A PEN HAS MORE THAN TWO PARTS. Barrel and head alone is a shape that tapers once;
@@ -125,9 +129,13 @@ const PEN_BUTT = 0.78;
  *  travels along the line. Standing it up buys a third more pen for the same box, and
  *  a steeper grip is the more natural one anyway. */
 const PEN_ROT = 2.09;
-const PEN_TRAVEL = 0.078;
+const PEN_TRAVEL = 0.07;
+/** ★ AND IT SITS LEFT OF CENTRE. The pen runs up and to the RIGHT from its nib, so
+ *  centring the nib puts the whole barrel in the right half and the composition off the
+ *  edge. Centring the SHAPE means starting the nib left of the middle. */
+const PEN_CX = 0.4;
 /** The line the pen leaves. */
-const INK_R = 0.042;
+const INK_R = 0.052;
 const INK_Y = GROUND - INK_R;
 
 /** What the orb shrinks to before the canvas takes over, and how soft both go. */
@@ -140,13 +148,13 @@ const HANDOFF_R = 0.108;
  *  wider than the gap between two dots — tension exists for the moment a mass is
  *  tearing or coalescing, where there is a gap worth bridging. */
 const K_REST = 0;
-const K_NECK = 0.05;
+const K_NECK = 0.07;
 /** Inside one mass: exactly zero. `smin(a, a, k)` is `a − k`, so two coincident bodies
  *  blended at k are one body INFLATED by k. */
 const K_ONE = 0;
 /** The pen's two halves, and the pen against its own line. Small: the step at the
  *  shoulder is what makes the silhouette read as a pen. */
-const K_PEN = 0.007;
+const K_PEN = 0.005;
 
 /** How far a body has to travel to earn a full deformation. */
 const DEFORM_REF = 0.34;
@@ -206,7 +214,7 @@ function emptyPose(): Pose {
     ax: 0.5, ay: 0.5, ar: 0, al: 0, asx: 1, asy: 1, ask: 0,
     bx: 0.5, by: 0.5, br: 0, bl: 0, bsx: 1, bsy: 1, bsk: 0,
     cx: 0.5, cy: 0.5, cr: 0, cl: 0, csx: 1, csy: 1, csk: 0,
-    px: 0.5 - PEN_TRAVEL, py: INK_Y - INK_R * 0.25, prot: PEN_ROT, pr: 0, plen: PEN_LEN,
+    px: PEN_CX - PEN_TRAVEL, py: INK_Y - INK_R * 0.25, prot: PEN_ROT, pr: 0, plen: PEN_LEN,
     os: ORB_SMALL, ob: ORB_BLUR, oa: 0,
     k: K_ONE, soft: 0, alpha: 1,
   };
@@ -255,7 +263,7 @@ export function fieldOf(pose: Pose): Field {
      *   the longest line clean off the canvas. The length takes a third of the share,
      *   so a stretch still reads on a line and stays inside it. */
     const len = num(pose, key + "l") * (1 + (sx - 1) * 0.35);
-    const presence = smooth(Math.min(num(pose, key + "r") / LINE_R, 1));
+    const presence = smooth(Math.min(num(pose, key + "r") / PRESENCE_R, 1));
     bodies.push({
       /* A cone runs from its near end along +x, so a body stored by its CENTRE starts
        * half a (scaled) length back. At len = 0 that is the centre — which is why a dot
@@ -351,7 +359,6 @@ function smooth(t: number): number {
 
 const P_THINK = 820;
 const P_WRITE = 1150;
-const P_READ = 2000;
 /** Idle has no loop of its own — the orb animates itself. The number is only what a
  *  harness sweeps when it wants "a cycle of idle". */
 const P_IDLE = 1000;
@@ -381,8 +388,8 @@ function dotBeat(phase: number, jumpScale: number): { lift: number; sx: number; 
 
   let sy: number;
   if (f < 0.12) sy = 1;
-  else if (f < 0.26) sy = mix(1, 0.9, window_(f, 0.12, 0.26, OUT_STRONG));
-  else if (f < 0.32) sy = mix(0.9, flightSy(u), window_(f, 0.26, 0.32, IN_2));
+  else if (f < 0.26) sy = mix(1, 0.93, window_(f, 0.12, 0.26, OUT_STRONG));
+  else if (f < 0.32) sy = mix(0.93, flightSy(u), window_(f, 0.26, 0.32, IN_2));
   else if (f < AIR_B) sy = flightSy(u);
   else if (f < 0.755) sy = mix(flightSy(1), SPLAT, window_(f, AIR_B, 0.755, IN_2));
   else sy = mix(SPLAT, 1, window_(f, 0.755, 1, ELASTIC));
@@ -436,37 +443,6 @@ function thinkingPose(clock: number): Pose {
  *    thickness comes up three times faster than its length, so it is a line from the
  *    first frame rather than a dot that stretches.
  */
-/** ★ THE PAGE IS MOSTLY WRITTEN ON. The earlier split left each line blank for a
- *  quarter of its cycle, so the box spent much of its time nearly empty and the state
- *  read as sparse rather than as a paragraph. A line is drawn for 88% of its cycle now
- *  and clear for 12%; with three of them, at least two are always up. The cascade is
- *  still what moves — it moves through text rather than through space. */
-function lineWave(u: number): number {
-  const g = u - Math.floor(u);
-  if (g < 0.12) return smooth(g / 0.12);
-  if (g < 0.76) return 1;
-  if (g < 0.88) return 1 - smooth((g - 0.76) / 0.12);
-  return 0;
-}
-
-function readingPose(clock: number): Pose {
-  const f = clock / P_READ;
-  const pose = emptyPose();
-  BODIES.forEach((key, i) => {
-    const w = lineWave(f - i * 0.26);
-    const len = LINE_LEN[i] * w;
-    /* ★ SMOOTHED, NOT CLAMPED. `min(w·3, 1)` has a corner where it saturates, and a
-     *   corner in a position channel is a change of velocity — a jerk, even though no
-     *   pixel jumps. Smootherstep has zero slope at both ends. */
-    put(pose, key + "r", LINE_R * smooth(Math.min(w * 3, 1)));
-    put(pose, key + "l", len);
-    put(pose, key + "x", LINE_LEFT + len / 2);
-    put(pose, key + "y", LINE_Y[i]);
-  });
-  pose.k = K_REST;
-  return pose;
-}
-
 /**
  * WRITING — a pen, drawing.
  *
@@ -506,8 +482,8 @@ function writingPose(clock: number): Pose {
   const pose = emptyPose();
   pose.pr = PEN_R;
   pose.plen = PEN_LEN;
-  pose.px = 0.5 + nib;
-  pose.py = INK_Y - INK_R * 0.25 - bob - lift * 0.075;
+  pose.px = PEN_CX + nib;
+  pose.py = INK_Y - INK_R * 0.25 - bob - lift * 0.05;
   pose.prot = PEN_ROT + Math.sin(2 * Math.PI * (g * 2 + 0.2)) * 0.045;
 
   /* The line runs from where the stroke started to wherever the nib got to, and thins
@@ -519,7 +495,7 @@ function writingPose(clock: number): Pose {
   const half = (drawnTo + PEN_TRAVEL) / 2;
   const touch = Math.min(g / 0.05, 1);
   const fade = touch * (g < END ? 1 : 1 - window_(g, END, 0.98, IN_1));
-  pose.ax = 0.5 - PEN_TRAVEL + half;
+  pose.ax = PEN_CX - PEN_TRAVEL + half;
   pose.ay = INK_Y;
   pose.al = Math.max(half * 2, 0);
   pose.ar = INK_R * Math.max(fade, 0);
@@ -557,8 +533,7 @@ function idlePose(): Pose {
 export function loopPose(state: LiquidStateName, clock: number): Pose {
   if (state === "idle") return idlePose();
   if (state === "thinking") return thinkingPose(clock);
-  if (state === "writing") return writingPose(clock);
-  return readingPose(clock);
+  return writingPose(clock);
 }
 
 /** The period of a state's loop — one place knows, so a harness sampling a full cycle
@@ -566,7 +541,6 @@ export function loopPose(state: LiquidStateName, clock: number): Pose {
 export function periodOf(state: LiquidStateName): number {
   if (state === "thinking") return P_THINK;
   if (state === "writing") return P_WRITE;
-  if (state === "reading") return P_READ;
   return P_IDLE;
 }
 
@@ -644,7 +618,10 @@ const STAGGER_SPREAD = 0.14;
  *  zero at both ends and zero SLOPE at both ends — so it adds a beat without adding a
  *  kink. That is the whole trick: anticipation usually costs smoothness because it is
  *  authored as an extra keyframe, and a bump is not a keyframe. */
-const ANTICIPATE_BY = 0.055;
+/* Trimmed from 0.055: a lean is a lean, and on the OUTERMOST body it leans away from
+ * the centre — straight at the edge of the canvas, which is the one direction there is
+ * no room in. */
+const ANTICIPATE_BY = 0.03;
 
 /**
  * The deform envelope — the shape half of the choreography, and all of it.
@@ -896,16 +873,13 @@ export function poseAt(state: LiquidStateName, clock: number, motion: Motion | n
 export function staticPose(state: LiquidStateName): Pose {
   if (state === "idle") return idlePose();
   if (state === "thinking") return thinkingPose(0);
-  if (state === "writing") return writingPose(P_WRITE * 0.45);
-  /* 0.62 of the cycle is the one window where all three lines are drawn at once — a
-   * still frame of a paragraph has to be a paragraph. */
-  return readingPose(P_READ * 0.62);
+  return writingPose(P_WRITE * 0.45);
 }
 
 export const GEOMETRY = {
-  GROUND, R_DOT, DOT_GAP, JUMP, LINE_Y, LINE_LEN, LINE_LEFT, LINE_R,
-  PEN_LEN, PEN_R, PEN_TIP, PEN_ROT, PEN_TRAVEL, PEN_HEAD, PEN_NECK,
+  GROUND, R_DOT, DOT_GAP, JUMP,
+  PEN_LEN, PEN_R, PEN_TIP, PEN_ROT, PEN_TRAVEL, PEN_HEAD, PEN_NECK, PEN_CX,
   INK_R, INK_Y, K_REST, K_NECK, K_ONE, K_PEN, DEFORM_REF,
   ORB_SMALL, ORB_BLUR, HANDOFF_R,
-  P_THINK, P_WRITE, P_READ, P_IDLE,
+  P_THINK, P_WRITE, P_IDLE,
 };

@@ -119,13 +119,12 @@ function enterRow(to: LiquidStateName): Row {
 const ROWS: Row[] = [
   loopRow("writing"),
   loopRow("thinking"),
-  loopRow("reading"),
-  transitionRow("idle", "writing"),
   transitionRow("idle", "thinking"),
+  transitionRow("idle", "writing"),
+  transitionRow("thinking", "idle"),
   transitionRow("writing", "idle"),
   transitionRow("thinking", "writing", GEOMETRY.P_THINK * 0.33),
   transitionRow("writing", "thinking"),
-  transitionRow("reading", "thinking"),
 ];
 
 /** Draw one pose into a cell of `cell` device px, scaled up by `zoom` with no smoothing. */
