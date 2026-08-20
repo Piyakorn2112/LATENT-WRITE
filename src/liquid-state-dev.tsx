@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import { LiquidState, type LiquidStateName } from "./components/liquid-state/LiquidState";
 
-const STATES: LiquidStateName[] = ["reading", "thinking", "writing"];
+const STATES: LiquidStateName[] = ["idle", "reading", "thinking", "writing"];
 const SIZES = [18, 28, 48, 96, 160];
 
 function Panel({ scheme, state }: { scheme: "light" | "dark"; state: LiquidStateName }) {
@@ -32,7 +32,8 @@ function Panel({ scheme, state }: { scheme: "light" | "dark"; state: LiquidState
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 40, fontSize: 13 }}>
         <LiquidState state={state} size={18} />
         <span>
-          {state === "reading" ? "Reading chapter 3 of 12…"
+          {state === "idle" ? "Idle"
+            : state === "reading" ? "Reading chapter 3 of 12…"
             : state === "thinking" ? "Turning it over…"
             : "Writing the card…"}
         </span>
@@ -42,7 +43,7 @@ function Panel({ scheme, state }: { scheme: "light" | "dark"; state: LiquidState
 }
 
 function Harness() {
-  const [state, setState] = useState<LiquidStateName>("thinking");
+  const [state, setState] = useState<LiquidStateName>("idle");
   const [auto, setAuto] = useState(false);
 
   /* ★ THE CYCLE IS THE POINT. Every transition is authored per (from → to) pair, so
@@ -57,7 +58,7 @@ function Harness() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const i = ["1", "2", "3"].indexOf(e.key);
+      const i = ["1", "2", "3", "4"].indexOf(e.key);
       if (i >= 0) { setAuto(false); setState(STATES[i]); }
       if (e.key === " ") { e.preventDefault(); setAuto((v) => !v); }
     };

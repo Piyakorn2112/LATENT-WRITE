@@ -412,9 +412,19 @@ things the model is doing.
 
 | state | shape | when |
 |---|---|---|
+| `idle` | the app's orb: six petals around an empty centre, turning slowly | at rest. Available, not yet wired into any surface |
 | `reading` | a flat lozenge sweeping the box | evidence is being gathered — "Reading chapter 3 of 12…" |
 | `thinking` | two dots taking turns jumping | the reasoning pass — the rotating `ThinkingLabel` |
 | `writing` | one body reaching out to the right | tokens are being produced — "Writing the card…" |
+
+**`idle` is the app's orb drawn in the same liquid**, which is the whole
+reason it exists: a mark rendered by a different engine can only be *swapped*
+for the working shape, and a swap between a WebGL orb and a canvas metaball is
+a cross-fade however it is dressed up. Rendered in the field, the ring can
+collapse inward, feed a single mass, and that mass can tear into two dots. Its
+proportions are taken from `orbPhysics.ts` — ring 0.556, half-length 0.255,
+aspect 1.15, empty centre 0.278 — not drawn by eye. Two versions were guessed
+at first and both read as an asterisk.
 
 Each surface maps its own vocabulary onto those three. `MaxAskPopover` carries
 `work` beside `label` because the ask harness narrates five phases and there
@@ -440,6 +450,12 @@ keeps producing artifacts, stop tuning the map and paint it.
   is no crossfade and no settling step. The split therefore ends with one half
   thrown up to the apex of its first jump — the tear's energy becomes the
   loop's first beat.
+- **Petal tension is derived from how far the ring has collapsed**, not
+  authored. No transition has to remember to ramp it, and it can never be left
+  on at rest, where it would weld the mark into a disc.
+- **The ring is centred where a resting mass is centred**, a constant. Deriving
+  it from the body's own centre and floating the mark with `lift0` is wrong the
+  instant a transition grows a body: the lift and the radius both push it up.
 - **`fieldOf` always emits every body.** A body that should not be seen gets
   zero radius *and* zero blend, which is inert under `min()`. Dropping it
   instead is a discrete branch inside a continuous animation and steps the
