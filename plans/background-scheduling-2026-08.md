@@ -1,4 +1,4 @@
-# Background scheduling: why the timeline stuttered
+# Background scheduling: what was fixed, and what is still unexplained
 
 **Report (owner, 2026-08-19):** chapter summarisation and the timeline chips
 make the UI lag from a saturated GPU. Ask, rewrite and the character
@@ -6,198 +6,160 @@ description must stay as they are. Follow-up: *"open the story timeline sidebar
 and timeline full screen while the summarization and chip creation is running
 and you will clearly see lag."*
 
-**Answer:** the work was never the problem. Two engines loading and decoding at
-the same time was.
+**Status:** two real defects found and fixed with gates. The frame-rate cost is
+reproduced and reduced but **not fully explained** — five hypotheses were
+refuted by their own experiments, including three I was confident in. This
+document is written so the next pass starts from the instrumentation rather
+than from a sixth guess.
 
 ---
 
-## 1. What the measurements actually said
+## 1. Fixed, with gates
 
-### The reproduction (`probe-bg-schedule.cjs`, then `probe-timeline-stutter.cjs`)
+### The writer's work queued behind the app's own
 
-The real app, a real manuscript, the real tick, the surface the owner named,
-bracketed between two baselines:
+Every caller used `lane: "batch"` — one FIFO pool of three shared by the ask
+popover, the writing tool, the dossier fields **and** the chip/summary tick. An
+ask arriving while the tick held all three slots waited for a whole
+chapter-sized request to finish, and that included the popover's own prewarm,
+whose entire purpose is to be ready before the writer clicks.
+
+Two pools now:
+
+| lane | who | concurrency |
+|---|---|---|
+| `batch` | ask, rewrite, dossier, prewarm — the writer is waiting | 3 (unchanged) |
+| `background` | chips, chapter summaries — nobody is waiting | 2, and only when the other pool is empty |
+
+An interactive arrival **cancels** in-flight background work rather than waiting
+for it. That work is keyed and idempotent, so the slot costs one redo.
+
+**A reclaimed slot must not read as a failure.** The runtime can only report a
+cancel as `cancelled`, which the tick counts as a transient strike; three
+strikes add a session-long skip key. Three asks near one chapter would have
+silenced exactly that chapter — and the chapters a writer works next to are the
+ones that go stale most often. Preemption returns its own reason and earns no
+strike.
+
+Gate: `verify:assistant-lanes` (10, deterministic, stub bridge whose runs never
+settle on their own — "was it dispatched" is not observable against a real
+engine) and `test:assistant-lanes` (18). Both carry a **negative control**: with
+one shared pool the same ask is not dispatched at all, so the tests can tell the
+new arrangement from the old.
+
+### Convergence took the writer's moment
+
+The tick now waits for a still screen: 600ms of quiet, with a 30s starvation
+ceiling so someone typing without a gap still gets chips (`src/lib/ui-activity.ts`).
 
 ```
-base-1  120.0 fps   p95 9.1ms   worst  10ms    0 frames >25ms
-load     84.8 fps   p95 9.3ms   worst 537ms   63 frames >25ms
-base-2  120.1 fps   p95 9.3ms   worst  10ms    0 frames >25ms
-                                        baseline drift 0.1%
+tick on     116.3 fps   35 frames >25ms    0 units converged
+quiet       no pointer, 120s              30 units converged
 ```
 
-The mean hides the finding. The ten-second buckets do not:
+**The gate is not allowed to pass by doing nothing** — deferring work trivially
+restores the frame rate, so every arm reports units converged and the run ends
+with a quiet phase proving the deferred work still lands.
 
-```
-16.4 fps / 57 bad   →   119.7 fps / 6 bad   →   120.7 fps / 0 bad
-```
-
-**All the damage is one burst.** For the other twenty seconds the sidecar runs
-at 91% duty and 94% GPU and costs nothing at all.
-
-Every bad frame is GPU-side. Zero longtasks, and the worst frames (379-540ms)
-report **0ms of blocking script** — the renderer was not asked to do anything,
-it simply could not get the GPU.
-
-### The eliminations
-
-`probe-gpu-yield.cjs` drove the real chip and summary request bytes at the
-shipped concurrency of 3 straight at the sidecar, with the app scrolling
-beside it:
-
-```
-idle      120.0 fps    0 frames >25ms    GPU  50%
-shipped   120.5 fps    0 frames >25ms    GPU  98%    ← the shipped background load
-on2048    116.6 fps   24 frames >25ms    GPU  99%    ← positive control, separates
-```
-
-**A pegged GPU is not a starved compositor.** The positive control separates, so
-the harness can see a bad setting when there is one — and the shipped setting is
-not one.
-
-### The cause (`probe-engine-collision.cjs`)
-
-Full-screen timeline, 25s phases, bracketed:
-
-| phase | fps | frames >40ms | ms lost | decodes | loads |
-|---|---|---|---|---|---|
-| quiet | 120.4 | 0 | 0 | 0 | 0 |
-| host reloads alone | 120.4 | **0** | 0 | 0 | 8 |
-| sidecar decoding alone | 122.0 | **0** | 0 | 9 | 0 |
-| **BOTH** | 115.0 | **15** | **757ms** | **2** | 7 |
-| quiet (again) | 120.2 | 0 | 0 | 0 | 0 |
-
-Eight full model loads on their own cost nothing. Nine chapter-sized decodes on
-their own cost nothing. Overlap them and the frames go.
-
-**And the frames were the least of it.** In that phase the sidecar was stopped
-**five times** by the memory guard's `yield-to-interactive`, **four of seven**
-host loads came back `low-memory`, and decoding throughput fell from **9 units
-to 2**. The two engines evict each other in a loop: the host cannot fit beside
-the sidecar so it kills the sidecar; the next unit of background work boots the
-sidecar again (13.4s measured); the host tries again and hits `low-memory`.
-
-**In max mode both engines are resident by construction.** The sidecar holds the
-4B for chips and summaries, and every caller that passes no tier — the review
-sweep, the adjudication sweep, the World panel's referent pass — loads the 1.7B
-into the in-process host beside it.
+Bad frames on the timeline scene went **69 → 33-35** per 40s.
 
 ---
 
-## 2. What shipped
+## 2. Refuted — five hypotheses, each killed by its own experiment
 
-### The renderer: a background lane (`assistant-client.ts`)
+| hypothesis | measurement | verdict |
+|---|---|---|
+| chip/summary decoding saturates the GPU | real request bytes at the shipped concurrency, driven at the engine with the app scrolling: **120.5 fps, 0 frames >25ms, GPU pegged at 98%** | **false** |
+| the pool of 3 is too aggressive | concurrency is not the lever; 3 concurrent chapter-sized requests cost nothing | **false** |
+| a model load landing on a decoding engine | warm engines together: **one 65ms frame in 25 seconds**. Loads alone: 8 in 25s, zero bad frames | **false** |
+| a cold engine boot | a boot inside the measured window: **120.1 fps, zero frames >25ms, worst 17ms** | **false** |
+| the book is too big | the timeline **virtualises** — 174 chapters is 2054 SVG nodes against 1298 for twelve; idle stays 119.9 fps | **false** |
+| the in-process host's micro-batch (512) | `ASSISTANT_BATCH_SIZE=128`: 114.7 fps / 46 bad against 512's 116.3 / 35 | **false** (and unverified — the host never reports the batch it applied) |
+| the in-process host's inference | ablating every in-process consumer made it **worse**: 113.6 fps / 46 bad against 116.4 / 34 | **false** |
 
-Every caller used `lane: "batch"`, one FIFO pool of 3. An ask arriving while the
-chip tick held all three slots queued behind up to three chapter-sized requests
-— measured at **10.2s mean per request** at that concurrency — and that included
-the ask popover's own prewarm, whose entire purpose is to be ready before the
-writer clicks.
+### The attribution error underneath three of those
 
-- `lane: "background"` is its own pool of 2. It starts only when **nothing else
-  is pending in either lane**, and is cancelled the instant anything else
-  arrives.
-- Interactive concurrency is **unchanged at 3**, so the dossier's three
-  independent field calls still ride together.
-- The single-flight lane preempts too. Its callers run on the in-process host —
-  the very engine whose loads collide with the sidecar — so yielding only to the
-  batch pool would have left the collision in place. The rule this settles into:
-  **one engine works at a time.**
-
-### A reclaimed slot is not a failure
-
-Preemption settles as `preempted`, never `cancelled`, and the chip tick gives it
-a free retry. Counted as a transient strike, three asks near the same chapter
-would have silenced that chapter for the session — exactly backwards, since the
-chapters the writer works next to are the ones that go stale most.
-
-### Main: loads never land on a decoding engine (`assistant.cjs`)
-
-- A host load waits (bounded, then proceeds anyway) for the sidecar to go quiet.
-- A sidecar **boot** waits for the host to go quiet — gated on the server
-  actually being down, because `ensureStarted` is called per request.
-- Background work no longer takes the `yield-to-interactive` branch. It was
-  background evicting the sidecar that turned a tight memory fit into a thrash.
-  Nobody is waiting for a chip; it can have the engine later.
-- `ENGINE_QUIET_INTERACTIVE_MS = 800` is a **cap, not an optimum**, sized against
-  the ~500ms of frozen frames a collision costs. The common case resolves in
-  tens of milliseconds.
+Six harnesses reported "0ms of blocking script" on 400-1300ms frames, and I read
+that as *the renderer is idle, therefore GPU contention*. **`longtask` and
+`blockingDuration` cover script only** — style, layout and paint are not tasks.
+Long Animation Frame timing splits it properly (`startTime → renderStart →
+styleAndLayoutStart → end`), and that is what `probe-render-attribution.cjs`
+measures. Every conclusion that rested on the old reading had to be re-tested;
+three of them fell.
 
 ---
 
-## 3. Verification
+## 3. What is still unexplained
 
-Same probe, same book, same scene, bracketed:
-
-```
-            fps    median   worst   >25ms  duty  gpu   chips converged
-before     84.8    8.3ms    537ms     63    91%   94%    1 of 12
-after     122.1    8.3ms     21ms      0    90%   94%    7 of 12
-                                     baselines 120.0 / 120.1, drift 0.1%
-```
-
-Not one frame over 25ms, and the worst single frame in thirty seconds is 21ms.
-The background work is doing **more**, not less.
-
-The collision phases, re-run against the fix:
+Reproducible and bracketed (idle arms 120.0 / 120.2, drift 0.2):
 
 ```
-                          fps    >40ms   lost   decodes  low-mem  killed
-BOTH  before             115.0     15   757ms      2        4       5x
-BOTH  batch lane         120.2      0     0ms     19        0       1x
-BOTH  background lane    120.2      0     0ms     17        0       0x
+idle        120.0 fps    0 frames >25ms
+tick on     116.4 fps   34 frames >25ms   worst  75ms
+idle again  120.2 fps    0 frames >25ms
 ```
 
-Both arms now sit exactly on the single-engine phases. Throughput recovered
-**2 → 19**.
+The residual is **~4 fps and 30-46 frames between 25 and 130ms per forty
+seconds** on the full-screen timeline, and:
 
-Gates: `test:assistant-lanes` (18, ordering and preemption against a fake
-runtime whose requests finish on command), `verify:assistant-tasks` 30/30 at
-82.0 tok/s against 83.6 recorded, plus `test:chip-picker`,
-`test:chapter-summary`, `test:assist-reviews`, `verify:lane-keys`.
+- it has **zero script, zero rAF and zero style/layout/paint** on the long frames
+- it does **not** track which engine is busy
+- in the ablated arm the sidecar reports `inflight=0` from 8.8s onward and the
+  host is ready, yet the worst frames are at **15.3s, 16.0s, 17.4s, 17.6s** —
+  **both engines idle**
+- it appears only when the app's assistant is **enabled**, never when the same
+  inference is driven at the engine from outside the app
+
+That last pair is the shape of the remaining lead: something about the renderer
+having the assistant *mounted* costs frames independently of any inference
+actually running. Untested candidates, in the order I would take them:
+
+1. **The progress IPC.** Main broadcasts `run-text` to every renderer on a
+   120ms throttle, carrying the *accumulated* text — a growing payload re-sent
+   ~8 times a second per in-flight request. Cheap to test: drop the emitter and
+   re-run.
+2. **Effects mounted only when the assistant is enabled** — the review sweep,
+   adjudication and knowledge sweep effects and their timers, independent of
+   whether they run a model.
+3. **The hover path under `lmChips`.** The probe sweeps a synthetic pointer
+   every frame; chips that have landed may mount a card the plain events do not.
 
 ---
 
-## 4. Do not relitigate
-
-| claim | verdict |
-|---|---|
-| the chip/summary decoding saturates the GPU and costs frames | **false.** 120.5 fps at 98% GPU, zero bad frames, two independent harnesses |
-| the pool of 3 is too aggressive | **false.** Concurrency is not the lever; 3 concurrent chapter-sized requests cost nothing |
-| the cost is React re-rendering the timeline as chips stream | **false.** 0ms of blocking script on every 379-540ms frame, on the timeline scene itself |
-| `-ub 128` is already enough | **true for the sidecar, and it was never applied to the in-process host** (node-llama-cpp sets `n_ubatch = n_batch = batchSize`, default 512). Untested; the collision fix made it unnecessary to chase |
-| a model load freezes the GPU | **false on its own.** Eight loads in 25s, zero bad frames |
-| the freeze is a load overlapping a decode | **true, and it is the whole finding** |
-
-## 5. Harness lessons paid for here
+## 4. Harness lessons paid for here
 
 - **A story graph entry is built only for the chapter the writer is ON.** Booting
-  the app and waiting yields one entry, already converged, and an idle machine to
-  measure. Page through the book first.
+  and waiting yields one entry, already converged, and an idle machine to
+  measure. Page through the book first — and note that paging a real book cost
+  **80 seconds per chapter by chapter 29** and was still slowing, which is why
+  the scale probe synthesises the graph instead.
 - **App.tsx's keyboard shortcuts return immediately under Electron** — the
-  application menu owns every accelerator. Paging must go through the
-  `menu-command` channel.
-- **The app caches its answers on disk.** `assist-reviews.json` keys verdicts by
-  chapter+hash+model, so the first bisect window answered every review question
-  and the rest found them already asked and ran nothing — which reads as
-  "dropping this fixed the frames" when there was no work left to do. Restore a
-  post-warm-up snapshot of `.renderer/` before each window.
-- **A driver without a backoff is not a driver.** Re-asking immediately on
-  failure pegged Electron's main process at 100% of a core, which then could not
-  resolve `executeJavaScript`, so a 25-second phase ran for six minutes without
-  printing.
-- **Bracket, and bucket.** The same "background work running" window measured
-  38.3, 75.0 and 118.4 fps across three unbracketed runs; what moved was when the
-  window opened relative to a load. And a mean over 30 seconds hid a burst that
-  the ten-second buckets showed immediately.
+  application menu owns every accelerator. Paging goes through `menu-command`.
+- **The app caches its answers on disk.** The first bisect window consumed all
+  the work and the rest measured nothing, which reads exactly like "dropping
+  this fixed the frames". Restore a snapshot of `.renderer/` per window.
+- **A driver without a backoff is a busy loop in the main process.** Re-asking a
+  fast-failing engine pegged a core, after which `executeJavaScript` could not
+  resolve and a 25-second phase ran for six minutes without printing.
+- **A probe that never closes the panel measures an already-open panel.** It
+  reported the timeline appearing in *negative* milliseconds under every
+  condition. Assert the starting state.
+- **A phase passing `lane:'background'` to main proved nothing** — that word is
+  renderer-side, main routes on `'batch'` only, so the phase bypassed the
+  sidecar and reported a clean 120.2 fps that read exactly like the fix working.
+- **Bracket, and bucket.** Unbracketed, the same window read 38.3, 75.0 and
+  118.4 fps across three runs. And a 30-second mean hid a burst that ten-second
+  buckets showed at once (16.4 → 119.7 → 120.7).
 
-## 6. Still open
+## 5. Harnesses
 
-- **`ASSISTANT_BATCH_SIZE` for the in-process host.** node-llama-cpp defaults to
-  512, the setting `-ub 128` exists to avoid on the sidecar. It was never
-  measured because the collision fix removed the symptom. If a machine ever
-  stutters with only the host running, this is the first knob — gated on
-  byte-identical output, since batch splitting changes reduction order.
-- **Two engines at all in max mode.** The review sweep and adjudication run on
-  the small tier in-process while the sidecar holds the 4B. Routing them through
-  the sidecar would leave one engine, but it is a different model and would move
-  their answers; it needs the golden sets re-run, not a scheduling change.
+| script | what it answers |
+|---|---|
+| `probe:render-attribution` | where long frames go (script / rAF / style+layout), engine timeline, ablation switch |
+| `probe:timeline-stutter` | bracketed, bucketed frame trace on the timeline with the real tick |
+| `probe:engine-collision` | loads vs decoding, 2×2, with an eviction witness |
+| `probe:gpu-yield` | real request bytes driven at the engine; positive control (`-ub 2048`) |
+| `probe:panel-open` | click-to-pixels for the sidebar and full-screen timeline |
+| `probe:boot-cost` | a cold boot inside the measured window |
+| `probe:timeline-scale` | 12 vs 174 chapters, synthesised graph |
+| `verify:assistant-lanes` | the scheduling contract, deterministic |
