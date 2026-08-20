@@ -61,7 +61,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { OrbEngine } from "../orb/OrbEngine";
 import { rasterise } from "./field";
 import {
-  DURATION, fieldOf, kindFor, loopPose, poseAt, staticPose,
+  DURATION, fieldOf, kindFor, loopPose, poseAt, staticPose, tailClock,
   type LiquidStateName, type Motion, type Pose,
 } from "./choreography";
 
@@ -171,11 +171,11 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
 
       const orb = orbRef.current;
       if (orb) {
-        orb.style.transform = `scale(${pose.orbScale.toFixed(4)})`;
-        orb.style.filter = pose.orbBlur > 0.01 ? `blur(${pose.orbBlur.toFixed(2)}px)` : "none";
-        orb.style.opacity = pose.orbAlpha.toFixed(3);
+        orb.style.transform = `scale(${pose.os.toFixed(4)})`;
+        orb.style.filter = pose.ob > 0.01 ? `blur(${pose.ob.toFixed(2)}px)` : "none";
+        orb.style.opacity = pose.oa.toFixed(3);
       }
-      const need = pose.orbAlpha > 0.002;
+      const need = pose.oa > 0.002;
       if (need !== orbOnRef.current) {
         orbOnRef.current = need;
         setOrbOn(need);
@@ -214,11 +214,15 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
       if (motion) {
         motion.elapsed += dt;
         if (motion.elapsed >= DURATION[motion.kind]) {
+          /* ★ THE LOOP RESUMES WHERE THE TRANSITION LEFT IT, not at zero. The target
+           *   loop has been running under the cross-fade for the last third of the
+           *   transition, which is what makes the hand-over match in velocity; picking
+           *   it up at zero would throw that away and put the jerk back. */
+          clock = tailClock(motion.kind);
           /* ★ THE HANDSHAKE. Every transition is authored to end exactly on its target
            *   loop's clock-zero pose, so the loop can take over on the next frame with
            *   the clock at zero and no settling step. Gated in test-liquid-state.ts. */
           motion = null;
-          clock = 0;
         }
       } else {
         clock += dt;
