@@ -68,35 +68,46 @@ export type LiquidStateName = "idle" | "reading" | "thinking" | "writing";
  *  is the whole difference between a landing and a shrink. */
 const GROUND = 0.72;
 
+/* ★★ THE THREE WORKING MARKS ARE SIZED AGAINST THE ORB, not against the box. The orb
+ *    fills its slot almost entirely — its own layout reaches 0.93 of the canvas — and
+ *    beside it the working shapes read as lighter and smaller, which makes the
+ *    hand-over look like a shrink rather than a change of state. Everything below grew
+ *    by roughly a tenth.
+ *
+ *    ★ AND THE CEILING IS NOT THE CANVAS, IT IS THE NECK. While a transition's tension
+ *      is up, `smin(a, a, k)` inflates the whole mass by k in every direction, so the
+ *      real budget is (shape + squash + k) < half the box. Growing the shapes meant
+ *      spending some of that back: K_NECK came down with them, and the containment gate
+ *      is what decides whether the sums are right. */
 /** Rest radius of one thinking dot, and the spacing between adjacent dots. */
-const R_DOT = 0.098;
-const DOT_GAP = 0.285;
+const R_DOT = 0.108;
+const DOT_GAP = 0.295;
 /** How high a dot jumps, and how much it stretches at full speed. */
-const JUMP = 0.20;
+const JUMP = 0.215;
 /** How far apart in the cycle adjacent dots are. See thinkingPose. */
 const DOT_WAVE = 0.17;
 const STRETCH = 0.17;
 /** How flat a dot goes on impact. */
-const SPLAT = 0.84;
+const SPLAT = 0.87;
 
 /** The three lines of the paragraph: where they sit, how long each is, how thick. */
-const LINE_Y = [0.29, 0.5, 0.71] as const;
+const LINE_Y = [0.27, 0.5, 0.73] as const;
 /** ★ THE PARAGRAPH IS SIZED AGAINST THE NECK, not against the box. `smin(a, a, k)` is
  *  `a − k`, so while a transition's tension is up the whole mass is INFLATED by k in
  *  every direction — which is invisible on three dots near the centre and took the
  *  longest line clean off the left edge. Lines, tension and wind-up are one budget. */
-const LINE_LEN = [0.5, 0.6, 0.36] as const;
-const LINE_LEFT = 0.17;
+const LINE_LEN = [0.58, 0.68, 0.43] as const;
+const LINE_LEFT = 0.145;
 /** ★ THE LINES CARRY THE SAME WEIGHT AS THE DOTS. At 0.032 they were 1.1px at the
  *  shipping size against a 3.5px dot, so `reading` read as a lighter, thinner thing
  *  than the state either side of it — and weight is the first thing the eye compares
  *  between two marks that share a slot. */
-const LINE_R = 0.046;
+const LINE_R = 0.055;
 
 /** The pen. A barrel of constant width, a shoulder where it steps in, and a short cone
  *  to the nib — a nib is a POINT, and no union of ellipses makes one. */
-const PEN_LEN = 0.36;
-const PEN_R = 0.062;
+const PEN_LEN = 0.46;
+const PEN_R = 0.074;
 const PEN_TIP = 0.008;
 const PEN_HEAD = 0.34;
 const PEN_NECK = 0.6;
@@ -108,11 +119,15 @@ const PEN_NECK = 0.6;
 const PEN_FERRULE = 1.16;
 const PEN_FERRULE_LEN = 0.1;
 const PEN_BUTT = 0.78;
-/** Held at 135°: barrel up and to the right, nib down and to the left. */
-const PEN_ROT = 2.36;
-const PEN_TRAVEL = 0.085;
+/** ★ HELD AT 120°, NOT 135°, AND THE REASON IS SIZE RATHER THAN STYLE. A pen is one
+ *  long diagonal, so at 45° it spends as much of the box on horizontal reach as on
+ *  length — and horizontal reach is the axis that runs out first, because the nib also
+ *  travels along the line. Standing it up buys a third more pen for the same box, and
+ *  a steeper grip is the more natural one anyway. */
+const PEN_ROT = 2.09;
+const PEN_TRAVEL = 0.078;
 /** The line the pen leaves. */
-const INK_R = 0.036;
+const INK_R = 0.042;
 const INK_Y = GROUND - INK_R;
 
 /** What the orb shrinks to before the canvas takes over, and how soft both go. */
@@ -125,7 +140,7 @@ const HANDOFF_R = 0.108;
  *  wider than the gap between two dots — tension exists for the moment a mass is
  *  tearing or coalescing, where there is a gap worth bridging. */
 const K_REST = 0;
-const K_NECK = 0.06;
+const K_NECK = 0.05;
 /** Inside one mass: exactly zero. `smin(a, a, k)` is `a − k`, so two coincident bodies
  *  blended at k are one body INFLATED by k. */
 const K_ONE = 0;

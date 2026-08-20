@@ -412,19 +412,25 @@ things the model is doing.
 
 | state | shape | when |
 |---|---|---|
-| `idle` | the app's orb: six petals around an empty centre, turning slowly | at rest. Available, not yet wired into any surface |
-| `reading` | a flat lozenge sweeping the box | evidence is being gathered — "Reading chapter 3 of 12…" |
-| `thinking` | two dots taking turns jumping | the reasoning pass — the rotating `ThinkingLabel` |
-| `writing` | one body reaching out to the right | tokens are being produced — "Writing the card…" |
+| `idle` | the app's actual blue orb, on its own layer | at rest, and what every instance mounts as |
+| `reading` | three lines of a paragraph, drawn by a wave running down them | evidence is being gathered — "Reading chapter 3 of 12…" |
+| `thinking` | three dots as a travelling wave | the reasoning pass — the rotating `ThinkingLabel` |
+| `writing` | a pen — nib, collar, tapered barrel — drawing a line | tokens are being produced — "Writing the card…" |
 
-**`idle` is the app's orb drawn in the same liquid**, which is the whole
-reason it exists: a mark rendered by a different engine can only be *swapped*
-for the working shape, and a swap between a WebGL orb and a canvas metaball is
-a cross-fade however it is dressed up. Rendered in the field, the ring can
-collapse inward, feed a single mass, and that mass can tear into two dots. Its
-proportions are taken from `orbPhysics.ts` — ring 0.556, half-length 0.255,
-aspect 1.15, empty centre 0.278 — not drawn by eye. Two versions were guessed
-at first and both read as an asterisk.
+**`idle` is the real `OrbEngine`**, with the same props the wait rows pass
+(`analyzing`, `flowScale={0.8}`, `aberration={0.45}`, the tint). An earlier
+version rebuilt it as six metaball petals so it could morph natively; the
+geometry was measured from `orbPhysics.ts` and it still looked wrong, because
+the orb is a lens with a per-petal palette and per-channel dispersion. A
+component whose job is to BE the app's mark cannot ship an approximation of it.
+
+**Every instance mounts as `idle` and hands over on the next frame**, so the
+app's own mark is what appears and then liquefies into whatever the model is
+doing. Call sites pass only the working state; the hand-over falls out of the
+state-change path. The orb shrinks and blurs into a droplet first — only once
+it is a small soft blob can the metaball match it exactly — and the canvas is
+revealed UNDER the orb while only the orb fades, because two layers
+cross-fading at 50% cover 75% of the pixel.
 
 Each surface maps its own vocabulary onto those three. `MaxAskPopover` carries
 `work` beside `label` because the ask harness narrates five phases and there

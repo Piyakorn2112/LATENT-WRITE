@@ -112,7 +112,7 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
   /* The orb is a WebGL context, so it is mounted only while it has something to show —
    * three indicators each holding a context for a layer at zero opacity is three
    * contexts wasted, and browsers cap how many a page may have. */
-  const [orbOn, setOrbOn] = useState(state === "idle");
+  const [orbOn, setOrbOn] = useState(true);
   const orbOnRef = useRef(orbOn);
   /* The prop is read inside the loop rather than closed over, so a state change does
    * not tear down and rebuild the rAF loop — which would reset the clock and drop the
@@ -151,12 +151,20 @@ export function LiquidState({ state, size = 18, tint = "--control-value-fill", c
     let raf = 0;
     let last = 0;
     let clock = 0;
-    let current: LiquidStateName = stateRef.current;
-    let motion: Motion | null = {
-      from: null, to: current, kind: "enter",
-      fromPose: loopPose(current, 0), elapsed: 0,
-    };
-    let painted: Pose = loopPose(current, 0);
+    /* ★★ IT ALWAYS ARRIVES AS THE ORB. Whatever state it is asked for, the indicator
+     *    mounts at `idle` and hands over on the next frame — so the app's own mark is
+     *    what appears, and then liquefies into whatever the model is doing. The
+     *    alternative was a droplet falling in from nowhere, which is a nice arrival and
+     *    says nothing; this one says "the thing you already know just started working".
+     *
+     *    It costs no call site anything: the surfaces still pass only the working
+     *    state, and the hand-over falls out of the state-change path that already
+     *    exists. A component that mounts already at `idle` still gets the droplet. */
+    let current: LiquidStateName = "idle";
+    let motion: Motion | null = stateRef.current === "idle"
+      ? { from: null, to: "idle", kind: "enter", fromPose: loopPose("idle", 0), elapsed: 0 }
+      : null;
+    let painted: Pose = loopPose("idle", 0);
     let reducedDrawn: LiquidStateName | null = null;
 
     const paint = (pose: Pose) => {
