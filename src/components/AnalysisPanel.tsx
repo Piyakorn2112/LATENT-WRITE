@@ -45,7 +45,7 @@ import {
 } from "../lib/widget-config";
 import { WidgetHelpContext } from "./widgets/WidgetCard";
 import { isDesktopApp } from "../lib/project-manager";
-import type { AssistantStatus, AssistantPreset } from "../lib/project-manager";
+import type { AssistantStatus } from "../lib/project-manager";
 import type { KnowledgeCandidate, KnowledgeLedgerStore } from "../lib/knowledge-store";
 import { activateCode, clearLicense, type Tier } from "../lib/license";
 import { ProBadge, LockedHint } from "./ProBadge";
@@ -248,14 +248,6 @@ function AssistantSettingsRow({ prefs, onSetPrefs, licenseTier }: {
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [sourceDraft, setSourceDraft] = useState(prefs.assistant?.sourceUrl ?? "");
-  const [presets, setPresets] = useState<AssistantPreset[]>([]);
-
-  useEffect(() => {
-    if (!menuOpen || presets.length) return;
-    void window.electronAPI?.assistantPresets?.()
-      .then((r) => setPresets(r?.presets ?? []))
-      .catch(() => {});
-  }, [menuOpen, presets.length]);
 
   // A source saved on a previous launch has to reach the runtime before the
   // first download, and the runtime holds it in memory only.
@@ -433,42 +425,30 @@ function AssistantSettingsRow({ prefs, onSetPrefs, licenseTier }: {
 
       {menuOpen && (
         <div className="assistant-options">
-          <span className="assistant-options-label">Model</span>
-          {/* ★ THE DEFAULT STAYS ONE CLICK AWAY. Customisation that cannot be
-              undone by pointing at a thing is a trap, so the tuned model is the
-              first row and choosing it clears the custom entry outright. */}
-          <div className="assistant-presets">
-            {presets.map((preset) => {
-              const active = preset.builtin ? !sourceDraft : sourceDraft === preset.url;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  className="assistant-preset"
-                  data-active={active || undefined}
-                  onClick={() => {
-                    const url = preset.url ?? "";
-                    setSourceDraft(url);
-                    onSetPrefs({
-                      ...prefs,
-                      assistant: { ...(prefs.assistant ?? { enabled }), sourceUrl: url || undefined },
-                    });
-                    void window.electronAPI?.assistantSetSource?.(
-                      preset.builtin || !preset.url ? null : {
-                        id: preset.id, label: preset.label, url: preset.url,
-                        contextSize: preset.contextSize, noThink: preset.noThink,
-                      },
-                    ).catch(() => {});
-                  }}
-                >
-                  <span className="assistant-preset-name">{preset.label}</span>
-                  {preset.note && <span className="assistant-preset-note">{preset.note}</span>}
-                </button>
-              );
-            })}
-          </div>
+          {/*
+            ★★ THE ALTERNATE-MODEL PICKER IS HIDDEN, AND THE URL BOX IS NOT.
+               They look like one feature and are two. The picker offered OTHER
+               MODELS — a swap that silently invalidates every prompt in the app,
+               because each one is tuned against the model it ships with
+               (measured: plans/model-evaluation-2026-08.md, where two stronger
+               models both LOST gates the 1.7B passes). Offering that as three
+               one-click buttons put a quality regression one press away, with
+               nothing on screen to connect the press to the worse answers that
+               follow.
+
+            ★  WHAT THE URL BOX IS FOR SURVIVES INTACT: a dead source. The
+               registry pins one repo at one revision, which is right until that
+               repo moves, rate-limits, or is blocked on someone's network — and
+               then a feature that works entirely offline is bricked by a URL.
+               That escape hatch is the reason this menu exists, so it stays;
+               only the invitation to go model-shopping is withdrawn.
+
+               Hidden, not deleted: `assistant:presets` and MODEL_PRESETS are
+               untouched in the main process, so bringing the picker back is
+               this block returning, not a rebuild.
+          */}
           <label className="assistant-options-label" htmlFor="assistant-source">
-            Or a direct URL
+            Model source
           </label>
           <input
             id="assistant-source"
@@ -484,6 +464,7 @@ function AssistantSettingsRow({ prefs, onSetPrefs, licenseTier }: {
           <p className="assistant-options-hint">
             A direct link to the same GGUF file. Use this if the default source is
             unreachable; the download is still checked against the expected file.
+            Leave it empty to go back to the built-in source.
           </p>
           <button
             type="button"

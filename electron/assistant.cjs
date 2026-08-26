@@ -280,7 +280,21 @@ function setCustomModel(next) {
     bytes: Number(next.bytes) > 0 ? Number(next.bytes) : null,
     sha256: next.sha256 || null,
     contextSize: Number(next.contextSize) > 0 ? Number(next.contextSize) : 4096,
-    noThink: next.noThink !== false,
+    /**
+     * ★★ AN UNKNOWN MODEL DOES NOT GET A QWEN TOKEN. This defaulted to TRUE,
+     *    which appends `/no_think` to the system prompt — a Qwen3 control token
+     *    and literal junk in a Granite, Gemma or Qwen3.5 prompt (Qwen3.5 and
+     *    Qwen3.8 switched to an `enable_thinking` template flag and no longer
+     *    read it at all; verified against the GGUF's own embedded template).
+     *
+     * ★  AND IT COSTS NOTHING TO DROP, because it was already cosmetic: a
+     *    grammar masks think tokens from token zero, so a constrained run never
+     *    reasons whether or not the line is there (see src/lib/think.ts, which
+     *    is why real thinking is a separate unconstrained pass). The caller can
+     *    still pass `noThink: true` explicitly; what changed is only what an
+     *    unspecified model is assumed to be.
+     */
+    noThink: next.noThink === true,
   };
   return _customModel;
 }

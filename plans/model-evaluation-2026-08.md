@@ -4,6 +4,11 @@
 shipping models, one candidate is disqualified outright and the other is a tie
 that costs memory
 
+> **Follow-up, 2026-08-26:** the "no sub-9B Qwen3.5" line in the
+> disqualification table below expired — Qwen3.5 has a 2B and Qwen3.8 was
+> distilled into it. Tested on this same suite and rejected;
+> see [model-evaluation-qwen38-2026-08-26.md](model-evaluation-qwen38-2026-08-26.md).
+
 ## What we ship today
 
 | mode | model | Q4_K_M | licence | context |

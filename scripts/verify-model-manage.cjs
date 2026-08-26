@@ -53,11 +53,27 @@ async function main() {
     /^custom-[0-9a-f]{12}\.gguf$/.test(assistant.customFileName('https://x.example/download?id=7')),
     assistant.customFileName('https://x.example/download?id=7'));
 
+  // ★★ THE DEFAULT FOR AN UNSPECIFIED MODEL. The panel's picker (which carried
+  //    a per-model noThink) is hidden, so every custom model now arrives as a
+  //    bare URL — and a bare URL must not be assumed to be a Qwen3. `/no_think`
+  //    is a Qwen3 control token and literal junk anywhere else.
+  assistant.setCustomModel({ url: 'https://mirror.example/some-unknown-model.gguf' });
+  gate('★ a bare URL is not assumed to want /no_think',
+    assistant.activeEntry().noThink === false, 'noThink defaults false');
+  assistant.setCustomModel({ url: 'https://mirror.example/qwen3.gguf', noThink: true });
+  gate('…and an explicit noThink still wins',
+    assistant.activeEntry().noThink === true, 'noThink=true honoured');
+
   assistant.setCustomModel(null);
   gate('clearing restores the pinned revision',
     assistant.resolvedModelUrl(assistant.activeEntry()) === pinned, 'back to default');
 
-  gate('presets are offered, default first and built in',
+  // ★★ THE PICKER IS HIDDEN IN THE PANEL, SO THIS GATE NO LONGER CLAIMS IT IS
+  //    "OFFERED". It used to, and leaving it that way would have been a gate
+  //    asserting something the product stopped doing — green, and a lie. What
+  //    is still true, and worth holding, is that the list survives intact in
+  //    main so un-hiding it is a render change and not a rebuild.
+  gate('the preset list is still intact behind the hidden picker',
     assistant.MODEL_PRESETS.length >= 2 && assistant.MODEL_PRESETS[0].builtin === true,
     assistant.MODEL_PRESETS.map((p) => p.label).join(' · '));
 
