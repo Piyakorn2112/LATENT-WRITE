@@ -69,39 +69,57 @@ same closed-think prefill `TEMPLATES.qwen3` already hand-builds**. It does
 (That finding is why `setCustomModel` no longer defaults `noThink` to true —
 see §6.)
 
-## 3. Speed — and the trap in the first measurement
+## 3. Speed — and a measurement that was wrong twice
 
-The first in-process numbers looked disqualifying, and were wrong about why.
+> ★★ **CORRECTED 2026-08-26, same day.** This section first reported a "2.1x
+> prompt-cache ceiling" for qwen35 in-process against the incumbent's 64x, and
+> concluded the pinned binding could not reuse a cached prefix for this
+> architecture. **That was an artifact of the probe, not a property of
+> anything.** The correction is below; the original claim should not be cited.
 
-**Warm prefill, in-process, on the app's real chip request (~1450 tokens):**
+**The bug in the instrument.** `probe-model-candidate.ts` discarded exactly ONE
+cold run before timing. On qwen3 that is enough. **On qwen35 the prefix cache
+needs two or three evaluations to engage** — observed directly at
+`2618ms, 2524ms, 24ms, 32ms` — so discarding one and taking a median over the
+next two averaged a still-cold run against a warm one and produced a number
+that meant nothing.
 
-| model | cold prefill | warm prefill | cache gain |
+The same model, same binding, warmed properly:
+
+| model | arch | cold prefill | warm prefill |
 |---|---|---|---|
-| Qwen3-1.7B | 1538 ms | **24 ms** | 64x |
-| Qwen3.8-2B | 1527 ms | **737 ms** | 2.1x |
+| Qwen3-1.7B | qwen3 | 1801 ms | **36.5 ms** |
+| Qwen3.5-0.8B | qwen35 | 941 ms | **46.5 ms** |
 
-★★ **Cold prefill is identical. The entire gap is prompt-cache reuse.** Raw
-compute is the same; what differs is whether a repeated system prompt has to be
-re-scanned. That matters more here than anywhere, because every batch task in
-this app sends a byte-identical 400-1400 token preamble and asks for ~50 tokens
-back — the shipped cost *is* the warm number.
+**There is no architecture penalty on the in-process path.** Warm prefill is
+comparable, and the "54x interactive regression" this document previously
+attributed to the 4B distill (§4c) is withdrawn — see the correction there.
 
-Two things were then falsified rather than assumed:
+★ **THE FIX IS IN THE PROBE, NOT IN A NOTE.** It now warms until two
+consecutive runs agree within 35% rather than discarding a fixed count, because
+a fixed warm-up count encodes an assumption about the model under test, which
+is the one thing a candidate probe must not do.
 
-- **Flash attention is not the cause.** `FLASH=off` gives 742 ms against
-  737 ms. Unchanged.
-- **The architecture is not the cause either.** On the *sidecar* (b10298) the
-  same model caches fine:
+★★ **AND THE FALSIFICATIONS THAT LOOKED LIKE CONFIRMATIONS.** Two checks were
+run against the false finding and both "passed":
+`FLASH=off` reproduced it (742 ms vs 737 ms), and the sidecar showed a
+contrasting 100x. Neither was wrong, and neither could catch this, because both
+compared the broken measurement against *something else* rather than asking
+whether the measurement itself was sound. A control that varies the treatment
+cannot detect a broken thermometer.
 
-| model | first request | repeat | reprocessed | gain |
-|---|---|---|---|---|
-| Qwen3-1.7B | 2732 ms | 13 ms | 1 of 2787 tok | 210x |
-| Qwen3.8-2B | 2806 ms | 28 ms | 4 of 2908 tok | 100x |
+The sidecar figures stand on their own and remain useful — llama-server reuses
+a repeated 2908-token prompt down to 4 reprocessed tokens (**100x**, 28 ms) for
+the 2B and **107x** (66 ms) for the 4B, against **210x** (13 ms) for the
+incumbent.
 
-So the 2x ceiling is **b10068 / the in-process binding**, not Gated DeltaNet.
-On the path the app would actually route batch work through, the candidate's
-warm prefill is 28 ms — 15 ms behind the incumbent and irrelevant in absolute
-terms.
+**Generation speed was measured independently and is unaffected by any of this:**
+
+| model | tok/s |
+|---|---|
+| Qwen3-1.7B | 83–88 |
+| **Qwen3.8-2B** | **58–68** |
+| Qwen3-4B-Thinking | 38–41 |
 
 **Generation**, all three models, same requests, temperature 0:
 
@@ -221,7 +239,9 @@ byte-exact — and put through the identical suite.
 
 It **ties the current Max** on the gate suite and on attribution, and the
 grammar-cap warnings that sank the 2B fall from 11 to 3. This is a real model,
-not a curiosity. It still does not ship, for three reasons in this order.
+not a curiosity. It still does not ship — originally for three reasons, of
+which **the largest was withdrawn the same day when the probe behind it turned
+out to be broken.** What remains is reason 1 and reason 3.
 
 **1. It fails the one stated ship condition.** `probe-presence-review.cjs`
 prints it in the output: *wrong-and-applied = 0. A better "right" does not pay
@@ -236,23 +256,18 @@ wrong mark is what the writer sees.
   measured on. If this candidate is ever revisited, the presence probe needs
   more cases before that threshold means anything.
 
-**2. Interactive latency regresses 54x, and it is the engine's fault, not the
-model's.** Warm prefill on the app's real chip request, in-process:
+**2. ~~Interactive latency regresses 54x~~ — WITHDRAWN, the measurement was
+broken.** This originally read: warm prefill 1864 ms against the incumbent's
+34 ms, a 2.1x cache ceiling blamed on b10068. **It was the probe discarding too
+few cold runs on an architecture that needs three (§3).** Warmed properly,
+qwen35 prefill is comparable to qwen3 on the same binding. The 4B's own
+corrected number was never re-measured before its weights were deleted, so it
+is recorded here as **unknown, and no longer an objection.**
 
-| model | cold | warm | cache gain |
-|---|---|---|---|
-| Qwen3-4B-Thinking | 3402 ms | **34 ms** | 98.6x |
-| Qwen3.8-4B-Distill | 3937 ms | **1864 ms** | 2.1x |
+  This was the largest of the three reasons for rejecting the 4B. It is gone.
 
-  Same 2x ceiling the 2B hit, same cause: b10068 in `node-llama-cpp` cannot
-  reuse a cached prefix for this architecture. On the sidecar (b10298) the same
-  model caches **107x** — 66 ms warm, 4 of 2908 tokens reprocessed — so batch
-  work would be untouched. But the Max tier deliberately splits: batch to the
-  sidecar, **interactive (max-ask, writing tool) to the in-process host**, which
-  is exactly where a writer sits watching. A chip request costs 1770 ms warm
-  today and 3995 ms on the candidate.
-
-**3. Generation is 25% slower** — 30.5 tok/s against 40.3.
+**3. Generation is 25% slower** — 30.5 tok/s against 40.3. Measured
+independently of the prefill bug and unaffected by it.
 
 Against all that it wins one column decisively: **32 KB/token against 144**.
 At 8k its plain f16 KV costs what the incumbent reaches only by spending an
@@ -293,17 +308,23 @@ two.
   and runs 1.7x faster, and gives up half the attribution accuracy to do it
   (WRONG-APPLIED 3 against 1). That column is the one the writer sees.
 
-- **Max tier** — keep Qwen3-4B-Thinking-2507. **Qwen3.8-4B-Distill was the
-  serious candidate and it got within one column** (§4c): it ties on gates and
-  attribution and costs 4.5x less per token of context, then fails the stated
-  presence ship condition with a confident wrong mark, regresses interactive
-  warm prefill 54x on the pinned in-process engine, and generates 25% slower.
+- **Max tier** — keep Qwen3-4B-Thinking-2507 **for now**. Qwen3.8-4B-Distill
+  ties on gates and attribution and costs 4.5x less per token of context, then
+  fails the stated presence ship condition with a confident wrong mark and
+  generates 25% slower. Its third objection was withdrawn (§4c).
 
-**Revisit when `node-llama-cpp` ships on a newer llama.cpp.** That single change
-removes the largest of the three objections outright, and the memory result is
-the only thing measured in two rounds of this exercise that could lift the Max
-tier's 8k context cap. Qwen3.8-9B is out of budget and will stay there;
-Qwen3.5-4B at IQ4_XS remains open from the previous round.
+**This verdict is weaker than it was when first written**, and honestly so. The
+largest objection against the 4B evaporated when its own measurement was found
+broken, and the remaining one rests on a single wrong answer in a seven-case
+probe. **The next round should widen the presence probe before anything else**
+— it is now the only thing standing between the Max tier and a model that costs
+4.5x less per token of context.
+
+Qwen3.8-9B is out of budget and will stay there. **Qwen3.5-4B at IQ4_XS is now
+the strongest open candidate**: the previous round rejected it on memory
+(3.01 GB against a 2.50 GB budget) and §4b shows memory was the wrong column to
+judge it in — the real IQ4_XS file is **2.48 GB**, under the incumbent, and at
+hybrid KV rates it totals ~2.73 GB at 8k against the incumbent's 3.05 GB.
 
 ### On tuning it
 

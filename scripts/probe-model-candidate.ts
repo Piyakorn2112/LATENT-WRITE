@@ -56,6 +56,10 @@ const CTX = Number(process.env.CTX) || 8192;
  *  Q8_0 is measured separately, per model, once the shape is known. */
 const KV = process.env.KV === "Q8_0" ? "Q8_0" : "f16";
 const RUNS = Number(process.env.RUNS) || 2;
+/** Warm-up rounds allowed before the prefill is called settled. Bounded so a
+ *  model that never stabilises reports its real (bad) number instead of
+ *  looping forever. */
+const MAX_WARMUP = Number(process.env.MAX_WARMUP) || 4;
 /** Both tiers ship flashAttention:true. A candidate on a new attention shape is
  *  exactly where that flag can stop being free, so it is a knob here. */
 const FLASH = process.env.FLASH !== "off";
@@ -191,10 +195,26 @@ async function main() {
       // ★★ COLD AND WARM PREFILL ARE BOTH REPORTED, and the gap between them
       //    IS the measurement. Every request in this app repeats a
       //    byte-identical system prompt, so the shipped speed is the WARM
-      //    number — and a model whose warm prefill never drops to the cold
-      //    one's fraction is a model whose prompt cache does not work, which
-      //    no amount of raw tok/s makes up for.
+      //    number.
+      //
+      // ★★ WARM UNTIL IT STOPS FALLING — DO NOT DISCARD A FIXED COUNT. This
+      //    discarded exactly ONE cold run, which silently produced a WRONG
+      //    ANSWER on qwen35: that architecture needs TWO OR THREE evaluations
+      //    before the prefix cache engages (observed 2618ms, 2524ms, 24ms,
+      //    32ms). Discarding one and taking a median over the next two
+      //    averaged a still-cold run against a warm one and reported a "2.1x
+      //    cache ceiling" that does not exist — the same model warms to 52ms
+      //    on the same binding. A fixed warm-up count encodes an assumption
+      //    about the model under test, which is the one thing a candidate
+      //    probe must not do.
       const cold = await once();
+      for (let i = 0; i < MAX_WARMUP; i++) {
+        const a = await once();
+        const b = await once();
+        // Stable = the two agree within 35%. Two consecutive comparable runs
+        // mean the cache has settled, whatever it took to get there.
+        if (b.prefillMs <= Math.max(4, a.prefillMs * 1.35)) break;
+      }
       const takes = [];
       for (let i = 0; i < RUNS; i++) takes.push(await once());
       const last = takes[takes.length - 1];
