@@ -279,7 +279,11 @@ is still the only thing that might.
 
 ## 5. Verdict
 
-**Change nothing. Again.**
+**Change nothing. Again.** Put to the owner with the numbers above on
+2026-08-26 and confirmed: leave the lineup alone. The variant that prompted
+this round ("smaller but smarter and much faster") does not exist among the
+candidates measured — the 2B is genuinely smaller and is neither of the other
+two.
 
 - **On tier** — keep Qwen3-1.7B. Not on size: the candidate's total footprint
   is genuinely 600 MB smaller (§4b), which is the one thing it wins. It loses
