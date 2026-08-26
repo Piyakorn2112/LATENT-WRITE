@@ -164,22 +164,63 @@ finding the previous round put in bold: *swapping the model invalidates the
 tuning.* It is stated here as a caveat, not as an excuse, because a swap that
 requires retuning six task prompts is a swap whose cost is measured in days.
 
+## 4b. Memory — the one column the candidate wins outright
+
+The previous evaluation left this open, in as many words:
+
+> Qwen3.5's hybrid attention may need less KV per token, which could offset it,
+> but nothing here measured that, so it stays an open question rather than a
+> claim.
+
+Measured now, by reading llama.cpp's own `llama_kv_cache: size = …` line at
+four context sizes (`probe-model-kv-scaling.ts`). The 1.7B's slope comes out at
+112 KB/token against a hand-computed 28 layers x 1024 KV dims x 2 x f16 =
+112 KB, so the instrument is calibrated against geometry before it is trusted
+on anything new.
+
+| model | KV per token (f16) | KV at 8k | weights | **total at 8k** |
+|---|---|---|---|---|
+| Qwen3-1.7B (On) | 112 KB | 0.88 GB | 1.11 GB | **1.99 GB** |
+| **Qwen3.8-2B** | **12 KB** | **0.09 GB** | 1.30 GB | **1.39 GB** |
+| Qwen3-4B-Thinking (Max) | 144 KB | 1.13 GB | 2.50 GB | **3.63 GB** |
+
+★★ **A twelvefold cut, and it is the architecture doing it.** Only a quarter of
+the layers keep a conventional KV cache; the Gated DeltaNet layers hold a
+fixed-size recurrent state that does not grow with context. So the candidate's
+weights are 200 MB *larger* than the 1.7B's and its real footprint is 600 MB
+*smaller* — and the gap widens with every extra token of window. At 16k the
+current Max needs 2.3 GB of KV; this needs 0.19 GB.
+
+★ **This is the finding worth keeping even though the model was rejected.** The
+Max tier's context is capped at 8192 by memory, it spends an experimental Q8_0
+KV option to afford that, and `kvBytesPerToken` is the single number the memory
+guard reasons with. An architecture that makes context nearly free is the one
+thing that would lift that cap — and it is the reason a Qwen3.8-**4B**-Distill
+at 2.78 GB of weights may still cost *less* in total than the 2.50 GB model it
+would replace.
+
 ## 5. Verdict
 
 **Change nothing. Again.**
 
-- **On tier** — keep Qwen3-1.7B. The candidate is 200 MB larger, 30% slower to
-  generate, and loses 4 gates the incumbent passes. It is not smaller, not
-  faster, and not smarter on this app's work.
+- **On tier** — keep Qwen3-1.7B. Not on size: the candidate's total footprint
+  is genuinely 600 MB smaller (§4b), which is the one thing it wins. It loses
+  on the two that decide the tier — 4 gates the incumbent passes, and 58 tok/s
+  against 83. On is the tier where speed *is* the product.
 - **Max tier** — keep Qwen3-4B-Thinking-2507. The candidate halves the download
   and runs 1.7x faster, and gives up half the attribution accuracy to do it
   (WRONG-APPLIED 3 against 1). That column is the one the writer sees.
 
-What would change the answer: **Qwen3.8-4B or Qwen3.8-9B**, which the card
-itself points at, if either lands at or under the 2.5 GB the Max tier is
-budgeted for. The 9B will not. The 4B is worth a look at IQ4_XS the next time
-this question comes round, together with Qwen3.5-4B at IQ4_XS, which the
-previous evaluation left open for the same reason.
+What would change the answer: **[Qwen3.8-4B-Distill](https://huggingface.co/empero-ai/Qwen3.8-4B-Distill-GGUF)**,
+which the card itself points at and which exists in GGUF. Q4_K_M is 2.78 GB
+against Max's 2.50 GB — over budget on weights, and §4b says that is the wrong
+place to look: at 8k the hybrid's KV is ~0.19 GB against the incumbent's
+1.13 GB, so the candidate plausibly costs *less* in total. It is the right next
+test and it is in progress; the 2B was the wrong weight class to aim at Max in
+the first place.
+
+Qwen3.8-9B is out of budget and will stay there. Qwen3.5-4B at IQ4_XS remains
+open from the previous round.
 
 ### On tuning it
 
@@ -228,6 +269,10 @@ FLASH=off MODELS=Qwen3.8-2B-Q4_K_M.gguf \
 
 # …and on the sidecar, which is a different engine with a different cache
 MODEL=Qwen3.8-2B-Q4_K_M.gguf ./node_modules/.bin/tsx scripts/probe-model-server-cache.ts
+
+# what a token of context actually costs — read off llama.cpp, not RSS
+MODELS=Qwen3-1.7B-Q4_K_M.gguf,Qwen3.8-2B-Q4_K_M.gguf,Qwen3-4B-Thinking-2507-Q4_K_M.gguf \
+  ./node_modules/.bin/tsx scripts/probe-model-kv-scaling.ts
 
 # what the file says about itself
 MODELS=Qwen3.8-2B-Q4_K_M.gguf ./node_modules/.bin/tsx scripts/print-gguf-template.ts
