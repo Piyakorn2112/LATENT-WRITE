@@ -1,9 +1,13 @@
-# Qwen3.8-2B-Distill, researched, downloaded, measured
+# Qwen3.8 distills — 2B and 4B — researched, downloaded, measured
 
 **Date** 2026-08-26 · **Hardware** Apple M1 Pro, 16 GB · **Outcome** keep both
-shipping models. The candidate loads cleanly on the pinned engine and is the
-fastest reasoning-tuned model tested, and it still loses to both incumbents on
-every quality instrument this repo has.
+shipping models, and keep the memory finding.
+
+The **2B** loses to both incumbents on every quality instrument here (§4). The
+**4B** ties the current Max on two of three and fails the third (§4c) — the
+closest any candidate has come in two rounds. What survives both rejections is
+§4b: this architecture costs **12x less memory per token of context**, which is
+the first measured route to lifting the Max tier's 8k cap.
 
 Follow-up to [model-evaluation-2026-08.md](model-evaluation-2026-08.md), which
 tested Qwen3.5-4B and Granite-4.0-1B on 2026-08-08 and kept both incumbents.
@@ -199,6 +203,80 @@ thing that would lift that cap — and it is the reason a Qwen3.8-**4B**-Distill
 at 2.78 GB of weights may still cost *less* in total than the 2.50 GB model it
 would replace.
 
+## 4c. Qwen3.8-**4B**-Distill — the right weight class, tested
+
+The 2B was aimed at a tier it was never sized for. The card points at the 4B,
+[it exists in GGUF](https://huggingface.co/empero-ai/Qwen3.8-4B-Distill-GGUF),
+and it is the same distillation of the same teacher into Qwen3.5-4B.
+Downloaded at Q4_K_M — 2,783,446,304 B, sha256 `dec96e8c…c6790`, verified
+byte-exact — and put through the identical suite.
+
+| model | 30 gates | attribution right / **WRONG** | presence right / **WRONG** | gen tok/s | KV/tok | total @8k |
+|---|---|---|---|---|---|---|
+| Qwen3-1.7B (On) | **30/30** | 1 / 3–4 | 4 / **0** | 83 | 112 KB | 1.99 GB |
+| Qwen3-4B-Thinking (Max) | 28/30 | **4 / 1** | 3 / **0** | 33–40 | 144 KB | 3.05 GB (Q8_0 KV) |
+| Qwen3.5-4B (rejected 08-08) | 27/30 | **4 / 1** | 5 / **0** | 25 | — | — |
+| Qwen3.8-2B-Distill | 26/30 | 2 / 3 | 1 / **0** | 58 | 12 KB | 1.39 GB |
+| **Qwen3.8-4B-Distill** | **28/30** | **4 / 1** | 4 / **1** | 29–31 | **32 KB** | **3.03 GB (f16 KV)** |
+
+It **ties the current Max** on the gate suite and on attribution, and the
+grammar-cap warnings that sank the 2B fall from 11 to 3. This is a real model,
+not a curiosity. It still does not ship, for three reasons in this order.
+
+**1. It fails the one stated ship condition.** `probe-presence-review.cjs`
+prints it in the output: *wrong-and-applied = 0. A better "right" does not pay
+for a confident wrong mark, because the engine already had an answer.* Every
+model ever tested here scored 0 in that column — 1.7B, 4B-Thinking, Qwen3.5-4B,
+and the 2B. This one produced **one confident wrong presence mark**, and a
+wrong mark is what the writer sees.
+
+  The probe notes that a threshold would separate them (wrong at 0.9, all six
+  right answers at 1.0). **That is not a fix, it is a fit** — seven cases, one
+  error, and a floor moved to clear it is tuned against the sample it was
+  measured on. If this candidate is ever revisited, the presence probe needs
+  more cases before that threshold means anything.
+
+**2. Interactive latency regresses 54x, and it is the engine's fault, not the
+model's.** Warm prefill on the app's real chip request, in-process:
+
+| model | cold | warm | cache gain |
+|---|---|---|---|
+| Qwen3-4B-Thinking | 3402 ms | **34 ms** | 98.6x |
+| Qwen3.8-4B-Distill | 3937 ms | **1864 ms** | 2.1x |
+
+  Same 2x ceiling the 2B hit, same cause: b10068 in `node-llama-cpp` cannot
+  reuse a cached prefix for this architecture. On the sidecar (b10298) the same
+  model caches **107x** — 66 ms warm, 4 of 2908 tokens reprocessed — so batch
+  work would be untouched. But the Max tier deliberately splits: batch to the
+  sidecar, **interactive (max-ask, writing tool) to the in-process host**, which
+  is exactly where a writer sits watching. A chip request costs 1770 ms warm
+  today and 3995 ms on the candidate.
+
+**3. Generation is 25% slower** — 30.5 tok/s against 40.3.
+
+Against all that it wins one column decisively: **32 KB/token against 144**.
+At 8k its plain f16 KV costs what the incumbent reaches only by spending an
+experimental Q8_0 KV option, losslessly. At 16k it would cost 3.28 GB total —
+less than the incumbent costs at 8k. **It could double the Max tier's context
+inside the same budget**, which is the standing constraint no other candidate
+has offered to lift.
+
+**What would change the verdict**, concretely: a `node-llama-cpp` release built
+on a newer llama.cpp, which turns reason 2 from a 54x regression into nothing,
+and a presence probe with more than seven cases to say whether reason 1 is a
+real behaviour or one unlucky draw. Reason 3 would remain, and would be worth
+paying for double the context.
+
+### An incidental fifth confirmation
+
+The candidate fails `continues+` in all four presentations, with the same
+reading — "a reply to Bern Halloway's statement" — that Qwen3-1.7B,
+Qwen3-4B-Thinking and Qwen3.5-4B all gave. That failure now survives **two
+architectures, three model generations and five models**. The previous round
+called it model-invariant within the family on three; it is safe to drop the
+qualifier. No purchase clears that bar, and the cheap prompt fix it recommended
+is still the only thing that might.
+
 ## 5. Verdict
 
 **Change nothing. Again.**
@@ -211,16 +289,17 @@ would replace.
   and runs 1.7x faster, and gives up half the attribution accuracy to do it
   (WRONG-APPLIED 3 against 1). That column is the one the writer sees.
 
-What would change the answer: **[Qwen3.8-4B-Distill](https://huggingface.co/empero-ai/Qwen3.8-4B-Distill-GGUF)**,
-which the card itself points at and which exists in GGUF. Q4_K_M is 2.78 GB
-against Max's 2.50 GB — over budget on weights, and §4b says that is the wrong
-place to look: at 8k the hybrid's KV is ~0.19 GB against the incumbent's
-1.13 GB, so the candidate plausibly costs *less* in total. It is the right next
-test and it is in progress; the 2B was the wrong weight class to aim at Max in
-the first place.
+- **Max tier** — keep Qwen3-4B-Thinking-2507. **Qwen3.8-4B-Distill was the
+  serious candidate and it got within one column** (§4c): it ties on gates and
+  attribution and costs 4.5x less per token of context, then fails the stated
+  presence ship condition with a confident wrong mark, regresses interactive
+  warm prefill 54x on the pinned in-process engine, and generates 25% slower.
 
-Qwen3.8-9B is out of budget and will stay there. Qwen3.5-4B at IQ4_XS remains
-open from the previous round.
+**Revisit when `node-llama-cpp` ships on a newer llama.cpp.** That single change
+removes the largest of the three objections outright, and the memory result is
+the only thing measured in two rounds of this exercise that could lift the Max
+tier's 8k context cap. Qwen3.8-9B is out of budget and will stay there;
+Qwen3.5-4B at IQ4_XS remains open from the previous round.
 
 ### On tuning it
 
@@ -277,7 +356,7 @@ MODELS=Qwen3-1.7B-Q4_K_M.gguf,Qwen3.8-2B-Q4_K_M.gguf,Qwen3-4B-Thinking-2507-Q4_K
 # what the file says about itself
 MODELS=Qwen3.8-2B-Q4_K_M.gguf ./node_modules/.bin/tsx scripts/print-gguf-template.ts
 
-# quality — the documented suite
+# quality — the documented suite (swap the filename for Qwen3.8-4B-Q4_K_M.gguf)
 CAND="$HOME/Library/Application Support/Latent Write/models/Qwen3.8-2B-Q4_K_M.gguf"
 ASSISTANT_MODEL_PATH="$CAND" PROBE_NOTHINK=0 \
   ./node_modules/.bin/electron scripts/verify-assistant-tasks.cjs
